@@ -74,15 +74,15 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
         <span className="settings-section-title" style={{ color: '#ef4444' }}>{t('settings.storage.dangerZone')}</span>
       </div>
 
-      <div className="setting-row">
+      <div className="setting-row setting-row--danger">
         <div className="setting-info">
-          <div className="setting-label" style={{ color: '#fca5a5' }}>{t('settings.storage.nukeGenerations')}</div>
+          <div className="setting-label">{t('settings.storage.nukeGenerations')}</div>
           <div className="setting-description">
             Permanently delete <strong>all</strong> generated audio — songs from the library, audio files from disk,
             and all Lyric Studio audio generation entries. Lyrics, profiles, and artist data are preserved.
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+        <div className="settings-danger-actions">
           {!nukeConfirm ? (
             <button
               id="nuke-generations-btn"
@@ -92,7 +92,6 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               style={{
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#fca5a5',
                 cursor: 'pointer',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'; }}
@@ -101,7 +100,7 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               ☢️ {t('settings.storage.nukeGenerations')}
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="settings-actions">
               <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>{t('settings.storage.areYouSure')}</span>
               <button
                 id="nuke-confirm-btn"
@@ -138,15 +137,15 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
       </div>
 
       {/* Nuke Lyrics */}
-      <div className="setting-row">
+      <div className="setting-row setting-row--danger">
         <div className="setting-info">
-          <div className="setting-label" style={{ color: '#fca5a5' }}>{t('settings.storage.nukeLyrics')}</div>
+          <div className="setting-label">{t('settings.storage.nukeLyrics')}</div>
           <div className="setting-description">
             Permanently delete <strong>all</strong> generated/written song lyrics across all artists.
             Profiles and source lyrics are preserved.
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+        <div className="settings-danger-actions">
           {!nukeLyricsConfirm ? (
             <button
               id="nuke-lyrics-btn"
@@ -156,7 +155,6 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               style={{
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#fca5a5',
                 cursor: 'pointer',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'; }}
@@ -165,7 +163,7 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               🗑️ {t('settings.storage.nukeLyrics')}
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="settings-actions">
               <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>{t('settings.storage.areYouSure')}</span>
               <button
                 id="nuke-lyrics-confirm-btn"
@@ -202,15 +200,15 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
       </div>
 
       {/* Nuke Profiles */}
-      <div className="setting-row">
+      <div className="setting-row setting-row--danger">
         <div className="setting-info">
-          <div className="setting-label" style={{ color: '#fca5a5' }}>{t('settings.storage.nukeProfiles')}</div>
+          <div className="setting-label">{t('settings.storage.nukeProfiles')}</div>
           <div className="setting-description">
             Permanently delete <strong>all</strong> artist profiles and their dependent written lyrics.
             Source lyrics and artist data are preserved.
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+        <div className="settings-danger-actions">
           {!nukeProfilesConfirm ? (
             <button
               id="nuke-profiles-btn"
@@ -220,7 +218,6 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               style={{
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#fca5a5',
                 cursor: 'pointer',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.25)'; e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'; }}
@@ -229,7 +226,7 @@ export const DangerZone: React.FC<DangerZoneProps> = ({ onNukeComplete }) => {
               🧬 {t('settings.storage.nukeProfiles')}
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="settings-actions">
               <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>{t('settings.storage.lyricsAlsoDeleted')}</span>
               <button
                 id="nuke-profiles-confirm-btn"

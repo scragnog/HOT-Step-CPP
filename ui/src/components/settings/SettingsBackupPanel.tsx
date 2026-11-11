@@ -7,6 +7,7 @@ import { http } from '../../services/axiosClient';
 import { queryManager } from '../../queries/invalidation';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Archive } from 'lucide-react';
 
 interface Props { settings: AppSettings; onSettingsChange: (settings: AppSettings) => void }
 const MAX_BYTES = 500 * 1024 * 1024; // server accepts 512 MB (BACKUP_BODY_LIMIT)
@@ -65,18 +66,23 @@ export function SettingsBackupPanel({ settings, onSettingsChange }: Props) {
     album_presets: t('settings.backup.presets', 'Album presets'), audio_generations: t('settings.backup.audio', 'Audio links'),
     settings: t('settings.backup.preferences', 'Lyric Studio preferences'),
   };
-  return <section className="px-4 py-3 space-y-3 text-sm text-zinc-700 dark:text-zinc-300">
-    <ParamLabel label={t('settings.backup.title', 'Settings and Lyric Studio backup')}
-      info={t('settings.backup.info', 'Save application settings and Lyric Studio data to JSON. Import replaces them after confirmation. Audio files, models, environment settings, and other browser preferences are excluded.')} />
-    <p>{t('settings.backup.scope', 'Includes General and Performance settings, Lyric Studio preferences, artists, lyric collections, profiles, generated lyrics, presets, and audio links. Media files and environment settings are excluded.')}</p>
-    <div className="flex flex-wrap gap-2">
-      <button className="placement-button" disabled={busy} onClick={() => void download()}>{t('settings.backup.export', 'Export JSON')}</button>
-      <button className="placement-button" disabled={busy} onClick={() => fileInput.current?.click()}>{t('settings.backup.choose', 'Choose JSON to import')}</button>
+  return <section className="settings-section text-sm text-zinc-700 dark:text-zinc-300">
+    <div className="settings-section-header"><Archive size={16} className="settings-section-icon" /><span className="settings-section-title">{t('settings.backup.title', 'Settings and Lyric Studio backup')}</span></div>
+    <div className="setting-row">
+      <div className="setting-info">
+        <ParamLabel className="setting-label" label={t('settings.backup.title', 'Settings and Lyric Studio backup')}
+          info={t('settings.backup.info', 'Save application settings and Lyric Studio data to JSON. Import replaces them after confirmation. Audio files, models, environment settings, and other browser preferences are excluded.')} />
+        <p className="setting-description">{t('settings.backup.scope', 'Includes General and Performance settings, Lyric Studio preferences, artists, lyric collections, profiles, generated lyrics, presets, and audio links. Media files and environment settings are excluded.')}</p>
+      </div>
+    <div className="settings-actions">
+      <button className="settings-save-btn" disabled={busy} onClick={() => void download()}>{t('settings.backup.export', 'Export JSON')}</button>
+      <button className="settings-save-btn" disabled={busy} onClick={() => fileInput.current?.click()}>{t('settings.backup.choose', 'Choose JSON to import')}</button>
       <input ref={fileInput} type="file" accept="application/json,.json" hidden disabled={busy}
         aria-label={t('settings.backup.choose', 'Choose JSON to import')} onChange={event => {
           const file = event.target.files?.[0]; event.target.value = '';
           if (file) void choose(file);
         }} />
+    </div>
     </div>
     {pending && <div className="space-y-2">
       <p>{t('settings.backup.replacement', 'Import will replace application settings and all Lyric Studio data. Current records will be removed, including any created since this preview.')}</p>

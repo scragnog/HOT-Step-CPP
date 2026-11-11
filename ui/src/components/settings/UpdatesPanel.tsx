@@ -45,7 +45,7 @@ export function UpdatesPanel() {
       <RefreshCw size={16} className="settings-section-icon" aria-hidden="true" />
       <span className="settings-section-title">{t('settings.updates.title')}</span>
     </div>
-    <div className="space-y-3 text-sm text-zinc-700 dark:text-zinc-300">
+    <div className="settings-grid text-sm text-zinc-700 dark:text-zinc-300">
       {error && <p role="alert" className="env-save-status env-save-status--error">{error}</p>}
       {!s && !error && <p className="setting-description">{t('settings.updates.loading')}</p>}
       {s && <>

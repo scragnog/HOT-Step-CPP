@@ -7,6 +7,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { dataFolderOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { StyledSelect } from '../shared/StyledSelect';
+import { FolderOpen } from 'lucide-react';
 
 export function DataFolderPanel() {
   const { t } = useTranslation();
@@ -76,18 +77,20 @@ export function DataFolderPanel() {
   const bytes = (value: number) => `${(value / 1e9).toFixed(2)} GB`;
   const blocked = busy || !location || !!location.override || !!location.pending;
   return <section className="settings-section">
-    <div className="settings-section-header"><span className="settings-section-title">{t('settings.dataFolder.title')}</span></div>
-    <div className="space-y-3 text-sm text-zinc-700 dark:text-zinc-300">
+    <div className="settings-section-header"><FolderOpen size={16} className="settings-section-icon" /><span className="settings-section-title">{t('settings.dataFolder.title')}</span></div>
+    <div className="settings-grid text-sm text-zinc-700 dark:text-zinc-300">
       {locationQuery.error && <p role="alert" className="text-red-600 dark:text-red-400">{locationQuery.error.message}</p>}
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
       {!location && !locationQuery.error && <p>{t('settings.dataFolder.loading')}</p>}
       {location && <>
-        <ParamLabel label={t('settings.dataFolder.current')} info={t('settings.dataFolder.currentInfo')} />
-        <p className="break-all">{location.dataRoot || t('settings.dataFolder.dev')}</p>
+        <div className="setting-row">
+          <div className="setting-info"><ParamLabel className="setting-label" label={t('settings.dataFolder.current')} info={t('settings.dataFolder.currentInfo')} /></div>
+          <p className="setting-value font-mono">{location.dataRoot || t('settings.dataFolder.dev')}</p>
+        </div>
         {location.override && <p className="break-all">{t('settings.dataFolder.override', { path: location.override })}</p>}
-        {location.externals.length > 0 && <div>
-          <ParamLabel label={t('settings.dataFolder.externals')} info={t('settings.dataFolder.externalsInfo')} />
-          <ul>{location.externals.map(item => <li className="break-all" key={item.key}>{item.key}: {item.path}</li>)}</ul>
+        {location.externals.length > 0 && <div className="setting-row">
+          <div className="setting-info"><ParamLabel className="setting-label" label={t('settings.dataFolder.externals')} info={t('settings.dataFolder.externalsInfo')} /></div>
+          <ul className="setting-value font-mono">{location.externals.map(item => <li key={item.key}>{item.key}: {item.path}</li>)}</ul>
         </div>}
         {location.blockers.length > 0 && <div><p>{t('settings.dataFolder.wait')}</p><ul>{location.blockers.map((item, i) => <li key={i}>{item}</li>)}</ul></div>}
         {location.pending && <div className="space-y-2">
@@ -96,14 +99,20 @@ export function DataFolderPanel() {
           <button className="settings-save-btn" disabled={busy} onClick={runRestart}>{t('settings.dataFolder.restart')}</button>
           <button className="settings-save-btn" disabled={busy} onClick={runCancel}>{t('settings.dataFolder.cancel')}</button>
         </div>}
-        <ParamLabel label={t('settings.dataFolder.action')} info={t('settings.dataFolder.actionInfo')} />
+        <div className="setting-row">
+        <div className="setting-info">
+          <ParamLabel className="setting-label" label={t('settings.dataFolder.action')} info={t('settings.dataFolder.actionInfo')} />
+          <p className="setting-description">{t(`settings.dataFolder.${kind}Info`)}</p>
+        </div>
         <StyledSelect value={kind} disabled={blocked} accent="emerald" onChange={value => { change(); setKind(value as DataFolderOperation); }} options={(['move', 'repoint', 'create', 'import'] as const).map(value => ({ value, label: t(`settings.dataFolder.${value}`) }))} />
-        <p>{t(`settings.dataFolder.${kind}Info`)}</p>
-        <label className="flex flex-col gap-1">
-          <ParamLabel label={t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')} info={t('settings.dataFolder.targetInfo')} />
-          <input className="w-full rounded border border-zinc-300 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900" disabled={blocked} value={target} onChange={e => { change(); setTarget(e.target.value); }} />
-        </label>
-        <button className="settings-save-btn" disabled={blocked || !target.trim()} onClick={runPreview}>{t('settings.dataFolder.preview')}</button>
+        </div>
+        <div className="setting-row">
+          <div className="setting-info"><ParamLabel className="setting-label" label={t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')} info={t('settings.dataFolder.targetInfo')} /></div>
+          <div className="settings-path-actions">
+            <input className="env-input" aria-label={t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')} disabled={blocked} value={target} onChange={e => { change(); setTarget(e.target.value); }} />
+            <button type="button" className="settings-save-btn" disabled={blocked || !target.trim()} onClick={runPreview}>{t('settings.dataFolder.preview')}</button>
+          </div>
+        </div>
         {preview && <div className="space-y-2">
           <p className="break-all">{t('settings.dataFolder.current')}: {location.dataRoot || t('settings.dataFolder.dev')}</p>
           <p className="break-all">{t(kind === 'import' ? 'settings.dataFolder.previousInstall' : 'settings.dataFolder.target')}: {preview.target}</p>

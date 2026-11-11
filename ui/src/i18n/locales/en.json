@@ -2376,6 +2376,7 @@
     "mm3Compose.reroll": "Compose again for a different take",
     "settings.title": "Settings",
     "settings.subtitle": "Configure performance and behavior options",
+    "settings.tabs.updates": "Updates",
     "settings.tabs.general": "General",
     "settings.tabs.environment": "Environment",
     "settings.tabs.ai": "AI Services",

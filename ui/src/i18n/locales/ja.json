@@ -70,6 +70,7 @@
     "metadataSection.auto": "自動",
     "settings.title": "設定",
     "settings.subtitle": "パフォーマンスと動作のオプションを設定",
+    "settings.tabs.updates": "アップデート",
     "settings.tabs.general": "一般",
     "settings.tabs.environment": "環境",
     "settings.tabs.ai": "AIサービス",

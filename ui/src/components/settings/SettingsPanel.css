@@ -164,12 +164,6 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
-.settings-updates [role="combobox"] {
-  width: 180px;
-  max-width: 50%;
-  flex-shrink: 0;
-}
-
 /* Shared settings actions */
 .settings-save-btn {
   display: inline-flex;
@@ -693,5 +687,102 @@
 
 :root:not(.dark) .settings-tab:hover {
   color: rgba(0, 0, 0, 0.7);
+}
+
+/* Size cards to the available studio width, including when sidebars are open. */
+.settings-panel {
+  container: settings / inline-size;
+  min-width: 0;
+}
+
+.settings-section, .settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.settings-section > *, .settings-grid > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.settings-section > .setting-row--compact,
+.settings-grid > .setting-row--compact,
+.settings-section > .setting-row:has(> [role="switch"]),
+.settings-grid > .setting-row:has(> [role="switch"]) {
+  grid-column: auto;
+}
+
+.settings-section-header { margin-bottom: 0.25rem; }
+
+.settings-panel .setting-row {
+  gap: 1rem;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.settings-panel .setting-info {
+  flex: 1 1 12rem;
+  min-width: 0;
+  margin-right: 0;
+}
+
+.settings-panel .setting-label { overflow-wrap: anywhere; }
+.settings-panel .setting-row > :last-child { min-width: 0; }
+
+.settings-panel .setting-row [role="combobox"] {
+  flex: 0 1 14rem;
+  width: 14rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.settings-panel .env-input { min-width: 0; }
+.settings-panel .env-input--number { flex: 0 0 6rem; width: 6rem; }
+.settings-panel .env-path-row, .settings-panel .env-password-wrapper { min-width: 0; }
+.settings-panel .env-path-row .env-input { width: 0; }
+.settings-panel .setting-value { max-width: 60%; text-align: right; overflow-wrap: anywhere; }
+.settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
+.settings-path-actions { display: flex; gap: 0.5rem; width: min(100%, 36rem); }
+.settings-path-actions .env-input { flex: 1; width: 0; max-width: none; }
+.settings-danger-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; max-width: 100%; color: #fca5a5; }
+:root:not(.dark) .settings-danger-actions { color: #b91c1c; }
+.setting-row--danger { color: #fca5a5; }
+.setting-row--danger .setting-label { color: inherit; }
+:root:not(.dark) .setting-row--danger,
+:root:not(.dark) .setting-row--danger .setting-label { color: #b91c1c; }
+.settings-panel .settings-actions button { max-width: 100%; white-space: normal; }
+.settings-panel .env-save-bar { flex-wrap: wrap; }
+.settings-panel .settings-tab { position: relative; flex-shrink: 0; }
+.settings-update-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  right: 6px;
+  top: 8px;
+  border-radius: 50%;
+  background: #ec4899;
+}
+
+@container settings (max-width: 640px) {
+  .settings-panel .setting-row { flex-wrap: wrap; padding: 1rem; }
+  .settings-panel .setting-info { flex-basis: 100%; }
+  .settings-panel .setting-row:has(> [role="switch"]) .setting-info { flex-basis: 10rem; }
+  .settings-panel .setting-row > :last-child { max-width: 100%; }
+  .settings-panel .setting-row [role="combobox"] { flex-basis: 100%; width: 100%; }
+  .settings-panel .env-input:not(.env-input--number),
+  .settings-panel .env-password-wrapper, .settings-panel .env-path-row { max-width: none; }
+  .settings-panel .setting-value { text-align: left; }
+  .settings-actions { justify-content: flex-start; }
+  .settings-danger-actions { align-items: flex-start; }
+  .settings-path-actions { flex-wrap: wrap; }
+  .settings-path-actions .env-input { flex-basis: 100%; width: 100%; }
+}
+
+@media (max-width: 800px) {
+  .settings-panel { padding: 1.25rem 1rem; }
+  .settings-tabs { flex-wrap: wrap; gap: 0.25rem; }
+  .settings-tab { padding: 0.625rem 0.75rem; }
 }
 

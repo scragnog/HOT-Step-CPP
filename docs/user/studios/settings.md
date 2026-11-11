@@ -20,7 +20,7 @@ See [Terminal](#terminal), [Theme, restart, and shutdown](#theme-restart-and-shu
 
 ## Workflow
 
-1. Open Settings and pick a tab: General, Environment, AI Services, Storage & Data, Performance, or Report an issue.
+1. Open Settings and pick a tab: General, Environment, AI Services, Storage & Data, Performance, Updates, or Report an issue.
 2. On the Environment tab, edit any field, then click **Save Environment** (or **Save Changes** on the AI Services tab, which shares the same save bar). Only changed keys are written to `.env`.
 3. If a changed key needs a restart to take effect, the save bar shows which one and a **Restart now** button appears. Click it to restart the server and engine; the UI reconnects on its own once they are back.
 4. General, Performance, and language/theme changes apply immediately and do not need a restart.
@@ -28,6 +28,8 @@ See [Terminal](#terminal), [Theme, restart, and shutdown](#theme-restart-and-shu
 A small reset arrow appears beside a General or Performance setting whenever its value has moved
 from the default; click it to snap that one field back. The reset persists like any other change;
 it is not a page reload. The Environment and AI Services fields have no reset arrow.
+
+Short controls share a row on wide screens and stack as the Settings area narrows. Paths and credentials keep a full row.
 
 ## Settings and Lyric Studio backup
 
@@ -39,7 +41,6 @@ The Storage & Data tab can export a versioned JSON backup of application setting
 
 | Control | What it does |
 |---|---|
-| Updates | Shows the installed build (release tag or source commit, plus the build variant), a Release / Master selector, the time of the last successful check and **Check now**. When something newer exists a banner links to its GitHub release notes or commit. Changing the selector only changes which feed is checked, never your installation. It is a notice only: nothing is downloaded or installed. A copy with no build record, a source checkout with uncommitted changes, and a failed check each get a plain message, and a failed check is never shown as "up to date". At startup the app checks again only when the last successful check is more than a day old; **Check now** asks GitHub at most once a minute per feed and shows the saved result in between. |
 | Display Language | Sets the application interface language: English, Russian, Chinese, Japanese or Korean. Applies immediately. |
 | Generic artwork | Which set of stand-in cover images a track shows until it has one of its own, Cyberpunk (the default) or Scenic; each track keeps the same image within a set. |
 | "Disco Mode": Extract drum stems for visualisations | After generation, extracts kick, snare, and hi-hat stems to drive the beat-reactive visual effects (rainbow borders, snare flash, hi-hat particles). Adds roughly 60 to 90 seconds per song. |
@@ -49,6 +50,14 @@ The Storage & Data tab can export a versioned JSON backup of application setting
 | Update adapter references | Checks Lyric Studio album presets and clears references to deleted adapter weights. Lists each changed preset and removed adapter. Existing adapters, scales, and reference tracks are kept. Runs only when clicked. |
 | Use filename as trigger word | Auto-injects the adapter's filename (minus the `.safetensors` extension) into the style description at generation time. |
 | Trigger word placement | Only shown when the trigger toggle above is on. Prepend, Append, or Replace, controlling where the trigger word lands relative to your style description. |
+
+### Updates tab
+
+The Updates tab holds build information and update checks. A small dot appears on its tab label only when an update is available. General stays in place while the status loads.
+
+| Control | What it does |
+|---|---|
+| Updates | Shows the installed build (release tag or source commit, plus the build variant), a Release / Master selector, the time of the last successful check and **Check now**. When something newer exists a banner links to its GitHub release notes or commit. Changing the selector only changes which feed is checked, never your installation. It is a notice only: nothing is downloaded or installed. A copy with no build record, a source checkout with uncommitted changes, and a failed check each get a plain message, and a failed check is never shown as "up to date". At startup the app checks again only when the last successful check is more than a day old; **Check now** asks GitHub at most once a minute per feed and shows the saved result in between. |
 
 ### Environment tab
 

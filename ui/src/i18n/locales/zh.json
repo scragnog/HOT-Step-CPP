@@ -70,6 +70,7 @@
     "metadataSection.auto": "自动",
     "settings.title": "设置",
     "settings.subtitle": "配置性能和行为选项",
+    "settings.tabs.updates": "更新",
     "settings.tabs.general": "常规",
     "settings.tabs.environment": "环境",
     "settings.tabs.ai": "AI 服务",

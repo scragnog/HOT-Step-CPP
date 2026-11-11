@@ -70,6 +70,7 @@
     "metadataSection.auto": "Авто",
     "settings.title": "Настройки",
     "settings.subtitle": "Конфигурация параметров производительности и поведения",
+    "settings.tabs.updates": "Обновления",
     "settings.tabs.general": "Общие",
     "settings.tabs.environment": "Окружение",
     "settings.tabs.ai": "ИИ-сервисы",

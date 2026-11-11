@@ -70,6 +70,7 @@
     "metadataSection.auto": "자동",
     "settings.title": "설정",
     "settings.subtitle": "성능 및 동작 옵션 구성",
+    "settings.tabs.updates": "업데이트",
     "settings.tabs.general": "일반",
     "settings.tabs.environment": "환경",
     "settings.tabs.ai": "AI 서비스",

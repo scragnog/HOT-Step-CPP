@@ -39,7 +39,7 @@ app runs; see [Settings page and hot reload](#settings-page-and-hot-reload).
 
 ### Update notices
 
-Settings > General > Updates reads `GET /api/updates/status` (cached, never calls GitHub) and refreshes with `POST /api/updates/check`, optionally `{ channel }` to switch the feed (`release` or `master`). The wire shapes are in `server/src/contracts/updates.ts`; the UI copy is `ui/src/services/updatesApi.ts`, and the panel is `ui/src/components/settings/UpdatesPanel.tsx`. Notices only: no download, prepare or apply endpoint exists. The installed identity comes from `build-info.json` beside `VERSION` (a git checkout reports its own HEAD); a missing file means unknown identity and the UI never guesses a variant.
+Settings > Updates reads `GET /api/updates/status` (cached, never calls GitHub) and refreshes with `POST /api/updates/check`, optionally `{ channel }` to switch the feed (`release` or `master`). The wire shapes are in `server/src/contracts/updates.ts`; the UI copy is `ui/src/services/updatesApi.ts`, and the panel is `ui/src/components/settings/UpdatesPanel.tsx`. Notices only: no download, prepare or apply endpoint exists. The installed identity comes from `build-info.json` beside `VERSION` (a git checkout reports its own HEAD); a missing file means unknown identity and the UI never guesses a variant.
 
 ## Settings page and hot reload
 

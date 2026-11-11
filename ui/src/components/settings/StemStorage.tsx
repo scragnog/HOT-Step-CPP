@@ -61,7 +61,7 @@ export const StemStorage: React.FC = () => {
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px', flexShrink: 0 }}>
+        <div className="settings-danger-actions">
           {!stemClearConfirm ? (
             <button
               id="clear-stems-btn"
@@ -71,7 +71,6 @@ export const StemStorage: React.FC = () => {
               style={{
                 background: 'rgba(239, 68, 68, 0.15)',
                 border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#fca5a5',
                 cursor: (!stemStats || stemStats.jobCount === 0) ? 'not-allowed' : 'pointer',
                 opacity: (!stemStats || stemStats.jobCount === 0) ? 0.5 : 1,
               }}
@@ -79,7 +78,7 @@ export const StemStorage: React.FC = () => {
               🗑️ {t('settings.storage.clearAllStems')}
             </button>
           ) : (
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="settings-actions">
               <span className="text-xs text-red-400" style={{ whiteSpace: 'nowrap' }}>{t('settings.storage.deleteAllStems')}</span>
               <button
                 id="clear-stems-confirm-btn"
