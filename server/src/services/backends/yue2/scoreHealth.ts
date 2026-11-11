@@ -242,7 +242,79 @@ export function hasSoundingScore(abc: string): boolean {
 
 export const EMPTY_COVER_SCORE_ERROR = 'The transcriber heard no melody in this source';
 
+type ScoreHeader = 'M' | 'L' | 'K';
+const SCORE_HEADERS: ScoreHeader[] = ['M', 'L', 'K'];
+
+function validScoreHeader(field: ScoreHeader, value: string): boolean {
+  if (field === 'M' && /^(C\|?|none)$/.test(value)) return true;
+  if (field !== 'K') return /^[1-9]\d*\/[1-9]\d*$/.test(value);
+  // ABC key names, modal suffixes, explicit accidentals and voice settings.
+  return /^(?:[A-G](?:#|b)?\s*(?:major|maj|minor|min|m|mixolydian|mix|dorian|dor|phrygian|phr|lydian|lyd|locrian|loc|aeolian|aeo|ionian|ion)?|none|HP)(?:\s+(?:[_^=]+[A-Ga-g]|(?:clef|middle|transpose|octave|stafflines|staffscale|style)=\S+))*$/i.test(value);
+}
+
+function scoreHeader(abc: string) {
+  const lines = abc.split('\n');
+  const fields = new Map<ScoreHeader, string>();
+  let problem: string | undefined;
+  let body = lines.length;
+  for (const [i, raw] of lines.entries()) {
+    const line = raw.replace(/%.*$/, '').trim();
+    if (!line) continue;
+    if (/^[MLK](?!:)/.test(line)) {
+      problem ??= `malformed ${line[0]}: score header`;
+      continue;
+    }
+    if (!/^[A-Za-z]:/.test(line)) { body = i; break; }
+    const field = line[0] as ScoreHeader;
+    if (!SCORE_HEADERS.includes(field)) continue;
+    const value = line.slice(2).trim();
+    fields.set(field, value);
+    if (!validScoreHeader(field, value) || (field !== 'K' && fields.has('K'))) {
+      problem ??= `malformed ${field}: score header`;
+    }
+  }
+  return { lines, fields, problem, body };
+}
+
+/** Fill only absent fields, using values supplied by the caller. Saved plans
+ * use both 1/16 and 1/32 units, so guessing L: can double or halve the song.
+ * Missing values without a supplied replacement stay missing for replan.
+ * Existing fields, malformed fields and healthy score bytes stay untouched. */
+export function repairYue2ScoreHeader(abc: string, replacements: Partial<Record<ScoreHeader, string>>): string {
+  const { lines, fields, problem, body } = scoreHeader(abc);
+  const missing = SCORE_HEADERS.filter(field => !fields.has(field));
+  if (problem || !missing.length || body === lines.length
+    || missing.some(field => !replacements[field] || !validScoreHeader(field, replacements[field]!))) return abc;
+  const eol = abc.includes('\r\n') ? '\r\n' : '\n';
+  // K: ends the header. Put it after the declarations and before any notes,
+  // including a pickup without a bar separator.
+  if (missing.includes('K')) lines.splice(body, 0, `K:${replacements.K}${eol === '\r\n' ? '\r' : ''}`);
+  const head = missing.filter(field => field !== 'K').map(field => `${field}:${replacements[field]}${eol}`).join('');
+  const at = /^X:/.test(lines[0]) ? 1 : 0;
+  return lines.slice(0, at).join('\n') + (at ? '\n' : '') + head + lines.slice(at).join('\n');
+}
+
+function scoreSyntaxProblem(abc: string): string | undefined {
+  if (!abc.trim()) return undefined;
+  const { lines, fields, problem } = scoreHeader(abc);
+  if (problem) return problem;
+  const missing = SCORE_HEADERS.filter(field => !fields.has(field));
+  if (missing.length) return `score header missing ${missing.map(field => `${field}:`).join(', ')}`;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%') || /^[A-Za-z]:/.test(line)) continue;
+    const notes = line.replace(/"[^"]*"|\[[A-Za-z]:[^\]]*\]|%.*$/g, '');
+    for (let i = 0; i < notes.length; i++) {
+      if (notes[i] === ':' && !/[|:]/.test(notes[i - 1] ?? '') && !/[|:]/.test(notes[i + 1] ?? '')) {
+        return 'colon inside a score note run';
+      }
+    }
+  }
+  return undefined;
+}
+
 export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string, norms?: Yue2StyleNorms | null): Yue2ScoreHealth {
+  const syntaxProblem = scoreSyntaxProblem(abc);
   const vocalIds = vocalVoiceIds(abc);
   const exempt = new Set<Yue2Check>(norms?.exempt ?? []);
   const sections: string[] = [];
@@ -310,6 +382,8 @@ export function classifyYue2Score(abc: string, endReason?: string, lyrics?: stri
   const base = { bars, vocalBars, vocalShare: Math.round(vocalShare * 1000) / 1000, longestSilentRun, sections, tempo, meter, estSeconds, legibility, failed };
   const fails = (check: Yue2Check) => failed.includes(check) && !exempt.has(check);
 
+  // Syntax failures cannot be waived by style norms or instrumental mode.
+  if (syntaxProblem) return { ...base, verdict: 'runaway', reason: syntaxProblem };
   if (!bars) return { ...base, verdict: 'unknown', reason: 'no Vocal voice bars found in the score' };
   if (fails('section-loop')) {
     return { ...base, verdict: 'runaway', reason: `${sections.length} section markers but only ${distinct} distinct name(s) — the planner is looping` };

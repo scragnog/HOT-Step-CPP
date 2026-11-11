@@ -1,10 +1,70 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyYue2Score, hasSoundingScore, hasSoundingVocalBar, yue2PlanDraws, yue2StyleNorms } from './scoreHealth.js';
+import { classifyYue2Score, hasSoundingScore, hasSoundingVocalBar, repairYue2ScoreHeader, yue2PlanDraws, yue2PlanUsable, yue2StyleNorms } from './scoreHealth.js';
 import { scoreBarClock } from './scoreClock.js';
 import { scoreSections } from './scoreSections.js';
 
 const HEADER = 'X:1\nT:\nM:4/4\nL:1/16\nQ:1/4=120\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\nV: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\n';
+
+test('dropped header fields are filled with explicit values before the body', () => {
+  const abc = 'X:1\nQ:1/4=84\nV: Vocal\nz12"D"z4|"D"D8F8|\n';
+  const repaired = repairYue2ScoreHeader(abc, { M: '2/4', L: '1/32', K: 'D' });
+  assert.match(repaired, /M:2\/4\nL:1\/32\n/);
+  assert.match(repaired, /K:D\nz12/);
+  assert.equal(classifyYue2Score(repaired).verdict, 'healthy');
+  assert.equal(repairYue2ScoreHeader(repaired, { M: '4/4', L: '1/16', K: 'C' }), repaired);
+});
+
+test('healthy headers and their line endings stay byte-identical', () => {
+  for (const abc of [`${HEADER}V: Vocal\nCDEF|`, `${HEADER}V: Vocal\nCDEF|`.replaceAll('\n', '\r\n')]) {
+    assert.equal(repairYue2ScoreHeader(abc, { M: '2/4', L: '1/32', K: 'D' }), abc);
+    assert.equal(classifyYue2Score(abc).verdict, 'healthy');
+  }
+});
+
+test('each dropped field is repaired without changing the surviving fields', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const abc = `${HEADER}V: Vocal\nCDEF|`.replaceAll('\n', eol);
+    for (const field of ['M', 'L', 'K']) {
+      const dropped = abc.replace(new RegExp(`^${field}:.*\\r?\\n`, 'm'), '');
+      const repaired = repairYue2ScoreHeader(dropped, { M: '4/4', L: '1/16', K: 'C' });
+      assert.equal(classifyYue2Score(repaired).verdict, 'healthy');
+      assert.equal(repaired.split(eol).filter(line => line.startsWith(`${field}:`)).length, 1);
+      if (eol === '\r\n') assert.equal(repaired.replaceAll(eol, '').includes('\n'), false);
+    }
+  }
+});
+
+test('malformed headers and stray note colons replan even for instrumental styles', () => {
+  for (const abc of [
+    `${HEADER.replace('M:4/4', 'M:4/x')}V: Vocal\nCDEF|`,
+    `${HEADER.replace('L:1/16', 'L:0/16')}V: Vocal\nCDEF|`,
+    `${HEADER.replace('K:C', 'K:garbage')}V: Vocal\nCDEF|`,
+    `${HEADER.replace('L:1/16', 'L 1/16')}V: Vocal\nCDEF|`,
+    `${HEADER.replace('L:1/16', 'L1/16')}V: Vocal\nCDEF|`,
+    `${HEADER.replace('M:4/4\n', '')}M:4/4\nV: Vocal\nCDEF|`,
+    `${HEADER}V: Vocal\nCD:E:F|`,
+    `${HEADER}V: Vocal\n[CE:G]|`,
+  ]) {
+    const health = classifyYue2Score(abc);
+    assert.equal(health.verdict, 'runaway', abc);
+    assert.equal(yue2PlanUsable(health.verdict, true), false);
+    assert.equal(yue2PlanUsable(health.verdict, false), false);
+  }
+});
+
+test('repeat bars, inline fields, chords, comments and lyrics keep their colons', () => {
+  const abc = `${HEADER}V: Vocal\n|:"A:7"C[K:G]D:|::GABc| % cue: repeat\nw:la: la\n`;
+  assert.equal(classifyYue2Score(abc).verdict, 'healthy');
+});
+
+test('repair preserves malformed fields and needs a value for every missing field', () => {
+  const broken = `${HEADER.replace('M:4/4', 'M:bad')}V: Vocal\nCDEF|`;
+  assert.equal(repairYue2ScoreHeader(broken, { M: '2/4', L: '1/32', K: 'D' }), broken);
+  const missing = 'V: Vocal\nCDEF|';
+  assert.equal(repairYue2ScoreHeader(missing, { M: '2/4' }), missing);
+  assert.equal(classifyYue2Score(missing).verdict, 'runaway');
+});
 
 function song(bars: number, vocalEvery: number, sections: string[]): string {
   const lines: string[] = [HEADER];
