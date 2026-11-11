@@ -339,6 +339,9 @@ struct MM3ArOptions {
     // adapter rows, so the adapter sings whatever is planned. 1 (or no runtime
     // adapter) = no base rows: today's graph and today's RNG draws.
     float                lm_adapter_plan  = 1.0f;
+    // Store the LM KV cache as Q8_0 (request lm_kv_q8, mm3_lm_kv_type): half the
+    // VRAM for ~7% per step, which is what fits 3-4 takes under the plan dial.
+    bool                 lm_kv_q8         = false;
 
     // The adapter whose SOFT-PROMPT halves (artist token, trained KV prefix)
     // apply. Usually the same object as lm_adapter, and deliberately a separate
@@ -734,7 +737,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Both graph sets bake rows() into their shapes, so K has to be settled
     // before either is prepared. Kept in lockstep on purpose: the depth decoder
     // reads the LM's hidden rows straight out of the same buffer.
-    mm3_lm_set_takes(&g_mm3_lm, K, plan_mix);
+    mm3_lm_set_takes(&g_mm3_lm, K, plan_mix, opt.lm_kv_q8);
     if (plan_mix) {
         fprintf(stderr, "[MM3-AR] plan dial %.2f: base rows active (%d take%s, %zu adapter + %zu base LM rows)\n",
                 (double) plan, K, K == 1 ? "" : "s", KP, KP);
@@ -823,9 +826,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Cut to the batch ceiling rather than to what this run uses: the readback
     // helpers size their transfers from the graph, so a ceiling-sized buffer
     // can never be the thing that overruns.
-    // The plan dial's base rows fit too: mm3_max_takes halves K for them.
-    std::vector<float> hidden((size_t) (H * MM3_MAX_BATCH_ROWS));
-    std::vector<float> logits((size_t) (hn * MM3_MAX_BATCH_ROWS));
+    // The plan dial's base rows double the LM rows: MM3_MAX_LM_ROWS covers them.
+    std::vector<float> hidden((size_t) (H * MM3_MAX_LM_ROWS));
+    std::vector<float> logits((size_t) (hn * MM3_MAX_LM_ROWS));
     std::vector<float> feedback((size_t) H);
 
     // Row of take t: conditional, and unconditional. At P == 1 (a

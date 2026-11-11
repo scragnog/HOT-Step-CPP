@@ -1019,7 +1019,11 @@ Other adapter paths:
   PiSSA only (`mm3_lm_merge_fade_ok`), DoRA falls back to runtime. The plan dial (`lm_adapter_plan` < 1) adds a base copy of every
   take's CFG pair (`MM3LmGraph::base_rows`), masks the adapter delta off on those rows
   with a resident `[1, 1, B]` tensor in the KV buffer, and mixes the two models' logits
-  before the semantic draw (`mm3-ar-loop.h`).
+  before the semantic draw (`mm3-ar-loop.h`). The LM may then run up to
+  `MM3_MAX_LM_ROWS` (16) rows. Past 8 rows ggml takes MMQ, which measured faster than
+  splitting into 8-row matrix-vector matmuls (`MM3_LM_ROW_SPLIT=1`): 31.5 against 38.2 ms
+  per AR iteration at 16 rows on a 5090. The request's `lm_kv_q8` stores the KV cache at
+  Q8_0 so 4 takes fit. The depth decoder and flow stage only see the adapter rows.
 - YuE2 adapters merge at load (`yue2-adapter.h`): AR (composer) and NAR files in
   LoRA, LoKr or DoRA form (`yue2-{ar,nar}-{lora,lokr,dora}-v1`), chosen with
   `POST /yue2/select-model`. On a ConvRot INT8 base the LoRA factors are applied at

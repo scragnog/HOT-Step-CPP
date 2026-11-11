@@ -1201,6 +1201,10 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     // Ensemble takes: plan K independent songs from this prompt in one batched
     // pass (mm3-ar-loop.h). Clamped inside mm3_ar_plan_takes to the row budget.
     opt.n_takes         = (int) mm3_json_i64(root, "takes", 1);
+    {
+        yyjson_val * kq = yyjson_obj_get(root, "lm_kv_q8");
+        opt.lm_kv_q8    = kq && yyjson_is_bool(kq) && yyjson_get_bool(kq);
+    }
     // LRC per take ("lrc" in the JSON reply), to see where a plan sang its last line.
     if (mm3_json_bool(root, "lrc", false)) {
         std::string terr;

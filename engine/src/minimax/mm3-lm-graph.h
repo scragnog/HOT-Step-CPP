@@ -174,7 +174,10 @@
 // it adds ~2,000 nodes and lands around 3,700 — inside 4096, but with under 10%
 // headroom, which is not a margin worth defending. The cost of a bigger cap is
 // one pointer per slot in the node array.
-#define MM3_LM_MAX_NODES 8192
+// Doubled again for the opt-in row split (mm3_lm_mm): past 8 rows every
+// projection is two matmuls, two adapter applies and a concat, which takes a
+// LoKr graph past 8192.
+#define MM3_LM_MAX_NODES 16384
 // Attention-window quantum (design note C).
 #define MM3_LM_KV_BUCKET 256
 
@@ -184,9 +187,11 @@
 // still grows with song length. The write side is ggml_set_rows (F32 -> Q8_0 on
 // CUDA), the read side is flash attention (Q8_0 K/V are first-class there);
 // the manual F32 path widens the cache first (mm3_lm_attn_f32). Read once per
-// process: MM3_LM_KV_TYPE=f16|q8_0.
-static inline ggml_type mm3_lm_kv_type() {
-    static const ggml_type t = [] {
+// process: MM3_LM_KV_TYPE=f16|q8_0, which overrides the request. Otherwise the
+// request's lm_kv_q8 picks it (`q8`); it costs ~7% per step at 300 s and halves
+// the VRAM, which is what lets the plan dial's base rows run 3 or 4 takes.
+static inline ggml_type mm3_lm_kv_type(bool q8 = false) {
+    static const int env = [] {
         const char * e = std::getenv("MM3_LM_KV_TYPE");
         if (e && e[0]) {
             std::string s(e);
@@ -194,16 +199,28 @@ static inline ggml_type mm3_lm_kv_type() {
                 ch = (char) tolower((unsigned char) ch);
             }
             if (s == "q8_0" || s == "q8") {
-                return GGML_TYPE_Q8_0;
+                return (int) GGML_TYPE_Q8_0;
             }
             if (s == "f16") {
-                return GGML_TYPE_F16;
+                return (int) GGML_TYPE_F16;
             }
-            fprintf(stderr, "[MM3-LM] MM3_LM_KV_TYPE=%s not recognised (f16|q8_0); using f16\n", e);
+            fprintf(stderr, "[MM3-LM] MM3_LM_KV_TYPE=%s not recognised (f16|q8_0); ignoring it\n", e);
         }
-        return GGML_TYPE_F16;
+        return -1;
     }();
-    return t;
+    return env >= 0 ? (ggml_type) env : q8 ? GGML_TYPE_Q8_0 : GGML_TYPE_F16;
+}
+
+// MM3_LM_ROW_SPLIT=1: run a folded batch past MM3_MAX_BATCH_ROWS as 8-row
+// matmuls, each on ggml's matrix-vector kernel, instead of one matmul (MMQ on
+// CUDA). Off by default: measured on a 5090, q8_0 LM, plan 0.25, 4 takes (16
+// rows), steps 500-5000, MMQ ran 31.5 ms per AR iteration and the split 38.2.
+static inline bool mm3_lm_row_split() {
+    static const bool on = [] {
+        const char * e = std::getenv("MM3_LM_ROW_SPLIT");
+        return e && e[0] == '1';
+    }();
+    return on;
 }
 // MM3_MAX_BATCH_ROWS (mm3-model.h) is the MAXIMUM — the size every host-side
 // staging buffer is cut to, so a caller's [8, H] hidden / [8, V] logit buffers
@@ -343,6 +360,9 @@ struct MM3LmGraph {
     // loop mixes the two models' logits and the depth decoder keeps reading
     // the adapter rows, which come first. Off = today's graph exactly.
     bool                       base_rows = false;
+    // Request lm_kv_q8: store the KV cache as Q8_0 (mm3_lm_kv_type). Baked
+    // into the KV buffer, so mm3_lm_set_takes owns it like rows().
+    bool                       kv_q8     = false;
     // The per-row 1/0 on the adapter delta, F32 [1, 1, B]: 1 on the adapter
     // rows, 0 on the base rows. Its values only depend on rows(), so it lives
     // in the KV buffer and is written once there, never uploaded per step.
@@ -630,6 +650,23 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
                                const MM3LmAdapterScales & sc, int layer, int module, bool want_fold,
                                ggml_tensor * dmask = nullptr) {
     const bool fold = want_fold && x->ne[1] == 1 && x->ne[2] > 1 && x->ne[3] == 1 && ggml_is_contiguous(x);
+    // Past the matrix-vector ceiling (plan dial base rows, MM3_MAX_LM_ROWS),
+    // opt-in (mm3_lm_row_split): one matmul per 8-row chunk, so every chunk
+    // keeps MMVQ's shared weight read; the weights are read once per chunk. The
+    // chunks are contiguous views ([H, 1, B] with ne1 == 1), so each folds again.
+    if (fold && x->ne[2] > MM3_MAX_BATCH_ROWS && mm3_lm_row_split()) {
+        ggml_tensor * out = nullptr;
+        for (int64_t c0 = 0; c0 < x->ne[2]; c0 += MM3_MAX_BATCH_ROWS) {
+            const int64_t nb = std::min<int64_t>(MM3_MAX_BATCH_ROWS, x->ne[2] - c0);
+            ggml_tensor * xc = ggml_view_3d(ctx, x, x->ne[0], 1, nb, x->nb[1], x->nb[2], (size_t) c0 * x->nb[2]);
+            ggml_tensor * mc = dmask ? ggml_view_3d(ctx, dmask, 1, 1, nb, dmask->nb[1], dmask->nb[2],
+                                                    (size_t) c0 * dmask->nb[2])
+                                     : nullptr;
+            ggml_tensor * yc = mm3_lm_mm(ctx, w, xc, ad, sc, layer, module, want_fold, mc);
+            out              = out ? ggml_concat(ctx, out, yc, 2) : yc;
+        }
+        return out;
+    }
     if (fold) {
         x = ggml_reshape_2d(ctx, x, x->ne[0], x->ne[2]);  // [H, 1, B] -> [H, B]
     }
@@ -1001,7 +1038,7 @@ static int64_t mm3_lm_bucket(int64_t n) {
 // bad call site can never silently push ggml off the matrix-vector path.
 // `base_rows` adds the plan dial's base copy of every pair (MM3LmGraph); it
 // changes rows() the same way, so it tears down the same things.
-static void mm3_lm_set_takes(MM3LmGraph * g, int takes, bool base_rows = false) {
+static void mm3_lm_set_takes(MM3LmGraph * g, int takes, bool base_rows = false, bool kv_q8 = false) {
     if (takes < 1) {
         takes = 1;
     }
@@ -1019,13 +1056,14 @@ static void mm3_lm_set_takes(MM3LmGraph * g, int takes, bool base_rows = false) 
         return e[0] == '0' ? 0 : 1;
     }();
     const bool fold = forced >= 0 ? forced == 1 : true;
-    if (g->n_takes == takes && g->fold_rows == fold && g->base_rows == base_rows) {
+    if (g->n_takes == takes && g->fold_rows == fold && g->base_rows == base_rows && g->kv_q8 == kv_q8) {
         return;
     }
     mm3_lm_free(g);
     g->n_takes   = takes;
     g->fold_rows = fold;
     g->base_rows = base_rows;
+    g->kv_q8     = kv_q8;
 }
 
 // Grows only; a shrink would throw away a valid allocation for nothing.
@@ -1142,7 +1180,7 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     }
     g->kv_k.assign((size_t) L, nullptr);
     g->kv_v.assign((size_t) L, nullptr);
-    const ggml_type kv_type = mm3_lm_kv_type();
+    const ggml_type kv_type = mm3_lm_kv_type(g->kv_q8);
     for (int i = 0; i < L; i++) {
         char nm[64];
         g->kv_k[(size_t) i] = ggml_new_tensor_4d(g->kv_ctx, kv_type, D, want, Nkv, g->rows());

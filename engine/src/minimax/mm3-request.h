@@ -611,6 +611,8 @@ struct MM3SynthRequest {
      *  rather than rejected, so a caller that asks for more gets fewer songs
      *  and a log line, not an error. Take t uses seed + t. */
     int     takes  = 1;
+    /** Store the planner's KV cache as Q8_0 (MM3GenRequest::lm_kv_q8). */
+    bool    lm_kv_q8 = false;
     /** Natural-ending candidates: see MM3GenRequest::require_eos. */
     bool    require_eos = false;
     bool    stop_after_first_eos = false;
@@ -661,7 +663,8 @@ struct MM3SynthRequest {
     // reads the adapter rows. Runtime mode only (merge has no base weights to
     // mask back to); ignored with a log line otherwise, and for an adapter that
     // carries a soft prompt. Doubles the LM rows and KV, so takes clamp to 2
-    // with a CFG pair (mm3_max_takes); in the AR cache key when below 1.
+    // with a CFG pair at f16; lm_kv_q8 lets 4 fit (mm3_max_takes); in the AR
+    // cache key when below 1.
     float              lm_adapter_plan  = 1.0f;
     // "runtime" (default) = low-rank deltas in-graph, live dials, +28 %/step
     // at r256. "merge" = fold scale·B·A into the resident weights once
@@ -1046,6 +1049,16 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->takes = (int) t;
+        }
+        yyjson_val * kq = yyjson_obj_get(root, "lm_kv_q8");
+        if (kq && !yyjson_is_null(kq)) {
+            if (!yyjson_is_bool(kq)) {
+                if (err) {
+                    *err = "\"lm_kv_q8\" must be a boolean";
+                }
+                return false;
+            }
+            out->lm_kv_q8 = yyjson_get_bool(kq);
         }
     }
 
@@ -1471,6 +1484,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
     out->gen.lm_adapter_sched  = out->lm_adapter_sched;
     out->gen.lm_adapter_plan   = out->lm_adapter_plan;
+    out->gen.lm_kv_q8          = out->lm_kv_q8;
     out->gen.a2a_strength      = (float) a2a_strength;
     out->gen.a2a_hold          = (float) a2a_hold;
 

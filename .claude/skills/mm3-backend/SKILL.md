@@ -237,9 +237,18 @@ fade study's three control WAVs byte for byte; `check-mm3-ensemble.mjs
 --adapter` section 4 holds it. The base rows match a pure-base batch at the
 same row positions exactly. Costs (5090, q8_0, PiSSA r128 adapter, 2 takes,
 300 s): LM step 15.0 -> 18.2 ms, KV 4.8 -> 9.6 GB, peak 23.4 -> 29.4 GB
-on the card with ~4.5 GB of other apps. The rows double, so takes clamp to 2
-(`mm3_max_takes(c, plan_rows)`): 3 takes wanted a 14.3 GB KV, filled the 32
-GB card and ran ~10x slower. A graph input for the mask (uploaded per step)
+on the card with ~4.5 GB of other apps. The rows double: at f16, 3 takes wanted
+a 14.3 GB KV, filled the 32 GB card and ran ~10x slower. **Since 2026-11-11 the LM
+alone may run 16 rows (`MM3_MAX_LM_ROWS`, 4 takes) and the request's `lm_kv_q8`
+stores the KV at Q8_0**; the server sends it only when the plan dial is below 1
+and the user asked for more than 2 variations (`mm3KvQ8`, "Compact Planner
+Cache", default on), and otherwise keeps 2 takes there, ending candidates
+included. KV at 300 s: 2 takes f16 8.44 GB, 4 takes q8 8.96 GB. Per AR iteration
+(LM + depth + host), steps 500-5000, 5090, q8_0 LM, plan 0.25: 2 takes f16 22.4
+ms, 4 takes q8 31.5 ms (7.9 per take against 11.2), 4 takes at plan 1 f16 23.9.
+Past 8 rows ggml's MMQ beat splitting into 8-row MMVQ matmuls (38.2 ms;
+`MM3_LM_ROW_SPLIT=1` keeps the split for A/B). Not yet measured on a 24 GB card,
+which was already at 23.5 of 24.5 GB with 2 takes. A graph input for the mask (uploaded per step)
 cost +3.8 ms/step at one take; the resident tensor costs +0.85. Merge mode
 has no base weights, so the server forces runtime; an adapter with an artist
 token or KV prefix ignores the dial (it would need a per-row attention mask).

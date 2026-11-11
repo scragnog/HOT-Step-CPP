@@ -310,12 +310,13 @@ static std::shared_ptr<MM3JobState> mm3_job_state_get(const std::string & id) {
 // Exact KV-cache cost per row: K and V [key_length, n_ctx, head_count_kv]
 // F16 tensors per block, multiplied by cfg_rows * n_takes for this run.
 // n_ctx is bucketed the same way mm3_lm_prepare() buckets it.
-static size_t mm3_kv_bytes_estimate(const MM3Model & m, int64_t n_ctx_needed, int rows) {
+// `kv_q8`: a Q8_0 cache (mm3_lm_kv_type) is 34 bytes per 32 values against f16's 64.
+static size_t mm3_kv_bytes_estimate(const MM3Model & m, int64_t n_ctx_needed, int rows, bool kv_q8 = false) {
     const MM3LmConfig & c = m.lm_cfg;
     const int64_t       b = MM3_LM_KV_BUCKET;
     const int64_t       n = ((n_ctx_needed + b - 1) / b) * b;
     return (size_t) c.block_count * (size_t) c.key_length * (size_t) c.head_count_kv * 2 /*K+V*/ * 2 /*f16*/ *
-           (size_t) n * (size_t) rows;
+           (size_t) n * (size_t) rows / (kv_q8 ? 64 : 2) * (kv_q8 ? 34 : 2);
 }
 
 // Weights + KV + compute headroom. Distinct files only — in bundle mode the
@@ -324,7 +325,8 @@ static size_t mm3_kv_bytes_estimate(const MM3Model & m, int64_t n_ctx_needed, in
 // `stage2_only` is the AR-cache-hit shape: the LM is never loaded and there is
 // no KV cache, so asking for the full figure would evict the ACE side for
 // VRAM this run will not touch.
-static size_t mm3_vram_need(const MM3Model & m, int64_t n_ctx_needed, int rows, bool stage2_only = false) {
+static size_t mm3_vram_need(const MM3Model & m, int64_t n_ctx_needed, int rows, bool stage2_only = false,
+                            bool kv_q8 = false) {
     uint64_t weights = mm3_total_tensor_bytes(m);
     // TensorRT uses BF16 weights plus its execution context; reserve additional
     // workspace before deciding whether planner/render streaming can co-reside.
@@ -333,7 +335,7 @@ static size_t mm3_vram_need(const MM3Model & m, int64_t n_ctx_needed, int rows, 
         weights -= m.lm_file.found ? m.lm_file.tensor_bytes : 0;  // the LM is never a role file
         return (size_t) weights + MM3_VRAM_COMPUTE_HEADROOM;
     }
-    return (size_t) weights + mm3_kv_bytes_estimate(m, n_ctx_needed, rows) + MM3_VRAM_COMPUTE_HEADROOM;
+    return (size_t) weights + mm3_kv_bytes_estimate(m, n_ctx_needed, rows, kv_q8) + MM3_VRAM_COMPUTE_HEADROOM;
 }
 
 static bool mm3_cuda_free_bytes(size_t * free_b, size_t * total_b) {
@@ -370,11 +372,11 @@ static bool mm3_cuda_free_bytes(size_t * free_b, size_t * total_b) {
 // unconditional whenever ACE modules are resident and MM3 is cold, which is
 // the conservative choice.
 static void mm3_arbitrate_vram(const MM3Model & m, int64_t n_ctx_needed, int rows, MM3JobState * st,
-                               bool stage2_only = false) {
+                               bool stage2_only = false, bool kv_q8 = false) {
     if (m.loaded) {
         return;  // already resident: whatever fit before still fits
     }
-    const size_t need = mm3_vram_need(m, n_ctx_needed, rows, stage2_only);
+    const size_t need = mm3_vram_need(m, n_ctx_needed, rows, stage2_only, kv_q8);
 
     size_t free_b = 0, total_b = 0;
     const bool have_cuda = mm3_cuda_free_bytes(&free_b, &total_b);
@@ -507,6 +509,11 @@ static void mm3_ar_key_add_models(std::string & k, const MM3Model & m, const MM3
     // still refuses rather than reading a differently-shaped file as valid.
     add_i("cb", (long long) m.lm_cfg.num_codebooks);
     add_i("emb", (long long) m.lm_cfg.embedding_length);
+    // A Q8_0 KV cache rounds every attention read: a different plan. Only when
+    // on, so every f16 key from before it existed still hits.
+    if (mm3_lm_kv_type(req.lm_kv_q8) != GGML_TYPE_F16) {
+        add_i("kv_q8", 1);
+    }
 }
 
 /** The model half alone — what a `.mm3hiddens` file must match to be usable. */
@@ -979,9 +986,10 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // over-reserves.
     const bool plan_rows = req.lm_adapter_plan < 1.0f && !req.lm_adapter.empty() && req.lm_adapter_mode != "merge";
     const int  rows      = mm3_cfg_rows(g_mm3.lm_cfg) * st->n_takes * (plan_rows ? 2 : 1);
+    const bool kv_q8     = mm3_lm_kv_type(req.lm_kv_q8) == GGML_TYPE_Q8_0;
 
     const auto t_arb = std::chrono::steady_clock::now();
-    mm3_arbitrate_vram(g_mm3, n_ctx_needed, rows, st.get(), /*stage2_only=*/ar_hit);
+    mm3_arbitrate_vram(g_mm3, n_ctx_needed, rows, st.get(), /*stage2_only=*/ar_hit, kv_q8);
     const double arb_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_arb).count();
 
     if (job->cancel.load()) {
@@ -1032,7 +1040,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             // The co-resident figure is what mm3_vram_need already computes with
             // stage2_only=false: every role file + this run's KV + compute
             // headroom. Whatever is already ours does not need finding again.
-            const size_t need     = mm3_vram_need(g_mm3, n_ctx_needed, rows, /*stage2_only=*/false);
+            const size_t need     = mm3_vram_need(g_mm3, n_ctx_needed, rows, /*stage2_only=*/false, kv_q8);
             const size_t resident = mm3_vram_bytes(g_mm3);
             const size_t want     = need > resident ? need - resident : 0;
             size_t       free_b = 0, total_b = 0;

@@ -181,15 +181,26 @@ static inline int mm3_cfg_rows(const MM3LmConfig & c) {
 // K <= 8 on a guidance-distilled checkpoint that runs single-row.
 #define MM3_MAX_BATCH_ROWS 8
 
+// The LM alone may go past it: the plan dial's base rows double every take's
+// LM rows. Above 8 rows ggml takes MMQ, which measured faster here than
+// splitting into 8-row MMVQ matmuls (MM3_LM_ROW_SPLIT=1, mm3-lm-graph.h): 31.5
+// vs 38.2 ms per AR iteration at 16 rows on a 5090. The depth decoder and the
+// flow stage only ever see the adapter rows, within MM3_MAX_BATCH_ROWS.
+#define MM3_MAX_LM_ROWS 16
+
 // Largest K the row budget allows for this checkpoint. 4 normally, 8 at CFG 1.0.
-// `plan_rows`: the plan dial's base rows double every take's rows, so the
-// budget halves (2 takes with a CFG pair). Measured on a 5090, 300 s cap:
-// 3 takes with base rows want a 14.3 GB KV cache, filled the card and ran
-// ~10x slower (spilling to system RAM); within the budget the dial never
-// needs more VRAM than 4 takes do without it, and stays on MMVQ.
+// `plan_rows`: the plan dial's base rows double every take's LM rows, so 4
+// takes with a CFG pair need 16. VRAM is the real limit there, not the kernel:
+// on a 5090, 300 s cap, 3 takes with base rows want a 14.3 GB f16 KV cache,
+// filled the card and ran ~10x slower (spilling to system RAM). The request's
+// lm_kv_q8 halves that cache; the server sends it for more than 2 takes.
 static inline int mm3_max_takes(const MM3LmConfig & c, bool plan_rows = false) {
-    const int r = mm3_cfg_rows(c) * (plan_rows ? 2 : 1);
-    return r > 0 && r <= MM3_MAX_BATCH_ROWS ? MM3_MAX_BATCH_ROWS / r : 1;
+    const int p = mm3_cfg_rows(c);
+    if (p <= 0 || p > MM3_MAX_BATCH_ROWS) {
+        return 1;
+    }
+    const int k = MM3_MAX_BATCH_ROWS / p;
+    return plan_rows ? std::min(k, MM3_MAX_LM_ROWS / (2 * p)) : k;
 }
 
 // Clamp a requested take count into what the kernels can actually serve.
