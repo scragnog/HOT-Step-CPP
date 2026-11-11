@@ -122,7 +122,7 @@ test('startup hooks wait for release and then run in registration order', () => 
   gate.whenOpen(() => ran.push('mirror'));
   gate.whenOpen(() => { throw new Error('one failing hook'); });
   gate.whenOpen(() => ran.push('workflows'));
-  assert.deepEqual(ran, []);
+  assert.equal(ran.length, 0);
   assert.equal(gate.state.deferred, 4);
   gate.open();
   assert.deepEqual(ran, ['reconcile', 'mirror', 'workflows'], 'a failing hook does not stop the rest');
