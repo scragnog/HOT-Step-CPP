@@ -223,21 +223,38 @@ function retain(ctx, add) {
   writeJsonAtomic(ctx.L.retained, r);
 }
 
-/** Absolute paths the user's settings name: the process env and the data
- *  folder's settings/.env. A retained payload one of them points into is kept. */
-function settingPaths(ctx) {
-  const values = Object.values(ctx.env);
-  let dataRoot = ctx.dataEnv?.HOT_STEP_DATA_ROOT || ctx.env.HOT_STEP_DATA_ROOT;
-  if (!dataRoot) { try { dataRoot = readJson(path.join(ctx.dataEnv.HOT_STEP_PROFILE_DIR, 'data-location.json'))?.root; } catch { /* none */ } }
-  if (typeof dataRoot === 'string') {
-    try {
-      for (const line of fs.readFileSync(path.join(dataRoot, 'settings', '.env'), 'utf8').split(/\r?\n/)) {
-        const m = /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.*)$/.exec(line);
-        if (m) values.push(m[1].trim().replace(/^(['"])(.*)\1$/, '$2'));
-      }
-    } catch { /* no settings file */ }
+/** dotenv 16 parse(), which the server's config.ts uses for settings/.env:
+ *  same line rule, quote stripping (', " and `) and "\n" expansion. */
+const DOTENV_LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/mg;
+export function parseDotenv(src) {
+  const out = {};
+  const lines = src.replace(/\r\n?/mg, '\n');
+  for (const m of lines.matchAll(DOTENV_LINE)) {
+    let value = (m[2] || '').trim();
+    const quote = value[0];
+    value = value.replace(/^(['"`])([\s\S]*)\1$/mg, '$2');
+    if (quote === '"') value = value.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+    out[m[1]] = value;
   }
-  return values.filter(v => typeof v === 'string' && path.isAbsolute(v));
+  return out;
+}
+
+/** Every path the server could take from a setting: process env and the data
+ *  folder's settings/.env, relative values resolved against the data folder
+ *  as config.ts does. null when they cannot be read safely: then no retained
+ *  payload is deleted. */
+function settingPaths(ctx) {
+  let dataRoot = ctx.dataEnv?.HOT_STEP_DATA_ROOT || ctx.env.HOT_STEP_DATA_ROOT;
+  if (!dataRoot) {
+    try { dataRoot = readJson(path.join(ctx.dataEnv.HOT_STEP_PROFILE_DIR, 'data-location.json'))?.root; } catch { return null; }
+  }
+  if (typeof dataRoot !== 'string' || !path.isAbsolute(dataRoot)) return null;
+  let file = {};
+  try { file = parseDotenv(fs.readFileSync(path.join(dataRoot, 'settings', '.env'), 'utf8')); }
+  catch (e) { if (e.code !== 'ENOENT') return null; }
+  return [...Object.values(ctx.env), ...Object.values(file)]
+    .filter(v => typeof v === 'string' && v.trim())
+    .map(v => path.resolve(dataRoot, v));
 }
 
 /** Delete retained folders. Only recorded names in updater-owned places, never
@@ -258,6 +275,7 @@ async function cleanRetained(ctx) {
   for (const id of r.payloads) {
     if (!validPayloadId(id) || id === current) continue;
     const dir = path.join(L.app, id);
+    if (!referenced) { keep.payloads.push(id); ctx.log(`[Launcher] Keeping ${dir}: the settings could not be read to check it is unused.`); continue; }
     const used = referenced.find(p => sameDir(p, dir) || inside(real(dir), real(p)));
     if (used) { keep.payloads.push(id); ctx.log(`[Launcher] Keeping ${dir}: a setting points into it (${used}).`); continue; }
     await remove('payloads', id, dir);

@@ -13,7 +13,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
-import { AlreadyRunning, RecoveryRequired, launch, payloadIdFor, timing } from './launcher.mjs';
+import { AlreadyRunning, RecoveryRequired, launch, parseDotenv, payloadIdFor, timing } from './launcher.mjs';
 import { MANIFEST_FILE, packageLayout } from './package-layout.mjs';
 import { checkPackageBuildInfo } from '../check-layout.mjs';
 
@@ -418,10 +418,28 @@ test('a first start records the data folder beside the install, never inside app
   assert.equal(await run, 0);
 });
 
+test('parseDotenv reads settings/.env exactly as the server\'s dotenv does', () => {
+  const dotenv = createRequire(import.meta.url)(path.join(repo, 'server', 'node_modules', 'dotenv'));
+  const src = [
+    'A=C:\\x\\models', 'B="C:\\y z\\models"', "C='rel/dir'", 'D=`C:\\back tick`', 'E=C:\\e # comment', 'export F=f',
+    'G = spaced ', 'H:colon', '# comment', 'I=', 'J="multi\\nline"', 'K=a#b', 'L="quoted # not a comment"', 'M="unclosed', 'N.dot=n',
+  ].join('\r\n');
+  assert.deepEqual(parseDotenv(src), dotenv.parse(src));
+});
+
+function settings(f, text) {
+  fs.mkdirSync(path.join(f.data, 'settings'), { recursive: true });
+  fs.writeFileSync(path.join(f.data, 'settings', '.env'), text);
+}
 for (const [name, prepare, snapshots] of [
   ['the next start never answers health', f => fs.writeFileSync(path.join(f.root, 'app', f.newId, 'stub.json'), JSON.stringify({ version: 'new', health503: true })), 1],
-  ['a setting points into the old payload', f => { fs.mkdirSync(path.join(f.data, 'settings'), { recursive: true }); fs.writeFileSync(path.join(f.data, 'settings', '.env'), `ACESTEPCPP_MODELS="${path.join(f.root, 'app', f.oldId, 'models')}"
-`); }, 0],
+  // Forward slashes: inside double quotes dotenv turns \r and \n into line breaks, as the server reads it.
+  ['a setting points into the old payload', f => settings(f, `ACESTEPCPP_MODELS="${path.join(f.root, 'app', f.oldId, 'models').replaceAll('\\', '/')}"\n`), 0],
+  // config.ts writes backtick quoting and resolves relative values against the data folder.
+  ['a backtick-quoted setting points into it', f => settings(f, `ACESTEPCPP_MODELS=\`${path.join(f.root, 'app', f.oldId, 'models')}\`\n`), 0],
+  ['a setting relative to the data folder points into it', f => settings(f, `ACESTEPCPP_MODELS=${path.relative(f.data, path.join(f.root, 'app', f.oldId, 'models'))}\n`), 0],
+  ['an unquoted setting with a comment points into it', f => settings(f, `ACESTEPCPP_MODELS=${path.join(f.root, 'app', f.oldId, 'models')} # moved\n`), 0],
+  ['the settings file cannot be read', f => fs.mkdirSync(path.join(f.data, 'settings', '.env'), { recursive: true }), 0],
 ]) test(`retained folders are kept when ${name}`, async t => {
   const f = install(t);
   const run = f.start();
