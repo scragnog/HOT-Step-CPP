@@ -244,6 +244,16 @@ static bool should_quantize(const char * name, int n_dims, const char * arch) {
     if (n_dims < 2) {
         return false;
     }
+    // SheetSage2 merges MERT into this file. Unlike upstream's layout, our
+    // converter squeezes depthwise and pointwise conv kernels to 2-D.
+    // Keep those kernels, mel buffers and learned positions unchanged.
+    // Block 23 attention must remain float for the loader's F32 promotion.
+    if (strcmp(arch, "sheetsage2") == 0) {
+        return n_dims == 2 && strncmp(name, "enc.mel.", 8) != 0 &&
+               !name_is(name, "dec.pos_embd") && strstr(name, ".dw.weight") == nullptr &&
+               strstr(name, ".conv_dw.weight") == nullptr && strstr(name, ".conv_pw") == nullptr &&
+               strncmp(name, "enc.blk.23.attn_", 16) != 0;
+    }
     // HeartCodec: Weights::load (heartmula/rvq.h) keeps only 2-D ".weight"
     // matrices in a quantized type; conv kernels (3-D), tables and the RVQ
     // codebooks must stay float or the loader refuses the file.

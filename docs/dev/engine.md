@@ -46,7 +46,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
-| `quantize` | `tools/quantize.cpp` | GGUF requantizer for ACE-Step, MM3, YuE2 and SA3 DiT files, with optional `--imatrix` |
+| `quantize` | `tools/quantize.cpp` | GGUF requantizer for ACE-Step, MM3, YuE2, SheetSage2 and SA3 DiT files, with optional `--imatrix` |
 | `mastering` | `tools/mastering.cpp` | Reference-based mastering (the matchering algorithm) |
 | `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`, `--monitor`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins. `--monitor` (Windows, WASAPI) plays a track through the chain live, driven by a control file the server rewrites atomically with an increasing `seq`; see the note below |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
@@ -594,6 +594,24 @@ GGUF. YuE2 generation captures the approved score as `yue2Abc` and source
 identity as `yue2Cover`; the engine composes from the score rather than
 conditioning its audio renderer on the recording. Without `--melody-only`,
 `yue2-sheet` retains its full-score training default.
+
+The merged `sheetsage2` GGUF can be requantized with
+`quantize sheetsage2-f16.gguf sheetsage2-q8_0.gguf Q8_0`.
+The quantizer preserves mel buffers, learned decoder positions, convolution
+kernels, including the converter's squeezed 2-D kernels, and the final encoder
+block's attention weights. That last group stays float for the loader's F32
+promotion. Other linear projections and the tied token embedding use Q8_0.
+The encoder and decoder remain in one file.
+
+Five 20-second clips covering pop, electronic, metal, reggae and acoustic music
+produced byte-identical full-score ABC at F16 and Q8_0 on Metal. This checks those
+clips only. The file shrank from 1,360,020,736 to 805,249,312 bytes; the Metal
+weight buffer under the default transcription settings shrank from 2,498.7 to
+919.9 MiB. These are weight allocations, not total unified-memory use. Quantized
+weights remain quantized when the default `exact` mode requests F32 promotion;
+the loader emits an unsupported-type warning and loads them as-is. That mode
+cannot recover precision discarded by quantization. Publication and a model
+catalogue entry require a separate decision.
 
 Source guidance is the optional second path from the recording to the render.
 `ace-train yue2-guide` runs MERT and the tokenizer head over the source with
