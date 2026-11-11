@@ -164,6 +164,46 @@
   color: rgba(255, 255, 255, 0.4);
 }
 
+.settings-updates [role="combobox"] {
+  width: 180px;
+  max-width: 50%;
+  flex-shrink: 0;
+}
+
+/* Shared settings actions */
+.settings-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.settings-save-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.settings-save-btn:focus-visible {
+  outline: 2px solid #ec4899;
+  outline-offset: 2px;
+}
+
+.settings-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Placement Button Group (segmented control) */
 .placement-button-group {
   display: flex;
@@ -541,6 +581,25 @@
 }
 
 /* Placement buttons */
+:root:not(.dark) .settings-save-btn {
+  color: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+:root:not(.dark) .settings-save-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+:root:not(.dark) .env-save-status--success {
+  color: #15803d;
+}
+
+:root:not(.dark) .env-save-status--error {
+  color: #dc2626;
+}
+
 :root:not(.dark) .placement-button-group {
   border-color: rgba(0, 0, 0, 0.12);
 }
