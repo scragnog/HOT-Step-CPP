@@ -203,7 +203,11 @@ candidate costs its own flow pass.
 **Adapter fade (2026-11-08, 28c79e42, opt-in, no UI dial yet).** Adapters
 suppress the base's ending instinct, so `lm_adapter_fade_*` (engine
 ARCHITECTURE.md) can step the LM adapter down to the base for the tail
-(`MM3LmAdapterSchedule`; runtime mode only, the server forces it). Plan-only
+(`MM3LmAdapterSchedule`). Since 2026-11-11 merge mode fades too: the weights stay
+merged and below x1 the graph adds the adapter at `(mult - 1)` times its scale
+(`lm_adapter_merged`, plain LoRA/PiSSA only; DoRA falls back to runtime; cache key
+`fd_merged`). Teacher-forced check: merged at x0 sits 1.5% relRMSE from the base,
+the same as merge vs runtime at x1 (1.4%); the adapter itself moves it 50%. Plan-only
 count, one adapter, one prompt, 12 takes, 300 s cap: control 2/12, base 12/12,
 **ramp from 210 s to the base at 270 s 9/12**, hard handoff at 210 s 5/12, ramp
 or handoff at 150 s 2/12 and 0/12. A fade during the lyrics loses: the base

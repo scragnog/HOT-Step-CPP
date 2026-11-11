@@ -84,7 +84,7 @@ test('MM3 audio to audio: source and dials travel only with a strength, and the 
   }
 });
 
-test('MM3 sends the LM adapter fade only when set, and a fade forces runtime mode', (t) => {
+test('MM3 sends the LM adapter fade only when set, and a fade keeps the selected mode', (t) => {
   const installed = listMm3LmAdapters()[0];
   if (!installed) return t.skip('no MM3 LM adapter installed');
   const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3LmAdapterMode: 'merge' };
@@ -93,10 +93,16 @@ test('MM3 sends the LM adapter fade only when set, and a fade forces runtime mod
   assert.equal(Object.keys(plain).some((k) => k.startsWith('lm_adapter_fade')), false);
   const faded = mapMinimaxParams({ ...params, mm3LmAdapterFadeOut: 150, mm3LmAdapterFadeLen: 60, mm3LmAdapterFadeFloor: 7 })
     .req as unknown as Record<string, unknown>;
-  assert.equal(faded.lm_adapter_mode, 'runtime');
+  assert.equal(faded.lm_adapter_mode, 'merge');  // the engine fades a merged adapter in-graph
   assert.equal(faded.lm_adapter_fade_out, 150);
   assert.equal(faded.lm_adapter_fade_len, 60);
   assert.equal(faded.lm_adapter_fade_floor, undefined);  // out of range is dropped
+  const fadeRuntime = mapMinimaxParams({ ...params, mm3LmAdapterMode: 'runtime', mm3LmAdapterFadeOut: 150 })
+    .req as unknown as Record<string, unknown>;
+  assert.equal(fadeRuntime.lm_adapter_mode, 'runtime');
+  const fadePlan = mapMinimaxParams({ ...params, mm3LmAdapterFadeOut: 150, mm3LmAdapterScalePlan: 0.25 })
+    .req as unknown as Record<string, unknown>;
+  assert.equal(fadePlan.lm_adapter_mode, 'runtime');  // the plan dial still needs the base weights
 });
 
 test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => {

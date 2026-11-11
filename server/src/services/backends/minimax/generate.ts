@@ -805,8 +805,9 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         // weights once — zero per-step cost; scale changes re-merge).
         // Strength along the song (engine MM3LmAdapterSchedule): the base for
         // the first N s, full strength for the body, then a ramp back to the
-        // base (or a floor) for the ending. Off unless a fade is set. It needs
-        // the deltas in the graph, so it wins over merge mode.
+        // base (or a floor) for the ending. Off unless a fade is set. In merge
+        // mode the engine keeps the merged weights and subtracts the faded
+        // share in-graph from the fade on (DoRA falls back to runtime there).
         const fadeNum = (key: string, max: number): number | undefined => {
           const v = Number((params as Record<string, unknown>)[key]);
           return Number.isFinite(v) && v >= 0 && v <= max ? v : undefined;
@@ -830,9 +831,6 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           }
         }
         const fadeOn = (fade.lm_adapter_fade_in ?? 0) > 0 || (fade.lm_adapter_fade_out ?? 0) > 0;
-        if (fadeOn && params.mm3LmAdapterMode === 'merge') {
-          notes.push('LM adapter fade set: rendering in runtime mode, since a merged adapter cannot change strength mid-song');
-        }
         // Plan dial (engine lm_adapter_plan): below 1 the engine adds base rows
         // with the adapter delta masked off, which a merged LM has no base
         // weights for. Sent only when it does something.
@@ -844,7 +842,10 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         // The base rows double the planner's batch, so the engine plans at most
         // 2 takes (engine mm3_max_takes); a 3- or 4-candidate ask gets 2.
         if (plan !== undefined) notes.push(`LM adapter plan dial: ${plan} (at most 2 takes per planning round)`);
-        const mode = params.mm3LmAdapterMode === 'merge' && !fadeOn && plan === undefined ? 'merge' : 'runtime';
+        const mode = params.mm3LmAdapterMode === 'merge' && plan === undefined ? 'merge' : 'runtime';
+        if (fadeOn && mode === 'merge') {
+          notes.push('LM adapter fade in merge mode: merged speed until the fade, runtime ops for the faded stretch');
+        }
         notes.push(`LM adapter: ${path.basename(resolved)} (${mode})`);
         const mergeGpu = params.mm3LmMergeGpu !== false;
         if (mode === 'merge') notes.push(`LM adapter merging: ${mergeGpu ? 'GPU preferred' : 'CPU-assisted'}`);

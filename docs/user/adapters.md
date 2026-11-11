@@ -311,8 +311,10 @@ strength until the lyrics should be done, then steps it down to the base model o
 so the base can close the song. The start comes from the word count: about 1.85 words a
 second plus 30 s, never later than 4:00. The fade keeps what has already been generated,
 so the timbre holds. In a test on one adapter, 9 of 12 plans ended on their own with the
-fade against 2 of 12 without. It needs lyrics, and it renders the adapter in Runtime mode
-even when Merge is picked, so planning is slower.
+fade against 2 of 12 without. It needs lyrics. In Merge mode the song plans at merge speed
+up to the fade and only the faded stretch runs the slower runtime adapter maths. A DoRA
+adapter fades in Runtime mode instead, and a LoHa or HiRA adapter cannot fade once merged
+(the fade is skipped). The **Plan** dial below 1 still renders in Runtime mode.
 
 An adapter that fails to load fails the job. It never renders the base model silently.
 

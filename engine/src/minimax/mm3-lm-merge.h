@@ -100,6 +100,15 @@ static std::string mm3_lm_merge_make_tag(const std::string & path, int64_t mtime
     return path + buf + (mm3_lm_merge_device_enabled(requested_gpu) ? "|device-experimental" : "|host-reference");
 }
 
+// Whether a merged adapter can still fade (MM3ArOptions::lm_adapter_merged):
+// the graph takes the delta back out as (mult - 1)*s*BA, which is exact only
+// for a plain low-rank pair (PiSSA delta files load as one). DoRA rescales by
+// a norm of the merged weight, LoHa and HiRA have no runtime form, and LoKr
+// does not merge at all.
+static bool mm3_lm_merge_fade_ok(const MM3LmAdapter * ad) {
+    return ad && !ad->is_lokr && !ad->is_loha && !ad->is_hira && ad->dora_n == 0;
+}
+
 // The base LM tensor an adapter module targets.
 static ggml_tensor * mm3_lm_merge_target(const MM3Model & m, int layer, int module) {
     const MM3LmLayer & b = m.lm.blk[(size_t) layer];

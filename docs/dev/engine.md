@@ -868,7 +868,10 @@ Other adapter paths:
   load (`mm3-adapter.h`). A runtime MM3 LM adapter can change strength along the
   song (`lm_adapter_fade_*`, `MM3LmAdapterSchedule` in `mm3-lm-adapter.h`): the AR
   loop re-sets the scales between iterations, which rebuilds the decode graph and
-  keeps the KV cache. The plan dial (`lm_adapter_plan` < 1) adds a base copy of every
+  keeps the KV cache. In merge mode (`MM3ArOptions::lm_adapter_merged`) the graph keeps
+  the merged weights and, below full strength, carries the adapter again at
+  `(mult - 1)` times its scale, so the body runs the plain merged graph; plain LoRA and
+  PiSSA only (`mm3_lm_merge_fade_ok`), DoRA falls back to runtime. The plan dial (`lm_adapter_plan` < 1) adds a base copy of every
   take's CFG pair (`MM3LmGraph::base_rows`), masks the adapter delta off on those rows
   with a resident `[1, 1, B]` tensor in the KV buffer, and mixes the two models' logits
   before the semantic draw (`mm3-ar-loop.h`).

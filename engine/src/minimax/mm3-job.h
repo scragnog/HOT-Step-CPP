@@ -483,6 +483,11 @@ static void mm3_ar_key_add_models(std::string & k, const MM3Model & m, const MM3
         if (f.active()) {
             add_f("fd_in", f.in_sec);  add_f("fd_out", f.out_sec); add_f("fd_len", f.out_len_sec);
             add_f("fd_fl", f.floor);   add_f("fd_st", f.step_sec);
+            // A merged fade (correction ops) renders differently from a runtime one,
+            // and an older merge-mode key with fade fields holds a full-strength render.
+            if (req.lm_adapter_mode == "merge") {
+                add_i("fd_merged", 1);
+            }
         }
         if (req.lm_adapter_plan < 1.0f) {
             add_f("ad_p", req.lm_adapter_plan);
@@ -1136,13 +1141,50 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // Skipped wholesale on an AR cache hit: there is no LM to adapt, and the
     // adapter's identity and dials are already baked into the cache key, so a
     // hit means "this exact adapter produced this exact block".
-    const bool merge_mode = !req.lm_adapter.empty() && req.lm_adapter_mode == "merge";
+    bool merge_mode = !req.lm_adapter.empty() && req.lm_adapter_mode == "merge";
     if (!ar_hit) {
         // hs_stat: a >= 2 GiB adapter must not read as missing (see above) —
         // stat_ok false here means the mtime revalidation below never fires and
         // a retrained checkpoint under the same path is served from cache.
         HS_STAT_T   asb {};
         const bool  stat_ok  = !req.lm_adapter.empty() && hs_stat(req.lm_adapter, &asb) == 0;
+        // Loaded before the merge tag is settled: whether a fade can ride a
+        // merge depends on what the adapter is. The adapter owns its own
+        // buffer, so the pristine reload below leaves it alone.
+        if (!req.lm_adapter.empty()) {
+            const bool cached = g_mm3_lm_adapter && g_mm3_lm_adapter->path == req.lm_adapter && stat_ok &&
+                                (int64_t) asb.st_mtime == g_mm3_lm_adapter->mtime;
+            if (!cached) {
+                mm3_lm_adapter_drop();
+                std::string aerr;
+                const auto adapter_load_start = std::chrono::steady_clock::now();
+                g_mm3_lm_adapter = mm3_lm_adapter_load(req.lm_adapter.c_str(), &aerr,
+                                                       g_mm3.lm_file.found ? g_mm3.lm_file.path.c_str() : nullptr);
+                fprintf(stderr, "[MM3-Job] %s: LM adapter load %.0f ms (%s)\n", job->id.c_str(),
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - adapter_load_start).count(),
+                        g_mm3_lm_adapter ? "success" : "failed");
+                if (!g_mm3_lm_adapter) {
+                    fail(2, "lm_adapter", aerr);  // fail() handles transient release
+                    return;
+                }
+            }
+        }
+        // Merge mode with a fade (MM3ArOptions::lm_adapter_merged) needs a
+        // delta the graph can take back out linearly. DoRA's rescale is not
+        // linear in the delta, so it renders the fade in runtime mode, as it
+        // always has. LoHa and HiRA have no runtime path at all: they merge at
+        // full strength and the schedule is ignored.
+        if (merge_mode && req.lm_adapter_sched.active() && !mm3_lm_merge_fade_ok(g_mm3_lm_adapter) &&
+            !g_mm3_lm_adapter->is_lokr) {  // LoKr: the merge refuses it with its own message
+            if (g_mm3_lm_adapter->dora_n > 0) {
+                fprintf(stderr, "[MM3-Job] %s: DoRA adapter with a fade: rendering in runtime mode\n", job->id.c_str());
+                merge_mode          = false;
+                req.lm_adapter_mode = "runtime";
+            } else {
+                fprintf(stderr, "[MM3-Job] %s: %s adapter cannot fade once merged: schedule ignored\n",
+                        job->id.c_str(), g_mm3_lm_adapter->is_loha ? "LoHa" : "HiRA");
+            }
+        }
         std::string want_tag;  // "" = this render wants a pristine base
         if (merge_mode) {
             want_tag = mm3_lm_merge_make_tag(req.lm_adapter, stat_ok ? (int64_t) asb.st_mtime : 0,
@@ -1162,22 +1204,6 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         }
 
         if (!req.lm_adapter.empty()) {
-            const bool cached = g_mm3_lm_adapter && g_mm3_lm_adapter->path == req.lm_adapter && stat_ok &&
-                                (int64_t) asb.st_mtime == g_mm3_lm_adapter->mtime;
-            if (!cached) {
-                mm3_lm_adapter_drop();
-                std::string aerr;
-                const auto adapter_load_start = std::chrono::steady_clock::now();
-                g_mm3_lm_adapter = mm3_lm_adapter_load(req.lm_adapter.c_str(), &aerr,
-                                                       g_mm3.lm_file.found ? g_mm3.lm_file.path.c_str() : nullptr);
-                fprintf(stderr, "[MM3-Job] %s: LM adapter load %.0f ms (%s)\n", job->id.c_str(),
-                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - adapter_load_start).count(),
-                        g_mm3_lm_adapter ? "success" : "failed");
-                if (!g_mm3_lm_adapter) {
-                    fail(2, "lm_adapter", aerr);  // fail() handles transient release
-                    return;
-                }
-            }
             if (merge_mode) {
                 if (g_mm3.lm_merge_tag != want_tag) {
                     set_stage("merging", -1, 0, 0, 0);
@@ -1194,6 +1220,10 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
                     g_mm3.lm_merge_tag = want_tag;
                 }
                 req.gen.lm_adapter = nullptr;  // baked in; no runtime deltas on top
+                // ...except a fade's correction, below full strength only.
+                req.gen.lm_adapter_merged = req.lm_adapter_sched.active() && mm3_lm_merge_fade_ok(g_mm3_lm_adapter)
+                                                ? g_mm3_lm_adapter
+                                                : nullptr;
                 // The soft-prompt halves survive the merge. A token is a
                 // conditioning input on k prompt positions and a prefix is n KV
                 // columns; neither is a weight delta, so mm3_lm_merge_apply

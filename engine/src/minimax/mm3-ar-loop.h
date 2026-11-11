@@ -321,9 +321,17 @@ struct MM3ArOptions {
     const MM3LmAdapter * lm_adapter = nullptr;
     MM3LmAdapterScales   lm_adapter_scales = {};
     // Strength along the song (MM3LmAdapterSchedule), a multiplier on
-    // lm_adapter_scales.global. Needs a runtime adapter: merge mode has baked
-    // the delta into the weights, so there is nothing to turn down.
+    // lm_adapter_scales.global. Needs a runtime adapter or lm_adapter_merged.
     MM3LmAdapterSchedule lm_adapter_sched = {};
+    // Merge mode with a schedule: the adapter already folded into the resident
+    // weights at lm_adapter_scales. Wherever the schedule is below 1 the graph
+    // carries it again at (mult - 1) times its scale, which takes the merged
+    // delta back down: W + s*BA + (mult - 1)*s*BA = W + mult*s*BA, up to the
+    // merge's one requantization. At 1 the graph is the plain merged one, so
+    // the body runs at merge speed and only the faded stretch pays the
+    // runtime ops. Plain LoRA only (mm3_lm_merge_fade_ok); never set together
+    // with lm_adapter.
+    const MM3LmAdapter * lm_adapter_merged = nullptr;
     // Plan dial, 0..1: how much the adapter plans the song. Below 1 every take
     // gets a base pair (same prompt, delta masked off), guidance runs per
     // model, the semantic draw samples base + plan * (adapter - base), and the
@@ -847,8 +855,8 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // multiplier per iteration is exact for every take. Iteration `it` is
     // song time it / 25 s; the decode at the end of iteration it makes the
     // logits iteration it + 1 samples from, so that is the time it is set for.
-    const bool sched_on = opt.lm_adapter && opt.lm_adapter_sched.active();
-    if (opt.lm_adapter_sched.active() && !opt.lm_adapter) {
+    const bool sched_on = (opt.lm_adapter || opt.lm_adapter_merged) && opt.lm_adapter_sched.active();
+    if (opt.lm_adapter_sched.active() && !sched_on) {
         fprintf(stderr, "[MM3-AR] adapter schedule ignored: no runtime LM adapter (none loaded, or merge mode)\n");
     }
     float      sched_cur   = -1.0f;
@@ -859,6 +867,15 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         }
         sched_cur             = mult;
         MM3LmAdapterScales sc = opt.lm_adapter_scales;
+        if (opt.lm_adapter_merged) {
+            // Merged: full strength is the weights as they are; below it the
+            // graph takes the missing share of the delta back out.
+            sc.global *= mult - 1.0f;
+            mm3_lm_set_adapter(&g_mm3_lm, mult < 1.0f ? opt.lm_adapter_merged : nullptr, sc);
+            fprintf(stderr, "[MM3-AR] adapter schedule: x%.2f from %.1f s (merged, correction x%.2f)\n", mult,
+                    (double) it / 25.0, mult - 1.0f);
+            return;
+        }
         sc.global *= mult;
         // Zero is the base itself: no delta in the graph, and no delta cost.
         mm3_lm_set_adapter(&g_mm3_lm, mult > 0.0f ? opt.lm_adapter : nullptr, sc);
@@ -1688,6 +1705,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         // The replay runs the whole plan under ONE adapter setting. A schedule
         // left the graph at its tail strength; align under the body's instead,
         // which is where the lyrics are. The tail's timestamps are approximate.
+        // Merged (lm_adapter null): the body is the merged weights alone.
         if (sched_on) {
             mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
         }
