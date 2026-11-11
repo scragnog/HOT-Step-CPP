@@ -30,9 +30,9 @@ Older releases, Linux and macOS require the manual upgrade below. The Updates pa
 3. Start `HOT-Step.bat` on Windows or `./HOT-Step.sh` on Linux and macOS.
 4. Check **Settings > Storage & Data > Data folder**. The saved location should be unchanged.
 
-Releases before v1.4.1 kept their data inside the app folder. With no saved location, starting the new launcher inside such an install carries that install's data into the sibling folder. Conflicting populated destinations stop startup instead of merging libraries.
+Releases before v1.4.1 kept their data inside the app folder. With no saved location, a new version extracted over such an install carries that install's data into the sibling `HOT-Step-Data` folder the first time `HOT-Step.bat` or `HOT-Step.sh` starts it. If that move stops, the next start resumes it. Conflicting populated destinations stop startup instead of merging libraries.
 
-A fresh extraction elsewhere cannot find an arbitrary older app folder. Use **Import previous install** in Settings and provide the older app folder. Import needs an empty current library and never merges libraries. It moves the older install's library, models, adapters, logs and Whisper into the data folder, and copies its own Lua plugins and downloaded runtime libraries. The older app folder stays in place without that data, and its `.env` is renamed `.env.migrated`. Its settings become `settings/.env`; a `settings/.env` the data folder already had is kept as `settings/.env.before-import-<id>`.
+A fresh extraction elsewhere cannot find an arbitrary older app folder. Run **Import previous install** in Settings first, before you create any songs or settings in the new library, and provide the older app folder. Import needs an empty current library and never merges libraries. It moves the older install's library, models, adapters, logs and Whisper into the data folder, and copies its own Lua plugins and downloaded runtime libraries. The older app folder stays in place without that data, and its `.env` is renamed `.env.migrated`. Its settings become `settings/.env`; a `settings/.env` the data folder already had is kept as `settings/.env.before-import-<id>`.
 
 ## Choose or move a folder
 

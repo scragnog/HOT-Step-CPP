@@ -52,7 +52,11 @@ const Database = createRequire(import.meta.url)(${JSON.stringify(SQLITE)});
 const dir = process.env.HOT_STEP_ROOT, updater = process.env.HOT_STEP_UPDATER_DIR, token = process.env.HOT_STEP_MAINTENANCE_TOKEN;
 const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'stub.json'), 'utf8'));
 const build = JSON.parse(fs.readFileSync(path.join(dir, 'build-info.json'), 'utf8'));
-const dataRoot = process.env.HOT_STEP_DATA_ROOT || JSON.parse(fs.readFileSync(path.join(process.env.HOT_STEP_PROFILE_DIR, 'data-location.json'), 'utf8')).root;
+// With no saved root the real server picks the folder beside HOT_STEP_INSTALL_ROOT; start-env.json records what it was given.
+const ptrFile = path.join(process.env.HOT_STEP_PROFILE_DIR, 'data-location.json');
+const ptr = fs.existsSync(ptrFile) ? JSON.parse(fs.readFileSync(ptrFile, 'utf8')) : null;
+fs.writeFileSync(path.join(dir, 'start-env.json'), JSON.stringify({ dataRoot: process.env.HOT_STEP_DATA_ROOT ?? null, installRoot: process.env.HOT_STEP_INSTALL_ROOT, pointer: ptr }));
+const dataRoot = process.env.HOT_STEP_DATA_ROOT || ptr?.root || path.join(path.dirname(process.env.HOT_STEP_INSTALL_ROOT), 'HOT-Step-Data');
 const hash = s => crypto.createHash('sha256').update(s).digest('hex');
 const leaseFile = path.join(updater, 'maintenance-lease.json');
 const lease = fs.existsSync(leaseFile) ? JSON.parse(fs.readFileSync(leaseFile, 'utf8')) : null;
@@ -486,21 +490,28 @@ test('a stale preparation lock and a lease with no transaction are cleared befor
   assert.equal(await run, 0);
 });
 
-test('a first start records the data folder beside the install, never inside app/', async t => {
+test('a first start leaves the data location to the server, and a pending transfer passes through untouched', async t => {
   const f = install(t);
   const ptr = path.join(f.profile, 'data-location.json');
+  const seen = () => JSON.parse(fs.readFileSync(path.join(f.root, 'app', f.oldId, 'start-env.json'), 'utf8'));
+  // No pointer: the launcher writes none, so the server can find an old version's data in the install folder first.
   fs.rmSync(ptr);
-  fs.rmSync(f.data, { recursive: true });
-  fs.mkdirSync(f.data);
-  fs.writeFileSync(path.join(f.data, 'someone-elses.txt'), '');
-  await assert.rejects(f.start(), /not a HOT-Step data folder/);
-  assert.equal(fs.existsSync(ptr), false);
-  fs.rmSync(f.data, { recursive: true });
-  const run = f.start();
-  const port = await f.port(f.oldId);
-  assert.equal(JSON.parse(fs.readFileSync(ptr, 'utf8')).root, path.join(path.dirname(f.root), 'HOT-Step-Data'));
+  let run = f.start();
+  let port = await f.port(f.oldId);
+  assert.deepEqual(seen(), { dataRoot: null, installRoot: f.root, pointer: null });
   await f.post(port, '/test/quit');
   assert.equal(await run, 0);
+  assert.equal(fs.existsSync(ptr), false);
+  // A migration that stopped half-way: plain start, no update recovery, pointer unchanged for the server to resume.
+  const pending = { version: 1, root: null, pending: { id: 'm', kind: 'migrate', source: f.root, destination: f.data, mappings: [], error: 'stopped' } };
+  fs.writeFileSync(ptr, JSON.stringify(pending));
+  run = f.start();
+  port = await f.port(f.oldId);
+  assert.deepEqual(seen(), { dataRoot: null, installRoot: f.root, pointer: pending });
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(ptr, 'utf8')), pending);
+  assert.ok(!f.logs.some(m => /Update|Recovery/i.test(m)), f.logs.join(' | '));
 });
 
 test('parseDotenv reads settings/.env exactly as the server\'s dotenv does', () => {

@@ -21,6 +21,10 @@ export interface PointerLocation {
   mode: 'dev' | 'release';
   /** HOT_STEP_ROOT in a release, the checkout in dev. */
   appRoot: string;
+  /** The folder a user unzipped: HOT_STEP_INSTALL_ROOT under the stable launcher
+   *  (appRoot is then its app/<id> payload), else appRoot. The default data
+   *  folder sits beside it and an old version's in-app data sits inside it. */
+  installRoot: string;
   profileDir: string;
   pointerPath: string;
 }
@@ -30,9 +34,11 @@ export function pointerLocation(env: NodeJS.ProcessEnv = process.env, checkoutRo
   const prof = profileDir(env);
   if (!env.HOT_STEP_ROOT) {
     const checkout = path.resolve(checkoutRoot);
-    return { mode: 'dev', appRoot: checkout, profileDir: prof, pointerPath: devPointerFile(prof, checkout) };
+    return { mode: 'dev', appRoot: checkout, installRoot: checkout, profileDir: prof, pointerPath: devPointerFile(prof, checkout) };
   }
-  return { mode: 'release', appRoot: path.resolve(env.HOT_STEP_ROOT), profileDir: prof, pointerPath: path.join(prof, POINTER_FILE) };
+  const appRoot = path.resolve(env.HOT_STEP_ROOT);
+  const installRoot = env.HOT_STEP_INSTALL_ROOT ? path.resolve(env.HOT_STEP_INSTALL_ROOT) : appRoot;
+  return { mode: 'release', appRoot, installRoot, profileDir: prof, pointerPath: path.join(prof, POINTER_FILE) };
 }
 
 export function accessibleRoot(root: string): boolean {
@@ -44,10 +50,10 @@ export function accessibleRoot(root: string): boolean {
 }
 
 /** Shared boot/inspection selection after pending work. Never creates the fallback. */
-export function selectPointerRoot(loc: Pick<PointerLocation, 'mode' | 'appRoot'>, savedRoot: string): { root: string | null; staleRoot: string | null } {
+export function selectPointerRoot(loc: Pick<PointerLocation, 'mode' | 'installRoot'>, savedRoot: string): { root: string | null; staleRoot: string | null } {
   if (accessibleRoot(savedRoot)) return { root: path.resolve(savedRoot), staleRoot: null };
   return {
-    root: loc.mode === 'release' ? path.join(path.dirname(loc.appRoot), DEFAULT_DATA_FOLDER) : null,
+    root: loc.mode === 'release' ? path.join(path.dirname(loc.installRoot), DEFAULT_DATA_FOLDER) : null,
     staleRoot: savedRoot,
   };
 }

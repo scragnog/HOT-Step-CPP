@@ -2,8 +2,8 @@
 //
 // config.ts imports RUNTIME from here, so this module is evaluated before any
 // module that opens SQLite, log files or the engine. In a release it picks the
-// root (HOT_STEP_DATA_ROOT, profile pointer, this app's old layout, then
-// <parent of app>/HOT-Step-Data), runs a pending move/import/migration, and on
+// root (HOT_STEP_DATA_ROOT, profile pointer, this install's old layout, then
+// <parent of install>/HOT-Step-Data), runs a pending move/import/migration, and on
 // transfer or pointer failure serves one plain page and never lets the app start.
 // An unavailable saved root falls back without changing the pointer.
 // A dev checkout (no HOT_STEP_ROOT) keeps its checkout paths until Settings
@@ -160,7 +160,7 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
     const err = await runPendingAtBoot(ptrFile, ptr, checkout, prof, opts, log);
     if (err) return fail(err);
     if (!ptr.root) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) }; // abandoned before any root
-    const selected = selectPointerRoot({ mode: 'dev', appRoot: checkout }, ptr.root);
+    const selected = selectPointerRoot({ mode: 'dev', installRoot: checkout }, ptr.root);
     if (selected.staleRoot) {
       log(`[Data] WARNING: Saved data folder ${ptr.root} is missing or cannot be accessed. Using this checkout's default folders in ${checkout}. Saved location unchanged; reconnect the drive and restart to use it again.`);
       return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
@@ -181,7 +181,7 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
   const log = opts.log ?? (m => console.log(m));
   if (!env.HOT_STEP_ROOT) return resolveDev(opts, env, log);
 
-  const { appRoot, profileDir: prof, pointerPath: ptrFile } = pointerLocation(env);
+  const { appRoot, installRoot, profileDir: prof, pointerPath: ptrFile } = pointerLocation(env);
   const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
 
   try {
@@ -201,19 +201,21 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
     try { ptr = readPointer(ptrFile); } catch (e: any) { return fail(`${e.message}. Fix or delete it, then restart.`); }
 
     if (!ptr) {
-      // First run of the new layout on this machine.
-      const sibling = path.join(path.dirname(appRoot), DEFAULT_DATA_FOLDER);
+      // First run of the new layout on this machine. Under the stable launcher
+      // the old version's data is in the install folder, not in app/<id>: a
+      // versioned package unzipped over an old one leaves it there.
+      const sibling = path.join(path.dirname(installRoot), DEFAULT_DATA_FOLDER);
       if (sharedRoot(prof, ptrFile, sibling)) {
         return fail(`${sibling} is a development checkout's data folder. Set HOT_STEP_DATA_ROOT, or move that checkout's data elsewhere, then restart.`);
       }
-      const legacy = inspectLegacy(appRoot);
+      const legacy = inspectLegacy(installRoot);
       const hasLegacy = legacyMappings(legacy, sibling).length > 0 || !!legacy.envFile;
       if (hasLegacy) {
         if (!isEmptyDir(sibling)) {
           return fail(`This app folder still holds data from an older version, and ${sibling} already exists with other data. `
             + `Move one of them aside, then restart.`);
         }
-        const { op, errors } = planOperation('migrate', sibling, { appRoot, currentRoot: null, currentDb: null });
+        const { op, errors } = planOperation('migrate', sibling, { appRoot: installRoot, currentRoot: null, currentDb: null });
         if (errors.length) return fail(`Could not plan moving this install's data to ${sibling}: ${errors.join('; ')}`);
         ptr = { version: 1, root: null, pending: op };
         writePointer(ptrFile, ptr);
@@ -235,7 +237,7 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
 
     let root = ptr.root;
     if (!root) return fail(`${ptrFile} names no data folder.`);
-    const selected = selectPointerRoot({ mode: 'release', appRoot }, root);
+    const selected = selectPointerRoot({ mode: 'release', installRoot }, root);
     const staleRoot = selected.staleRoot;
     if (staleRoot) {
       root = selected.root!;

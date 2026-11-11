@@ -182,23 +182,19 @@ function usableDefault(dir) {
 }
 
 /** Env that makes every payload resolve the same profile and data folder.
- *  The profile is always pinned. The data folder is pinned only where the
- *  server would otherwise derive it from the payload folder (a saved folder
- *  that is missing); a first start records <parent of install>/HOT-Step-Data
- *  in the profile pointer, so Settings can still move it later. */
+ *  The profile is always pinned. With no saved data location, or a transfer
+ *  still pending in it, the server decides from HOT_STEP_INSTALL_ROOT: an old
+ *  version's data in this install folder is migrated (and resumed on the next
+ *  start if it stops), otherwise <parent of install>/HOT-Step-Data is recorded.
+ *  The data folder is pinned only when a saved folder is missing. */
 export function dataEnv(root, env, log) {
   const prof = profileDir(env);
   const out = { HOT_STEP_PROFILE_DIR: prof };
   if (env.HOT_STEP_DATA_ROOT) return out;
-  const ptrFile = path.join(prof, 'data-location.json');
   let ptr;
-  try { ptr = readJson(ptrFile); } catch { return out; } // the server explains a broken pointer
+  try { ptr = readJson(path.join(prof, 'data-location.json')); } catch { return out; } // the server explains a broken pointer
+  if (ptr === undefined || ptr?.pending || (typeof ptr?.root === 'string' && isDir(ptr.root))) return out;
   const fallback = path.join(path.dirname(path.resolve(root)), 'HOT-Step-Data');
-  if (ptr === undefined) {
-    writeJsonAtomic(ptrFile, { version: 1, root: usableDefault(fallback), pending: null });
-    return out;
-  }
-  if (ptr?.pending || (typeof ptr?.root === 'string' && isDir(ptr.root))) return out;
   log(`[Launcher] Saved data folder ${ptr?.root} is missing or cannot be accessed. Using ${fallback} for this run; the saved location is unchanged.`);
   return { ...out, HOT_STEP_DATA_ROOT: usableDefault(fallback) };
 }
