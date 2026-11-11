@@ -294,7 +294,24 @@ both modes. The engine makes a separate feature buffer for each request;
 the cache never contains windowed features or rendered output. The Node
 generation parameter is `timbreReferenceWindow`; there is no UI control yet.
 
-ACE synthesis rejects NaN or infinity in DiT output, after latent shift and
+All synthesis backends reject NaN or infinity in decoded PCM before encoding a
+successful result. The shared `synth-finite.h` check logs
+`[Synth-Finite] <stage>: N non-finite values out of M`; the Node job failure
+includes that stage and count. MM3 checks both vocoder paths, YuE2 checks full
+and tiled VAE output plus the final plugin result, HeartMuLa checks codec output,
+and SA3 checks native and plugin decoding. SA3 never falls back to native decode
+after a plugin callback returns invalid PCM. Finite samples are read without
+modification. `engine/tests/test-synth-finite.py` probes decoder assembly on the
+CPU with injected graph output, without model weights.
+
+SA3 returns the finite-check diagnostic in the HTTP 500 JSON `error` field for
+both `/sa3-synth` and `/sa3-refine`. The Node job reads the response body, so its
+stage and count do not depend on when stderr arrives.
+`engine/tests/test-sa3-finite-error.cpp` checks native decode, a swallowed Lua
+decode failure, invalid plugin output and finite recovery through the real SA3
+orchestration with a CPU graph double.
+
+ACE synthesis also rejects NaN or infinity in DiT output, after latent shift and
 rescale, and after native, plugin and PP-VAE decodes. It reports the stage
 and number of invalid values instead of letting the WAV writer replace them
 with silence. Node preserves the `[Synth-Finite]` diagnostic in the failed

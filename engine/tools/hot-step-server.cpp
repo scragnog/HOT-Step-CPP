@@ -4196,6 +4196,7 @@ int main(int argc, char ** argv) {
         // Acquire model + run
         std::vector<float> out44;
         bool ok;
+        std::string finite_error;
         Timer refine_timer;
         {
             ModelKey k{};
@@ -4212,13 +4213,13 @@ int main(int argc, char ** argv) {
             refine_timer.reset();
             ok = sa3_refine_run_ggml(sa3, p44, T44, ids.data(), n_tokens,
                                      strength, steps, pingpong, seed, zero_noise, out44, sp_ptr,
-                                     req.is_connection_closed);
+                                     req.is_connection_closed, &finite_error);
         }
         fprintf(stderr, "[Server] SA3 refine compute (%s): %.0f ms\n",
                 "gguf", refine_timer.ms());
         if (!ok) {
             free(p44);
-            json_error(res, 500, "SA3 refine failed");
+            json_error(res, 500, finite_error.empty() ? "SA3 refine failed" : finite_error.c_str());
             return;
         }
 
@@ -4738,6 +4739,7 @@ int main(int argc, char ** argv) {
         // Acquire model + run. Same ModelKey / store / ModelHandle as refine.
         std::vector<float> out44;
         bool ok;
+        std::string finite_error;
         Timer synth_timer;
         {
             ModelKey k{};
@@ -4751,11 +4753,11 @@ int main(int argc, char ** argv) {
             ok = sa3_synth_run_ggml(sa3, T44, ids.data(), n_tokens,
                                     steps, pingpong, seed, zero_noise, out44, sp_ptr,
                                     dump_latent_path.empty() ? nullptr : dump_latent_path.c_str(),
-                                    req.is_connection_closed);
+                                    req.is_connection_closed, &finite_error);
         }
         fprintf(stderr, "[Server] SA3 synth compute (gguf): %.0f ms\n",
                 synth_timer.ms());
-        if (!ok) { json_error(res, 500, "SA3 synth failed"); return; }
+        if (!ok) { json_error(res, 500, finite_error.empty() ? "SA3 synth failed" : finite_error.c_str()); return; }
 
         // Encode. Same format/saturation convention as refine: f32 keeps peaks,
         // integer formats clamp (audio_encode_wav would anyway).

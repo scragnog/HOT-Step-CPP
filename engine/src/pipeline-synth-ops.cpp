@@ -5,6 +5,7 @@
 // pipeline-synth-impl.h for the struct layouts.
 
 #include "pipeline-synth-ops.h"
+#include "synth-finite.h"
 
 #include "hot-step-sampler.h"
 #include "hot-step-sampler-trt.h"
@@ -60,14 +61,6 @@ static std::vector<float> timbre_window(const float * data, int frames, int chan
         }
     }
     return window;
-}
-
-static bool synth_finite(const float * data, size_t n, const char * stage) {
-    size_t count = 0;
-    for (size_t i = 0; i < n; ++i) count += !std::isfinite(data[i]);
-    if (!count) return true;
-    fprintf(stderr, "[Synth-Finite] %s: %zu non-finite values out of %zu\n", stage, count, n);
-    return false;
 }
 
 // ─── Determinism diagnostic ─────────────────────────────────────────────────

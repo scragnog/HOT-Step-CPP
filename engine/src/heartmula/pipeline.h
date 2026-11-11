@@ -27,6 +27,7 @@
 //    on raw mt19937_64 words, so a noise seed gives the same noise on every platform.
 
 #include "heartmula/codec-decode.h"
+#include "synth-finite.h"
 #include "heartmula/local-graph.h"
 #include "heartmula/tokenizer.h"
 
@@ -1056,6 +1057,10 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
             req.codec_guidance, cancelled,
             [&](int n, int chunks) { progress("codec_decode", n * req.codec_steps, chunks * req.codec_steps); }, {},
             hooks.solve);
+        std::string finite_error;
+        if (!synth_finite(res->audio.data(), res->audio.size(), "HeartMuLa codec decode", &finite_error)) {
+            return load_error(finite_error.c_str());
+        }
         res->samples = (int64_t) res->audio.size() / 2;
         res->t_codec = ms_since(t0);
     } catch (const heartcodec::Cancelled &) {

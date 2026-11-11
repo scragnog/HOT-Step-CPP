@@ -57,6 +57,7 @@
 #include "guidance/guidance-interface.h"
 #include "lua-plugin-registry.h"
 #include "sampler-schedule.h"
+#include "synth-finite.h"
 #include "solvers/solver-interface.h"
 
 // ── Constants (match the exported graphs / SA3 medium config) ───────────
@@ -170,7 +171,8 @@ static inline bool sa3_encode_tiled(Sa3Backend * be, const float * audio, int S,
 // are not computed (the input is padded to a latent bucket plus headroom, and the caller trims that
 // tail anyway). The result for [0, n_valid_samples) is bit-identical. SA3_DEC_SKIP=0 turns it off.
 static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int L,
-                                    std::vector<float> & audio_out, int n_valid_samples = -1) {
+                                    std::vector<float> & audio_out, int n_valid_samples = -1,
+                                    std::string * finite_error = nullptr) {
     static const bool skip_pad = getenv("SA3_DEC_SKIP") == NULL || atoi(getenv("SA3_DEC_SKIP")) != 0;
     if (L <= 0) return false;
     int S = L * SA3_DS;
@@ -192,7 +194,7 @@ static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int 
         if (!be->same_decode_chunk(pad_lat.data(), aud_buf.data())) return false;
         memcpy(audio_out.data(),     aud_buf.data(),                     sizeof(float) * S);
         memcpy(audio_out.data() + S, aud_buf.data() + SA3_CHUNK_SAMPLES, sizeof(float) * S);
-        return true;
+        return synth_finite(audio_out.data(), audio_out.size(), "SA3 SAME decode", finite_error);
     }
     int hop = SA3_CHUNK_LAT - SA3_OVERLAP_LAT;
     std::vector<int> starts;
@@ -216,7 +218,7 @@ static inline bool sa3_decode_tiled(Sa3Backend * be, const float * latents, int 
         memcpy(audio_out.data() + os + left,     aud + left,                     sizeof(float) * (right - left));
         memcpy(audio_out.data() + S + os + left, aud + SA3_CHUNK_SAMPLES + left, sizeof(float) * (right - left));
     }
-    return true;
+    return synth_finite(audio_out.data(), audio_out.size(), "SA3 SAME decode", finite_error);
 }
 
 // ── SA3 ⇄ Lua plugin bridge ────────────────────────────────────────────
@@ -355,7 +357,9 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                                           const Sa3PluginParams * sp = nullptr,
                                           bool noise_only = false,
                                           const char * dump_latent_path = nullptr,
-                                          const std::function<bool()> & cancelled = nullptr) {
+                                          const std::function<bool()> & cancelled = nullptr,
+                                          std::string * finite_error = nullptr) {
+    if (finite_error) finite_error->clear();
     // noise_only (HOT-Step /sa3-synth): text-to-audio from pure gaussian noise.
     // `audio` is ignored (may be nullptr); T44 gives the requested output
     // length; strength is forced to 1.0 so the schedule runs the full
@@ -1000,6 +1004,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     int valid_samples = valid * SA3_DS;
     bool decoded_ok = false;
     if (pp_plugin) {
+        std::string plugin_finite_error;
         std::vector<float> tm_lat((size_t) L * Oc);
         sa3_to_ace_view(x.data(), tm_lat.data(), Oc, L);
 
@@ -1016,7 +1021,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
                 std::vector<float> cm_lat((size_t) Oc * T_lat);
                 sa3_from_ace_view(latent_tm, cm_lat.data(), Oc, T_lat);
                 std::vector<float> aud;
-                if (!sa3_decode_tiled(be, cm_lat.data(), T_lat, aud)) return -1;
+                if (!sa3_decode_tiled(be, cm_lat.data(), T_lat, aud, -1, &plugin_finite_error)) return -1;
                 int t_audio = T_lat * SA3_DS;
                 if (t_audio > max_T) t_audio = max_T;
                 memcpy(aud_out,          aud.data(),                  sizeof(float) * (size_t) t_audio);
@@ -1029,6 +1034,11 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         int T_audio = lua_call_postprocess(*pp_plugin, tm_lat.data(), L, Oc, 2,
                                            pp_audio.data(), max_T_audio, decode_fn,
                                            sp->plugin_params, sa3_lua_ctx, SA3_DS);
+        // A plugin may swallow a failed decode; never fall back after invalid PCM.
+        if (!plugin_finite_error.empty()) {
+            if (finite_error) *finite_error = plugin_finite_error;
+            return false;
+        }
         if (T_audio > 0) {
             decoded.assign((size_t) 2 * max_T_audio, 0.0f);
             int n = T_audio < max_T_audio ? T_audio : max_T_audio;
@@ -1043,7 +1053,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
         }
     }
     if (!decoded_ok) {
-        if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples)) return false;
+        if (!sa3_decode_tiled(be, x.data(), L, decoded, T44 < valid_samples ? T44 : valid_samples,
+                              finite_error)) return false;
     }
     int S_dec = L * SA3_DS;
     out.assign((size_t)2 * T44, 0.0f);
@@ -1057,6 +1068,8 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
             dst[k] = src[k];
         }
     }
+
+    if (!synth_finite(out.data(), out.size(), "SA3 final PCM", finite_error)) return false;
 
     // Audio-domain rms/peak in dBFS over the final trimmed planar-stereo
     // output, for quick clip/level sanity checks in the engine log.
@@ -1175,11 +1188,12 @@ static inline bool sa3_refine_run_ggml(Sa3GgmlRefine * m,
                                        bool pingpong, uint64_t seed, bool zero_noise,
                                        std::vector<float> & out,
                                        const Sa3PluginParams * sp = nullptr,
-                                       const std::function<bool()> & cancelled = nullptr) {
+                                       const std::function<bool()> & cancelled = nullptr,
+                                       std::string * finite_error = nullptr) {
     if (!m || !m->loaded) return false;
     return sa3_refine_run_backend(m, audio, T44, token_ids, n_tokens,
                                   strength, steps, pingpong, seed, zero_noise, out, sp,
-                                  /*noise_only=*/false, /*dump_latent_path=*/nullptr, cancelled);
+                                  /*noise_only=*/false, /*dump_latent_path=*/nullptr, cancelled, finite_error);
 }
 
 // HOT-Step /sa3-synth: text-to-audio from noise on the GGML backend.
@@ -1191,10 +1205,11 @@ static inline bool sa3_synth_run_ggml(Sa3GgmlRefine * m,
                                       std::vector<float> & out,
                                       const Sa3PluginParams * sp = nullptr,
                                       const char * dump_latent_path = nullptr,
-                                      const std::function<bool()> & cancelled = nullptr) {
+                                      const std::function<bool()> & cancelled = nullptr,
+                                      std::string * finite_error = nullptr) {
     if (!m || !m->loaded) return false;
     return sa3_refine_run_backend(m, nullptr, T44, token_ids, n_tokens,
                                   1.0f, steps, pingpong, seed, zero_noise, out, sp,
-                                  /*noise_only=*/true, dump_latent_path, cancelled);
+                                  /*noise_only=*/true, dump_latent_path, cancelled, finite_error);
 }
 #endif // SA3_REFINE_H

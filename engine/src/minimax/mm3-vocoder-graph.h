@@ -1,4 +1,5 @@
 #pragma once
+#include "synth-finite.h"
 // minimax/mm3-vocoder-graph.h — MiniMax-Music3 vocoder (DAC-style decoder) graph.
 //
 // HOT-Step file (does not exist upstream). Included only by minimax/mm3-server.h,
@@ -602,7 +603,7 @@ static bool mm3_vocoder_decode_with(const MM3Model & m, MM3VocGraph * g, const f
                 return false;
             }
         }
-        return true;
+        return synth_finite(out_stereo.data(), out_stereo.size(), "MM3 vocoder decode", err);
     }
 
     // Windowed path: overlap-discard. Upsampling is exactly `up`, so the audio
@@ -635,7 +636,7 @@ static bool mm3_vocoder_decode_with(const MM3Model & m, MM3VocGraph * g, const f
                    (size_t) ((ce - cs) * up) * sizeof(float));
         }
     }
-    return true;
+    return synth_finite(out_stereo.data(), out_stereo.size(), "MM3 vocoder decode", err);
 }
 
 static bool mm3_vocoder_decode(const MM3Model & m, const float * latents, int64_t L,

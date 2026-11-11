@@ -287,9 +287,19 @@ static bool yue2_overlap_ok(Yue2Model & m, const Yue2Request & req, bool evict_s
 // Fill the Job's terminal fields from a finished (or failed) run.
 static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request & req, Yue2PipelineResult & result,
                             bool ok, const std::string & err) {
+    std::string failure = err;
+    if (ok && !req.plan_only && !req.semantic_only) {
+        for (const auto & track : result.tracks) {
+            if (!synth_finite(track.audio_planar.data(), track.audio_planar.size(), "YuE2 final PCM", &failure)) {
+                ok = false;
+                break;
+            }
+        }
+    }
     if (!ok) {
         const bool cancelled = job->cancel.load();
-        job->result_body = err.empty() ? "YuE2 generation failed" : err;
+        job->result_body = failure.empty() ? "YuE2 generation failed" : failure;
+        job->result_error = job->result_body;
         job->result_mime  = "text/plain";
         fprintf(stderr, "[YuE2-Job] %s: %s: %s\n", job->id.c_str(), cancelled ? "cancelled" : "FAILED",
                 job->result_body.c_str());

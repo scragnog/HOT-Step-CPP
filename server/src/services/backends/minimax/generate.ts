@@ -1262,7 +1262,15 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     }, DETAIL_POLL_MS);
     detailTimer.unref?.();
 
-    await deps.pollUntilDone(sub.job_id, job, deps.signal, timeoutMinutes);
+    try {
+      await deps.pollUntilDone(sub.job_id, job, deps.signal, timeoutMinutes);
+    } catch (err) {
+      if (!deps.signal.aborted) {
+        const detail = await mm3JobDetail(sub.job_id).catch(() => undefined);
+        if (detail?.status === 'failed' && detail.error) throw new Error(detail.error);
+      }
+      throw err;
+    }
     clearInterval(detailTimer);
     detailTimer = undefined;
     timing.push({ name: 'MM3 Generate', ms: Math.round(performance.now() - submitStart) });

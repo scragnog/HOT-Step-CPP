@@ -1334,13 +1334,22 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     }, DETAIL_POLL_MS);
     detailTimer.unref?.();
 
-    await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes, {
-      // No chunk cap means the engine can render the full 360 s song at 25 fps.
-      narChunkFrames: req.nar_chunk_frames || 9000,
-      // Decode and output can stay silent while processing a whole batch.
-      // Keep the wall-clock deadline, rather than cancelling at 15 minutes.
-      quietCompletionPhases: ['vae_decode', 'vae', 'encoding_output'],
-    });
+    try {
+      await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes, {
+        // No chunk cap means the engine can render the full 360 s song at 25 fps.
+        narChunkFrames: req.nar_chunk_frames || 9000,
+        // Decode and output can stay silent while processing a whole batch.
+        // Keep the wall-clock deadline, rather than cancelling at 15 minutes.
+        quietCompletionPhases: ['vae_decode', 'vae', 'encoding_output'],
+      });
+    } catch (err) {
+      if (!deps.signal.aborted) {
+        const status = await aceClient.pollJob(sub.job_id).catch(() => undefined);
+        const detail = (status as { error?: string } | undefined)?.error;
+        if (status?.status === 'failed' && detail) throw new Error(detail);
+      }
+      throw err;
+    }
     clearInterval(detailTimer);
     detailTimer = undefined;
     const generateMs = Math.round(performance.now() - submitStart);

@@ -1,4 +1,5 @@
 #pragma once
+#include "synth-finite.h"
 // yue2/yue2-vae-graph.h — YuE2 Oobleck VAE decoder graph (M6).
 //
 // HOT-Step file (does not exist upstream). Included only by bring-up tooling
@@ -637,7 +638,8 @@ static bool yue2_vae_decode(Yue2Model & m, const float * latent_ct, int64_t T, s
     if (!yue2_vae_prepare(m, g, err)) {
         return false;
     }
-    return yue2_vae_run(m, g, latent_ct, T, out_planar, out_samples, err);
+    if (!yue2_vae_run(m, g, latent_ct, T, out_planar, out_samples, err)) return false;
+    return synth_finite(out_planar->data(), out_planar->size(), "YuE2 VAE decode", err);
 }
 
 struct Yue2VaeTileBoundary {
@@ -739,6 +741,7 @@ static bool yue2_vae_decode_tiled(Yue2Model & m, const float * latent_ct, int64_
         }
     }
 
+    if (!synth_finite(assembled.data(), assembled.size(), "YuE2 VAE decode", err)) return false;
     *out_planar = std::move(assembled);
     if (out_samples) {
         *out_samples = total;
