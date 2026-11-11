@@ -39,7 +39,7 @@ app runs; see [Settings page and hot reload](#settings-page-and-hot-reload).
 
 ### Update notices
 
-Settings > Updates reads `GET /api/updates/status` (cached, never calls GitHub) and refreshes with `POST /api/updates/check`, optionally `{ channel }` to switch the feed (`release` or `master`). The wire shapes are in `server/src/contracts/updates.ts`; the UI copy is `ui/src/services/updatesApi.ts`, and the panel is `ui/src/components/settings/UpdatesPanel.tsx`. Notices only: no download, prepare or apply endpoint exists. The installed identity comes from `build-info.json` beside `VERSION` (a git checkout reports its own HEAD); a missing file means unknown identity and the UI never guesses a variant.
+Settings > Updates reads `GET /api/updates/status` (cached, never calls GitHub) and refreshes with `POST /api/updates/check`, optionally `{ channel }` to switch the feed (`release` or `master`). The wire shapes are in `server/src/contracts/updates.ts`; the UI copy is `ui/src/services/updatesApi.ts`, and the panel is `ui/src/components/settings/UpdatesPanel.tsx`. A Windows portable install on updater protocol 1, started by its stable launcher, can also download (`POST /api/updates/prepare`) and install (`POST /api/updates/apply`) a release; every other install, protocol 0 included, gets notices only ([HTTP API index](api.md), [Windows updater layout](releasing.md#windows-updater-layout-protocol-1)). The installed identity comes from `build-info.json` beside `VERSION` (a git checkout reports its own HEAD); a missing file means unknown identity and the UI never guesses a variant.
 
 ## Settings page and hot reload
 
@@ -180,6 +180,11 @@ Two unpacked releases that share one profile folder share one library: the launc
 only `HOT_STEP_ROOT` (their own folder) and never `HOT_STEP_DATA_ROOT` or
 `HOT_STEP_PROFILE_DIR`, so the pointer in the profile decides, not the new app folder's
 sibling default. `release/check-layout.mjs` fails a launcher that sets either variable.
+The stable launcher of an updater-capable install (`release/updater/launcher.mjs`) is
+the exception: every payload lives in `app/<id>/`, so it pins `HOT_STEP_PROFILE_DIR`,
+records `<parent of install>/HOT-Step-Data` in the profile pointer on a first start, and
+pins `HOT_STEP_DATA_ROOT` only when the saved folder is missing (the server would
+otherwise fall back inside `app/`) and while an update's candidate is checked.
 
 - **Reuse** is the upgrade path: the same profile and pointer, nothing copied. Tokens come
   with the folder: service keys in `settings/.env`, the Hugging Face token for MuScriptor in
@@ -367,9 +372,13 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 
 | Variable | Default | Read in | Effect |
 |---|---|---|---|
-| `HOT_STEP_ROOT` | unset | `config.ts` | Project root. Setting it turns on portable mode, which among other things downloads the CUDA runtime DLLs on a Windows CUDA build's first launch. Set by the portable launchers `release/HOT-Step.bat` and `release/HOT-Step.sh` |
+| `HOT_STEP_ROOT` | unset | `config.ts` | Project root. Setting it turns on portable mode, which among other things downloads the CUDA runtime DLLs on a Windows CUDA build's first launch. Set by the portable launchers `release/HOT-Step.bat` and `release/HOT-Step.sh`, and by the stable launcher to the selected `app/<id>` |
 | `HOT_STEP_DATA_ROOT` | unset | `dataroot/bootstrap.ts` | Release only. Use this data folder for this process, ignoring `data-location.json`. A scheduled move does not run while it is set |
-| `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Replaces the profile folder that holds `data-location.json` and the dev pointers. Meant for test fixtures |
+| `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Replaces the profile folder that holds `data-location.json` and the dev pointers. Meant for test fixtures; the stable launcher also pins it |
+| `HOT_STEP_INSTALL_ROOT` | unset | `routes/updates.ts` | Set by the stable launcher (`release/updater/launcher.mjs`) to its install folder, the parent of `app/<id>/`. Updater state lives in its `updater/` folder |
+| `HOT_STEP_UPDATER_DIR` | unset | `services/updates/maintenance.ts` | Set by the stable launcher to `<install>/updater`. Startup reads the maintenance lease and `transaction.json` there before opening SQLite |
+| `HOT_STEP_MAINTENANCE_TOKEN` | unset | `services/updates/maintenance.ts` | Set by the stable launcher only for an update's candidate (and for a restart after a crash past commit). Without it a process refuses to start while a lease exists; with it, `/api/health`, `/api/maintenance` and `/api/shutdown` pass the closed gate |
+| `HOT_STEP_LAUNCHER_PROTOCOL` | unset | `config.ts` | Set by the stable launcher. Read only with an IPC channel and `HOT_STEP_INSTALL_ROOT`; apply needs it to equal `updaterProtocol` in `build-info.json` |
 | `HOT_STEP_DEV` | unset | `routes/shutdown.ts` | Set to `1` by `dev.bat` and `dev.sh`. On Windows it lets `POST /api/shutdown` kill the Vite process on port 3000 after checking it is Node running Vite. It also gates `HOTSTEP_GENERATE_CAPTURE` and `HOTSTEP_YUE2_COVER_FORCE_FALLBACK` |
 | `HOTSTEP_GENERATE_CAPTURE` | unset | `services/generation/requestCapture.ts` | Dev only, honoured only when `HOT_STEP_DEV` is set. `record` saves every `POST /api/generate` body as a fixture under `<data dir>/dev-captures/generate/`, then generates as normal; `capture-only` saves it and queues nothing. See [Generation API contracts](api-contracts.md#fixture-capture-dev-only) |
 | `HOTSTEP_YUE2_COVER_FORCE_FALLBACK` | unset | `services/training/yue2ArTrainRunner.ts` | Dev only: `1`, with `HOT_STEP_DEV=1`, sends every Cover Studio YuE2 lead-sheet transcription down its fallback path, which waits for the GPU lane and frees the engine for the transcriber. Tests that path on a card where both fit |

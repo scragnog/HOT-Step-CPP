@@ -379,9 +379,38 @@ Every package carries `build-info.json` beside `VERSION`. All five assemblers (t
 | `os`, `arch` | `windows`/`linux` with `x64`, or `macos` with `arm64` |
 | `variant` | Exact asset variant: `cuda13.1`, `cuda12.8`, `cuda12-volta`, `vulkan`, `cpu`, `rocm` (Linux), `metal` (macOS) |
 | `engineSha` | Git tree id of `engine/` at that commit; it changes with any engine source or ggml pin change |
-| `updaterProtocol` | `0` until the updater can apply packages |
+| `updaterProtocol` | `0` (`UPDATER_PROTOCOL` in `release/build-info.mjs`) until the Windows updater has passed its acceptance run. `--protocol 1` overrides it for one build |
 
 The package check also matches the ggml backend library in `engine/` to the variant, and `engine/.variant` and `.cuda-version` when present. `engine/.variant` keeps its coarse meaning (`cuda` for every CUDA asset) for the code that reads it. The server reads the file in `config.ts` (`BUILD_INFO`) and reports `build.tag`, `build.sha`, `build.variant` and `build.channel` in `/api/health`. A package without the file (an older release), a package whose file breaks those rules (the server logs a warning and ignores it), or a git checkout has unknown identity: `sha` falls back to the checkout's HEAD and the rest is `null`. Nothing guesses a variant. The update notices read the same file for the installed identity (`server/src/services/updates/install.ts`).
+
+## Windows updater layout (protocol 1)
+
+Releases ship protocol 0, the flat package. A Windows package built with `updaterProtocol` 1 (`.\release\build-release.ps1 ... -UpdaterProtocol 1`) is the versioned layout the in-app updater installs into. Both Windows assemblers run `node release/updater/package-layout.mjs <staging>` and then the package check just before zipping, so a local build and CI produce the same archive. For protocol 0 the script changes nothing.
+
+```
+HOT-Step.bat        runs runtime\node.exe launcher.mjs (release/updater/HOT-Step.bat)
+launcher.mjs        the stable launcher (release/updater/launcher.mjs), never replaced by an update
+runtime/node.exe    the Node that runs the launcher
+current.json        {"format":1,"payload":"<id>"}, one line, written atomically
+README.txt
+app/<id>/           the old flat package, minus its HOT-Step.bat, plus payload-manifest.json
+updater/            created at run time: staging, transaction.json, lease, snapshots, last-result.json
+```
+
+`<id>` is `<tag>-<first 12 of sha>-<variant>`, for example `v1.6.0-0123456789ab-cuda13.1`. `payload-manifest.json` holds the SHA-256 of every file in the payload; apply refuses a payload with added, edited or missing files, because an update would strand them in an old folder. The archive check (`checkPackageBuildInfo`) accepts both layouts and, for the versioned one, requires exactly one payload named for its build. Slice D's staging (`server/src/services/updates/download.ts`) checks the same layout.
+
+The launcher is the only thing that starts a server on the root. It refuses a second launcher (a named pipe the OS frees on exit), settles an interrupted update before anything opens SQLite, clears a stale `updater/prepare.lock`, pins the profile (and the data folder only where the server would otherwise derive it from `app/<id>`), and starts `app/<id>/runtime/node.exe app/<id>/server/server.mjs` with an IPC channel. An update runs like this:
+
+1. The running server's `POST /api/updates/apply` opens the maintenance transaction and sends the launcher `apply` over IPC. The launcher checks it (staged payload, lease and token, snapshot list) and acknowledges.
+2. The server stops through `exitForLauncher()` in `routes/shutdown.ts` and reports `stopped` with `clean`. Without a clean report and exit code 0 the candidate is not started; the old version restarts and the result is `failed`.
+3. The old payload's `server/updater-tool.mjs` snapshots the databases and files, `transaction.json` is written `pending`, the staged `app/<id>` moves into `app/`, and `current.json` switches.
+4. The candidate starts under the lease token with the data folder pinned. Within 120 s `GET /api/maintenance/status` must report the gate closed under this lease, the exact build, the DB open, the UI files and the engine ready.
+5. Pass: `committed`, `POST /api/maintenance/release`, lease and record removed, result `installed`, browser opened. The old payload and the snapshot stay until a later plain start or restart deletes them (`updater/retained.json`).
+6. Fail: the candidate is stopped, `current.json` goes back, the old payload's tool restores the snapshot, and the old version starts (`rolled-back`). If the restore fails, the lease and record stay, nothing starts and the result is `recovery-required`.
+
+At start-up a `pending` record means step 6. A `committed` record means the new version is kept and never restored: it is started under a fresh lease and step 5 is finished. Malformed pointer, record or lease files stop the launcher with nothing started. Locked or full targets get three attempts within about 15 s; a lock on an old payload only delays its deletion.
+
+A protocol-1 fixture for updater tests: tag the commit locally (`git tag v1.6.0`, never pushed), build with `-UpdaterProtocol 1`, and unzip it to a temporary folder outside the checkout with its own `HOT_STEP_PROFILE_DIR`. The candidate needs a second build with a newer tag. Fault cases: `node --test release/updater/launcher.test.mjs`.
 
 ## Data layout acceptance
 

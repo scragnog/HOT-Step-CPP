@@ -478,7 +478,7 @@ To build a package locally:
 
 | Platform | Command |
 |---|---|
-| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda -CudaAsset cuda13.1\|cuda12.8\|cuda12-volta \| -Variant vulkan\|cpu] [-BuildBackend all\|cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI] [-NodeVersion 24.18.0]`, output in `release/out/` |
+| Windows | `.\release\build-release.ps1 [-Version "1.5.0"] [-Variant cuda -CudaAsset cuda13.1\|cuda12.8\|cuda12-volta \| -Variant vulkan\|cpu] [-BuildBackend all\|cuda\|vulkan\|cpu] [-SkipEngine] [-SkipUI] [-NodeVersion 24.18.0] [-UpdaterProtocol 1]`, output in `release/out/` |
 | macOS | `./package-release.sh [--skip-build] [--version=1.2.0]`, output `HOT-Step-CPP-v<version>-macOS-arm64.tar.gz`. It bundles Node 22.22.2, where CI bundles 24.18.0 |
 
 `-BuildBackend` defaults to `all`, preserving the local build of CUDA, Vulkan and CPU
@@ -487,7 +487,10 @@ release test, use `-Variant cpu -BuildBackend cpu`; use matching `cuda` or `vulk
 values for those backends. A single build backend must match `-Variant`, including
 with `-SkipEngine`, and mismatches fail before staging is changed. `-Variant cuda` also
 needs `-CudaAsset`, the CI asset the build stands in for, because `build-info.json` records
-an exact variant and the script will not guess one from the toolkit.
+an exact variant and the script will not guess one from the toolkit. `-UpdaterProtocol 1`
+builds the versioned layout the Windows updater installs (stable launcher root plus
+`app/<id>/`), for updater test fixtures; releases stay protocol 0 and flat. See
+[Windows updater layout](releasing.md#windows-updater-layout-protocol-1).
 
 | Build backend | GGML_CUDA | GGML_VULKAN | Packaged GPU DLL |
 |---|---|---|---|
