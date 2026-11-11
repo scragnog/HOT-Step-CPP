@@ -10,6 +10,7 @@ link to the page that explains it.
 |---|---|
 | [Getting started](user/getting-started.md) | Download, first launch, first model pack, first song, where files live |
 | [Data folder and upgrades](user/data-folder.md) | Shared data across versions, move, repoint, import and recovery |
+| [Recovery after an update](user/update-recovery.md) | What `Recovery required` in the HOT-Step window means and what to do |
 | [Running on Google Colab](user/colab.md) | The Colab notebook: install, models, Drive persistence, opening the UI |
 | [Backends](user/backends.md) | ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3: what each is for, how to switch, capability matrix |
 | [Generation](user/generation.md) | The global parameter bar: models, steps, seeds, guidance, post-processing chain, queue, task modes |

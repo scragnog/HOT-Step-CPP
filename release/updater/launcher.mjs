@@ -657,13 +657,28 @@ export async function launch(opts = {}) {
   }
 }
 
+export const RECOVERY_DOC = 'https://github.com/scragnog/HOT-Step-CPP/blob/master/docs/user/update-recovery.md';
+
+/** What the window shows when the launcher stops. An update never replaces this
+ *  file, so the text stays general and the steps live in RECOVERY_DOC. */
+export function failureText(e) {
+  const head = e instanceof RecoveryRequired ? 'Recovery required' : 'Launcher error';
+  return [
+    `[HOT-Step] ${head}: ${e.message}`,
+    '[HOT-Step] Nothing was started and nothing was deleted. Do not delete or edit anything in the updater folder.',
+    '[HOT-Step] First step: close this window and anything that may hold HOT-Step files open (backup or sync tools,',
+    '[HOT-Step] an antivirus scan), check the disk has free space, then start HOT-Step again. Each start retries',
+    '[HOT-Step] from the beginning. If it stops here again, follow the steps at',
+    `[HOT-Step] ${RECOVERY_DOC}`,
+  ].join('\n');
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   // Ctrl+C reaches the server too; it shuts down and we return when it exits.
   process.on('SIGINT', () => {});
   launch().then(code => process.exit(code), e => {
     if (e instanceof AlreadyRunning) { console.error(`[HOT-Step] ${e.message} Use the window that is already open.`); process.exit(2); }
-    console.error(`\n[HOT-Step] ${e instanceof RecoveryRequired ? 'Recovery required' : 'Launcher error'}: ${e.message}`);
-    console.error('[HOT-Step] Nothing was started and nothing was deleted. See updater/last-result.json and docs: https://github.com/scragnog/HOT-Step-CPP');
+    console.error(`\n${failureText(e)}`);
     process.exit(1);
   });
 }

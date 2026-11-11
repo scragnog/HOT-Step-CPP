@@ -13,7 +13,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
-import { AlreadyRunning, RecoveryRequired, launch, parseDotenv, payloadIdFor, timing } from './launcher.mjs';
+import { AlreadyRunning, RECOVERY_DOC, RecoveryRequired, failureText, launch, parseDotenv, payloadIdFor, timing } from './launcher.mjs';
 import { MANIFEST_FILE, packageLayout } from './package-layout.mjs';
 import { checkPackageBuildInfo } from '../check-layout.mjs';
 
@@ -393,11 +393,25 @@ test('a failed restore leaves the lease and record, starts nothing and says reco
   f.seed();
   const tx = f.snapshotTx();
   fs.writeFileSync(path.join(tx.snapshot.dir, fs.readdirSync(tx.snapshot.dir).find(n => n.endsWith('hotstep.db'))), 'damaged snapshot');
-  await assert.rejects(f.start(), RecoveryRequired);
+  let err;
+  await assert.rejects(f.start(), e => (err = e) instanceof RecoveryRequired);
   assert.equal(f.result().outcome, 'recovery-required');
   assert.equal(f.tx(), true);
   assert.equal(f.leases().length, 2);
   assert.equal(fs.existsSync(path.join(f.root, 'app', f.oldId, 'port')), false, 'no server started');
+  // The window gives the first step and the full URL of the user page, which ships in the repo.
+  const text = failureText(err);
+  assert.match(text, /^\[HOT-Step\] Recovery required: An update was interrupted\. Restoring the data snapshot failed: snapshot file .*hotstep\.db is damaged/);
+  assert.match(text, /Do not delete or edit anything in the updater folder/);
+  assert.match(text, /start HOT-Step again/);
+  assert.ok(text.endsWith(`[HOT-Step] ${RECOVERY_DOC}`));
+  assert.equal(RECOVERY_DOC, 'https://github.com/scragnog/HOT-Step-CPP/blob/master/docs/user/update-recovery.md');
+  assert.ok(fs.existsSync(path.join(here, '..', '..', 'docs', 'user', 'update-recovery.md')));
+  // The first step is safe: starting again retries from the snapshot and keeps the same state.
+  await assert.rejects(f.start(), RecoveryRequired);
+  assert.equal(f.tx(), true);
+  assert.equal(f.leases().length, 2);
+  assert.ok(fs.existsSync(tx.snapshot.dir));
 });
 
 test('a second launcher on the same root is refused', async t => {
