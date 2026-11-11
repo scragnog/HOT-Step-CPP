@@ -31,6 +31,8 @@ import { MonitorBar } from './MonitorBar';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ProfilesModal } from './ProfilesModal';
 import { QueryError } from '../shared/QueryError';
+import { healthOptions } from '../../queries/shell-queue/settings';
+import { engineNotice, noModelsRefetchInterval } from '../shared/noModelsPoll';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 
@@ -248,6 +250,8 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
   }, []);
 
   const modelsQuery = useQuery(aceModelsOptions());
+  const healthQuery = useQuery({ ...healthOptions(), refetchInterval: noModelsRefetchInterval });
+  const notice = engineNotice(healthQuery.data?.engine);
   const availableModels = modelsQuery.data;
   useEffect(() => {
     const models = availableModels?.models;
@@ -264,17 +268,13 @@ export const GlobalParamBar: React.FC<{ onOpenMobileNav?: () => void }> = ({ onO
   // the engine time to start, there are genuinely no models available.
   useEffect(() => {
     if (sessionStorage.getItem('mm-auto-dismissed')) return;
+    if (notice !== 'no-models') return;
 
     const timer = setTimeout(() => {
-      if (modelsQuery.isPending) return;
-      const allModels = [
-        ...(availableModels?.models?.dit ?? []), ...(availableModels?.models?.lm ?? []),
-        ...(availableModels?.models?.vae ?? []),
-      ];
-      if (!allModels.length) setShowModelManager(true);
+      setShowModelManager(true);
     }, 8000);
     return () => clearTimeout(timer);
-  }, [availableModels, modelsQuery.isPending]);
+  }, [notice]);
 
   // ── "Models missing" banner (generic — any backend) ─────────────────
   // capabilities().core.modelsMissing is true only when the ACTIVE backend is

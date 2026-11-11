@@ -21,6 +21,14 @@ checkout uses `update.bat`. The stable launcher supplies `HOT_STEP_INSTALL_ROOT`
 staging lives in its `updater` folder, outside the active payload and data root.
 Existing protocol-0 packages remain notice-only.
 
+`GET /api/health` reports `engine.ready`, `engine.failed`, `engine.noModels`
+and the server's reason in `engine.bootStatus`. The tab shows that reason when
+`failed` is true and suppresses the first-run Model Manager prompt. Failure
+takes priority over `noModels`. While the engine starts, both flags are false
+and neither banner appears. An empty models folder still shows the download
+banner and opens the Model Manager after eight seconds. Health polling continues
+after readiness so later failures and model-scan results reach the tab.
+
 `POST /api/updates/check` discovers a candidate for the latest stable release when
 preparation is eligible. `GET /api/updates/status` never fetches from GitHub; its
 `prepare` object reports `offered`, a plain `reason`, `candidate`, `phase`,

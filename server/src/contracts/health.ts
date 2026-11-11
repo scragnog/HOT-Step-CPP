@@ -32,6 +32,8 @@ export interface HealthResponse {
   clients: number;
   engine: {
     ready: boolean;
+    /** True when the engine cannot start without help; bootStatus gives the reason. */
+    failed: boolean;
     bootStatus: string;
     /** True while the engine is down only because no model is installed yet. */
     noModels: boolean;

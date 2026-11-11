@@ -361,6 +361,7 @@
     "api.error.serverError": "The server ran into a problem",
     "noModels.message": "No models installed yet. Download one in the Model Manager and the engine starts by itself.",
     "noModels.open": "Open Model Manager",
+    "engine.failed": "Engine unavailable.",
     "trainingStudio.yue2.stat.loss": "Decoder loss",
     "trainingStudio.yue2.stat.gradNorm": "Grad norm",
     "trainingStudio.yue2.stat.stepTime": "Step time",

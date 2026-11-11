@@ -4,7 +4,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 import { aceClient } from '../services/aceClient.js';
 import { APP_VERSION, BUILD_INFO, config } from '../config.js';
-import { engineReady, engineBootStatus, engineNoModels, engineDevice, backendFamily } from '../engineState.js';
+import { engineReady, engineFailed, engineBootStatus, engineNoModels, engineDevice, backendFamily } from '../engineState.js';
 import { startupCommit, cachedDirtyCheckout } from '../services/training/workerUpdate.js';
 import type { HealthResponse } from '../contracts/health.js';
 
@@ -70,6 +70,7 @@ router.get('/', async (_req, res) => {
     clients: presence,
     engine: {
       ready: engineReady,
+      failed: engineFailed,
       bootStatus: engineBootStatus,
       noModels: engineNoModels,
       backend: backendFamily(engineDevice),
