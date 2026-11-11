@@ -64,9 +64,9 @@ export function resolveMm3Caption(
   return { caption: own, mode: 'custom' };
 }
 
-/** A stored MM3 choice as the browser reads it: anything unrecognised is auto. */
+/** A stored MM3 choice as the browser reads it: anything unrecognised is custom. */
 export function normalizeMm3Selection(sel: Mm3CaptionSelection | null | undefined): Mm3CaptionSelection {
-  return sel && (sel.mode === 'auto' || sel.mode === 'track' || sel.mode === 'custom') ? sel : { mode: 'auto' };
+  return sel && (sel.mode === 'auto' || sel.mode === 'track' || sel.mode === 'custom') ? sel : { mode: 'custom' };
 }
 
 // ── YuE2 ─────────────────────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ export interface CaptionResolution extends Partial<ResolvedCaption> {
  *  ACE caption. */
 export function captionForEngine(gen: SongCaptions, engine: string, ctx: CaptionContext): CaptionResolution {
   if (engine === MM3_ENGINE_ID) {
-    const r = resolveMm3Caption(gen, ctx.mm3?.tracks ?? [], ctx.mm3?.selection ?? { mode: 'auto' });
+    const r = resolveMm3Caption(gen, ctx.mm3?.tracks ?? [], ctx.mm3?.selection ?? { mode: 'custom' });
     if (r.caption.trim()) return { ...r, source: r.mode === 'custom' ? 'song-mm3' : 'album-track' };
   }
   const yue2 = ctx.yue2;

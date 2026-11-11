@@ -15,7 +15,7 @@ import { z } from 'zod/v4';
 const captionSourceMode = z.enum(['auto', 'track', 'custom']);
 export type CaptionSourceMode = z.infer<typeof captionSourceMode>;
 
-/** A MiniMax-Music3 caption choice for one written song. Absent = auto. */
+/** A MiniMax-Music3 caption choice for one written song. Absent = custom. */
 export const mm3CaptionSelectionSchema = z.object({
   mode: captionSourceMode,
   /** Only read for mode 'track'. */

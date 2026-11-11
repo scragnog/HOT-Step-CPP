@@ -2,9 +2,9 @@
  * mm3CaptionSync.ts — keep a lyrics set's source-song MM3 and YuE2 captions in
  * step with the training dataset the set was exported from.
  *
- * Why this exists (2026-09-09): a written song renders on MiniMax-Music3 under
- * one of the album's own training captions by default (utils/mm3CaptionSource
- * in the UI), because a training caption with new lyrics is what reliably
+ * Why this exists (2026-09-09): a written song can render on MiniMax-Music3
+ * under one of the album's own training captions (utils/mm3CaptionSource in
+ * the UI; since 2026-11-11 the song's own caption is the default), because a training caption with new lyrics is what reliably
  * lands in the band's style and reaches a natural ending. The captions the UI
  * can offer come from the lyrics set's stored songs, and those were copied
  * from `<stem>.mm3.txt` ONCE, at export time. Every set exported before that

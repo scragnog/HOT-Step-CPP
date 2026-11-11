@@ -1,18 +1,20 @@
 /**
  * mm3CaptionSource.ts — where a MiniMax-Music3 render's caption comes from.
  *
- * Rendering a NEW song's lyrics under one of the artist's OWN training tracks'
- * Structured Captions — word for word, not a fresh caption in the same style —
- * is the most reliable way to get a song that sounds like the band and, in
- * particular, the most reliable way to get a natural ending. So the MM3 caption
- * used for a written song is a CHOICE, not simply the caption the LLM wrote for
- * it:
+ * The MM3 caption used for a written song is a CHOICE:
  *
- *   auto    (default) the source track whose tempo is nearest this song's,
- *           among the album's tracks that have an MM3 caption. Ties go to the
- *           first in album order.
+ *   custom  (default) the generation's own `caption_mm3`, the one the LLM wrote
+ *           with the lyrics. A song with none falls through to auto.
+ *   auto    the source track whose tempo is nearest this song's, among the
+ *           album's tracks that have an MM3 caption. Ties go to the first in
+ *           album order.
  *   track   a specific source track the user picked, by title.
- *   custom  the generation's own `caption_mm3`, exactly as before this existed.
+ *
+ * Rendering new lyrics under one of the artist's own training captions, word
+ * for word, is a strong style prompt and tends to end naturally, which is why
+ * the dataset options exist. They are the opt-in: the song's own caption was
+ * written for these lyrics, so it is what renders unless the user picks
+ * otherwise.
  *
  * The choice lives in localStorage — there is no column for it — keyed by
  * generation id. The album's captioned tracks are cached in memory, keyed by
@@ -47,7 +49,7 @@ export interface Mm3SourceTrack {
   caption: string;
 }
 
-/** The per-generation choice. Absent from storage means `{ mode: 'auto' }`. */
+/** The per-generation choice. Absent from storage means `{ mode: 'custom' }`. */
 export interface Mm3CaptionSelection {
   mode: Mm3CaptionMode;
   /** Only meaningful for mode 'track'. */
@@ -103,7 +105,7 @@ try {
 export function readMm3CaptionSelection(generationId: number): Mm3CaptionSelection {
   const stored = _read<Mm3CaptionSelection>(MM3_CAPTION_SOURCE_PREFIX + generationId);
   if (!stored || (stored.mode !== 'auto' && stored.mode !== 'track' && stored.mode !== 'custom')) {
-    return { mode: 'auto' };
+    return { mode: 'custom' };
   }
   return stored;
 }
@@ -238,6 +240,6 @@ export function resolveMm3CaptionForGeneration(
   gen: { id?: number; bpm?: number; caption_mm3?: string | null },
   lyricsSetId: number | undefined,
 ): Mm3ResolvedCaption {
-  const sel = gen.id ? readMm3CaptionSelection(gen.id) : { mode: 'auto' as const };
+  const sel = gen.id ? readMm3CaptionSelection(gen.id) : { mode: 'custom' as const };
   return resolveMm3Caption(gen, readMm3SourceTracks(lyricsSetId), sel);
 }

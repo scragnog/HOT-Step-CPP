@@ -20,9 +20,9 @@
  * never happens; an ACE run is never handed a Structured Caption.
  *
  * On the MM3 side `caption_mm3` is no longer automatically the one that renders.
- * A written song's MM3 caption has a SOURCE — by default one of the artist's own
- * training tracks, picked by tempo — because reusing a training caption verbatim
- * is what reliably lands in the band's style and reaches a natural ending. See
+ * A written song's MM3 caption has a SOURCE: by default the song's own
+ * `caption_mm3`, or on request one of the artist's own training tracks (by
+ * tempo or by name), whose caption reused verbatim is a strong style prompt. See
  * utils/mm3CaptionSource.ts. Pass the album's `lyricsSetId` so that choice can be
  * resolved; without one this degrades to the song's own caption, i.e. the
  * behaviour above.

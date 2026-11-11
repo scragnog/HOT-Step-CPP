@@ -59,9 +59,9 @@ test('mm3: no tracks at all lands on the song caption, even an empty one', () =>
   assert.deepEqual(resolveMm3Caption({}, [], { mode: 'auto' }), { caption: '', mode: 'custom' });
 });
 
-test('mm3: an absent or unrecognised selection reads as auto', () => {
-  assert.deepEqual(normalizeMm3Selection(undefined), { mode: 'auto' });
-  assert.deepEqual(normalizeMm3Selection({ mode: 'bogus' } as any), { mode: 'auto' });
+test('mm3: an absent or unrecognised selection reads as custom', () => {
+  assert.deepEqual(normalizeMm3Selection(undefined), { mode: 'custom' });
+  assert.deepEqual(normalizeMm3Selection({ mode: 'bogus' } as any), { mode: 'custom' });
   assert.deepEqual(normalizeMm3Selection({ mode: 'custom' }), { mode: 'custom' });
 });
 
@@ -134,6 +134,9 @@ test('precedence: MM3 album track, own MM3 caption, then the ACE caption', () =>
     { caption: 'mm3 own', mode: 'custom', source: 'song-mm3' });
   assert.deepEqual(captionForEngine({ ...song, caption_mm3: '' }, 'minimax-m3', { mm3: { tracks: [], selection: { mode: 'auto' } } }),
     { caption: ' ace caption ', source: 'song' });
+  // No choice made: the song's own MM3 caption, not an album track.
+  assert.equal(captionForEngine(song, 'minimax-m3', { mm3: { tracks: mm3Tracks, selection: normalizeMm3Selection(undefined) } }).source, 'song-mm3');
+  assert.equal(captionForEngine(song, 'minimax-m3', {}).source, 'song-mm3');
 });
 
 test('precedence: YuE2 own caption beats the dataset unless rendering as another album', () => {
@@ -340,7 +343,10 @@ test('written: MM3 takes the preset adapter or none, auto duration, album-track 
   assert.equal(r.request.mm3LmAdapter, '');
   assert.equal(r.request.duration, -1);
   assert.equal(r.request.caption, 'mid a caption');
-  const p = resolveWrittenSongIntent(base, 'minimax-m3', { gen, preset: { mm3_adapter_path: 'mm3.pt' }, mm3Tracks, });
+  // A song with its own MM3 caption renders with it unless a track is picked.
+  const own = resolveWrittenSongIntent(base, 'minimax-m3', { gen: { ...gen, caption_mm3: 'own mm3' }, preset: null, mm3Tracks });
+  assert.equal(own.request.caption, 'own mm3');
+  const p =resolveWrittenSongIntent(base, 'minimax-m3', { gen, preset: { mm3_adapter_path: 'mm3.pt' }, mm3Tracks, });
   assert.equal(p.request.mm3LmAdapter, 'mm3.pt');
 });
 

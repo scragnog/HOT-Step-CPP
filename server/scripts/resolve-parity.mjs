@@ -282,10 +282,12 @@ if (!fs.existsSync(indexFile)) {
         }
         const r = node.intent.resolveWrittenSongIntent(intent, engine, data);
         compareBody(label, r.request, body, engine);
-        // Auto branches: the pick the resolver makes unprompted must be the one captured.
+        // Auto branches: the pick the resolver makes for Automatic must be the
+        // one captured. MM3's default is the song's own caption (since
+        // 2026-11-11), so Automatic is asked for there; YuE2 keeps its default.
         if (/Auto/.test(f.branch)) {
-          const auto = node.intent.resolveWrittenSongIntent({ ...intent, mm3Selection: undefined, yue2Selection: undefined }, engine, data);
-          same(`${label}: caption with the default (auto) selection`, auto.request.caption, body.caption);
+          const auto = node.intent.resolveWrittenSongIntent({ ...intent, mm3Selection: { mode: 'auto' }, yue2Selection: undefined }, engine, data);
+          same(`${label}: caption with the auto selection`, auto.request.caption, body.caption);
         }
         report.push(`${failures.length === before ? 'PASS' : 'FAIL'} ${label} -> ${savedOwn ? 'captured song caption restored; ' : ''}gen ${gen.id}, album ${target}${target !== own ? ` (as, own ${own})` : ''}, caption ${r.provenance.caption.source}${r.provenance.caption.fromTrack ? ` "${r.provenance.caption.fromTrack}"` : ''}`);
       } else {

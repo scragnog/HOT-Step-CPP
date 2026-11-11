@@ -72,10 +72,9 @@ const GenerationStatusBadge: React.FC<{ gen: Generation }> = ({ gen }) => {
  * The MM3 caption for one written song, plus WHERE it comes from.
  *
  * On MiniMax-Music3 the caption that renders is a choice. Rendering new lyrics
- * under one of the artist's own training-track captions — verbatim, not a fresh
- * caption in the same style — is what reliably produces a song in the band's
- * style and, especially, one that ends naturally. So the default is a source
- * track picked by tempo, and this song's own caption becomes the opt-in.
+ * under one of the artist's own training-track captions, verbatim, is a strong
+ * style prompt and tends to end naturally. The default is this song's own
+ * caption; a source track (by tempo, or a named one) is the opt-in.
  *
  * On ACE-Step none of this appears and the box behaves exactly as it always has.
  */
