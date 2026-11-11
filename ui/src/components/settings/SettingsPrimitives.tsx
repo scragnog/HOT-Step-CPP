@@ -107,8 +107,9 @@ export const EnvTextRow: React.FC<{
   onChange: (key: string, value: string) => void;
   type?: 'text' | 'number';
   placeholder?: string;
-}> = ({ envKey, label, description, value, onChange, type = 'text', placeholder }) => (
-  <div className={`setting-row${type === 'number' ? ' setting-row--compact' : ''}`}>
+  fullWidth?: boolean;
+}> = ({ envKey, label, description, value, onChange, type = 'text', placeholder, fullWidth = false }) => (
+  <div className={`setting-row${fullWidth ? '' : ' setting-row--compact'}`}>
     <div className="setting-info">
       <div className="setting-label">
         <ParamLabel label={label} info={description} className="" />
@@ -139,7 +140,7 @@ export const EnvPasswordRow: React.FC<{
 }> = ({ envKey, label, description, value, onChange, placeholder }) => {
   const [visible, setVisible] = useState(false);
   return (
-    <div className="setting-row">
+    <div className="setting-row setting-row--compact">
       <div className="setting-info">
         <ParamLabel label={label} info={description} className="setting-label" />
       </div>

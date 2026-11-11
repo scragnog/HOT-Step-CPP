@@ -343,7 +343,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={envValues.SERVER_PORT || ''} onChange={handleEnvChange} type="number" placeholder="3001" />
               <EnvPathRow envKey="DATA_DIR" label={t('settings.env.dataDir')} description={t('settings.env.dataDirDesc')}
                 value={envValues.DATA_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} placeholder="./data" />
-              <EnvTextRow envKey="TRAINING_WORKERS" label={t('settings.env.trainingWorkers', 'Training workers')}
+              <EnvTextRow fullWidth envKey="TRAINING_WORKERS" label={t('settings.env.trainingWorkers', 'Training workers')}
                 description={t('settings.env.trainingWorkersDesc', 'Other PCs running HOT-Step that this PC can train on, as Name=http://address:3001, comma-separated. They appear under "Train on" in the Training Studio.')}
                 value={envValues.TRAINING_WORKERS || ''} onChange={handleEnvChange} placeholder="LivingRoom=http://192.168.1.50:3001" />
               <EnvPasswordRow envKey="TRAINING_WORKER_TOKEN" label={t('settings.env.trainingWorkerToken', 'Training worker token')}

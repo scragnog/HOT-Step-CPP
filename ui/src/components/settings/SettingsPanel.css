@@ -470,6 +470,7 @@
 
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   margin-bottom: 1.75rem;
@@ -739,6 +740,11 @@
 }
 
 .settings-panel .env-input { min-width: 0; }
+.settings-panel .setting-row--compact > .env-input:not(.env-input--number),
+.settings-panel .setting-row--compact > .env-password-wrapper {
+  flex: 0 1 14rem;
+  width: 14rem;
+}
 .settings-panel .env-input--number { flex: 0 0 6rem; width: 6rem; }
 .settings-panel .env-path-row, .settings-panel .env-password-wrapper { min-width: 0; }
 .settings-panel .env-path-row .env-input { width: 0; }
@@ -765,7 +771,7 @@
   background: #ec4899;
 }
 
-@container settings (max-width: 640px) {
+@container settings (max-width: 28rem) {
   .settings-panel .setting-row { flex-wrap: wrap; padding: 1rem; }
   .settings-panel .setting-info { flex-basis: 100%; }
   .settings-panel .setting-row:has(> [role="switch"]) .setting-info { flex-basis: 10rem; }
@@ -773,6 +779,8 @@
   .settings-panel .setting-row [role="combobox"] { flex-basis: 100%; width: 100%; }
   .settings-panel .env-input:not(.env-input--number),
   .settings-panel .env-password-wrapper, .settings-panel .env-path-row { max-width: none; }
+  .settings-panel .setting-row--compact > .env-input:not(.env-input--number),
+  .settings-panel .setting-row--compact > .env-password-wrapper { flex-basis: 100%; width: 100%; }
   .settings-panel .setting-value { text-align: left; }
   .settings-actions { justify-content: flex-start; }
   .settings-danger-actions { align-items: flex-start; }
@@ -782,7 +790,7 @@
 
 @media (max-width: 800px) {
   .settings-panel { padding: 1.25rem 1rem; }
-  .settings-tabs { flex-wrap: wrap; gap: 0.25rem; }
+  .settings-tabs { gap: 0.25rem; }
   .settings-tab { padding: 0.625rem 0.75rem; }
 }
 

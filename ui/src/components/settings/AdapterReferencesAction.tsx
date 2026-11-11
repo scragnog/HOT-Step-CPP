@@ -16,11 +16,15 @@ export function AdapterReferencesAction() {
   const result = updateMut.data ?? null;
   const error = updateMut.error?.message ?? null;
   return (
-    <div className="px-4 py-3 space-y-2">
-      <p className="setting-description">{t('settings.adapters.updateInfo')}</p>
-      <button className="placement-button" disabled={running} onClick={() => updateMut.mutate()}>
-        {t(running ? 'settings.adapters.updating' : 'settings.adapters.update')}
-      </button>
+    <div className="space-y-2">
+      <div className="setting-row">
+        <div className="setting-info">
+          <p className="setting-description">{t('settings.adapters.updateInfo')}</p>
+        </div>
+        <button className="settings-save-btn" disabled={running} onClick={() => updateMut.mutate()}>
+          {t(running ? 'settings.adapters.updating' : 'settings.adapters.update')}
+        </button>
+      </div>
       <div role="status" aria-live="polite" className="text-sm text-zinc-700 dark:text-zinc-300">
         {error && <p className="text-red-600 dark:text-red-400">{t('settings.adapters.failed', { error })}</p>}
         {result && <>

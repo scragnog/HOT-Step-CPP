@@ -29,7 +29,7 @@ A small reset arrow appears beside a General or Performance setting whenever its
 from the default; click it to snap that one field back. The reset persists like any other change;
 it is not a page reload. The Environment and AI Services fields have no reset arrow.
 
-Short controls share a row on wide screens and stack as the Settings area narrows. Paths and credentials keep a full row.
+Short controls, text fields and credentials share a row on wide screens. Labels and controls stay side by side until the Settings area becomes too narrow for both. Path pickers and the training-worker list keep a full row. Tabs wrap so Updates and its notification dot stay visible with the sidebars open.
 
 ## Settings and Lyric Studio backup
 
