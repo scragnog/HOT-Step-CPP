@@ -1125,6 +1125,19 @@ that cancels to f16 precision rather than exactly. It is off by default at the
 CLI and on in the in-app recipe since 2026-09-06, where it was heard as part of
 the stacked recipe.
 
+The SVD's range finder (stage A of `lm_pissa_init`, `engine/src/train/lm-pissa.h`)
+runs one graph per power-iteration pass and rescales each column of Y on the
+host to a norm in [0.5, 1) between passes (2026-11-11, GH #335). Y grows by
+about sigma_max^2 a pass, and Metal's F32 matmul kernel stages both operands
+through half, so the unscaled product went past 65504 on the second pass and
+the init failed before step 1. The factor is a power of two. On a backend that
+multiplies in F32 the result has the same bits as the old single graph: the CPU
+cache is byte-identical before and after. Through half it does not, because the
+rescaled entries round differently; Metal agrees with CPU to about half
+precision (median relative difference 7.8e-4 in the rank-r product, captured
+energy within 8.4e-5). The init only runs when neither the residual file nor
+the cache matches, so a run that reads either is untouched.
+
 ### Six adapter parameterizations, both LM trainers (2026-09-04/05)
 
 `train-lm` and `mm3-lm-train` share one `LmLora` implementation

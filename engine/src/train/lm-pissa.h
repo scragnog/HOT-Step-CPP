@@ -591,9 +591,12 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
             // that stages F32 operands through f16 turns that into inf: cuBLAS's
             // F16 path did (hence both operands F32 below), and Metal's
             // kernel_mul_mm_f32_f32 stages BOTH operands as half whatever the
-            // dtype (GH #335, mlp.up_proj on layer 0). Scaling by a power of two
-            // is exact and the range finder only uses Y's column space, so this
-            // is bit-identical wherever the old single graph did not overflow.
+            // dtype (GH #335, mlp.up_proj on layer 0). The range finder only uses
+            // Y's column space, and a power-of-two factor is exact in F32, so a
+            // backend that multiplies in F32 gives the same bits as the old
+            // single graph (the CPU cache is byte-identical). That does not hold
+            // through half: the rescaled entries round differently there, and
+            // small ones go subnormal or to zero, with no overflow involved.
             for (int it = 0; it <= iters; it++) {
                 if (it > 0) {
                     host.resize((size_t) out * (size_t) q);
