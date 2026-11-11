@@ -7,6 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { RUNTIME } from './bootstrap.js';
+import { pointerLocation } from './locate.js';
 import { ENV_PATH_KEYS, isInside, readPointer, writePointer, type OperationKind, type PendingOperation } from './paths.js';
 import { planOperation, sharedRoot, sizeOperation } from './transfer.js';
 
@@ -101,7 +102,10 @@ function plan(kind: ScheduleKind, target: string, currentDb: string | null) {
   if (!RUNTIME.appRoot) throw Object.assign(new Error('The data folder cannot be changed in this app'), { status: 400 });
   const dev = RUNTIME.mode === 'dev';
   const k: OperationKind = dev && kind === 'move' && !RUNTIME.dataRoot ? 'migrate' : kind;
-  return planOperation(k, target, { appRoot: RUNTIME.appRoot, currentRoot: RUNTIME.dataRoot, currentDb, dev });
+  // Import identifies the old install against this payload; destinations must
+  // stay outside the whole extracted install, including its stable launcher.
+  const appRoot = kind === 'import' ? RUNTIME.appRoot : pointerLocation().installRoot;
+  return planOperation(k, target, { appRoot, currentRoot: RUNTIME.dataRoot, currentDb, dev });
 }
 
 /** Validate an operation and size it. Writes nothing. `currentDb` is

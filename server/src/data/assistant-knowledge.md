@@ -556,7 +556,7 @@ Open the **Data folder** panel on the **Storage & Data** tab of Settings, choose
 - **Create empty data folder** starts an empty library in an empty destination while retaining your current folder.
 - **Import previous install** moves an older install's data into the current empty library, as described above. Enter the older app folder, not its data subfolder.
 
-The data folder cannot be inside the app folder, and Settings refuses a folder that another install recorded in your profile already uses, such as the release app or a development checkout.
+The data folder cannot be inside the app folder. On Windows installs with an updater launcher, this means the whole extracted folder containing `HOT-Step.bat`, including locations outside its `app/` subfolder. Settings also refuses a folder that another install recorded in your profile already uses, such as the release app or a development checkout.
 
 Click **Preview change** to see the folders, size and space required. Finish queued and active work and downloads, then click **Confirm and restart**. Transfers run before the library opens; the launch console shows progress. Same-volume moves rename folders. Across volumes, HOT-Step copies and checks file sizes before removing verified source folders. External path overrides remain outside the transfer.
 

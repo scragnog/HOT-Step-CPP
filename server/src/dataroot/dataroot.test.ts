@@ -1067,6 +1067,76 @@ function versioned(f: ReturnType<typeof fixture>, install = f.app) {
   return { install, payload, env: { HOT_STEP_ROOT: payload, HOT_STEP_INSTALL_ROOT: install, HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv };
 }
 
+function settingsPlans(env: NodeJS.ProcessEnv, targets: string[], kind = 'move'): any {
+  const script = `const m = await import(${JSON.stringify(new URL('./pointer.ts', import.meta.url).href)});
+const targets = ${JSON.stringify(targets)};
+const previews = targets.map(t => m.previewOperation(${JSON.stringify(kind)}, t, null));
+const refusals = targets.map((t, i) => {
+  if (previews[i].ok) return null;
+  try { m.scheduleOperation(${JSON.stringify(kind)}, t, null); return 'accepted'; }
+  catch (e) { return { status: e.status, message: e.message }; }
+});
+console.log('@@' + JSON.stringify({ previews, refusals, preflight: m.updatePreflight() }));`;
+  const clean = { ...process.env };
+  for (const k of ['HOT_STEP_ROOT', 'HOT_STEP_INSTALL_ROOT', 'HOT_STEP_DATA_ROOT', 'HOT_STEP_PROFILE_DIR', ...Object.keys(clean).filter(k => /^(DATA_DIR|ACESTEPCPP_|TRAINING_DIR|TENSORRT_LIBS)/.test(k))]) delete clean[k];
+  const out = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    env: { ...clean, ...env }, cwd: SERVER_DIR, encoding: 'utf-8', timeout: 60_000,
+  });
+  return JSON.parse(out.split('\n').find(l => l.startsWith('@@'))!.slice(2));
+}
+
+test('Settings Move refuses destinations anywhere inside a versioned install', () => {
+  const f = fixture();
+  const v = versioned(f);
+  initLayout(dataLayout(f.sibling));
+  writePointer(f.ptrFile, { version: 1, root: f.sibling, pending: null });
+  const alias = path.join(f.base, 'install-link');
+  fs.symlinkSync(v.install, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const targets = [v.install, path.join(v.install, 'my-data'), path.join(v.payload, 'my-data'), path.join(alias, 'my-data'), path.join(f.base, 'outside')];
+  const r = settingsPlans(v.env, targets);
+  for (let i = 0; i < targets.length - 1; i++) {
+    assert.equal(r.previews[i].ok, false, targets[i]);
+    assert.ok(r.previews[i].errors.includes(`the data folder cannot be inside the app folder (${v.install})`));
+    assert.equal(r.refusals[i].status, 400);
+  }
+  assert.equal(r.previews.at(-1).ok, true);
+  assert.equal(readPointer(f.ptrFile)!.pending, null);
+});
+
+test('Settings Move keeps the flat release and checkout destination boundaries', () => {
+  for (const dev of [false, true]) {
+    const f = fixture();
+    initLayout(dataLayout(f.sibling));
+    const app = dev ? path.dirname(SERVER_DIR) : f.app;
+    const ptrFile = dev ? devPointerFile(f.prof, app) : f.ptrFile;
+    writePointer(ptrFile, { version: 1, root: f.sibling, pending: null, ...(dev ? { checkout: app } : {}) });
+    const env = dev ? { HOT_STEP_PROFILE_DIR: f.prof } : f.env;
+    const r = settingsPlans(env, [path.join(app, 'my-data'), path.join(f.base, 'outside')]);
+    assert.equal(r.previews[0].ok, false);
+    assert.ok(r.previews[0].errors.includes(`the data folder cannot be inside the app folder (${app})`));
+    assert.equal(r.refusals[0].status, 400);
+    assert.equal(r.previews[1].ok, true);
+  }
+});
+
+test('versioned Settings still imports from the install folder with a saved location', () => {
+  const f = fixture();
+  oldInAppData(f);
+  const v = versioned(f);
+  initLayout(dataLayout(f.sibling));
+  writePointer(f.ptrFile, { version: 1, root: f.sibling, pending: null });
+  assert.equal(settingsPlans(v.env, [v.install], 'import').previews[0].ok, true);
+});
+
+test('versioned update preflight allows an existing data folder inside the install', () => {
+  const f = fixture();
+  const v = versioned(f);
+  const root = path.join(v.install, 'my-data');
+  initLayout(dataLayout(root));
+  writePointer(f.ptrFile, { version: 1, root, pending: null });
+  assert.deepEqual(settingsPlans(v.env, []).preflight, []);
+});
+
 /** f.app as a release from before data folders: library in server/data, models and settings in the app folder. */
 function oldInAppData(f: ReturnType<typeof fixture>) {
   const sd = path.join(f.app, 'server', 'data');
