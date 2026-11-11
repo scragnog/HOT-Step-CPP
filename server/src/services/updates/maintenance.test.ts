@@ -308,7 +308,7 @@ test('a failed integrity check aborts the snapshot and leaves nothing behind', a
   fs.writeSync(fd, Buffer.alloc(512, 0xff), 0, 512, 4096 * 2 + 16);
   fs.closeSync(fd);
   const dir = path.join(d.updaterDir, 'bad');
-  await assert.rejects(createSnapshot(dir, { dbs: [file], files: [] }), /integrity_check failed/);
+  await assert.rejects(createSnapshot(dir, { dbs: [file], files: [] }), /integrity_check failed|SQLITE_CORRUPT|malformed/, 'SQLite or the integrity check rejects it');
   assert.ok(!fs.existsSync(dir));
 });
 

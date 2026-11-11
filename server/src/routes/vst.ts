@@ -168,6 +168,8 @@ router.put('/chain', (req, res) => {
 });
 
 const guiProcs = new Map<string, ChildProcess>();
+/** Every editor window still running, uid or not (the update busy check). */
+const openGuis = new Set<ChildProcess>();
 
 // ── POST /gui — Launch plugin GUI ───────────────────────────
 
@@ -207,6 +209,10 @@ router.post('/gui', (req, res) => {
   });
   child.unref();
   attachVstLog(child, 'gui', args);
+  openGuis.add(child);
+  const forget = () => { openGuis.delete(child); };
+  child.on('exit', forget);
+  child.on('error', forget);
   if (uid) {
     guiProcs.set(uid, child);
     const clear = () => { if (guiProcs.get(uid) === child) guiProcs.delete(uid); };
@@ -321,7 +327,7 @@ const monitorTransition = createSerializer();
 // An open plugin window or the monitor can stay up for hours, so they hold an
 // update only, never the shared busy registry (hash queue, data-folder move).
 maintenance.addBlocker(() => [
-  ...(guiProcs.size ? [`${guiProcs.size} VST plugin window(s) open`] : []),
+  ...(openGuis.size ? [`${openGuis.size} VST plugin window(s) open`] : []),
   ...(isMonitorAlive() ? ['the VST monitor is running'] : []),
 ]);
 
