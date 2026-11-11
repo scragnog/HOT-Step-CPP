@@ -567,7 +567,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       + `stage. `
       + (askedTakes === 1
         ? 'The batch stops at the first natural ending and renders that one song. '
-        : `This produces 1..${takes} songs, depending on which candidates ended. `)
+        : `Rounds continue until ${takes} candidates have ended or the rounds run out, so a short round only costs time. `)
       + `Turn "Require Natural Ending" off to render whatever the planner produced.`,
     );
   }

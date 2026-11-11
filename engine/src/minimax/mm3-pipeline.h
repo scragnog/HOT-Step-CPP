@@ -1002,6 +1002,10 @@ struct MM3GenResult {
      *  hit the frame cap (or the length floor) and is rendered anyway, because
      *  a capped song beats twenty minutes of planning and no audio at all. */
     bool        eos_fallback    = false;
+    /** Candidates over every round that hit the frame cap without EOS, and
+     *  that ended under the length floor. Same value on every take. */
+    int         cand_capped     = 0;
+    int         cand_short      = 0;
 
     double  ar_ms    = 0.0;
     double  cond_ms  = 0.0;
@@ -1593,6 +1597,17 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             }
             return true;
         };
+        // Every take asked for is a song asked for, so rounds go on until that
+        // many have been accepted, not just one: four takes with one ending
+        // used to stop there and drop three. Accepted plans from earlier
+        // rounds wait in the bank (they hold their frame hiddens, up to ~1 GB
+        // each at the cap) and take the first slots once planning stops. A
+        // one-song request (stop_after_first_eos) wants one.
+        const int                want = aopt.stop_after_first_eos ? 1 : K;
+        std::vector<MM3ArResult> bank_ar;
+        std::vector<uint64_t>    bank_seed;
+        std::vector<int>         bank_round;
+        int                      n_capped_all = 0, n_short_all = 0;
         int round = 0;
         for (;; round++) {
             if (round > 0) {
@@ -1601,8 +1616,9 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                     ars[(size_t) t]      = MM3ArResult{};
                     tk[(size_t) t].seed += (uint64_t) K;   // the flow noise follows its plan
                 }
-                fprintf(stderr, "[MM3-Pipe] natural ending: no candidate ended in round %d; re-planning %d at seed %llu "
-                                "(round %d of %d)\n", round, K, (unsigned long long) aopt.seed, round + 1, rounds_max);
+                fprintf(stderr, "[MM3-Pipe] natural ending: %zu of %d wanted after round %d; re-planning %d at seed "
+                                "%llu (round %d of %d)\n", bank_ar.size(), want, round, K,
+                        (unsigned long long) aopt.seed, round + 1, rounds_max);
                 if (progress) {
                     progress(MM3GenProgress{ "ar", -1, 0, 0, aopt.max_frames });
                 }
@@ -1617,19 +1633,34 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             int n_keep  = 0;
             int n_short = 0;
             for (int t = 0; t < K; t++) {
+                const MM3ArResult & a = ars[(size_t) t];
                 if (accepted(t)) {
                     n_keep++;
-                } else if (min_frames > 0 && ars[(size_t) t].n_frames > 0 &&
-                           ars[(size_t) t].n_frames < min_frames &&
-                           (!req.require_eos || ars[(size_t) t].eos_hit)) {
+                } else if (min_frames > 0 && a.n_frames > 0 && a.n_frames < min_frames &&
+                           (!req.require_eos || a.eos_hit)) {
                     n_short++;
+                } else if (!a.eos_hit && a.n_frames >= req.max_frames) {
+                    n_capped_all++;
                 }
             }
-            if (n_keep > 0) {
+            n_short_all += n_short;
+            const int have = (int) bank_ar.size() + n_keep;
+            if (have >= want || (have > 0 && round + 1 >= rounds_max)) {
                 fprintf(stderr,
-                        "[MM3-Pipe] candidates: %d of %d kept in round %d; the rest are dropped (%d too short)\n",
-                        n_keep, K, round + 1, n_short);
+                        "[MM3-Pipe] candidates: %d of %d kept in round %d (%zu from earlier rounds, %d wanted); the "
+                        "rest are dropped (%d too short)\n",
+                        n_keep, K, round + 1, bank_ar.size(), want, n_short);
                 break;
+            }
+            if (have > 0) {
+                for (int t = 0; t < K; t++) {
+                    if (accepted(t)) {
+                        bank_ar.push_back(std::move(ars[(size_t) t]));
+                        bank_seed.push_back(tk[(size_t) t].seed);
+                        bank_round.push_back(round);
+                    }
+                }
+                continue;
             }
             if (round + 1 >= rounds_max) {
                 // Every round spent, nothing accepted. The planning is already
@@ -1655,6 +1686,15 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                     }
                     return false;
                 }
+                {
+                    // It is rendered, so it is not counted as dropped.
+                    const MM3ArResult & a = ars[(size_t) fallback];
+                    if (!a.eos_hit && a.n_frames >= req.max_frames) {
+                        n_capped_all--;
+                    } else if (min_frames > 0 && a.n_frames < min_frames && (!req.require_eos || a.eos_hit)) {
+                        n_short_all--;
+                    }
+                }
                 if (min_frames > 0 && n_short > 0) {
                     fprintf(stderr,
                             "[MM3-Pipe] every candidate ended too early after %d round(s) of %d (%d plans, all "
@@ -1677,20 +1717,47 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 break;
             }
         }
-        int winner = -1;
-        if (aopt.stop_after_first_eos) {
-            for (int t = 0; t < K; t++) {
+        // Slot order: banked plans first, then this round's accepted ones, up
+        // to `want`; the remaining slots carry this round's rejects (dropped).
+        // The fallback plan counts as accepted, so it lands in slot 0.
+        std::vector<char> keep((size_t) K, 0);
+        std::vector<int>  slot_round((size_t) K, round);
+        if (cand) {
+            std::vector<MM3ArResult> nar;
+            std::vector<uint64_t>    nseed;
+            std::vector<char>        taken((size_t) K, 0);
+            for (size_t i = 0; i < bank_ar.size(); i++) {
+                nar.push_back(std::move(bank_ar[i]));
+                nseed.push_back(bank_seed[i]);
+                slot_round[nar.size() - 1] = bank_round[i];
+                keep[nar.size() - 1]       = 1;
+            }
+            for (int t = 0; t < K && (int) nar.size() < want; t++) {
                 if (accepted(t)) {
-                    winner = t;
-                    break;
+                    taken[(size_t) t] = 1;
+                    keep[nar.size()]  = 1;
+                    nar.push_back(std::move(ars[(size_t) t]));
+                    nseed.push_back(tk[(size_t) t].seed);
                 }
+            }
+            for (int t = 0; t < K && (int) nar.size() < K; t++) {
+                if (!taken[(size_t) t]) {
+                    nar.push_back(std::move(ars[(size_t) t]));
+                    nseed.push_back(tk[(size_t) t].seed);
+                }
+            }
+            for (int t = 0; t < K; t++) {
+                ars[(size_t) t]     = std::move(nar[(size_t) t]);
+                tk[(size_t) t].seed = nseed[(size_t) t];
             }
         }
         for (int t = 0; t < K; t++) {
-            outs[t].dropped         = cand && (!accepted(t) || (winner >= 0 && t != winner));
-            outs[t].round           = round;
+            outs[t].dropped         = cand && !keep[(size_t) t];
+            outs[t].round           = slot_round[(size_t) t];
             outs[t].eos_rounds_used = round + 1;
-            outs[t].eos_fallback    = (t == fallback) && !outs[t].dropped;
+            outs[t].eos_fallback    = cand && fallback >= 0 && keep[(size_t) t];
+            outs[t].cand_capped     = n_capped_all;
+            outs[t].cand_short      = n_short_all;
         }
         if (cand && req.on_candidates) {
             std::vector<int> kept;

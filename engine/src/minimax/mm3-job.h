@@ -1386,15 +1386,11 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     if ((req.gen.require_eos || req.gen.min_frames > 0) && !st->interleaved) {
         std::vector<MM3GenResult> kept;
         std::string               dropped_seeds;
-        int capped = K * (rs[0].eos_rounds_used - 1);
-        int too_short = 0;
+        // Every round's count: earlier rounds may have kept plans too.
+        const int capped    = rs[0].cand_capped;
+        const int too_short = rs[0].cand_short;
         for (MM3GenResult & x : rs) {
             if (x.dropped) {
-                if (!x.ar.eos_hit && x.ar.n_frames >= req.gen.max_frames) {
-                    capped++;
-                } else if (req.gen.min_frames > 0 && x.ar.n_frames > 0 && x.ar.n_frames < req.gen.min_frames) {
-                    too_short++;
-                }
                 dropped_seeds += (dropped_seeds.empty() ? "" : ", ") + std::to_string(x.ar.seed);
             } else {
                 kept.push_back(std::move(x));

@@ -177,9 +177,11 @@ counts localises a drop to the wire rather than the UI.
 
 `POST /mm3/synth` accepts `require_eos: true` and `eos_rounds: N` (1..16) with
 `takes: K`. The planner runs K takes in one batched pass (seed+t); any take that
-reaches max_frames without EOS is DROPPED before the flow stage; if none ended
-the plan repeats at seed + K (round r plans seed + r*K + t) up to `eos_rounds`
-times. Since 242645c4 a run where nothing ever ends renders the longest capped
+reaches max_frames without EOS is DROPPED before the flow stage; until K have
+ended (1 with `stop_after_first_eos`) the plan repeats at seed + K (round r plans
+seed + r*K + t) up to `eos_rounds` times, banking each round's endings, which
+take the first slots (2026-11-11; before that one ending stopped the rounds, so
+4 takes with 1 ending rendered 1 song). Since 242645c4 a run where nothing ever ends renders the longest capped
 plan anyway and reports `eos_fallback: true`, which the server relays as a
 warning rather than a normal success. `min_frames` adds a floor: a candidate
 that ends shorter is dropped and re-planned like one that never ended

@@ -194,10 +194,10 @@ export interface Mm3SynthRequest {
   // ── Natural endings (engine: the require_eos arbitration) ─────────────────
   /** Render only candidates whose plan reached EOS. The engine plans `takes`
    *  candidates in one batched pass; any that hits the frame cap without an
-   *  ending is DROPPED before the flow stage ever sees it. If none of them
-   *  ended, it re-plans the next round (round r uses seed + r*takes + t) up to
-   *  `eos_rounds` times, and only then fails the job with an error containing
-   *  "no candidate ended naturally".
+   *  ending is DROPPED before the flow stage ever sees it. Until `takes` of
+   *  them have ended it re-plans the next round (round r uses seed + r*takes
+   *  + t), keeping the endings so far, up to `eos_rounds` times; if nothing
+   *  ever ended it renders the longest capped plan (`eos_fallback`).
    *
    *  The count that comes back from GET /mm3/job is therefore the number
    *  RENDERED (1..takes) and can differ from what was asked for — which is why
