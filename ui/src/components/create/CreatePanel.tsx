@@ -25,6 +25,7 @@ import { applyCreateDraft, createContentParams, liveBackendRefusal } from './cre
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import { useBackendStore } from '../../stores/backendStore';
+import { setBackendParamFor } from '../../stores/globalParamsStore';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources, pickNearestBpmTrack,
@@ -383,12 +384,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (!reuseData) return;
     const gpData = reuseData.song.generationParams;
     if (!gpData) return;
+    const yue2Reuse = (reuseData.song.backend ?? gpData.backend) === YUE2_BACKEND_ID;
 
     // Style Description field ← user's original style input from generation_params
     // Priority: gpData.caption (original user input) → song.style (DB column)
     setCaption(gpData.caption || reuseData.song.style || '');
     // Lyrics
     setLyrics(gpData.lyrics || reuseData.song.lyrics || '');
+    if (yue2Reuse && gpData.instrumental !== undefined) setInstrumental(gpData.instrumental);
     // Song info metadata
     if (gpData.title || reuseData.song.title) setTitle(gpData.title || reuseData.song.title || '');
     if (gpData.artist) setArtist(gpData.artist);
@@ -407,16 +410,31 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (gpData.cacheRatio !== undefined) gp.setCacheRatio(gpData.cacheRatio);
     // baseSeed (the typed seed) over the rendered one, so reusing variation
     // 2.1 does not shift the base by one and re-roll the wildcard expansion.
-    if (gpData.baseSeed !== undefined) gp.setSeed(gpData.baseSeed);
+    if (yue2Reuse && gpData.seed !== undefined) gp.setSeed(gpData.seed);
+    else if (gpData.baseSeed !== undefined) gp.setSeed(gpData.baseSeed);
     else if (gpData.seed !== undefined) gp.setSeed(gpData.seed);
-    if (gpData.randomSeed !== undefined) gp.setRandomSeed(gpData.randomSeed);
+    if (yue2Reuse && gpData.seed !== undefined) gp.setRandomSeed(false);
+    else if (gpData.randomSeed !== undefined) gp.setRandomSeed(gpData.randomSeed);
     if (gpData.lmSeed !== undefined) gp.setLmSeed(gpData.lmSeed);
     if (gpData.lmSeedFollowsDit !== undefined) gp.setLmSeedFollowsDit(gpData.lmSeedFollowsDit);
     if (gpData.shift !== undefined) gp.setShift(gpData.shift);
     if (gpData.inferMethod) gp.setInferMethod(gpData.inferMethod);
     if (gpData.scheduler) gp.setScheduler(gpData.scheduler);
     if (gpData.guidanceMode) gp.setGuidanceMode(gpData.guidanceMode);
-    if (gpData.batchSize) gp.setBatchSize(gpData.batchSize);
+    if (yue2Reuse) {
+      // Replay this track's score and noise, including a planner retry or
+      // NAR variation, instead of composing the original batch again.
+      for (const [key, value] of Object.entries(gpData)) {
+        if (key.startsWith('yue2') && !['yue2', 'yue2Request', 'yue2Adapters'].includes(key)) {
+          setBackendParamFor(YUE2_BACKEND_ID, key, value);
+        }
+      }
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2Abc', gpData.yue2Abc ?? gpData.yue2Request?.abc ?? '');
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2NoiseSeed', gpData.yue2NoiseSeed ?? gpData.yue2Request?.noise_seed ?? gpData.seed);
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2BatchSize', 1);
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2Variations', 1);
+      gp.setBatchSize(1);
+    } else if (gpData.batchSize) gp.setBatchSize(gpData.batchSize);
     if (gpData.useCotCaption !== undefined) gp.setUseCotCaption(gpData.useCotCaption);
     if (gpData.skipLm !== undefined) gp.setSkipLm(gpData.skipLm);
     // Adapter

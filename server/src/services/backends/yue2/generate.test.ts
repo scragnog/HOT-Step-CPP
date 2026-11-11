@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, type Yue2PreparedJob } from './generate.js';
+import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, yue2TrackReplayParams, type Yue2PreparedJob } from './generate.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -97,6 +97,38 @@ const pick: Yue2PersistedSelection = {
 };
 const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse', 'V: Vocal', 'C4|', ''].join('\n');
 const lyrics = '[Verse]\nfirst line';
+
+test('batch member metadata replays its own score and exact semantic and noise seeds', () => {
+  const firstAbc = 'X:1\nK:C\nC4|';
+  const secondAbc = 'X:2\nK:C\nD4|';
+  const { req } = mapYue2Params({ caption: 'folk', seed: 7, yue2Abc: firstAbc }, pick);
+  const saved = yue2TrackReplayParams({ ...req, lm_batch_size: 3, synth_batch_size: 2,
+    songs: [{ style: 'folk', abc: firstAbc, seed: 7 }] }, {
+    song: 1, variation: 1, seed: '18446744073709551610', noise_seed: '18446744073709551611', abc: secondAbc,
+  });
+  assert.equal(saved.yue2Abc, secondAbc);
+  assert.equal(saved.yue2Request.abc, secondAbc);
+  assert.equal(saved.yue2Request.songs, undefined);
+  assert.equal(saved.yue2Request.lm_batch_size, undefined);
+  assert.equal(saved.yue2Request.synth_batch_size, undefined);
+  const replay = mapYue2Params({ caption: 'folk', ...saved, randomSeed: false, batchSize: 1,
+    yue2BatchSize: 1, yue2Variations: 1 }, pick).req;
+  assert.equal(replay.abc, secondAbc);
+  assert.equal(replay.seed, '18446744073709551610');
+  assert.equal(replay.noise_seed, '18446744073709551611');
+  assert.equal(replay.lm_batch_size, undefined);
+  assert.equal(replay.synth_batch_size, undefined);
+});
+
+test('single-track metadata retains supplied scores and falls back to the final score on older engines', () => {
+  const { req } = mapYue2Params({ caption: 'folk', lyrics, seed: 0, yue2Abc: abc }, pick);
+  const td = { song: 0, variation: 0, seed: 0, noise_seed: 0 };
+  assert.equal(yue2TrackReplayParams(req, td).yue2Abc, req.abc);
+  const saved = yue2TrackReplayParams({ ...req, abc: undefined }, td, abc);
+  assert.equal(saved.yue2Abc, abc);
+  assert.equal(saved.seed, 0);
+  assert.equal(saved.yue2NoiseSeed, 0);
+});
 
 test('score provenance survives app planning, engine fallback and instrumental planning', () => {
   for (const instrumental of [false, true]) {

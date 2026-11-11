@@ -117,6 +117,19 @@ export function releaseYue2RenderLane(
     && deps.nextLaneFamily?.() === 'yue2' && deps.releaseLane();
 }
 
+/** Save the rendered track's inputs, which can differ from the batch plan
+ *  after replanning or selecting a NAR noise variation. */
+export function yue2TrackReplayParams(req: Yue2SynthRequest, td: Yue2TrackDetail, soloAbc?: string) {
+  const abc = td.abc ?? soloAbc ?? req.abc;
+  return {
+    seed: td.seed,
+    yue2NoiseSeed: td.noise_seed,
+    yue2Abc: abc,
+    yue2Request: { ...req, abc, seed: td.seed, noise_seed: td.noise_seed,
+      songs: undefined, lm_batch_size: undefined, synth_batch_size: undefined },
+  };
+}
+
 /** Mirrors the capability manifest's core.duration (max 360, auto: true). */
 const YUE2_MAX_DURATION_SEC = 360;
 
@@ -1642,19 +1655,15 @@ async function finishYue2Job(
       const trackParams = {
         ...job.params,
         backend: 'yue2',
-        seed: td.seed,
+        ...yue2TrackReplayParams(req, td, parts.length === 1 ? finalDetail.abc : undefined),
         // The AR/NAR pick is engine state rather than a request field, so
         // without this the row records nothing about which adapter sang —
         // and the gp.lmAdapter sitting beside it belongs to ACE-Step's 4B
         // planner, which is what the details panel used to show.
         ...(halves.ar.path || halves.nar.path ? { yue2Adapters: halves } : {}),
-        // Overwrites whatever job.params.yue2Cover/yue2Abc held: req.abc is
-        // what was actually rendered (resolved from the envelope capture in
-        // prepareYue2Job), and cover's provenance is the envelope's own copy
-        // — the only sources the metadata reads for these fields.
+        // Cover provenance comes from the captured envelope. The replay
+        // fields above use the engine's per-track score and seeds.
         ...(cover ? { yue2Cover: cover } : {}),
-        ...(req.abc ? { yue2Abc: req.abc } : {}),
-        yue2Request: { ...req, seed: td.seed, noise_seed: td.noise_seed, lm_batch_size: undefined, synth_batch_size: undefined },
         yue2: {
           ode_steps: req.ode_steps,
           cfg_scale: req.cfg_scale,
