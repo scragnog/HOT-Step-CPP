@@ -411,7 +411,7 @@ static struct ggml_tensor * bsr_attn(struct ggml_context * ctx, const BsRoformer
         struct ggml_tensor * kf = ggml_cast(ctx, k, GGML_TYPE_F16);
         struct ggml_tensor * vf = ggml_cast(ctx, v, GGML_TYPE_F16);
         attn = ggml_flash_attn_ext(ctx, q, kf, vf, NULL, scale, 0.0f, 0.0f);
-        ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
+        ggml_prec_set_acc(attn, GGML_PREC_F32);
     } else {
         struct ggml_tensor * vt     = ggml_cont(ctx, ggml_transpose(ctx, v));
         struct ggml_tensor * scores = ggml_mul_mat(ctx, k, q);  // [S_kv, S_q, H, B]

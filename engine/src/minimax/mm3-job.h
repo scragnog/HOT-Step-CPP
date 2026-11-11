@@ -774,15 +774,13 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         release_if_transient();
     };
 
-    // MM3 Plank replay. Worth saying out loud what this does and does not buy:
-    // the AR loop still runs every per-frame forward pass, so the planning
-    // progress bar will still crawl to 100%. Forcing pins which TOKENS come out,
-    // not how much compute runs — the win is an identical semantic bed to A/B
-    // the flow stage against, not latency.
+    // MM3 Plank replay: an identical semantic bed to A/B the flow stage
+    // against. A full plank (both streams, hard pin) replays in one
+    // teacher-forced pass; semantic-only or soft forcing still runs every frame.
     if (!req.forced_semantic.empty()) {
-        fprintf(stderr,
-                "[MM3-Job] %s: AR replay — %zu forced iterations (codes pinned; AR compute still runs)\n",
-                job->id.c_str(), req.forced_semantic.size());
+        fprintf(stderr, "[MM3-Job] %s: AR replay — %zu forced iterations (%s)\n", job->id.c_str(),
+                req.forced_semantic.size(),
+                req.forced_acoustic.empty() ? "semantic only; the frame loop runs" : "codes pinned");
     }
 
     if (job->cancel.load()) {

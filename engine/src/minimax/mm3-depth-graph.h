@@ -1348,3 +1348,125 @@ static bool mm3_depth_decode_frame(const MM3Model & m, const float * lm_hidden_c
     }
     return mm3_depth_decode_takes(m, rows.data(), &semantic_code, forced_codes, out, err, rng, top_k);
 }
+
+// ── Teacher-forced replay (fully forced codes, mm3-ar-loop.h) ───────────────
+//
+// When every code of a frame is known up front there is no feedback chain to
+// wait on: step c's sequence is the first c+1 tokens of [hidden, sem, ac_1 ..
+// ac_{NC-1}], and the attention is causal, so ONE S = NC+1 forward produces all
+// seven step hiddens at positions 1..NC. Frames are independent, so a batch of
+// them rides the batch axis. Same blocks, same S=8 mask as the last step graph;
+// the matmul shapes differ, so agreement with the step path is to rounding, not
+// to the bit. Conditional row only: the hiddens never read the CFG row.
+#define MM3_DEPTH_REPLAY_BATCH 128
+
+struct MM3DepthReplay {
+    ggml_backend_sched_t sched = nullptr;
+    ggml_context *       gctx  = nullptr;
+    uint8_t *            gbuf  = nullptr;
+    ggml_cgraph *        graph = nullptr;
+    ggml_tensor *        in_hidden = nullptr;  // [H, 1, BATCH] F32
+    ggml_tensor *        in_sem    = nullptr;  // [BATCH]       I32, LM vocab ids
+    ggml_tensor *        in_ac     = nullptr;  // [BATCH*(NC-1)] I32, flat audio_embd rows
+    ggml_tensor *        out_hid   = nullptr;  // [H, NC, BATCH] F32
+};
+
+static void mm3_depth_replay_free(MM3DepthReplay * r) {
+    if (r->gctx) {
+        if (r->sched) {
+            ggml_backend_sched_reset(r->sched);
+        }
+        ggml_free(r->gctx);
+        free(r->gbuf);
+    }
+    if (r->sched) {
+        ggml_backend_sched_free(r->sched);
+    }
+    *r = MM3DepthReplay{};
+}
+
+// Needs mm3_depth_prepare first (backend and the S = NC+1 mask).
+static bool mm3_depth_replay_build(const MM3Model & m, MM3DepthGraph * g, MM3DepthReplay * r, std::string * err) {
+    const MM3DepthConfig &  c  = m.synth_cfg.depth;
+    const MM3DepthWeights & w  = m.synth.depth;
+    const int64_t           H  = (int64_t) c.embedding_length;
+    const int64_t           NC = (int64_t) g->n_steps;
+    const int64_t           S  = NC + 1;
+    const int64_t           BF = MM3_DEPTH_REPLAY_BATCH;
+    if (NC < 2) {
+        if (err) *err = "depth replay needs at least two acoustic codebooks";
+        return false;
+    }
+    const size_t ctx_bytes =
+        ggml_tensor_overhead() * (MM3_DEPTH_MAX_NODES + 64) + ggml_graph_overhead_custom(MM3_DEPTH_MAX_NODES, false);
+    r->gbuf = (uint8_t *) malloc(ctx_bytes);
+    ggml_init_params ip  = { ctx_bytes, r->gbuf, /*no_alloc*/ true };
+    ggml_context *   ctx = r->gbuf ? ggml_init(ip) : nullptr;
+    if (!ctx) {
+        free(r->gbuf);
+        r->gbuf = nullptr;
+        if (err) *err = "out of host memory for the depth replay graph";
+        return false;
+    }
+    r->in_hidden = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, H, 1, BF);
+    ggml_set_input(r->in_hidden);
+    r->in_sem = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, BF);
+    ggml_set_input(r->in_sem);
+    r->in_ac = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, BF * (NC - 1));
+    ggml_set_input(r->in_ac);
+
+    ggml_tensor * tok0   = ggml_mul_mat(ctx, w.proj, r->in_hidden);                               // [H, 1, BF]
+    ggml_tensor * shared = ggml_reshape_3d(ctx, ggml_get_rows(ctx, m.lm.token_embd, r->in_sem), H, 1, BF);
+    ggml_tensor * ac     = ggml_reshape_3d(ctx, ggml_get_rows(ctx, w.audio_embd, r->in_ac), H, NC - 1, BF);
+    shared               = ggml_mul_mat(ctx, w.proj, ggml_concat(ctx, shared, ac, 1));            // [H, NC, BF]
+    ggml_tensor * pos    = ggml_view_2d(ctx, w.pos_embd, H, S, w.pos_embd->nb[1], 0);
+    ggml_tensor * h      = ggml_add(ctx, ggml_concat(ctx, tok0, shared, 1), pos);                 // [H, S, BF]
+    for (size_t i = 0; i < w.blk.size(); i++) {
+        h = mm3_depth_block(ctx, c, w.blk[i], h, g->step[NC - 1].mask, g->fold_rows);
+    }
+    h          = mm3_depth_norm(ctx, h, w.output_norm, c.rms_eps);
+    r->out_hid = ggml_cont(ctx, ggml_view_3d(ctx, h, H, NC, BF, h->nb[1], h->nb[2], h->nb[1]));  // positions 1..NC
+    ggml_set_output(r->out_hid);
+
+    r->graph = ggml_new_graph_custom(ctx, MM3_DEPTH_MAX_NODES, false);
+    ggml_build_forward_expand(r->graph, r->out_hid);
+    BackendPair bp = { g->backend, g->cpu_backend, g->backend != g->cpu_backend };
+    r->sched       = backend_sched_new(bp, MM3_DEPTH_MAX_NODES * 2);
+    r->gctx        = ctx;
+    if (!ggml_backend_sched_alloc_graph(r->sched, r->graph)) {
+        mm3_depth_replay_free(r);
+        if (err) *err = "depth replay graph allocation failed (out of VRAM?)";
+        return false;
+    }
+    return true;
+}
+
+// Frames [0, nf) of one batch, nf <= MM3_DEPTH_REPLAY_BATCH. lm_hidden [nf, H]
+// is each frame's conditional LM hidden, sem [nf] and ac [nf, NC] its raw codes.
+// Writes out [nf, NC, H]. The unused tail of the batch computes on zeros.
+static bool mm3_depth_replay_run(const MM3Model & m, MM3DepthReplay * r, const float * lm_hidden, const int32_t * sem,
+                                 const int32_t * ac, int64_t nf, float * out, std::string * err) {
+    const int64_t H   = (int64_t) m.synth_cfg.depth.embedding_length;
+    const int64_t V   = (int64_t) m.synth_cfg.depth.audio_vocab_size;
+    const int64_t NC  = r->out_hid->ne[1];
+    const int64_t BF  = MM3_DEPTH_REPLAY_BATCH;
+    const int32_t OFF = (int32_t) m.lm_cfg.semantic_vocab_offset;
+    std::vector<float>   hid((size_t) (H * BF), 0.0f);
+    std::vector<int32_t> s((size_t) BF, OFF), a((size_t) (BF * (NC - 1)), 0);
+    memcpy(hid.data(), lm_hidden, (size_t) (nf * H) * sizeof(float));
+    for (int64_t f = 0; f < nf; f++) {
+        s[(size_t) f] = sem[f] + OFF;
+        for (int64_t i = 0; i < NC - 1; i++) {
+            a[(size_t) (f * (NC - 1) + i)] = ac[f * NC + i] + (int32_t) (i * V);  // note 2
+        }
+    }
+    ggml_backend_tensor_set(r->in_hidden, hid.data(), 0, hid.size() * sizeof(float));
+    ggml_backend_tensor_set(r->in_sem, s.data(), 0, s.size() * sizeof(int32_t));
+    ggml_backend_tensor_set(r->in_ac, a.data(), 0, a.size() * sizeof(int32_t));
+    if (ggml_backend_sched_graph_compute(r->sched, r->graph) != GGML_STATUS_SUCCESS) {
+        if (err) *err = "depth replay graph compute failed";
+        return false;
+    }
+    ggml_backend_tensor_get(r->out_hid, out, 0, (size_t) (nf * NC * H) * sizeof(float));
+    return true;
+}

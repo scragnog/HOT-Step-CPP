@@ -485,7 +485,12 @@ caption + lyrics -> prompt assembly and caption cleaning (mm3-request.h)
 (`mm3-{lm,depth,cond,dit,voc}-<quant>.gguf`) and older `mm3-synth-*` bundles still
 load. `mm3-plugins.h` lets the same Lua solvers, schedulers and guidance run on the
 MM3 flow stage. `mm3-ar-cache.h` and `mm3-hiddens-file.h` cache the planner output
-so a re-render can skip stage 1. Deeper notes, including the trap list, are in
+so a re-render can skip stage 1. When both code streams are forced (a full plank,
+hard pin), the planning loop is skipped too: `mm3_lm_replay_frames` re-derives the
+LM hiddens as a chunked teacher-forced prefill and `mm3_depth_replay_run` the seven
+depth hiddens as one 8-token forward per frame, in batches of 128 frames. The result
+matches the frame loop to rounding, not to the bit; `MM3_FORCED_REPLAY=0` runs the
+loop instead. Deeper notes, including the trap list, are in
 `.claude/skills/mm3-backend/SKILL.md`.
 
 ### MM3 latent refiner: audio in, audio out

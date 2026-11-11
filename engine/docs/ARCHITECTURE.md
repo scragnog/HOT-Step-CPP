@@ -415,7 +415,7 @@ are reported, not ignored.
 |---|---|---|
 | `caption` | required | Structured caption. Markdown formatting is cleaned before use |
 | `lyrics` | `""` | Empty means instrumental |
-| `duration` | required unless `max_frames` | Seconds. Rendered at 25 frames per second, capped at 9000 frames |
+| `duration` | required unless `max_frames` | Seconds. Rendered at 25 frames per second, capped at 9000 frames, and a sampled plan also at the LM's 10240-position context minus the prompt tokens (logged as `frames capped`). Forced codes replay as given, with a warning past the context |
 | `max_frames` | none | Frame count; wins over `duration` |
 | `seed` | -1 | `-1` draws a random seed |
 | `ar_seed` | -1 | Separate seed for the planner stage; `-1` ties it to `seed` |
@@ -440,7 +440,7 @@ are reported, not ignored.
 | `require_eos`, `stop_after_first_eos`, `eos_rounds`, `min_frames` | false, false, 4, 0 | Natural-ending controls. `eos_rounds` is 1 to 16; `min_frames` drops plans shorter than that |
 | `reuse_ar` | false | Reuse the previous planner output when every planner input matches |
 | `forced_frame_hiddens_file`, `save_frame_hiddens`, `frame_hiddens_save_path` | | Load or save the planner output as a `.mm3hiddens` file |
-| `forced_semantic`, `forced_acoustic` | | Replay captured codes; `forced_acoustic` has 7 entries per semantic entry. `forced_semantic` alone pins content and samples the acoustic codes from the caption. A `-1` entry is a free frame |
+| `forced_semantic`, `forced_acoustic` | | Replay captured codes; `forced_acoustic` has 7 entries per semantic entry. `forced_semantic` alone pins content and samples the acoustic codes from the caption. A `-1` entry is a free frame. Both arrays with no bias and no free frame replay in one teacher-forced pass instead of the frame loop (`MM3_FORCED_REPLAY=0` forces the loop) |
 | `lm_force_bias` | absent | Semantic-only soft forcing, 0 to 1000: adds this to the forced code's guided logit and samples instead of pinning. Absent = hard pin. With a bias or a `-1` frame, `forced_acoustic` is refused |
 | `lm_guide_file`, `lm_guide_scale`, `lm_guide_k`, `lm_guide_outside`, `lm_guide_gate_file`, `lm_guide_trace_file` | absent, 0.5, 0, 0 | Source guide: a Y2GD file from `ace-train mm3-codes`/`mm3-launder --guide-k N` (top N encoder codes and log-softmax per frame). Each draw mixes `(1 - scale) * p_LM + scale * p_encoder` over the candidates (`yue2_guide_apply`). `lm_guide_k` 0 uses every candidate in the file; `lm_guide_outside` at -100 or below allows candidates only. The gate file is raw f32, one scale multiplier per frame. The trace file receives per-frame JSON (rank of the drawn code, overlap, LM mass on the candidates, gap, surprise). Length = guide frames, EOS masked. Exclusive with `forced_semantic` and `forced_frame_hiddens_file`. Scale 1 with k 1 reproduces the hard pin exactly |
 | `lm_depth_greedy`, `lm_state_fix` | false, 0 | Probes on guided frames, read only with `lm_guide_file`. `lm_depth_greedy` takes argmax acoustic codes. `lm_state_fix` moves the conditional hidden row until the drawn code is in its top 10: 1 = depth decoder input, 2 = emitted stream 0, 3 = both. The LM's KV cache never sees the moved row, but under 1 or 3 the acoustic codes it produces are fed back |

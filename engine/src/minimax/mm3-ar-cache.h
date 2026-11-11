@@ -14,12 +14,11 @@
 //
 // The flow DiT never sees the AR codes. Its real input is the
 // [F, num_codebooks, embedding_length] hidden block the condition encoder
-// consumes (mm3-pipeline.h). That is exactly why the MM3 Plank
-// (forced_semantic / forced_acoustic) does NOT save time: pinning the codes
-// still re-runs every per-frame forward pass to regenerate these hiddens.
-// Caching the hiddens is the thing that actually skips the work. The two
-// features are complementary — the plank is portable and reproducible across
-// restarts, this is fast and in-process.
+// consumes (mm3-pipeline.h). The MM3 Plank (forced_semantic /
+// forced_acoustic) regenerates these hiddens from the codes; a full plank does
+// it in one teacher-forced pass (seconds), a semantic-only one frame by frame.
+// Caching the hiddens skips even that. The two features are complementary —
+// the plank is portable and reproducible across restarts, this is in-process.
 //
 // ── One slot, borrowed, never copied ────────────────────────────────────────
 //

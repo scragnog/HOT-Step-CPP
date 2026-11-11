@@ -625,6 +625,35 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             return false;
         }
     }
+    // Context guard (HOTSTEP-1119). The LM declares qwen3.context_length (10240)
+    // but the request limits allow a 5000-token prompt plus 9000 frames. Past it
+    // the plan degrades. Measured on a 3090, q8_0, two seeds: a 4224-token prompt
+    // planned to 9000 frames kept normal code diversity to about position 11700,
+    // then fell (semantic entropy per 20 s 7.3 -> 3.7 bits with one code on half
+    // the frames at seed 5; 7.7 -> 6.0 at seed 6). A 1097-token prompt, which
+    // never passes 10240, held 7.4 to 8.0 bits to the end at both seeds. So a
+    // free plan is capped to the declared context, not to where the fall began.
+    // Forced codes are the caller's (a plank, training codes) and replay as
+    // given, with a warning.
+    const int64_t ctx_len = (int64_t) c.context_length;
+    if (ctx_len > 0 && n_prompt + max_frames > ctx_len) {
+        if (forced && !opt.forced_continue) {
+            fprintf(stderr,
+                    "[MM3-AR] WARNING: %lld prompt tokens + %lld forced frames pass the LM's %lld-position context; "
+                    "the hiddens past it are out of range for the model\n",
+                    (long long) n_prompt, (long long) max_frames, (long long) ctx_len);
+        } else if (ctx_len - n_prompt < 1) {
+            if (err) {
+                *err = "the prompt fills the LM's " + std::to_string((long long) ctx_len) + "-position context";
+            }
+            return false;
+        } else {
+            fprintf(stderr, "[MM3-AR] frames capped %lld -> %lld: %lld prompt tokens + frames must fit the LM's "
+                            "%lld-position context\n",
+                    (long long) max_frames, (long long) (ctx_len - n_prompt), (long long) n_prompt, (long long) ctx_len);
+            max_frames = ctx_len - n_prompt;
+        }
+    }
     const bool guided = opt.guide != nullptr;
     if (guided) {
         if (forced) {
@@ -914,6 +943,104 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         outs[t].prefill_sum = ps;
     }
 
+    // ── Fully forced codes: one teacher-forced pass instead of the frame loop ──
+    //
+    // With both code streams pinned nothing is sampled, so the per-frame decode
+    // and depth steps only re-derive hiddens that are a function of the codes.
+    // mm3_lm_replay_frames recomputes the LM half as a chunked prefill and
+    // mm3_depth_replay_run the seven depth hiddens as one S=8 forward per frame,
+    // batched (minimaxmusic.cpp 8ab559f). Same frames, same codes, hiddens equal
+    // to rounding. Everything the replay does not model takes the loop: soft or
+    // partial forcing, forced_continue, an adapter schedule, the plan dial's base
+    // rows, parity dumps, EOS traces, live LRC, the state blend, and an armed
+    // imatrix collection (its hook sits on the decode and depth schedulers).
+    // MM3_FORCED_REPLAY=0 forces the loop, for A/B runs.
+    static const bool replay_env = [] {
+        const char * e = std::getenv("MM3_FORCED_REPLAY");
+        return !(e && e[0] == '0');
+    }();
+    const bool replay_fast = replay_env && forced_ac_given && !opt.forced_continue && !soft_force && !sched_on &&
+                             !plan_mix && opt.dump_iters == 0 && !opt.eos_trace && !opt.blend && !lrc_on &&
+                             !align_dump && opt.collect_hiddens && K == 1 && !g_mm3_imatrix.armed;
+    if (replay_fast) {
+        const int64_t F  = max_frames;
+        // The loop's depth step range-checks each forced code before it is
+        // gathered; the replay gathers them all at once, so check them here.
+        // Iterations 0..F-1 feed the LM, 1..F the depth decoder.
+        const int64_t AVmin = std::min<int64_t>(AV, (int64_t) m.synth_cfg.depth.audio_vocab_size);
+        for (int64_t i = 0; i < (F + 1) * NC; i++) {
+            const int32_t fc = opt.forced_acoustic[i];
+            if (fc < 0 || (int64_t) fc >= AVmin) {
+                if (err) {
+                    *err = "forced acoustic code " + std::to_string(fc) + " at iteration " +
+                           std::to_string((long long) (i / NC)) + ", codebook " + std::to_string((long long) (i % NC + 1)) +
+                           " is outside [0, " + std::to_string((long long) AVmin) + ")";
+                }
+                return false;
+            }
+        }
+        const auto    t0 = std::chrono::steady_clock::now();
+        // lmh[f] is the LM hidden emitted with frame f: the output after feeding
+        // iteration f's codes. Iteration F's codes are never fed back (note 2).
+        std::vector<float> lmh((size_t) (F * H));
+        if (!mm3_lm_replay_frames(m, &g_mm3_lm, opt.forced_semantic, opt.forced_acoustic, F, lmh.data(), err)) {
+            return false;
+        }
+        out->lm_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        out->semantic_all.assign(opt.forced_semantic, opt.forced_semantic + F + 1);
+        out->acoustic_all.assign(opt.forced_acoustic, opt.forced_acoustic + (F + 1) * NC);
+        out->n_iterations = F + 1;
+
+        MM3DepthReplay dr;
+        if (!mm3_depth_prepare(m, &g_mm3_depth, err) || !mm3_depth_replay_build(m, &g_mm3_depth, &dr, err)) {
+            mm3_depth_replay_free(&dr);
+            return false;
+        }
+        std::vector<float> dh((size_t) (MM3_DEPTH_REPLAY_BATCH * NC * H));
+        // Whole, before the first append: the streaming hook reads this block
+        // while it grows (see the reserve before the frame loop).
+        out->frame_hiddens.reserve((size_t) (F * (NC + 1) * H));
+        bool               ok = true;
+        for (int64_t f0 = 0; ok && f0 < F; f0 += MM3_DEPTH_REPLAY_BATCH) {
+            const int64_t nf = std::min<int64_t>(MM3_DEPTH_REPLAY_BATCH, F - f0);
+            // Frame f is iteration f + 1: the depth decoder reads that
+            // iteration's LM hidden and codes.
+            const auto t1 = std::chrono::steady_clock::now();
+            ok = mm3_depth_replay_run(m, &dr, lmh.data() + f0 * H, opt.forced_semantic + f0 + 1,
+                                      opt.forced_acoustic + (f0 + 1) * NC, nf, dh.data(), err);
+            // Graph time only: the hooks below can dispatch flow windows.
+            out->depth_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+            for (int64_t f = 0; ok && f < nf; f++) {
+                const float * hl = lmh.data() + (f0 + f) * H;
+                const float * hd = dh.data() + f * NC * H;
+                out->frame_hiddens.insert(out->frame_hiddens.end(), hl, hl + H);
+                out->frame_hiddens.insert(out->frame_hiddens.end(), hd, hd + NC * H);
+                out->n_frames++;
+                if (opt.on_frame) {
+                    opt.on_frame(out->n_frames, max_frames);
+                }
+                // Same hook order as the loop: progress, then window dispatch.
+                if (opt.on_takes_frame_ready) {
+                    ok = opt.on_takes_frame_ready(&out->n_frames, 1, err);
+                } else if (opt.on_frame_ready) {
+                    ok = opt.on_frame_ready(out->n_frames, err);
+                }
+            }
+            if (ok && opt.should_cancel && opt.should_cancel()) {
+                if (err) {
+                    *err = MM3_ERR_CANCELLED;
+                }
+                ok = false;
+            }
+        }
+        mm3_depth_replay_free(&dr);
+        if (!ok) {
+            return false;
+        }
+        fprintf(stderr, "[MM3-AR] Forced replay: %lld frames in one pass - LM %.0f ms, depth %.0f ms "
+                        "(MM3_FORCED_REPLAY=0 runs the frame loop)\n",
+                (long long) F, out->lm_ms, out->depth_ms);
+    }
 
     // Candidate layout: index 0 is EOS, indices 1..SV are semantic codes 0..SV-1.
     // Everything else in the 200000-entry vocabulary is masked and never gathered.
@@ -954,7 +1081,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         }
     }
 
-    for (int64_t it = 0; it <= max_frames; it++) {
+    for (int64_t it = 0; !replay_fast && it <= max_frames; it++) {
         if (forced && it >= opt.forced_len && !opt.forced_continue) {
             break;
         }

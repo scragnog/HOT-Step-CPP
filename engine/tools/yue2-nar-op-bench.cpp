@@ -96,7 +96,7 @@ void bench_fa(ggml_backend_t be, ggml_type kvt, bool with_mask, int64_t T, int64
     ggml_tensor * v = ggml_new_tensor_4d(ctx, kvt, D, Tk, Nkv, 1);
     ggml_tensor * m = with_mask ? ggml_new_tensor_2d(ctx, GGML_TYPE_F16, Tk, GGML_PAD(T, 64)) : nullptr;
     ggml_tensor * y = ggml_flash_attn_ext(ctx, q, k, v, m, 1.0f/std::sqrt((float) D), 0.0f, 0.0f);
-    ggml_flash_attn_ext_set_prec(y, GGML_PREC_F32);
+    ggml_prec_set_acc(y, GGML_PREC_F32);
     if (!ggml_backend_supports_op(be, y)) {
         std::printf("[flash_attn %-4s mask=%d] not supported by the backend\n", ggml_type_name(kvt), (int) with_mask);
         ggml_free(ctx); return;

@@ -293,7 +293,7 @@ static ggml_tensor * yue2_ar_block(ggml_context * ctx, ggml_cgraph * gf, const Y
     ggml_tensor * attn;
     if (use_flash) {
         attn = ggml_flash_attn_ext(ctx, q4, k_win, v_win, mask, scale, 0.0f, 0.0f);
-        ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
+        ggml_prec_set_acc(attn, GGML_PREC_F32);
     } else {
         attn = yue2_lm_attn_f32(ctx, q4, k_win, v_win, mask, scale);
     }

@@ -236,7 +236,7 @@ inline bool encode_windows(const AudioTower & m, const float * mel, int N, int L
         ggml_tensor * kf = ggml_cast(ctx, heads(k), GGML_TYPE_F16);
         ggml_tensor * vf = ggml_cast(ctx, heads(v), GGML_TYPE_F16);
         ggml_tensor * a = ggml_flash_attn_ext(ctx, q, kf, vf, nullptr, 1.0f, 0.0f, 0.0f);   // [hd, H, L, N]
-        ggml_flash_attn_ext_set_prec(a, GGML_PREC_F32);
+        ggml_prec_set_acc(a, GGML_PREC_F32);
         a = ggml_reshape_3d(ctx, a, D, Lv, N);
         x = ggml_add(ctx, x, ggml_add(ctx, ggml_mul_mat(ctx, b.o_w, a), b.o_b));
 
@@ -579,7 +579,7 @@ inline bool eval(const LmModel & m, Kv & kv, Eval & ev, const std::vector<int32_
             ggml_tensor * vw = ggml_view_3d(ctx, kv.v[il], D, pad, Nkv, kv.v[il]->nb[1], kv.v[il]->nb[2], 0);
             ggml_tensor * qp = ggml_permute(ctx, q, 0, 2, 1, 3);                   // [D, T, Nh]
             ggml_tensor * a = ggml_flash_attn_ext(ctx, qp, kw, vw, ev.mask, scale, 0.0f, 0.0f);
-            ggml_flash_attn_ext_set_prec(a, GGML_PREC_F32);                        // [D, Nh, T]
+            ggml_prec_set_acc(a, GGML_PREC_F32);                        // [D, Nh, T]
             a = ggml_reshape_2d(ctx, a, H, T);
             h = ggml_add(ctx, h, ggml_mul_mat(ctx, w.o_w, a));
             ggml_tensor * n2 = ggml_mul(ctx, ggml_rms_norm(ctx, h, m.rms_eps), w.ffn_norm);

@@ -530,7 +530,7 @@ static struct ggml_tensor * qw3lm_build_attn(struct ggml_context * ctx,
     struct ggml_tensor * attn  = use_flash_attn ? ggml_flash_attn_ext(ctx, q, k_full, v_full, mask, scale, 0.0f, 0.0f) :
                                                   qwen3_attn_f32(ctx, q, k_full, v_full, mask, scale);
     if (use_flash_attn) {
-        ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
+        ggml_prec_set_acc(attn, GGML_PREC_F32);
     }
 
     // Reshape: [D, Nh, S] -> [Nh*D, S]
@@ -1116,7 +1116,7 @@ static void qw3lm_forward_batch(Qwen3LM *   m,
                 m->use_flash_attn ? ggml_flash_attn_ext(ctx, q4, k_batch, v_batch, attn_mask, scale, 0.0f, 0.0f) :
                                     qwen3_attn_f32(ctx, q4, k_batch, v_batch, attn_mask, scale);
             if (m->use_flash_attn) {
-                ggml_flash_attn_ext_set_prec(attn_result, GGML_PREC_F32);
+                ggml_prec_set_acc(attn_result, GGML_PREC_F32);
             }
 
             // Output: [D, Nh, 1, N] -> [Nh*D, N]

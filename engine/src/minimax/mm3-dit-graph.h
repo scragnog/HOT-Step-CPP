@@ -416,7 +416,7 @@ static ggml_tensor * mm3_dit_block(ggml_context * ctx, const MM3DitGraph & g, co
         // ne[3] batch keeps the two CFG branches strictly separate.
         attn = ggml_flash_attn_ext(ctx, q, ggml_cast(ctx, k, GGML_TYPE_F16), ggml_cast(ctx, v, GGML_TYPE_F16), NULL,
                                    scale, 0.0f, 0.0f);
-        ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
+        ggml_prec_set_acc(attn, GGML_PREC_F32);
     } else {
         attn = mm3_dit_attn_f32(ctx, q, k, v, scale);
     }
@@ -455,9 +455,6 @@ static ggml_tensor * mm3_dit_build(ggml_context * ctx, const MM3Model & m, const
         x = ggml_repeat_4d(ctx, x, IC, L, B, 1);
     }
 
-    // The permanent zero block. The open release has no cover-audio slot, so the
-    // middle 128 channels are always zero (reference: `torch.zeros_like`).
-    ggml_tensor * zeros = ggml_scale(ctx, x, 0.0f);
 
     // cond_gate is 1.0 for the conditional branch and 0.0 for the unconditional
     // one — CFG's uncond branch is zeros_like(condition), not an empty prompt.
@@ -469,7 +466,10 @@ static ggml_tensor * mm3_dit_build(ggml_context * ctx, const MM3Model & m, const
     }
     cond = ggml_mul(ctx, cond, g.in_gate);
 
-    ggml_tensor * full = ggml_concat(ctx, ggml_concat(ctx, x, zeros, 0), cond, 0);  // [2304, L, B]
+    // [x, zeros, cond]. The middle 128 channels are a permanent zero block: the
+    // open release has no cover-audio slot (reference: `torch.zeros_like`). A
+    // right pad builds them in one node, with no scale and no extra concat.
+    ggml_tensor * full = ggml_concat(ctx, ggml_pad_ext(ctx, x, 0, (int) IC, 0, 0, 0, 0, 0, 0), cond, 0);  // [2304, L, B]
 
     // preprocess_conv is Conv1d k=1 no bias == a plain matmul over channels, and
     // it is RESIDUAL.

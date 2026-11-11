@@ -134,7 +134,7 @@ static ggml_tensor * heartmula_block(ggml_context * ctx, ggml_cgraph * gf, const
     ggml_tensor * attn;
     if (flash) {
         attn = ggml_flash_attn_ext(ctx, q4, kw, vw, mask, scale, 0.0f, 0.0f);
-        ggml_flash_attn_ext_set_prec(attn, GGML_PREC_F32);
+        ggml_prec_set_acc(attn, GGML_PREC_F32);
     } else {
         attn = heartmula_attn_manual(ctx, q4, kw, vw, mask, scale);
     }

@@ -533,7 +533,7 @@ static struct ggml_tensor * sa3_same_build_layer(struct ggml_context * ctx, cons
         auto fa = [&](struct ggml_tensor * qq, struct ggml_tensor * kk) {
             struct ggml_tensor * k16 = ggml_cast(ctx, kk, GGML_TYPE_F16);
             struct ggml_tensor * r   = ggml_flash_attn_ext(ctx, qq, k16, v16, mask, scale, 0.0f, 0.0f);
-            ggml_flash_attn_ext_set_prec(r, GGML_PREC_F32);
+            ggml_prec_set_acc(r, GGML_PREC_F32);
             return r;
         };
         struct ggml_tensor * o1 = fa(q, k);

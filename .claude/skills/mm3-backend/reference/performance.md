@@ -574,8 +574,13 @@ Output** (`mm3ReuseAr`, default ON).
 
 **Why this works where the plank does not:** the flow DiT never sees the codes.
 Its real input is the `[F, 8, 4096]` hidden block the condition encoder eats
-(`mm3-pipeline.h`), so pinning codes still re-runs every AR forward pass to
-regenerate them. Caching the hiddens skips the work.
+(`mm3-pipeline.h`), so pinning codes still has to regenerate it. Caching the
+hiddens skips the work. Since HOTSTEP-1119 a full plank (both streams, hard pin)
+regenerates it in one teacher-forced pass instead of the frame loop: on a 3090,
+q8_0 LM, 188 s of codes took 2.8 s against 117 to 140 s. Hiddens match the loop to
+cos 0.9999 (q8_0) or 0.9999998 (F16 LM); the q8_0 gap is the quantized matmul
+kernels, the same size as the loop's own flash-vs-manual attention spread.
+A semantic-only or soft plank still runs every frame.
 
 **Measured on a 12 s clip, q8_0, RTX 5090:**
 

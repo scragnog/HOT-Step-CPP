@@ -628,10 +628,11 @@ struct MM3SynthRequest {
     // present together, with acoustic == semantic * 7. Entry 0 is the
     // un-emitted iteration, so I codes render I-1 frames (mm3-ar-loop.h).
     //
-    // NOTE this does NOT make the render faster. The AR loop still executes
-    // every per-frame forward pass; forcing fixes which TOKENS come out, not
-    // how much compute runs. Its value is reproducibility — an identical
-    // semantic bed to A/B flow-stage solver/scheduler/guidance against.
+    // Both arrays together (hard pin, no lm_force_bias, no -1 frames) skip the
+    // frame loop: the AR stage re-derives the hiddens in one teacher-forced
+    // pass (mm3-ar-loop.h, "Fully forced codes"). Semantic-only or soft forcing
+    // still runs every frame. Either way the value is reproducibility — an
+    // identical semantic bed to A/B flow-stage solver/scheduler/guidance against.
     std::vector<int32_t> forced_semantic;  // [I]
     std::vector<int32_t> forced_acoustic;  // [I * 7], flat, iteration-major
 

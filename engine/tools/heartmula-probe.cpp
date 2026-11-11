@@ -176,7 +176,7 @@ static int run_tiny(const std::string & dir) {
                 // Production flash reads the F16 cache, so this does too.
                 att = ggml_flash_attn_ext(ctx, q4, ggml_cast(ctx, kc, GGML_TYPE_F16), ggml_cast(ctx, vc, GGML_TYPE_F16),
                                           in_m, scale, 0.0f, 0.0f);
-                ggml_flash_attn_ext_set_prec(att, GGML_PREC_F32);
+                ggml_prec_set_acc(att, GGML_PREC_F32);
             } else {
                 att = heartmula_attn_manual(ctx, q4, kc, vc, in_m, scale);
             }

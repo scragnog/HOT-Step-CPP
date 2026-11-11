@@ -112,7 +112,7 @@ static ggml_tensor * mulacover_adaptor_layer(ggml_context * ctx, const HeartMuLa
     if (flash) {
         a = ggml_flash_attn_ext(ctx, q, ggml_cast(ctx, k, GGML_TYPE_F16), ggml_cast(ctx, v, GGML_TYPE_F16), mask, scale,
                                 0.0f, 0.0f);
-        ggml_flash_attn_ext_set_prec(a, GGML_PREC_F32);
+        ggml_prec_set_acc(a, GGML_PREC_F32);
     } else {
         a = heartmula_attn_manual(ctx, q, ggml_cont(ctx, k), ggml_cont(ctx, v), mask, scale);
     }

@@ -112,7 +112,10 @@ What sets it apart:
   caption box turns a plain-English description into a Structured Caption with no AI
   model involved.
 - The song decides its own length, up to 300 seconds, and there is no duration
-  control.
+  control. A very long prompt lowers that ceiling: prompt tokens plus 25 frames per
+  second must fit the planner's 10,240-position context, so a 3,000-token prompt caps
+  the song at about 290 seconds. Past that context the planner was measured drifting
+  into repetition.
 - Play While Rendering (Generation cluster, off by default) starts playback a few
   seconds in, while later windows are still being rendered. The full file is saved as
   usual.
