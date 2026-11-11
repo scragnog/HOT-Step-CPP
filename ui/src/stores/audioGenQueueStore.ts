@@ -1136,7 +1136,9 @@ export function forceFailQueueItem(id: string): void {
 
 export function clearFinishedFromAudioQueue(): void {
   if (queueOwner() === 'server') {
-    if (_lastToken) void Promise.all(_state.items.filter(item => item.serverQueueId
+    // Take rows share their render's server item; it goes once, with its owner
+    // row, and the projection drops the takes with it.
+    if (_lastToken) void Promise.all(_state.items.filter(item => item.serverQueueId && !item.mm3TakeOf
       && (item.status === 'succeeded' || item.status === 'failed'))
       .map(item => audioQueueApi.dismiss(item.serverQueueId!)))
       .then(() => refreshServerProjection());
@@ -1151,7 +1153,8 @@ export function clearFinishedFromAudioQueue(): void {
  *  no longer exists, so there is nothing worth reconnecting to. */
 export function retryFailedInAudioQueue(): number {
   if (queueOwner() === 'server') {
-    const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId);
+    // A failed take row (a dropped candidate) belongs to its owner's render.
+    const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId && !item.mm3TakeOf);
     if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
       .then(() => refreshServerProjection());
     return failed.length;

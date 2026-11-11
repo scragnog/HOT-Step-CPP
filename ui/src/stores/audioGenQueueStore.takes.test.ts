@@ -18,15 +18,20 @@ Object.assign(globalThis, {
   indexedDB: createFakeIndexedDB().indexedDB,
 });
 
-const { OWNER_KEY, applyServerItems, _queueItemsForTests, _resetAudioQueueForTests } = await import('./audioGenQueueStore.js');
+const {
+  OWNER_KEY, applyServerItems, clearFinishedFromAudioQueue, resumeQueue, _queueItemsForTests, _resetAudioQueueForTests,
+} = await import('./audioGenQueueStore.js');
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
 test('MM3 variations: one row per take, boxed, kept across refreshes and a reload', async () => {
   localStorage.setItem(OWNER_KEY, 'server');
   const saved = globalThis.fetch;
-  globalThis.fetch = (async (url: string) => {
+  const deletes: string[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
     const path = new URL(url, 'http://local').pathname;
+    if (init?.method === 'DELETE') { deletes.push(path); return new Response(null, { status: 204 }); }
+    if (path === '/api/audio-queue/items') return ok({ items: [server] });
     if (path === '/api/generate/status/job1') {
       return ok({ jobId: 'job1', status: 'running', progress: 40, stage: 'Planning', mm3_takes: 3, mm3_take_seeds: ['7', '8', '9'] });
     }
@@ -54,6 +59,13 @@ test('MM3 variations: one row per take, boxed, kept across refreshes and a reloa
     await applyServerItems([server as never]);
     assert.deepEqual(rows().map(r => r.songId), ['s0', 's1', 's2'], 'reload keeps one row per song');
     assert.ok(rows().every(r => r.batchId === 'job1'));
+
+    // Clear finished: the render's one server item is dismissed once, not
+    // once per take row (the rest 404'd and each raised a toast).
+    await resumeQueue('t');
+    clearFinishedFromAudioQueue();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.deepEqual(deletes, ['/api/audio-queue/items/srv1']);
   } finally {
     _resetAudioQueueForTests();
     globalThis.fetch = saved;
