@@ -47,7 +47,13 @@ console.log('Owner kit ports are free. Open http://localhost:13960/settings');
 `);
 const script = ['@echo off', 'setlocal', 'cd /d "%~dp0"', 'set "NODE_OPTIONS="', '"%~dp0install\\runtime\\node.exe" "%~dp0preflight.mjs"', 'if errorlevel 1 (', '  echo Owner kit ports are busy. Close the other kit window first.', '  pause', '  exit /b 1', ')',
   ...['ACESTEPCPP_EXE','ACESTEPCPP_MODELS','ACESTEPCPP_ADAPTERS','DATA_DIR','DOWNLOAD_DIR','TENSORRT_LIBS','HOT_STEP_ROOT','HOT_STEP_INSTALL_ROOT','HOT_STEP_UPDATER_DIR','HOT_STEP_MAINTENANCE_TOKEN','CUDA_VISIBLE_DEVICES'].map(k => `set "${k}="`),
-  'set "HOT_STEP_PROFILE_DIR=%~dp0profile"', 'set "HOT_STEP_DATA_ROOT=%~dp0data"', 'set "SERVER_HOST=127.0.0.1"', 'set "SERVER_PORT=13960"', 'set "ACESTEPCPP_HOST=127.0.0.1"', 'set "ACESTEPCPP_PORT=18960"', 'set "ACESTEPCPP_WARM_ON_STARTUP=0"', 'set "TRAINING_WORKERS="', 'set NODE_OPTIONS=--import="%~dp0feed.mjs"', 'call "%~dp0install\\HOT-Step.bat"', 'exit /b %ERRORLEVEL%'];
+  'set "HOT_STEP_PROFILE_DIR=%~dp0profile"', 'set "HOT_STEP_DATA_ROOT=%~dp0data"', 'set "SERVER_HOST=127.0.0.1"', 'set "SERVER_PORT=13960"', 'set "ACESTEPCPP_HOST=127.0.0.1"', 'set "ACESTEPCPP_PORT=18960"', 'set "ACESTEPCPP_WARM_ON_STARTUP=0"', 'set "TRAINING_WORKERS="',
+  // --import takes a URL: a bare D:\ path is read as scheme "d:" and Node exits before the launcher runs.
+  // ponytail: no percent-encoding, so the kit path must have no spaces; the fixture root has none.
+  'set "KIT_URL=%~dp0"', 'set "NODE_OPTIONS=--import=file:///%KIT_URL:\\=/%feed.mjs"',
+  // OWNER_KIT_CHECK=1 (verify-owner-kit.mjs) runs everything above, then asks the preloaded feed for its tag instead of starting the app.
+  'if "%OWNER_KIT_CHECK%"=="1" goto check', 'call "%~dp0install\\HOT-Step.bat"', 'exit /b %ERRORLEVEL%', ':check',
+  `"%~dp0install\\runtime\\node.exe" -e "fetch('https://api.github.com/repos/scragnog/HOT-Step-CPP/releases/latest').then(r=>r.json()).then(j=>process.exit(j.tag_name==='${release.tag_name}'?0:1))"`, 'exit /b %ERRORLEVEL%'];
 fs.writeFileSync(path.join(kit, 'Start-owner-check.cmd'), script.join('\r\n') + '\r\n');
 fs.writeFileSync(path.join(kit, 'README.txt'), `Owner portable-update check — not started by the agent
 

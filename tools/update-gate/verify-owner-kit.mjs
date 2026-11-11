@@ -28,6 +28,8 @@ try {
   infos.push(info);
 }
 for (const name of ['feed.mjs', 'preflight.mjs']) execFileSync(process.execPath, ['--check', path.join(kit, name)], { windowsHide: true, timeout: 10_000 });
+// Run the real start script in check mode: preflight, environment and the feed preload, stopping before the launcher.
+execFileSync('cmd', ['/d', '/c', path.join(kit, 'Start-owner-check.cmd')], { env: { ...process.env, OWNER_KIT_CHECK: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 30_000 });
 // Exercise only the feed seam; never launch the kit/server/engine. Unknown URLs
 // go to a local fake fetch, so validation cannot contact a remote service.
 globalThis.fetch = async input => Response.json({ fallback: String(input) });
@@ -46,6 +48,6 @@ assert.deepEqual(await (await fetch('https://example.invalid/unrelated')).json()
 assert.equal(fs.existsSync(path.join(kit, 'data/library')), false);
 assert.equal(fs.existsSync(path.join(kit, 'install/updater/last-result.json')), false);
 assert.deepEqual(fs.readdirSync(path.join(kit, 'profile')), []);
-const result = { verdict: 'PASS', kit, infos, checks: ['both archive identities/hashes', 'feed/commit/asset/checksum responses', 'unrelated URL passthrough', 'feed/preflight syntax', 'no database, receipt or populated profile'], started: false };
+const result = { verdict: 'PASS', kit, infos, checks: ['both archive identities/hashes', 'feed/commit/asset/checksum responses', 'unrelated URL passthrough', 'feed/preflight syntax', 'start script runs to the launcher call with the feed preloaded','no database, receipt or populated profile'], started: false };
 fs.writeFileSync(path.join(here, 'evidence/round3/owner-kit-validation.json'), JSON.stringify(result, null, 2));
 console.log('PASS owner kit: identities, hashes and feed seam verified; kit not started');
