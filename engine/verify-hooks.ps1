@@ -174,7 +174,7 @@ if ($content -match 'hotstep_sampler_linked_') {
 }
 
 # ── Hooks 7-16: engine/ggml must be HOT-ggml with its HOT-Step changes ──────
-#    engine/ggml is pinned to HOT-ggml's hot-step-neutral branch, which carries these
+#    engine/ggml is pinned to HOT-ggml's hot-step-0.29 branch, which carries these
 #    changes as commits (docs/dev/ggml-fork.md). Each hook greps for the
 #    capability itself, so a stock ggml-org checkout (usually a submodule URL
 #    cached from before the fork) fails here in seconds instead of twenty
@@ -280,6 +280,13 @@ Test-GgmlHook "ggml-cuda few-rows mmvf for F32-precision nodes (Hook 20)" @("$cu
     @('HOT-Step patch: few-rows-mmvf') `
     "SILENT: MM3 runtime LM adapters plan slower."
 
+# Hook 21: RMS_NORM keeps the scalar kernels unless GGML_CUDA_RMS_NORM_VEC=1.
+#   SILENT if lost: the float4 kernels' reduction order moves MM3 LM training
+#   gradients far outside the pre-0.29 results (step-2 norm 49.83 -> 35.86).
+Test-GgmlHook "ggml-cuda RMS_NORM scalar by default (Hook 21)" @("$cuda/norm.cu") `
+    @('HOT-Step patch: rms-norm-scalar', 'GGML_CUDA_RMS_NORM_VEC') `
+    "SILENT: MM3 LM training gradients change against the pre-0.29 fork."
+
 # Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
 #   the only place ggml changes live now; local edits in engine/ggml are lost
 #   on the next submodule update and are not what CI or a user builds. Untracked
@@ -310,7 +317,7 @@ if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
     }
     if ($hook17) {
         Write-Host "  [FAIL] $hook17 (Hook 17)" -ForegroundColor Red
-        Write-Host "         ggml changes belong on HOT-ggml's hot-step-neutral branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
+        Write-Host "         ggml changes belong on HOT-ggml's hot-step-0.29 branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
         Write-Host "         $ggmlFix" -ForegroundColor Yellow
         $errors++
     } else {
