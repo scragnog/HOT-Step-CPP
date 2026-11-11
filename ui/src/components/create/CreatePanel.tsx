@@ -422,14 +422,21 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (gpData.scheduler) gp.setScheduler(gpData.scheduler);
     if (gpData.guidanceMode) gp.setGuidanceMode(gpData.guidanceMode);
     if (yue2Reuse) {
-      // Replay this track's score and noise, including a planner retry or
-      // NAR variation, instead of composing the original batch again.
+      // Planning and composing share an engine RNG. Replay the same path:
+      // an engine-planned track must plan again before composing.
       for (const [key, value] of Object.entries(gpData)) {
         if (key.startsWith('yue2') && !['yue2', 'yue2Request', 'yue2Adapters'].includes(key)) {
           setBackendParamFor(YUE2_BACKEND_ID, key, value);
         }
       }
-      setBackendParamFor(YUE2_BACKEND_ID, 'yue2Abc', gpData.yue2Abc ?? gpData.yue2Request?.abc ?? '');
+      // Older rows have these provenance flags but no explicit origin.
+      // With neither, conservatively rerun the engine planner.
+      const scoreOrigin = gpData.yue2ScoreOrigin
+        ?? (gpData.yue2?.abc_supplied || gpData.yue2?.abc_planned ? 'supplied' : 'engine');
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2ScoreOrigin', scoreOrigin);
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2AutoReplan', gpData.yue2AutoReplan !== false);
+      setBackendParamFor(YUE2_BACKEND_ID, 'yue2Abc', scoreOrigin === 'supplied'
+        ? gpData.yue2Abc ?? gpData.yue2Request?.abc ?? '' : '');
       setBackendParamFor(YUE2_BACKEND_ID, 'yue2NoiseSeed', gpData.yue2NoiseSeed ?? gpData.yue2Request?.noise_seed ?? gpData.seed);
       setBackendParamFor(YUE2_BACKEND_ID, 'yue2BatchSize', 1);
       setBackendParamFor(YUE2_BACKEND_ID, 'yue2Variations', 1);

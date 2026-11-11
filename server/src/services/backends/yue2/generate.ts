@@ -51,7 +51,7 @@ import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, spli
 import { yue2LyricsJson } from './align.js';
 import { applyYue2DurationCap, YUE2_TRIM_FADE_SEC } from './durationCap.js';
 import { buildYue2LyricSchedule } from './lyricSchedule.js';
-import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
+import { classifyYue2Score, repairYue2ScoreHeader, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
 import {
   yue2PickFromModels, yue2ResolvePick, yue2StackFrom, yue2PlanStackFrom, yue2PlanScaleDiffers, yue2CoverFromSubmission,
   type Yue2PersistedSelection, type Yue2CoverSubmission,
@@ -119,12 +119,15 @@ export function releaseYue2RenderLane(
 
 /** Save the rendered track's inputs, which can differ from the batch plan
  *  after replanning or selecting a NAR noise variation. */
-export function yue2TrackReplayParams(req: Yue2SynthRequest, td: Yue2TrackDetail, soloAbc?: string) {
+export function yue2TrackReplayParams(
+  req: Yue2SynthRequest, td: Yue2TrackDetail, soloAbc?: string, scoreSupplied = !!req.abc,
+) {
   const abc = td.abc ?? soloAbc ?? req.abc;
   return {
     seed: td.seed,
     yue2NoiseSeed: td.noise_seed,
     yue2Abc: abc,
+    yue2ScoreOrigin: scoreSupplied ? 'supplied' : 'engine',
     yue2Request: { ...req, abc, seed: td.seed, noise_seed: td.noise_seed,
       songs: undefined, lm_batch_size: undefined, synth_batch_size: undefined },
   };
@@ -582,9 +585,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // A previewed-and-approved lead sheet (score preview flow): the engine
   // renders this score instead of planning one. Meaningless under cot=off,
   // which has no plan stage — dropped with a note rather than sent.
-  const abcRaw = typeof params.yue2Abc === 'string' ? params.yue2Abc.trim() : '';
-  const abcUsed = abcRaw && cot !== 'off' ? abcRaw : undefined;
-  if (abcRaw && !abcUsed) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
+  const abcRaw = typeof params.yue2Abc === 'string' ? params.yue2Abc : '';
+  const abcUsed = abcRaw.trim() && cot !== 'off' ? abcRaw : undefined;
+  if (abcRaw.trim() && !abcUsed) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
   const abc = abcUsed && !lyrics ? yue2InstrumentalAbc(abcUsed, notes, yue2InstrumentalMode(params)) : abcUsed;
 
   // C6 lyric schedule: ties each sung lyric block to its score section's
@@ -983,11 +986,13 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     }
     draws.forEach((d, i) => {
       const { p } = d;
-      const health = classifyYue2Score(plans[i].abc, plans[i].end_reason, p.m.req.lyrics ?? '', norms);
+      const abc = repairYue2ScoreHeader(plans[i].abc, { M: '2/4' });
+      if (abc !== plans[i].abc) p.m.log('INFO', '[YuE2] Filled missing score header M:2/4');
+      const health = classifyYue2Score(abc, plans[i].end_reason, p.m.req.lyrics ?? '', norms);
       const flags = health.legibility?.flags ?? [];
       const attempts = p.m.autoReplan!.attempts;
       attempts.push({ seed: d.seed, verdict: health.verdict, reason: health.reason, ...(flags.length ? { flags } : {}) });
-      p.sheets.push(plans[i].abc);
+      p.sheets.push(abc);
       p.m.log('INFO', `[YuE2] Plan attempt ${attempts.length}: seed ${d.seed}, ${health.verdict} — ${health.reason}${flags.length ? ` — flags: ${flags.join('; ')}` : ''}`);
       if (yue2PlanUsable(health.verdict, p.instrumental) && (!p.replanFlags || !flags.length)) p.done = true;
     });
@@ -1655,7 +1660,8 @@ async function finishYue2Job(
       const trackParams = {
         ...job.params,
         backend: 'yue2',
-        ...yue2TrackReplayParams(req, td, parts.length === 1 ? finalDetail.abc : undefined),
+        ...yue2TrackReplayParams(req, td, parts.length === 1 ? finalDetail.abc : undefined,
+          p.abcSupplied || !!p.abcPlanned),
         // The AR/NAR pick is engine state rather than a request field, so
         // without this the row records nothing about which adapter sang —
         // and the gp.lmAdapter sitting beside it belongs to ACE-Step's 4B

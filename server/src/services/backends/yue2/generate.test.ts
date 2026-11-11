@@ -107,6 +107,7 @@ test('batch member metadata replays its own score and exact semantic and noise s
     song: 1, variation: 1, seed: '18446744073709551610', noise_seed: '18446744073709551611', abc: secondAbc,
   });
   assert.equal(saved.yue2Abc, secondAbc);
+  assert.equal(saved.yue2ScoreOrigin, 'supplied');
   assert.equal(saved.yue2Request.abc, secondAbc);
   assert.equal(saved.yue2Request.songs, undefined);
   assert.equal(saved.yue2Request.lm_batch_size, undefined);
@@ -128,6 +129,40 @@ test('single-track metadata retains supplied scores and falls back to the final 
   assert.equal(saved.yue2Abc, abc);
   assert.equal(saved.seed, 0);
   assert.equal(saved.yue2NoiseSeed, 0);
+});
+
+test('score origin records the engine input path even though both paths save the rendered score', () => {
+  const { req } = mapYue2Params({ caption: 'folk', lyrics, seed: 7 }, pick);
+  const td = { song: 0, variation: 0, seed: 7, noise_seed: 7, abc };
+  const engine = yue2TrackReplayParams(req, td, undefined, false);
+  assert.equal(engine.yue2ScoreOrigin, 'engine');
+  assert.equal(engine.yue2Abc, abc);
+  for (const provenance of [{ abcSupplied: true }, { abcPlanned: true }]) {
+    const saved = yue2TrackReplayParams({ ...req, abc }, td, undefined,
+      !!provenance.abcSupplied || !!provenance.abcPlanned);
+    assert.equal(saved.yue2ScoreOrigin, 'supplied');
+    assert.equal(saved.yue2Abc, abc);
+  }
+});
+
+test('supplied vocal scores retain every byte, including the last newline; blank scores stay absent', () => {
+  for (const score of [abc, `\n${abc}\n`, abc.trim()]) {
+    const mapped = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: score }, pick);
+    assert.equal(mapped.req.abc, score);
+    assert.equal(mapped.abcSupplied, true);
+  }
+  assert.equal(mapYue2Params({ caption: 'folk', lyrics, yue2Abc: ' \n\t' }, pick).req.abc, undefined);
+});
+
+test('instrumental score replay is byte-idempotent through the mapper in both modes', () => {
+  const score = 'X:1\nM:4/4\nL:1/4\nK:C\nV: Vocal\n"C"C2D2|\nV: Ins\nG4|\n';
+  for (const yue2InstrumentalMode of ['overlap', 'resting']) {
+    const params = { caption: 'folk', instrumental: true, yue2InstrumentalMode, yue2Abc: score };
+    const first = mapYue2Params(params, pick).req.abc;
+    assert.ok(first);
+    assert.notEqual(first, score, 'the first pass transforms sung notes');
+    assert.equal(mapYue2Params({ ...params, yue2Abc: first }, pick).req.abc, first);
+  }
 });
 
 test('score provenance survives app planning, engine fallback and instrumental planning', () => {
@@ -227,10 +262,10 @@ test('a supplied score is moved for an instrumental whatever re-planning is, and
   for (const yue2AutoReplan of [true, false]) {
     for (const cot of ['full', 'melody']) {
       const inst = mapYue2Params({ caption: 'piano', instrumental: true, yue2Abc: native, yue2Cot: cot, yue2AutoReplan }, pick).req;
-      assert.match(inst.abc!, /\nV: Vocal\n"C"z16"G"z16\|\nV: Ins\nc16d16\|$/, `instrumental, autoReplan ${yue2AutoReplan}, cot ${cot}`);
+      assert.match(inst.abc!, /\nV: Vocal\n"C"z16"G"z16\|\nV: Ins\nc16d16\|\n$/, `instrumental, autoReplan ${yue2AutoReplan}, cot ${cot}`);
       assert.equal(yue2PlanMode({ instrumental: true, yue2AutoReplan }, inst), null);
       const vocal = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: native, yue2Cot: cot, yue2AutoReplan }, pick).req;
-      assert.equal(vocal.abc, native.trim(), `vocal, autoReplan ${yue2AutoReplan}, cot ${cot}`);
+      assert.equal(vocal.abc, native, `vocal, autoReplan ${yue2AutoReplan}, cot ${cot}`);
     }
   }
 });
