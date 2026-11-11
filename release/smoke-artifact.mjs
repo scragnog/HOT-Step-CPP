@@ -343,7 +343,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       console.log(cudaRuntimeKey(checkoutRegistry(), Number(args[1])));
     } else if (args[0] === 'runtime-fetch' && args.length === 3) {
       console.log(JSON.stringify(await provisionCudaRuntime(checkoutRegistry(), Number(args[1]), path.resolve(args[2]))));
-    } else if (args.length >= 1 && args.length <= 4 && !args[0].startsWith('runtime-') && args[0] !== 'payload-root') {
+    } else if (args.length >= 1 && args.length <= 4 && !args[0].startsWith('runtime-')) {
       const [zip, parent, seconds = '60', runtimeDir] = args;
       await smokeArtifact(zip, { outputParent: parent || undefined, timeoutMs: Number(seconds) * 1000, runtimeDir });
     } else {

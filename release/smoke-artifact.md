@@ -11,8 +11,13 @@ The optional second argument is an existing output parent outside the checkout.
 The third argument is the server and engine timeout in seconds, default 60,
 maximum 600. Extraction has a separate 120-second timeout. Every invocation
 creates a unique `hotstep-artifact-*` directory under the output parent, with
-the archive extracted directly into `HOT Step smoke`. Archives must contain
-`runtime/node.exe`, `server/server.mjs` and `engine/ace-server.exe` at their root.
+the archive extracted directly into `HOT Step smoke`. The helper validates both
+flat Windows packages and versioned packages. In a flat package, `runtime/node.exe`,
+`server/server.mjs` and `engine/ace-server.exe` sit at the root. In a protocol-1
+package they sit under the `app/<id>/` payload named by `current.json`. See
+[Windows updater layout](../docs/dev/releasing.md#windows-updater-layout-protocol-1).
+Other scripts can use the same resolver with
+`node release/smoke-artifact.mjs payload-root <extracted-root>`.
 
 The gate runs the checkout's existing `smoke-boot.mjs` using the extracted Node
 runtime against the extracted server bundle. It uses temporary data and profile

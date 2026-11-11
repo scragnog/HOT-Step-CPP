@@ -28,10 +28,12 @@ prerequisites check in tier 0, and `--no-listen` leaves the renders unstaged.
 | Flag | App under test |
 |---|---|
 | none | Attaches to `--url` (default `http://localhost:3001`). Agents pass `--url http://localhost:3000` to attach through the Vite dev server instead of the raw Node port. Refuses to start if a generation or training job is running. Preprocess and training will stop and restart the engine, as they do from the UI. |
-| `--zip <file>` or `--dir <folder>` | Extracts or uses a release build, boots its bundled Node on `--port` 3199 with the engine on `--engine-port` 18085, and points it at this checkout's `models/` and `adapters/` (`--models`, `--adapters` to change; when your data folder has moved, pass the `models` and `adapters` paths that `cd server && npx tsx scripts/data-paths.ts` prints). The data directory is the extracted folder's own, so it starts as a fresh install. Shut down at the end unless `--keep`. |
+| `--zip <file>` or `--dir <folder>` | Extracts or uses a Windows release build. The archive helper resolves and validates either a flat package or the payload named by `current.json` in a versioned package. Boots the payload's bundled Node on `--port` 3199 with the engine on `--engine-port` 18085, and points it at this checkout's `models/` and `adapters/` (`--models`, `--adapters` to change; when your data folder has moved, pass the paths that `cd server && npx tsx scripts/data-paths.ts` prints). Each run gets its own `data/` and `profile/` under `logs/release-gate/<stamp>/`, through `HOT_STEP_DATA_ROOT` and `HOT_STEP_PROFILE_DIR`; the installed app's profile pointer is not used. Versioned packages also receive the launcher's install, updater and protocol env vars. Shut down at the end unless `--keep`. |
 | `--dev` | Spawns `tsx src/index.ts` from this tree on :3199 with `DATA_DIR` (the library) set to an empty folder under the run folder. |
 
-<!-- TODO(verify): bootApp in run.mjs sets HOT_STEP_ROOT but not HOT_STEP_DATA_ROOT or HOT_STEP_PROFILE_DIR. A release build then takes its data folder from the profile pointer (an installed release's folder, if one exists) or creates a sibling HOT-Step-Data and writes that pointer, so it is not a fresh install in the run folder. Fix the code, then drop this note. -->
+Older flat Windows servers can kill the gate process during `/api/shutdown`, after
+it writes its summary. A GO summary can then accompany exit 1. The versioned boot
+uses the launcher env and IPC channel so the server leaves its parent alive.
 
 Testing the extracted zip is the point: a feature can work here because this
 machine holds a file the archive never got (#137, #139). Only the packaged

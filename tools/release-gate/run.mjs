@@ -17,6 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { artifactPayload } from '../../release/smoke-artifact.mjs';
+import { LAUNCHER_PROTOCOL } from '../../release/updater/launcher.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -114,6 +116,18 @@ function bootApp(opts, runDir) {
   if (opts.zip) root = extractZip(opts.zip, path.join(runDir, 'app'));
   else if (opts.dir) root = opts.dir;
   if (root) {
+    const installRoot = root;
+    root = artifactPayload(installRoot);
+    env.HOT_STEP_DATA_ROOT = path.join(runDir, 'data');
+    env.HOT_STEP_PROFILE_DIR = path.join(runDir, 'profile');
+    fs.mkdirSync(env.HOT_STEP_DATA_ROOT, { recursive: true });
+    fs.mkdirSync(env.HOT_STEP_PROFILE_DIR, { recursive: true });
+    for (const key of ['DATA_DIR', 'DOWNLOAD_DIR', 'HOT_STEP_DEV', 'HOT_STEP_INSTALL_ROOT', 'HOT_STEP_UPDATER_DIR', 'HOT_STEP_LAUNCHER_PROTOCOL', 'HOT_STEP_MAINTENANCE_TOKEN']) delete env[key];
+    if (root !== installRoot) {
+      env.HOT_STEP_INSTALL_ROOT = installRoot;
+      env.HOT_STEP_UPDATER_DIR = path.join(installRoot, 'updater');
+      env.HOT_STEP_LAUNCHER_PROTOCOL = String(LAUNCHER_PROTOCOL);
+    }
     const serverMjs = path.join(root, 'server', 'server.mjs');
     if (!fs.existsSync(serverMjs)) throw new Error(`not a release build: ${serverMjs} is missing`);
     cmd = ['runtime/node.exe', 'runtime/bin/node', 'runtime/node'].map((p) => path.join(root, p)).find(fs.existsSync) ?? process.execPath;
@@ -128,7 +142,10 @@ function bootApp(opts, runDir) {
     env.DATA_DIR = path.join(runDir, 'data');
   }
   const out = fs.createWriteStream(path.join(runDir, 'app.log'));
-  const child = spawn(cmd, args, { cwd, env, shell: cmd === 'npx', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  // The server recognises launcher env only with an IPC channel; this also
+  // keeps its shutdown path from killing the gate as a legacy parent wrapper.
+  const stdio = env.HOT_STEP_LAUNCHER_PROTOCOL ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe'];
+  const child = spawn(cmd, args, { cwd, env, shell: cmd === 'npx', stdio, windowsHide: true });
   child.stdout.pipe(out, { end: false });
   child.stderr.pipe(out, { end: false });
   log(`spawned ${cmd} ${args.join(' ')} (pid ${child.pid}) with HOT_STEP_ROOT=${env.HOT_STEP_ROOT ?? '(dev)'}`);
@@ -142,7 +159,10 @@ async function waitReady(url, child, runDir, timeoutMs = 20 * MIN) {
     if (child && child.exitCode !== null) throw new Error(`app exited with code ${child.exitCode}\n${tail(path.join(runDir, 'app.log'))}`);
     try {
       const h = await getJson(`${url}/api/health`);
-      if (h?.engine?.ready) return h;
+      if (h?.engine?.ready) {
+        log(`health: version ${h.version}, engine ready`);
+        return h;
+      }
       last = h?.engine?.bootStatus ?? h?.status ?? '';
     } catch (err) { last = err.message; }
     if (Date.now() - started > timeoutMs) throw new Error(`engine never became ready: ${last}`);

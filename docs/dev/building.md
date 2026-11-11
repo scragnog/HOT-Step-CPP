@@ -383,8 +383,9 @@ full runbook.
 `release/smoke-artifact.mjs`. The zip is the same immutable Actions artifact later
 collected for the draft release. A failure in any of the five test jobs blocks the draft.
 
-The helper extracts outside the checkout into `HOT Step smoke`, boots `server/server.mjs`
-with the extracted `runtime/node.exe`, and checks the extracted engine's `/health`,
+The helper extracts outside the checkout into `HOT Step smoke`, validates the package
+and resolves its payload in either the flat or versioned Windows layout. It boots the
+payload's `server/server.mjs` with its `runtime/node.exe`, and checks its engine's `/health`,
 `/props` and `/plugins` using stub models. Its child processes search only Windows system
 directories and the explicitly provisioned CUDA runtime; no toolkit or build tree is on
 their `PATH`. The model-free `ace-server --backend-check` must initialise CPU and account
@@ -444,26 +445,12 @@ considering a generation gate. See the [trial dispatch instructions](releasing.m
 A portable release bundles the engine, a Node runtime, the server and the built UI, so users
 extract and run with no prerequisites.
 
-Layout of a Windows package, as assembled by `release.yml`:
-
-| Path | Contents |
-|---|---|
-| `runtime/node.exe` | Portable Node 24.18.0 |
-| `server/server.mjs` | The server bundled with esbuild (`release/esbuild.config.mjs`) |
-| `server/ffmpeg.exe` | From the `ffmpeg-static` package |
-| `server/node_modules/` | `better-sqlite3` with its native addon built for the bundled Node, plus `bindings` and `file-uri-to-path` |
-| `server/data/` | Everything from `server/src/data/`, copied whole |
-| `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, the MSVC runtime DLLs, `engine/plugins/`, and the `.variant` marker (plus `.cuda-version` on CUDA) that the first-launch runtime download reads |
-| `ui/dist/` | The built UI |
-| `Essentia/`, `noise_samples/` | Copied from the repo |
-| `presets/yue2-plan-play/` | Profile presets users import by hand, from `docs/user/presets/` |
-| `plugins/` | The repo-root plugin overlay |
-| `VERSION` | The release version, shown by the app |
-| `build-info.json` | The package's exact identity: tag, source commit, channel, OS, arch and asset variant. See [Releasing](releasing.md#build-identity) |
-| `.env.example` | `release/.env.example`, which leaves the managed paths unset |
-| `profile-path.mjs`, `README.txt` | From `release/` |
-| `HOT-Step.bat` | Launcher. Sets `HOT_STEP_ROOT` and runs `runtime\node.exe server\server.mjs` |
-| `open-browser-if-needed.mjs` | Browser helper the launcher starts on the bundled Node. It waits for `/api/health`, skips if a tab is already connected, and otherwise opens the URL through `explorer.exe` |
+Windows packages use either the flat protocol-0 layout or the versioned protocol-1
+layout. See [Windows updater layout](releasing.md#windows-updater-layout-protocol-1)
+for the install root, stable launcher, payload and pointer contract. The payload
+bundles the Node runtime, server and native modules, engine tools and backend DLLs,
+built UI, plugins and runtime data. `VERSION` and `build-info.json` identify that
+payload. The archive gate resolves and validates both layouts before starting it.
 
 The launcher must not spawn PowerShell. It used to start the browser helper with `powershell -ExecutionPolicy Bypass`, and behaviour-based antivirus quarantined the app's scripts for it. The helper is now `open-browser-if-needed.mjs` (it replaced the `.ps1`), `release/build-release.ps1` and `release.yml` copy it into the package, and `release/check-layout.mjs` fails if a portable launcher mentions PowerShell.
 
