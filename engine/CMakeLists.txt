@@ -1019,6 +1019,13 @@ endif()
 option(BUILD_TESTING "Build the engine unit tests" OFF)
 if(BUILD_TESTING)
     enable_testing()
+    # No models or GPU required: residual identity, delta export and legacy load.
+    add_executable(pissa-residual-test tests/test-pissa-residual.cpp)
+    link_ggml_backends(pissa-residual-test)
+    target_link_libraries(pissa-residual-test PRIVATE yyjson)
+    add_test(NAME pissa-residual COMMAND pissa-residual-test)
+    set_tests_properties(pissa-residual PROPERTIES ENVIRONMENT "GGML_BACKEND=CPU" TIMEOUT 60)
+
     add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
     add_test(NAME monitor-chain COMMAND test-monitor-chain)
 

@@ -277,6 +277,13 @@ for adapters that record no trigger.
 
 ## MiniMax-Music3
 
+PiSSA and HOT-PiZZA adapters need the exact residual file used in training,
+beside the language model. New adapters record its fingerprint. If a load
+reports a mismatch, restore that run's residual backup or retrain against
+the installed residual. A file with the same name and rank can still differ.
+Keep a locally generated residual with your adapters before replacing it
+with a download. Older adapters load as before and cannot detect this mismatch.
+
 1. Put adapters in `adapters/mm3-lm-adapters/`, up to two folder levels deep. The Training
    Studio already writes there. The list is read when the panel opens, so reopen it after
    adding files.

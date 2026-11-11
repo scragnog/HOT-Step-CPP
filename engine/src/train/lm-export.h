@@ -448,6 +448,7 @@ struct LmPeftOverride {
     // Written as hot_step.pissa.meta F32[6] when non-empty:
     // {rank, scale, layer_lo, layer_hi, base_size_hi, base_size_lo}.
     std::vector<float> pissa_meta;
+    std::vector<float> pissa_fingerprint;  // Captured at init, never re-hash at export.
     // Extra adapter_config.json lines (each "  \"k\": v,\n"), e.g. the residual name.
     std::string        cfg_extra;
 };
@@ -610,6 +611,14 @@ static bool lm_export_peft(const LmLora & L, const Qwen3LMConfig & cfg, const Lm
         sm.name  = "hot_step.pissa.meta";
         sm.shape = { (int64_t) ovr->pissa_meta.size() };
         sm.data  = ovr->pissa_meta.data();
+        tensors.push_back(sm);
+    }
+    if (ovr && !ovr->pissa_fingerprint.empty()) {
+        STWTensor sm;
+        sm.name  = "hot_step.pissa.fingerprint";
+        sm.shape = { (int64_t) ovr->pissa_fingerprint.size() };
+        sm.data  = ovr->pissa_fingerprint.data();
+        sm.dtype_override = STW_F32;  // 16-bit words must survive F16 adapter export exactly.
         tensors.push_back(sm);
     }
 

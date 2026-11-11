@@ -148,6 +148,13 @@ slices of the trajectory ("structure" expert early / "timbre" expert late — TD
 
 ## Planner (LM) adapters
 
+MM3 PiSSA delta adapters now carry `hot_step.pissa.fingerprint`. Preserve the
+exact residual used for training: matching names/ranks/base sizes do not imply
+matching frozen factors. The loader refuses mismatches; legacy files without
+the tensor retain the old checks. See `pissa-residual.h` and the PiSSA residual
+section of `docs/dev/training-internals.md`. The CPU `pissa-residual-test`
+exercises generated/read identity, export and mismatch/legacy loading.
+
 `engine/src/lm-adapter.h` loads adapters for the 5 Hz planner LM: PEFT LoRA (also LoKr and DoRA), applied at graph-build time through `qwen3_linear_lora()` and never merged, so the base LM can be any quant. The request carries `lm_adapter` / `lm_adapter_scale` in `AceRequest` itself, not the sideband, so they survive the LM echo by construction (`translateParams.ts:172-177`). The LM `ModelKey` includes the adapter path and the scale's bit pattern (`model-store.cpp:47-54`). The loader refuses, rather than guesses at, a LoHa or HiRA file (not low-rank, and this LM has no merge mode), a PiSSA delta adapter (MM3-only), a DiT LoKr (`carries cross_attn sites`), a marker that disagrees with `adapter_config.json`, and a `use_dora` flag that disagrees with the tensors. With an LM adapter the server defaults `lm_rep_penalty` to 1.05, and the plan guard in `services/backends/ace/generate.ts` resamples a degenerate plan up to twice with a shifted seed and a firmer penalty, then renders anyway with a warning. The UI list comes from `GET /api/adapters/lm`.
 
 ## Key files

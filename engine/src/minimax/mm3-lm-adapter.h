@@ -755,11 +755,16 @@ static MM3LmAdapter * mm3_lm_adapter_load(const char * path, std::string * err, 
             }
             return nullptr;
         }
-        if (!pissa_residual_read(pd_path, &rm, &pd_sites, &rerr)) {
+        const bool fingerprinted = st_find(st, "hot_step.pissa.fingerprint") != nullptr;
+        if (!pissa_residual_read(pd_path, &rm, &pd_sites, &rerr, fingerprinted)) {
             st_close(&st);
             if (err) {
                 *err = "PiSSA residual unreadable: " + rerr;
             }
+            return nullptr;
+        }
+        if (!pissa_residual_check_fingerprint(st, path, pd_path, rm.fingerprint, err)) {
+            st_close(&st);
             return nullptr;
         }
     }

@@ -283,6 +283,7 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
     const double sqrt_s     = (L->scale > 0.0f) ? sqrt((double) L->scale) : 1.0;
     const double inv_sqrt_s = 1.0 / sqrt_s;
     L->pissa_residual.clear();
+    L->pissa_fingerprint.clear();
     L->pissa_base_size = 0;
 
     std::string residual_base;
@@ -305,7 +306,7 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
                     "rank %d q %d iters %d layers %d-%d base %lld B. Not used; the export will be standalone.\n",
                     residual_path.c_str(), rm.rank, rm.q, rm.iters, rm.layer_lo, rm.layer_hi, rm.base_size, r, q,
                     iters, L->layer_lo, L->layer_hi, base_size);
-        } else if (!pissa_residual_read(residual_path, &rm, &rsites, &rerr)) {
+        } else if (!pissa_residual_read(residual_path, &rm, &rsites, &rerr, true)) {
             fprintf(stderr, "[pissa] residual %s unreadable (%s); falling back\n", residual_path.c_str(), rerr.c_str());
         } else {
             bool ok = true;
@@ -345,6 +346,7 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
             }
             if (ok) {
                 L->pissa_residual  = residual_base;
+                L->pissa_fingerprint = rm.fingerprint;
                 L->pissa_base_size = rm.base_size;
                 if (stats) {
                     stats->sites       = n;
@@ -362,7 +364,8 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
 
     // Canonical, f16-rounded copies of every site's frozen pair, for the
     // residual write. Only collected when there is somewhere to write them.
-    const bool                     want_write = !residual_path.empty();
+    // A fallback must not overwrite a residual that existing adapters still need.
+    const bool                     want_write = !residual_path.empty() && !hs_file_exists(residual_path);
     std::vector<PissaResidualSite> res_out;
     std::vector<ggml_fp16_t>       h16;
     // Takes trainer-space host factors, rounds them through the canonical F16
@@ -416,10 +419,19 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
         wm.energy_min  = e_min;
         std::string werr;
         if (lm_pissa_residual_write(residual_path, wm, res_out, &werr)) {
-            L->pissa_residual  = residual_base;
-            L->pissa_base_size = base_size;
-            fprintf(stderr, "[pissa] residual written: %s (%zu sites, F16; later runs at this rank read it and "
-                    "export adapter-only files)\n", residual_path.c_str(), res_out.size());
+            STFile written;
+            if (st_open(&written, residual_path.c_str())) {
+                L->pissa_fingerprint = pissa_residual_fingerprint(written);
+                st_close(&written);
+                L->pissa_residual  = residual_base;
+                L->pissa_base_size = base_size;
+                fprintf(stderr, "[pissa] residual generated: %s (%zu sites, F16). Adapters from this run fit "
+                        "ONLY this exact file. Back it up with the adapters; another residual with the same "
+                        "name, rank and base is not interchangeable.\n", residual_path.c_str(), res_out.size());
+            } else {
+                fprintf(stderr, "[pissa] cannot fingerprint generated residual %s; exporting standalone rank-2r files\n",
+                        residual_path.c_str());
+            }
         } else {
             fprintf(stderr, "[pissa] residual NOT written (%s); this run exports standalone rank-2r files\n",
                     werr.c_str());
@@ -910,8 +922,8 @@ static bool lm_export_pissa(const LmLora & L, const Qwen3LMConfig & cfg, const L
 static bool lm_export_pissa_delta(const LmLora & L, const Qwen3LMConfig & cfg, const LmExportMeta & meta,
                                   const std::string & out_dir, LmExportResult * res, std::string * err,
                                   const LmExtraExport * extra = nullptr) {
-    if (L.pissa_residual.empty()) {
-        *err = "PiSSA delta export: the init did not read or write a residual file";
+    if (L.pissa_residual.empty() || L.pissa_fingerprint.size() != 5) {
+        *err = "PiSSA delta export: no residual fingerprint was captured at initialization";
         return false;
     }
     const int          r = L.rank;
@@ -924,6 +936,7 @@ static bool lm_export_pissa_delta(const LmLora & L, const Qwen3LMConfig & cfg, c
     float hi = 0.0f, lo = 0.0f;
     pissa_size_split(L.pissa_base_size, &hi, &lo);
     ovr.pissa_meta = { (float) r, L.scale, (float) L.layer_lo, (float) L.layer_hi, hi, lo };
+    ovr.pissa_fingerprint = L.pissa_fingerprint;
     ovr.cfg_extra  = "  \"hot_step_pissa_residual\": \"" + lm_json_escape(L.pissa_residual) + "\",\n";
     ovr.site       = [&](int l, int s, LmPeftFactors * f, std::string * e) -> bool {
         const QwLoraPair & pr = L.layers[l].p[s];

@@ -1064,6 +1064,11 @@ used by `--weights bf16` on a q8_0 base). It writes machine-readable JSONL on st
 human logs on stderr, and exits 0 on success, 1 on a runtime failure and 2 on bad
 usage. `ace-train --help` prints the full option list.
 
+PiSSA delta adapters record the exact residual file used at initialization.
+The MM3 loader refuses a fingerprint mismatch; older adapters retain their
+existing checks. See [PiSSA residuals](training-internals.md#pissa-residual-the-frozen-half-shipped-once-2026-09-09)
+for the tensor format, generation warning and CPU regression check.
+
 | Subcommand | Purpose |
 |---|---|
 | `preprocess` | Build per-song tensor caches from an ACE-Step dataset |

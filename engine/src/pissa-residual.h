@@ -38,6 +38,15 @@
 // same rank-2r pair the old export carried, so everything downstream of the
 // loader (runtime graph, merge, group scales) is unchanged.
 //
+// New delta exports also carry hot_step.pissa.fingerprint, F32[5]: version 1
+// followed by four low-to-high 16-bit words of XXH64(seed=0) over EVERY byte
+// of the residual file, including its header. This is an accidental-mismatch
+// check, not a security signature. Repacking a residual changes its identity.
+// Capture it at init, before scaling the factors, and keep it for every export.
+// Files without this tensor retain the legacy rank/base-size checks. Never
+// trust a digest stored in the residual or a sidecar instead of hashing bytes.
+// Hash the existing mapping, with no second file read or persistent cache.
+//
 // Reader only. The writer lives with the trainer (train/lm-pissa.h) because it
 // is the trainer that has the factors and the st-write.h dependency.
 
@@ -64,7 +73,72 @@ struct PissaResidualMeta {
     int       layer_hi = 0;
     long long base_size = 0;
     double    energy_mean = 0.0, energy_min = 0.0;  // captured / ||W||_F^2, informational
+    std::vector<float> fingerprint;
 };
+
+// XXH64, seed 0. Explicit little-endian reads keep the on-disk identity portable.
+static inline uint64_t pissa_xxh64(const void * data, size_t size) {
+    constexpr uint64_t p1 = 11400714785074694791ull, p2 = 14029467366897019727ull;
+    constexpr uint64_t p3 = 1609587929392839161ull, p4 = 9650029242287828579ull;
+    constexpr uint64_t p5 = 2870177450012600261ull;
+    auto rot = [](uint64_t x, int n) { return (x << n) | (x >> (64 - n)); };
+    auto read = [](const uint8_t * p, int n) {
+        uint64_t x = 0;
+        for (int i = 0; i < n; ++i) x |= uint64_t(p[i]) << (8 * i);
+        return x;
+    };
+    auto round = [&](uint64_t a, uint64_t x) { return rot(a + x * p2, 31) * p1; };
+    const auto * p = static_cast<const uint8_t *>(data);
+    size_t left = size;
+    uint64_t h = p5;
+    if (left >= 32) {
+        uint64_t a = p1 + p2, b = p2, c = 0, d = 0 - p1;
+        do {
+            a = round(a, read(p, 8)); b = round(b, read(p + 8, 8));
+            c = round(c, read(p + 16, 8)); d = round(d, read(p + 24, 8));
+            p += 32; left -= 32;
+        } while (left >= 32);
+        h = rot(a, 1) + rot(b, 7) + rot(c, 12) + rot(d, 18);
+        for (uint64_t v : {a, b, c, d}) h = (h ^ round(0, v)) * p1 + p4;
+    }
+    h += size;
+    while (left >= 8) {
+        h = rot(h ^ round(0, read(p, 8)), 27) * p1 + p4;
+        p += 8; left -= 8;
+    }
+    if (left >= 4) {
+        h = rot(h ^ (read(p, 4) * p1), 23) * p2 + p3;
+        p += 4; left -= 4;
+    }
+    while (left--) h = rot(h ^ (uint64_t(*p++) * p5), 11) * p1;
+    h ^= h >> 33; h *= p2; h ^= h >> 29; h *= p3; h ^= h >> 32;
+    return h;
+}
+
+static inline std::vector<float> pissa_residual_fingerprint(const STFile & st) {
+    const uint64_t h = pissa_xxh64(st.mapping, st.file_size);
+    return {1.0f, float(h & 65535), float((h >> 16) & 65535),
+            float((h >> 32) & 65535), float(h >> 48)};
+}
+
+static inline bool pissa_residual_check_fingerprint(const STFile & adapter, const std::string & adapter_path,
+                                                    const std::string & residual_path,
+                                                    const std::vector<float> & actual, std::string * err) {
+    const STEntry * e = st_find(adapter, "hot_step.pissa.fingerprint");
+    if (!e) return true;  // Legacy adapter.
+    bool match = e->dtype == "F32" && e->n_dims == 1 && e->shape[0] == 5 &&
+                 e->data_end - e->data_start == 5 * sizeof(float) && actual.size() == 5;
+    if (match) {
+        const float * expected = static_cast<const float *>(st_data(adapter, *e));
+        for (size_t i = 0; i < actual.size(); ++i) match = match && expected[i] == actual[i];
+    }
+    if (!match && err) {
+        *err = "adapter " + adapter_path + " does not match PiSSA residual " + residual_path +
+               " (hot_step.pissa.fingerprint). Restore the exact residual used for training, or retrain "
+               "against the installed residual. Keep a backup before replacing a locally generated residual.";
+    }
+    return match;
+}
 
 struct PissaResidualSite {
     int                l = 0;
@@ -162,7 +236,8 @@ static inline bool pissa_residual_read_meta(const std::string & path, PissaResid
 /** Reads the whole file into host F32 (from F16 exactly). `sites` comes back
  *  in file order; look sites up by (l, site) rather than by index. */
 static inline bool pissa_residual_read(const std::string & path, PissaResidualMeta * meta,
-                                       std::vector<PissaResidualSite> * sites, std::string * err) {
+                                       std::vector<PissaResidualSite> * sites, std::string * err,
+                                       bool fingerprint = false) {
     if (!pissa_residual_read_meta(path, meta, err)) {
         return false;
     }
@@ -174,6 +249,7 @@ static inline bool pissa_residual_read(const std::string & path, PissaResidualMe
         return false;
     }
     sites->clear();
+    meta->fingerprint = fingerprint ? pissa_residual_fingerprint(st) : std::vector<float>();
     auto to_f32 = [&](const STEntry & e, std::vector<float> * out) -> bool {
         int64_t n = 1;
         for (int d = 0; d < e.n_dims; d++) {

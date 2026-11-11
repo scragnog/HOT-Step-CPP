@@ -1055,6 +1055,31 @@ SVD cache into the file; it made the shipped one. `mm3-lm-train
 nothing is written beside the base, and every checkpoint is an ordinary rank-2r
 PEFT LoRA on the original base for loaders that merge plain PEFT files.
 
+Delta exports now carry `hot_step.pissa.fingerprint`, an F32 tensor of five
+values: format version 1, then four low-to-high 16-bit words of XXH64 with
+seed 0 over every byte of the residual, including its safetensors header.
+This detects accidental replacement, not hostile modification. The shared
+LM trainer captures it when reading or generating the residual and keeps
+that value for every checkpoint; export never hashes the current path.
+MM3 checks it before constructing adapter tensors. A mismatch or malformed
+fingerprint refuses the load, naming both files and asking for the exact
+training residual or retraining. Older adapters without the tensor keep the
+rank/base-size checks. Repacking the residual changes its fingerprint too.
+The hash uses the existing file mapping without another file read or a
+sidecar cache. `pissa-residual-test`, enabled by `BUILD_TESTING=ON`, checks
+the writer/read identity, delta export, mismatch rejection and legacy load
+on CPU. Run `ctest --test-dir engine/build -C Release -R "^pissa-residual$" --output-on-failure`.
+
+The app requires the LM and depth files before training, but does not
+require the registry residual. If absent, the trainer can generate one
+under the same filename, and logs that adapters fit only that exact file.
+Keep a backup with the run. A residual already present but unusable is
+preserved; fallback exports standalone rank-2r adapters. The registry entry
+currently has no SHA-256, so Model Manager treats an existing generated file
+as installed and a normal download keeps it. Deleting it, replacing it by
+hand, or installing the shipped residual on another machine can change the
+basis. Fingerprinted adapters then refuse; legacy adapters cannot detect it.
+
 The shipped MM3 recipe since 2026-09-06 stacks four cost levers on top of
 HOT-PiZZA, each first tied against the default in a blind set and then heard
 together: `--prefix-frames 2048` (was 4096), `--attn flash` (composes with the

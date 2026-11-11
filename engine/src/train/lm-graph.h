@@ -226,6 +226,7 @@ struct LmLora {
     // init could neither read nor write one. Non-empty selects the DELTA export
     // (rank r, adapter-only) over the standalone rank-2r one.
     std::string pissa_residual;
+    std::vector<float> pissa_fingerprint;  // Identity of the file read/written at init.
     long long   pissa_base_size = 0;   // byte length of the base the residual is tied to
     // HRA (2026-09-05): `rank` Householder reflections on each site's INPUT.
     // A holds the vectors, B is null, so nothing downstream that keys off
