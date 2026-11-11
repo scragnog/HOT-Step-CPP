@@ -117,7 +117,8 @@ What sets it apart:
   seconds in, while later windows are still being rendered. The full file is saved as
   usual.
 - Variations Per Render (1 to 4) renders several different songs from one prompt in a
-  single pass, sharing the planner. Each request is otherwise one take. The queue shows
+  single pass, sharing the planner. Each request is otherwise one take. With the LM
+  adapter's Plan dial below 1 the planner's batch is halved, so you get at most 2. The queue shows
   each variation as its own row inside one batch box, as it does for a YuE2 batch, and
   each finished variation is saved and listed as its own song (and sent to the playlist
   as its own track when that option is on).
