@@ -5,23 +5,29 @@ other music parameters by hand, then queue the render. Reach for it when you wan
 over every field instead of the genre-picker shortcuts in Auto-Gen, or when refining a song that
 arrived here from Lyric Studio or Auto-Gen's preview screen.
 
-For a YuE2 song, Library's Edit action restores that track's rendered seed and NAR noise
-seed, and sets the song and variation counts to one. If the engine received a score,
-including one selected by auto-replan, Edit sends that saved score byte for byte. If the
+For a single YuE2 song, Library's Edit action reproduces it exactly with the same model
+and adapters. For a song generated in a batch, Edit restores its score and seeds but
+renders a new performance: a song composed beside others does not decode the same as
+that song composed alone.
+
+Edit restores the track's rendered seed and NAR noise seed, and sets the song and
+variation counts to one. If the engine received a score, including one selected by
+auto-replan, Edit sends that saved score byte for byte. If the
 engine planned and composed in one call, Edit leaves the score input empty and restores
 the auto-replan setting so planning consumes the same random draws before composing.
-The saved score remains available for display in both cases. Use the same model and
-adapters when reproducing a track.
+The saved score remains available for display in both cases.
 
 Older songs use their saved score-provenance flags when available. Without those flags,
 Edit leaves the score input empty and plans again. Missing scores or settings cannot be
 recovered, so exact reproduction of those older songs is not guaranteed.
 
-For YuE2, **Continue from recording** uploads audio and selects its start and end in seconds.
+For YuE2, **Continue from recording (experimental)** uploads audio and selects its start
+and end in seconds.
 Choose up to 30 seconds, then Generate. YuE2 tokenizes the recording, uses the selected
 section as the beginning of a new song, and continues composing with score planning off.
-The prefix is synthesized again, so it will differ from the original audio. A real-audio
-NAR adapter can help with recordings that YuE2 did not generate. The feature renders one
+The prefix is synthesized again, so it will differ from the original audio. Listening
+checks found it works on simple material and HOT-Step renders, but is unreliable on real
+vocal recordings, with smeared starts and looping passages. The feature renders one
 song per job; the variation count still applies. It cannot be combined with a cover or a
 build session. The selected recording section belongs only to Custom-Gen; it does not
 change Cover Studio's requests. Library's Edit action restores the saved section for a

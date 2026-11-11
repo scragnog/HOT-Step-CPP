@@ -49,7 +49,7 @@ Pick the backend from the Generation engine box at the top of the sidebar; it ap
 
 ### YuE2
 
-- [Continue from a recording](docs/user/studios/create.md): upload audio, select up to 30 seconds and compose a new song from that prefix, with an optional empty style.
+- [Continue from a recording (experimental)](docs/user/studios/create.md): upload audio, select up to 30 seconds and compose a new song from that prefix, with an optional empty style. Works on simple material and HOT-Step renders; real vocal recordings are unreliable, with smeared starts and looping.
 
 | Feature | What it does |
 |---|---|
