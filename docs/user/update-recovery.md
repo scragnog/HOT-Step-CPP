@@ -21,7 +21,7 @@ recover, so leave them in place:
 | `updater/transaction.json` | The unfinished update. The launcher reads it at every start |
 | `updater/maintenance-lease.json` and `.hot-step-maintenance.json` in the data folder | Keep any server from opening your databases until the update is settled |
 | `updater/snapshots/<id>/` | Your databases and settings as they were just before the update |
-| `updater/snapshots/<id>/candidate/` | A copy of what the new version left, made before a restore |
+| `updater/snapshots/<id>/candidate/` | A copy of what the new version left, made when a restore starts copying. Absent if the snapshot failed its check first |
 | `app/<old version>/` and `app/<new version>/` | Both versions of the app |
 
 Do not delete or edit any of them. Deleting `transaction.json` or a lease file does not
