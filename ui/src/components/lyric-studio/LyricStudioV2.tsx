@@ -72,6 +72,7 @@ async function fillMissingArtwork(items: Array<{ id: number; image_url?: string 
 }
 
 const LS_BASE = '/lyric-studio';
+const ADAPTER_FILTER_KEY = 'ls-artist-sidebar-adapter-filter';
 
 /** The adapter an album preset assigns to this engine, if any. MM3 and YuE2
  *  keep their own columns; every other engine renders with `adapter_path`, the
@@ -186,9 +187,24 @@ export const LyricStudioV2: React.FC = () => {
   // Per engine: the field that engine's renders read from the album preset.
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const activeBackendName = useBackendStore(s => s.backends.find(b => b.id === s.activeBackendId)?.displayName ?? s.activeBackendId);
-  const artistIdsWithAdapters = new Set((presetsQuery.data?.presets ?? [])
-    .filter(p => p.artist_id && presetAdapterFor(p, activeBackendId))
-    .map(p => p.artist_id!));
+  const adapterPresets = (presetsQuery.data?.presets ?? []).filter(p => presetAdapterFor(p, activeBackendId));
+  const adapterAlbumIds = new Set(adapterPresets.map(p => p.lyrics_set_id));
+  const adapterAlbumCounts = new Map<number, number>();
+  for (const p of adapterPresets) {
+    if (p.artist_id) adapterAlbumCounts.set(p.artist_id, (adapterAlbumCounts.get(p.artist_id) ?? 0) + 1);
+  }
+
+  // The "Has <engine> adapter" switch. Off by default; lasts for the session.
+  // On, it narrows the artist list, the artists' album counts and the album
+  // grid alike to albums whose preset assigns this engine an adapter.
+  const [adapterOnly, setAdapterOnlyState] = useState(() => {
+    try { return sessionStorage.getItem(ADAPTER_FILTER_KEY) === '1'; } catch { return false; }
+  });
+  const setAdapterOnly = useCallback((on: boolean) => {
+    setAdapterOnlyState(on);
+    try { sessionStorage.setItem(ADAPTER_FILTER_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  }, []);
+  const shownAlbums = adapterOnly ? albums.filter(a => adapterAlbumIds.has(a.id)) : albums;
 
   // ── Playback (for backdrop effect) ──
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
@@ -643,7 +659,8 @@ export const LyricStudioV2: React.FC = () => {
             <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={-1}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
+                adapterAlbumCounts={adapterAlbumCounts} adapterEngineName={activeBackendName}
+                adapterOnly={adapterOnly} onAdapterOnlyChange={setAdapterOnly} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -687,7 +704,8 @@ export const LyricStudioV2: React.FC = () => {
             <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
+                adapterAlbumCounts={adapterAlbumCounts} adapterEngineName={activeBackendName}
+                adapterOnly={adapterOnly} onAdapterOnlyChange={setAdapterOnly} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -698,21 +716,21 @@ export const LyricStudioV2: React.FC = () => {
                   All Artists
                 </button>
                 <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400 truncate min-w-0">{disguiseArtist(nav.selectedArtist.name)}</span>
-                {albums.length > 0 && (
+                {shownAlbums.length > 0 && (
                   <span className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center bg-white/10 text-zinc-600 dark:text-zinc-400 flex-shrink-0">
-                    {albums.length}
+                    {shownAlbums.length}
                   </span>
                 )}
               </div>
               <div className="flex-1 flex min-h-0">
                 <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
-                  <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
+                  <ArtistPageSidebar artist={nav.selectedArtist} albumCount={shownAlbums.length}
                     onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
                     modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <AlbumGrid
-                    albums={albums} loading={albumsLoading} artistName={nav.selectedArtist.name}
+                    albums={shownAlbums} loading={albumsLoading} artistName={nav.selectedArtist.name}
                     onSelectAlbum={handleSelectAlbum} onAddAlbum={openFetchForArtist}
                     onAddManual={() => setAddAlbumModalOpen(true)}
                     onDeleteAlbum={handleDeleteAlbum} onRefreshImage={handleRefreshAlbumImage}
@@ -740,7 +758,8 @@ export const LyricStudioV2: React.FC = () => {
               <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
                 <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                   onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                  artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
+                  adapterAlbumCounts={adapterAlbumCounts} adapterEngineName={activeBackendName}
+                adapterOnly={adapterOnly} onAdapterOnlyChange={setAdapterOnly} />
               </div>
               <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative max-[1023px]:hidden portrait-wide:hidden">
                 <div className="relative z-[1] h-full">

@@ -10,15 +10,18 @@ interface ArtistSidebarProps {
   selectedArtistId: number;
   onSelectArtist: (artist: Artist) => void;
   onBack: () => void;
-  /** Artists with an album preset that assigns the active engine an adapter. */
-  artistIdsWithAdapters?: Set<number>;
+  /** Per artist: how many albums have a preset assigning the active engine an
+   *  adapter. Artists with none are absent. */
+  adapterAlbumCounts?: Map<number, number>;
   /** The active engine's name, for the adapter filter's label. */
   adapterEngineName?: string;
+  /** The adapter filter switch; the studio owns it so the album grid follows. */
+  adapterOnly?: boolean;
+  onAdapterOnlyChange?: (on: boolean) => void;
 }
 
 const SCROLL_KEY = 'ls-artist-sidebar-scroll';
 const FILTER_KEY = 'ls-artist-sidebar-filter';
-const ADAPTER_FILTER_KEY = 'ls-artist-sidebar-adapter-filter';
 
 /** Lowercase + strip diacritics, so "Motorhead" finds "Motörhead". */
 const normalize = (s: string) =>
@@ -29,7 +32,7 @@ const sortKey = (name: string) => normalize(name).replace(/^the\s+/, '').trim();
 
 export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   artists, selectedArtistId, onSelectArtist, onBack,
-  artistIdsWithAdapters, adapterEngineName,
+  adapterAlbumCounts, adapterEngineName, adapterOnly = false, onAdapterOnlyChange,
 }) => {
   const { t } = useTranslation();
   const { disguiseArtist, disguiseImageUrl } = useDisguiseMode();
@@ -42,25 +45,21 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
     try { return sessionStorage.getItem(FILTER_KEY) ?? ''; } catch { return ''; }
   });
 
-  // Off by default; like the name filter it lasts for the session.
-  const [adapterOnly, setAdapterOnlyState] = useState(() => {
-    try { return sessionStorage.getItem(ADAPTER_FILTER_KEY) === '1'; } catch { return false; }
-  });
-  const filtering = adapterOnly && !!artistIdsWithAdapters;
+  const filtering = adapterOnly && !!adapterAlbumCounts;
 
   // Sort + filter run on the REAL names — disguise mode is display-only
   const visibleArtists = useMemo(() => {
     const sorted = [...artists].sort((a, b) =>
       sortKey(a.name).localeCompare(sortKey(b.name), undefined, { numeric: true })
     );
-    const withAdapter = filtering ? sorted.filter(a => artistIdsWithAdapters!.has(a.id)) : sorted;
+    const withAdapter = filtering ? sorted.filter(a => adapterAlbumCounts!.has(a.id)) : sorted;
     const q = normalize(query.trim());
     if (!q) return withAdapter;
     return withAdapter.filter(a => {
       const n = normalize(a.name);
       return n.includes(q) || n.replace(/^the\s+/, '').includes(q);
     });
-  }, [artists, query, filtering, artistIdsWithAdapters]);
+  }, [artists, query, filtering, adapterAlbumCounts]);
 
   const setFilter = useCallback((value: string) => {
     setQuery(value);
@@ -70,10 +69,9 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   }, []);
 
   const setAdapterOnly = useCallback((on: boolean) => {
-    setAdapterOnlyState(on);
-    try { sessionStorage.setItem(ADAPTER_FILTER_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+    onAdapterOnlyChange?.(on);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
-  }, []);
+  }, [onAdapterOnlyChange]);
 
   // Restore scroll position on mount
   useEffect(() => {
@@ -135,7 +133,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
             </button>
           )}
         </div>
-        {artistIdsWithAdapters && (
+        {adapterAlbumCounts && onAdapterOnlyChange && (
           <Toggle
             size="sm" accent="pink" className="mt-2"
             checked={adapterOnly} onChange={setAdapterOnly}
@@ -156,7 +154,9 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
         )}
         {visibleArtists.map((artist) => {
           const isSelected = artist.id === selectedArtistId;
-          const hasAdapter = !artistIdsWithAdapters || artistIdsWithAdapters.size === 0 || artistIdsWithAdapters.has(artist.id);
+          const hasAdapter = !adapterAlbumCounts || adapterAlbumCounts.size === 0 || adapterAlbumCounts.has(artist.id);
+          // Filtered, the count is the albums the filter keeps, matching the album grid.
+          const albumCount = filtering ? adapterAlbumCounts!.get(artist.id) ?? 0 : artist.lyrics_set_count ?? 0;
           return (
             <button
               key={artist.id}
@@ -196,7 +196,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
                   {disguiseArtist(artist.name)}
                 </p>
                 <p className="text-[11px] text-zinc-500">
-                  {artist.lyrics_set_count ?? 0} album{(artist.lyrics_set_count ?? 0) !== 1 ? 's' : ''}
+                  {albumCount} album{albumCount !== 1 ? 's' : ''}
                 </p>
               </div>
             </button>
