@@ -595,13 +595,24 @@ static void teardown_log_capture() {
 // safe on any exit path (early arg errors, model load failures, normal shutdown).
 struct LogCapture {
     std::thread reader;
+    inline static LogCapture * active = nullptr;
+
+    static void drain_at_exit() {
+        if (active) active->drain();
+    }
 
     LogCapture() {
         setup_log_capture();
-        reader = std::thread(log_reader_main);
+        if (g_real_stderr_fd >= 0) {
+            reader = std::thread(log_reader_main);
+            active = this;
+            std::atexit(drain_at_exit);
+        }
     }
 
-    ~LogCapture() {
+    void drain() {
+        if (active != this) return;
+        active = nullptr;
         teardown_log_capture();
         cv_log.notify_all();
         if (reader.joinable()) {
@@ -614,6 +625,8 @@ struct LogCapture {
             g_real_stderr_fd = -1;
         }
     }
+
+    ~LogCapture() { drain(); }
 };
 
 // GET /logs: SSE stream of stderr lines.
@@ -3264,6 +3277,14 @@ int main(int argc, char ** argv) {
     // stderr capture for SSE /logs (must be after arg parsing so --help prints directly)
     LogCapture log_capture;
 
+    // Probe the same device selection used by the model loaders, before serving jobs.
+    {
+        BackendPair bp = backend_init("Startup");
+        bool ok = backend_check::self_test(bp.backend);
+        backend_release(bp.backend, bp.cpu_backend);
+        if (!ok) return 1;
+    }
+
     // scan models directory (reads GGUF metadata only)
     fprintf(stderr, "[Server] Scanning models in %s\n", models_dir);
     if (!registry_scan(&g_registry, models_dir)) {
@@ -3441,12 +3462,11 @@ int main(int argc, char ** argv) {
     svr.set_read_timeout(600);
     svr.set_write_timeout(600);
 
-    // SO_REUSEADDR: allow rebind after TIME_WAIT (normal restart).
-    // no SO_REUSEPORT: fail if another process is actively listening.
+    // Windows SO_REUSEADDR permits two active listeners on the same port.
     svr.set_socket_options([](socket_t sock) {
         int one = 1;
 #ifdef _WIN32
-        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char *) &one, sizeof(one));
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &one, sizeof(one));
 #else
         setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 #endif
@@ -5240,7 +5260,8 @@ int main(int argc, char ** argv) {
             have_understand ? " /understand" : "");
     fprintf(stderr, "[Server] Models: %zu LM, %zu Text-Enc, %zu DiT, %zu VAE, %zu Adapter\n", g_registry.lm.size(),
             g_registry.text_enc.size(), g_registry.dit.size(), g_registry.vae.size(), g_registry.adapters.size());
-    if (!svr.listen(host, port)) {
+    const bool listened = svr.listen(host, port);
+    if (!listened) {
         fprintf(stderr, "[Server] FATAL: cannot bind %s:%d\n", host, port);
     }
 
@@ -5258,5 +5279,5 @@ int main(int argc, char ** argv) {
     store_free(g_store);
     fprintf(stderr, "[Server] Done\n");
 
-    return 0;
+    return listened ? 0 : 1;
 }

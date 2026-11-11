@@ -243,6 +243,31 @@ model. The original rules are still evaluated and shown per key. A manifest that
 unreadable, has fewer than 98 keys or lacks a key the engine produces fails the
 case.
 
+## Startup checks and model validation
+
+Before accepting requests, `ace-server` runs a small F32 scale graph directly on
+the device selected by the model loaders, including a `GGML_BACKEND` override.
+It checks the returned values and exits with a diagnostic if initialization,
+allocation, kernel execution or validation fails. The `[Backend self-test]` line
+reports the kernel check's elapsed time. `--backend-check` runs the same probe
+and adds `kernel_ok` to its JSON report.
+
+A failed HTTP bind exits nonzero after worker cleanup. Windows sockets use
+`SO_EXCLUSIVEADDRUSE` so a second engine cannot listen on the same address and
+port. The Node launcher retries an unexpected nonzero exit up to its existing
+three-crash limit within 30 seconds.
+
+DiT GGUF and safetensors configurations must declare 1 to 32 layers. The GGUF
+reader checks the unsigned count before narrowing it. The LM loader accepts 1
+to 64 layers. Both DiT configuration readers enforce the bound before
+tensor-count arithmetic or array indexing.
+
+The server drains captured stderr on `exit()` as well as normal scope exit,
+preserving fatal loader messages. Every Windows engine executable, including
+optional test targets, embeds the UTF-8 active-code-page and long-path manifest.
+Filesystem wrappers that explicitly convert UTF-8 to UTF-16 keep their existing
+behavior.
+
 ## How ace-server is organised
 
 One process, one port, one GPU worker thread. `POST /lm`, `/synth`, `/understand`,

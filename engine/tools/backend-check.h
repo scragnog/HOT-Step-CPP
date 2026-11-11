@@ -12,8 +12,12 @@
 // Pass/fail policy lives in release/smoke-artifact.mjs, not here.
 
 #include "ggml-backend.h"
+#include "ggml-alloc.h"
 #include "yyjson.h"
 
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
@@ -32,6 +36,63 @@
 #endif
 
 namespace backend_check {
+
+// Compute directly on the selected backend, with no scheduler CPU fallback.
+static bool self_test(ggml_backend_t backend) {
+    const auto started = std::chrono::steady_clock::now();
+    const char * error = nullptr;
+    ggml_context * ctx = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
+    if (!backend) {
+        error = "device initialization failed";
+    } else {
+        ggml_init_params params = {2 * ggml_tensor_overhead() + ggml_graph_overhead_custom(8, false), nullptr, true};
+        ctx = ggml_init(params);
+        if (!ctx) {
+            error = "graph allocation failed";
+        } else {
+            ggml_tensor * input = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 32);
+            ggml_tensor * output = ggml_scale(ctx, input, 2.0f);
+            ggml_cgraph * graph = ggml_new_graph_custom(ctx, 8, false);
+            ggml_build_forward_expand(graph, output);
+            if (!ggml_backend_supports_op(backend, output)) {
+                error = "device does not support the probe kernel";
+            } else if (!(buffer = ggml_backend_alloc_ctx_tensors(ctx, backend))) {
+                error = "device buffer allocation failed";
+            } else {
+                float values[32];
+                for (int i = 0; i < 32; ++i) values[i] = (float) (i + 1);
+                ggml_backend_tensor_set(input, values, 0, sizeof(values));
+                ggml_status status = ggml_backend_graph_compute(backend, graph);
+#ifdef ACE_ENABLE_FAULT_INJECTION
+                const char * fault = std::getenv("ACE_FAULT_BACKEND_ERROR");
+                if (fault && !strcmp(fault, "startup")) status = GGML_STATUS_FAILED;
+#endif
+                if (status != GGML_STATUS_SUCCESS) {
+                    error = "probe kernel execution failed";
+                } else {
+                    ggml_backend_tensor_get(output, values, 0, sizeof(values));
+                    for (int i = 0; i < 32; ++i) {
+                        if (!std::isfinite(values[i]) || values[i] != 2.0f * (i + 1)) {
+                            error = "probe kernel returned incorrect values";
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (buffer) ggml_backend_buffer_free(buffer);
+    if (ctx) ggml_free(ctx);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    if (error) {
+        fprintf(stderr, "[Backend self-test] FATAL: %s on %s. Check the device driver and backend libraries.\n",
+                error, backend ? ggml_backend_name(backend) : "unavailable device");
+    } else {
+        fprintf(stderr, "[Backend self-test] PASS on %s (%.2f ms)\n", ggml_backend_name(backend), ms);
+    }
+    return error == nullptr;
+}
 
 static std::vector<std::string> g_log;
 
@@ -229,6 +290,8 @@ static int run() {
     // What backend_init would run on.
     ggml_backend_t best = ggml_backend_init_best();
     yyjson_mut_obj_add_strcpy(doc, root, "selected", best ? ggml_backend_name(best) : "");
+    const bool kernel_ok = self_test(best);
+    yyjson_mut_obj_add_bool(doc, root, "kernel_ok", kernel_ok);
     if (best) {
         ggml_backend_free(best);
     }
@@ -317,7 +380,7 @@ static int run() {
     fflush(stdout);
     free(json);
     yyjson_mut_doc_free(doc);
-    return cpu_ok ? 0 : 1;
+    return cpu_ok && kernel_ok ? 0 : 1;
 }
 
 }  // namespace backend_check

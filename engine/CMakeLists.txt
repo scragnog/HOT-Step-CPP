@@ -1010,18 +1010,6 @@ if(APPLE)
     target_link_libraries(vst-host PRIVATE ${COCOA_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
 endif()
 
-# Embed the long-path manifest in every engine executable, so training and
-# adapter paths past 260 characters open when Windows long paths are enabled.
-if(MSVC)
-    get_property(_hs_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
-    foreach(_hs_target IN LISTS _hs_targets)
-        get_target_property(_hs_type ${_hs_target} TYPE)
-        if(_hs_type STREQUAL "EXECUTABLE")
-            target_sources(${_hs_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/long-paths.manifest)
-        endif()
-    endforeach()
-endif()
-
 # Monitor chain unit test (no VST plugins needed). Off by default so it is not
 # part of the ALL build; configure with -DBUILD_TESTING=ON to build and run it.
 option(BUILD_TESTING "Build the engine unit tests" OFF)
@@ -1084,4 +1072,16 @@ if(BUILD_TESTING)
     target_link_libraries(yue2-recompose-test PRIVATE yyjson luajit)
     link_ggml_backends(yue2-recompose-test)
     add_test(NAME yue2-recompose COMMAND yue2-recompose-test)
+endif()
+
+# Keep this after every executable, including optional test targets. Enable
+# long paths and UTF-8 narrow file APIs throughout each engine process.
+if(MSVC)
+    get_property(_hs_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_hs_target IN LISTS _hs_targets)
+        get_target_property(_hs_type ${_hs_target} TYPE)
+        if(_hs_type STREQUAL "EXECUTABLE")
+            target_sources(${_hs_target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/long-paths.manifest)
+        endif()
+    endforeach()
 endif()

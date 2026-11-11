@@ -336,8 +336,8 @@ static bool qw3lm_load(Qwen3LM * m, const char * path, int max_seq_len, int n_kv
     }
     const Qwen3LMConfig & c = m->cfg;
 
-    if (c.n_layers > QW3LM_MAX_LAYERS) {
-        fprintf(stderr, "[LM-Load] FATAL: %d layers > max %d\n", c.n_layers, QW3LM_MAX_LAYERS);
+    if (c.n_layers <= 0 || c.n_layers > QW3LM_MAX_LAYERS) {
+        fprintf(stderr, "[LM-Load] FATAL: invalid n_layers=%d (max %d)\n", c.n_layers, QW3LM_MAX_LAYERS);
         return false;
     }
 
