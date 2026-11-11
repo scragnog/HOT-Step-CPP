@@ -273,6 +273,13 @@ Test-GgmlHook "ggml-cuda strict-F32 MUL_MAT hint (Hook 19)" @("$ggml/include/ggm
     @('GGML_HINT_STRICT_F32\s*=', 'HOT-Step patch: strict-f32-hint') `
     "The MM3 refiner will not compile, or SILENT: its MERT conditioning drifts under TF32."
 
+# Hook 20: an F32-precision F16 MUL_MAT with few rows at a small batch runs mmvf.
+#   The MM3 LM runtime adapters' A side asks for it; SILENT if lost: right numbers,
+#   but each rank-256 A runs on 8 blocks again (+1.5 to +2.5 ms per LM step).
+Test-GgmlHook "ggml-cuda few-rows mmvf for F32-precision nodes (Hook 20)" @("$cuda/ggml-cuda.cu") `
+    @('HOT-Step patch: few-rows-mmvf') `
+    "SILENT: MM3 runtime LM adapters plan slower."
+
 # Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
 #   the only place ggml changes live now; local edits in engine/ggml are lost
 #   on the next submodule update and are not what CI or a user builds. Untracked

@@ -659,6 +659,12 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
             // disagreed about the same adapter at the same dials.
             if (s != 0.0f) {
                 ggml_tensor * ax = ggml_mul_mat(ctx, p.a, x);
+                // F32 precision on the A side: rank rows and a long K. On CUDA it
+                // also routes the decode batch (2 to 8 rows) to the vector kernel,
+                // one block per rank row with an F32 sum, instead of the tensor-core
+                // kernel that tiles 32 rows per block and so ran a rank-256 A on 8
+                // blocks (HOT-ggml few-rows-mmvf; -1.5 ms/step at 2 takes, 5090).
+                ggml_mul_mat_set_prec(ax, GGML_PREC_F32);
                 if (mk && !p.has_dora()) {
                     ax     = ggml_mul(ctx, ax, mk);
                     masked = true;

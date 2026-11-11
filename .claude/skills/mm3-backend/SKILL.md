@@ -213,8 +213,13 @@ count, one adapter, one prompt, 12 takes, 300 s cap: control 2/12, base 12/12,
 or handoff at 150 s 2/12 and 0/12. A fade during the lyrics loses: the base
 then has to finish the adapter's song and runs to the cap. A fade after the
 last lyric works. On that prompt the base sang the sheet by ~183 s and the
-adapter by ~260 s; the 210 s start was base pace + 30 s. Runtime mode costs
-about +44% LM step on q8_0 against merge.
+adapter by ~260 s; the 210 s start was base pace + 30 s. Runtime mode cost
+about +70% LM step on q8_0 against the base (7.6 -> 12.9 ms, 5090, 1 take) until
+2026-11-11; the LoRA A side now asks for F32 precision, which routes it to
+ggml-cuda's vector kernel (HOT-ggml few-rows-mmvf, verify-hooks Hook 20): 9.8 ms
+at 1 take, 11.0 at 2, plan 0.25 13.4. An Nsight trace showed the A side on 8
+blocks per launch (mmf tiles 32 rows; rank 256). What is left is the B side
+(mmf, 3-6 us per launch) and the adds.
 
 **Plan dial (2026-11-09, `lm_adapter_plan`, UI "Plan", default 1).** Splits
 the adapter's two jobs at the semantic/acoustic seam: the LM's semantic draw
