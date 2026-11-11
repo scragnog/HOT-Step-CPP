@@ -45,6 +45,14 @@ prepare leaves `<updater>/<preparedId>/payload` and `ready.json` for the launche
 receipt and paths. Preparation never changes the active payload or data root.
 The launcher must revalidate this receipt and acquire its maintenance lease before
 activation; staging does not imply permission to restart or install.
+On the next prepare, a lock with a provably dead owner is reclaimed once.
+Malformed lock records are reclaimed after a 30-second initialization grace;
+live owners and uncertain process probes keep their locks. While holding the
+lock, the service removes incomplete `prepare-xxxxxx` directories left by a
+crashed prepare. It preserves links, unrelated directories, and every directory
+with a `ready.json` receipt. An existing ready receipt blocks a second prepare.
+The launcher owns receipt recovery after a server restart and retention or removal
+of ready payloads; the download service neither adopts nor deletes those receipts.
 
 MM3 cover encoding uses `POST /api/mm3/cover/encode` with `sourceAudioUrl`, optional
 `sourceName`, and `launder: true` for the Cover Studio path. API callers can omit

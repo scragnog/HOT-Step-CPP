@@ -110,8 +110,8 @@ test('stages a complete stored/deflate archive, leaves active payload and data u
   assert.throws(() => s.d.prepare(result.candidate!.id), /already staged/);
 });
 
-test('accepts explicit empty directories and UTF-8 filenames', async t => {
-  const s = setup(t, [...layout(), { name: 'engine/empty/', text: '', attrs: 0x10 }, { name: 'plugins/caf\u00e9.lua' }]);
+test('accepts empty directories, UTF-8 filenames and CRC across multiple inflate chunks', async t => {
+  const s = setup(t, [...layout(), { name: 'engine/empty/', text: '', attrs: 0x10 }, { name: 'plugins/caf\u00e9.lua', text: 'fixture'.repeat(30_000), deflate: true }]);
   assert.equal((await s.prepare()).phase, 'ready', s.d.status().error ?? '');
 });
 
@@ -240,6 +240,76 @@ test('same instance and separate instances cannot prepare concurrently', async t
   assert.equal(states.filter(r => r.phase === 'ready').length, 1);
   assert.match(states.find(r => r.phase === 'failed')!.error!, /lock/);
   assert.equal(fs.existsSync(path.join(s.deps.stateRoot!, 'prepare.lock')), false);
+});
+
+test('a crashed owner lock is recovered and its incomplete stage is swept', async t => {
+  const s = setup(t);
+  const deadPid = Number(execFileSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8', timeout: 10_000, windowsHide: true }));
+  assert.throws(() => process.kill(deadPid, 0), { code: 'ESRCH' });
+  fs.mkdirSync(s.deps.stateRoot!, { recursive: true });
+  fs.writeFileSync(path.join(s.deps.stateRoot!, 'prepare.lock'), JSON.stringify({ pid: deadPid }));
+  const orphan = path.join(s.deps.stateRoot!, 'prepare-ab12CD');
+  fs.mkdirSync(orphan); fs.writeFileSync(path.join(orphan, 'archive.zip.part'), 'interrupted');
+  const r = await s.prepare();
+  assert.equal(r.phase, 'ready', r.error ?? '');
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(fs.existsSync(path.join(s.deps.stateRoot!, 'prepare.lock')), false);
+});
+
+test('a ready stage survives restart and prevents duplicate staging until launcher reconciliation', async t => {
+  const s = setup(t); const r = await s.prepare(); assert.equal(r.phase, 'ready');
+  const original = s.d.getPrepared()!;
+  const restarted = createDownloader(s.deps); await restarted.discover();
+  const downloads = s.calls.filter(url => url === URL).length;
+  restarted.prepare(restarted.status().candidate!.id); await restarted.wait();
+  assert.equal(restarted.status().phase, 'failed');
+  assert.match(restarted.status().error!, /launcher.*reconcile/i);
+  assert.ok(fs.existsSync(path.join(s.deps.stateRoot!, original.id, 'ready.json')));
+  assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), [original.id]);
+  assert.equal(s.calls.filter(url => url === URL).length, downloads);
+});
+
+test('a live owner, including an EPERM probe, keeps its lock and staging', async t => {
+  const s = setup(t);
+  fs.mkdirSync(s.deps.stateRoot!, { recursive: true });
+  const lock = path.join(s.deps.stateRoot!, 'prepare.lock');
+  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid }));
+  const orphan = path.join(s.deps.stateRoot!, 'prepare-ab12CD'); fs.mkdirSync(orphan);
+  for (const denied of [false, true]) {
+    if (denied) t.mock.method(process, 'kill', () => { throw Object.assign(new Error('permission denied'), { code: 'EPERM' }); });
+    const r = await s.prepare(); assert.equal(r.phase, 'failed'); assert.match(r.error!, /holds.*lock/);
+    assert.ok(fs.existsSync(lock)); assert.ok(fs.existsSync(orphan)); assert.ok(!s.calls.includes(URL));
+  }
+});
+
+test('old malformed locks recover; fresh malformed locks allow an owner to finish initialization', async t => {
+  const s = setup(t);
+  fs.mkdirSync(s.deps.stateRoot!, { recursive: true });
+  const lock = path.join(s.deps.stateRoot!, 'prepare.lock');
+  fs.writeFileSync(lock, '{');
+  const fresh = await s.prepare(); assert.equal(fresh.phase, 'failed'); assert.match(fresh.error!, /initializing/);
+  assert.ok(fs.existsSync(lock));
+  const old = new Date(Date.now() - 60_000); fs.utimesSync(lock, old, old);
+  const recovered = await s.prepare(); assert.equal(recovered.phase, 'ready', recovered.error ?? '');
+});
+
+test('sweeping incomplete stages leaves unrelated directories and junction targets untouched', async t => {
+  const s = setup(t);
+  fs.mkdirSync(s.deps.stateRoot!, { recursive: true });
+  const unrelated = path.join(s.deps.stateRoot!, 'prepare-not-owned'); fs.mkdirSync(unrelated);
+  const link = path.join(s.deps.stateRoot!, 'prepare-li12NK');
+  fs.writeFileSync(path.join(s.deps.dataRoot!, 'keep.txt'), 'untouched');
+  fs.symlinkSync(s.deps.dataRoot!, link, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal((await s.prepare()).phase, 'ready');
+  assert.ok(fs.existsSync(unrelated)); assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(fs.readFileSync(path.join(s.deps.dataRoot!, 'keep.txt'), 'utf8'), 'untouched');
+});
+
+test('a release recheck preserves a prior failed preparation phase and its error', async t => {
+  const s = setup(t); s.deps.freeBytes = async () => 1;
+  const failed = await s.prepare(); assert.equal(failed.phase, 'failed');
+  await s.d.discover();
+  assert.equal(s.d.status().phase, 'failed'); assert.equal(s.d.status().error, failed.error);
 });
 
 test('cancellation cleans .part and staging, then a retry starts from zero', async t => {

@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createInflateRaw } from 'node:zlib';
+import * as zlib from 'node:zlib';
 import type { BuildInfo, InstalledIdentity, UpdateCandidate, UpdatePrepareStatus } from '../../contracts/updates.js';
 import { parseBuildInfo, REPO } from './install.js';
 
@@ -263,7 +264,66 @@ async function zipEntries(file: string, limits: Limits, signal: AbortSignal): Pr
   } finally { await h.close(); }
 }
 const CRC_TABLE = Array.from({ length: 256 }, (_, i) => { let c = i; for (let j = 0; j < 8; j++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-function crcChunk(crc: number, b: Buffer): number { for (const v of b) crc = CRC_TABLE[(crc ^ v) & 255] ^ (crc >>> 8); return crc >>> 0; }
+function crcChunk(crc: number, b: Buffer): number {
+  // Portable packages use Node 24; keep the Node 20 source-checkout fallback.
+  if (typeof zlib.crc32 === 'function') return (zlib.crc32(b, (crc ^ 0xffffffff) >>> 0) ^ 0xffffffff) >>> 0;
+  for (const v of b) crc = CRC_TABLE[(crc ^ v) & 255] ^ (crc >>> 8);
+  return crc >>> 0;
+}
+
+/** Reclaim a proven dead owner once. A fresh malformed file may belong to a
+ * process between exclusive creation and writing its owner record. */
+function acquirePrepareLock(file: string, candidateId: string): number {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const handle = fs.openSync(file, 'wx', 0o600);
+      try { fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, candidateId })); }
+      catch (e) { fs.closeSync(handle); fs.unlinkSync(file); throw e; }
+      return handle;
+    } catch (e: any) { if (e.code !== 'EEXIST') throw e; }
+    if (attempt) refuse('Another updater holds the preparation lock');
+    let before: fs.Stats;
+    try { before = fs.lstatSync(file); }
+    catch (e: any) { if (e.code === 'ENOENT') continue; throw e; }
+    if (!before.isFile() || before.isSymbolicLink()) refuse('Updater lock is not an ordinary file');
+    let pid: unknown;
+    try { if (before.size <= 4096) pid = JSON.parse(fs.readFileSync(file, 'utf8')).pid; }
+    catch { /* An interrupted owner-record write can leave malformed JSON. */ }
+    if (typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 && pid <= 0x7fffffff) {
+      let dead = false;
+      try { process.kill(pid, 0); }
+      catch (e: any) { if (e.code === 'ESRCH') dead = true; }
+      // EPERM and other probe failures do not prove that the owner is dead.
+      if (!dead) refuse('Another updater holds the preparation lock');
+    } else if (Date.now() - before.mtimeMs < 30_000) refuse('Another updater is initializing the preparation lock');
+    // Recheck identity before removal in case another process already recovered it.
+    try {
+      const after = fs.lstatSync(file);
+      if (after.ino !== before.ino || after.dev !== before.dev || after.mtimeMs !== before.mtimeMs || after.size !== before.size) refuse('Updater lock changed during recovery; retry preparation');
+      fs.unlinkSync(file);
+    } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+  }
+  return refuse('Another updater holds the preparation lock');
+}
+
+async function sweepIncompleteStages(state: string): Promise<void> {
+  let ready = false;
+  for (const child of await fsp.readdir(state, { withFileTypes: true })) {
+    if (!/^prepare-[a-zA-Z0-9]{6}$/.test(child.name) || !child.isDirectory() || child.isSymbolicLink()) continue;
+    const folder = path.resolve(state, child.name);
+    if (path.dirname(folder) !== state) refuse('Refusing cleanup outside updater staging');
+    noLinks(folder);
+    try {
+      await fsp.lstat(path.join(folder, 'ready.json'));
+      ready = true;
+      continue;
+    } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
+    await fsp.rm(folder, { recursive: true, force: true });
+  }
+  // The launcher owns every ready receipt, even after a server restart. Never
+  // delete one or stage a second copy while it may be consumed for activation.
+  if (ready) refuse('The launcher must reconcile an existing ready update before preparing another');
+}
 
 async function extract(file: string, target: string, entries: ZipEntry[], signal: AbortSignal): Promise<void> {
   await fsp.mkdir(target, { mode: 0o700 });
@@ -335,6 +395,7 @@ export function createDownloader(d: DownloadDeps) {
     const blocker = prepareBlocker(d);
     if (blocker) { candidate = null; reason = blocker; return; }
     discovering = (async () => {
+      const previousPhase = progress.phase;
       progress.phase = 'checking';
       try {
         const next = await releaseCandidate(d, limits, AbortSignal.timeout(30_000));
@@ -342,7 +403,7 @@ export function createDownloader(d: DownloadDeps) {
         candidate = { ...next, id: same ? candidate!.id : randomUUID(), expiresAt: d.now() + EXPIRES_MS };
         reason = null;
       } catch (e) { candidate = null; reason = (e as Error).message; }
-      finally { progress.phase = 'idle'; }
+      finally { progress.phase = previousPhase; }
     })().finally(() => { discovering = null; });
     return discovering;
   }
@@ -352,16 +413,15 @@ export function createDownloader(d: DownloadDeps) {
   }
   async function work(c: Candidate, signal: AbortSignal): Promise<void> {
     let folder: string | null = null;
-    let lock: fsp.FileHandle | null = null;
+    let lock: number | null = null;
     const state = path.resolve(d.stateRoot!);
     try {
       noLinks(state);
       await fsp.mkdir(state, { recursive: true, mode: 0o700 });
       noLinks(state);
-      try { lock = await fsp.open(path.join(state, 'prepare.lock'), 'wx', 0o600); }
-      catch (e: any) { if (e.code === 'EEXIST') refuse('Another updater holds the preparation lock'); throw e; }
-      await lock.writeFile(JSON.stringify({ pid: process.pid, candidateId: c.id }));
+      lock = acquirePrepareLock(path.join(state, 'prepare.lock'), c.id);
       const blocker = prepareBlocker(d); if (blocker) refuse(blocker);
+      await sweepIncompleteStages(state);
       await free(state, c.bytes + limits.expandedBytes);
       const fresh = await releaseCandidate(d, limits, signal);
       if (JSON.stringify(fresh) !== JSON.stringify({ tag: c.tag, sha: c.sha, variant: c.variant, assetName: c.assetName, bytes: c.bytes, asset: c.asset, sidecar: c.sidecar, protocol: c.protocol })) refuse('Release candidate changed; check for updates again');
@@ -411,9 +471,9 @@ export function createDownloader(d: DownloadDeps) {
         catch { progress.error += '; staging cleanup failed; no update was activated'; }
       }
     } finally {
-      if (lock) {
+      if (lock !== null) {
         try {
-          await lock.close();
+          fs.closeSync(lock);
           await fsp.unlink(path.join(state, 'prepare.lock'));
         } catch {
           prepared = null;
