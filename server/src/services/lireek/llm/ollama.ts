@@ -64,59 +64,61 @@ export class OllamaProvider extends LLMProvider {
       };
     }
 
-    const doFetch = () => fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
-    });
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const doFetch = () => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    let resp = await doFetch();
-    // Non-thinking models reject the `think` field — retry once without it.
-    if (!resp.ok && noThink && resp.status === 400 && 'think' in payload) {
-      delete payload.think;
-      resp = await doFetch();
-    }
+      let resp = await doFetch();
+      // Non-thinking models reject the `think` field — retry once without it.
+      if (!resp.ok && noThink && resp.status === 400 && 'think' in payload) {
+        await resp.body?.cancel();
+        delete payload.think;
+        resp = await doFetch();
+      }
 
-    if (!resp.ok) throw new Error(`Ollama error: ${resp.status} ${await resp.text()}`);
+      if (!resp.ok) throw new Error(`Ollama error: ${resp.status} ${await resp.text()}`);
 
-    if (onChunk) {
-      if (!resp.body) return '';
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = '';
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunkLines = decoder.decode(value, { stream: true }).split('\n');
-          for (const line of chunkLines) {
-            if (!line.trim()) continue;
-            try {
-              const parsed = JSON.parse(line);
-              // Display-only: stream reasoning to UI but don't keep in result
-              const reasoning = parsed.message?.reasoning_content;
-              if (reasoning) {
-                onChunk(reasoning);
-                continue;
-              }
-              const content = parsed.message?.content;
-              if (content) {
-                fullText += content;
-                onChunk(content);
-                if (skipThinkingSignal && fullText.includes('<think>') && !fullText.includes('</think>')) {
-                  reader.cancel();
-                  return fullText;
+      if (onChunk) {
+        if (!resp.body) return '';
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunkLines = decoder.decode(value, { stream: true }).split('\n');
+            for (const line of chunkLines) {
+              if (!line.trim()) continue;
+              try {
+                const parsed = JSON.parse(line);
+                // Display-only: stream reasoning to UI but don't keep in result
+                const reasoning = parsed.message?.thinking || parsed.message?.reasoning_content;
+                if (reasoning) {
+                  onChunk(reasoning);
+                  continue;
                 }
-              }
-            } catch (e) {}
+                const content = parsed.message?.content;
+                if (content) {
+                  fullText += content;
+                  onChunk(content);
+                  if (skipThinkingSignal && fullText.includes('<think>') && !fullText.includes('</think>')) {
+                    reader.cancel();
+                    return fullText;
+                  }
+                }
+              } catch (e) {}
+            }
           }
-        }
-      } finally { reader.releaseLock(); }
-      return fullText;
-    } else {
-      const data = await resp.json();
-      return data.message?.content || '';
-    }
+        } finally { reader.releaseLock(); }
+        return fullText;
+      } else {
+        const data = await resp.json();
+        return data.message?.content || '';
+      }
+    });
   }
 }

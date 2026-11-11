@@ -1,7 +1,13 @@
 // llm/base.ts — LLMProvider abstract base class + SSE streaming helper
 
+import { Agent } from 'undici';
+import { config } from '../../../config.js';
 import type { ProviderInfo, ChunkCallback, CallOptions } from './types.js';
 import { skipThinkingSignal } from './types.js';
+
+// The completion timer owns the budget, including waits for headers and body.
+// A separate pool prevents undici's five-minute defaults from capping it.
+const completionDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
 export abstract class LLMProvider {
   abstract id: string;
@@ -36,6 +42,42 @@ export abstract class LLMProvider {
       return this.defaultModel;
     }
     return models[0] || this.defaultModel || '';
+  }
+
+  protected async withCompletion<T>(
+    onChunk: ChunkCallback | undefined,
+    run: (request: typeof fetch, onChunk: ChunkCallback | undefined) => Promise<T>,
+    streaming = !!onChunk,
+  ): Promise<T> {
+    const timeoutMs = config.lireek.llmTimeoutMs;
+    const controller = new AbortController();
+    const timeout = new Error(
+      `${this.name} LLM timeout after ${timeoutMs} ms${streaming ? ' without response tokens' : ''}. ` +
+      `Raise LLM_TIMEOUT_MS (currently ${timeoutMs} ms) in Settings > AI Services > "LLM call timeout (ms)".`,
+    );
+    timeout.name = 'TimeoutError';
+    const timer = setTimeout(() => controller.abort(timeout), timeoutMs);
+    const request: typeof fetch = (input, init) => fetch(input, {
+      ...init,
+      signal: controller.signal,
+      dispatcher: completionDispatcher,
+    } as RequestInit & { dispatcher: Agent });
+    const chunk: ChunkCallback | undefined = onChunk ? text => {
+      if (text && streaming && !controller.signal.aborted) timer.refresh();
+      onChunk(text);
+    } : undefined;
+    try {
+      const result = await run(request, chunk);
+      if (controller.signal.aborted) throw timeout;
+      return result;
+    } catch (error) {
+      if (controller.signal.aborted) throw timeout;
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      // Also closes an unfinished response after an early parser return/error.
+      controller.abort();
+    }
   }
 
   toInfo(): ProviderInfo {

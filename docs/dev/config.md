@@ -298,7 +298,7 @@ them are hot-reloaded when saved from Settings.
 | Variable | Default | Settings | Effect |
 |---|---|---|---|
 | `DEFAULT_LLM_PROVIDER` | `gemini` | AI Services | Provider used when a request does not name one |
-| `LLM_TIMEOUT_MS` | `300000` | AI Services | Abort limit for one completion call, every provider. Values below 10000 are raised to 10000 |
+| `LLM_TIMEOUT_MS` | `300000` | AI Services | Completion timeout, every provider. Streaming calls allow this long between response or reasoning tokens; non-streaming calls have a total time limit. The same timer covers headers and body without a separate five-minute HTTP cap. Values below 10000 are raised to 10000 |
 | `GENIUS_ACCESS_TOKEN` | empty | AI Services | Genius API token for lyric lookup |
 | `GEMINI_API_KEY` | empty | AI Services | Google Gemini key |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | AI Services | Gemini model |

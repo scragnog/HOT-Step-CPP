@@ -190,9 +190,17 @@ OpenAI-compatible entry once it has a base URL, and Unsloth Studio once it has
 both a username and a password or `UNSLOTH_KEYLESS=1` ("Keyless local Studio"
 in Settings). Ollama, LM Studio and llama.cpp are always listed, whether or not
 they are running. Three roles, Profiling, Generation and Refinement, each get an independent
-provider and model choice, all persisted locally in the browser. `LLM_TIMEOUT_MS`
-sets how long a single call may run (default 300 s). Raise it if a local
-model shares the GPU with the engine and needs longer to respond.
+provider and model choice, all persisted locally in the browser.
+
+Settings > AI Services > "LLM call timeout (ms)" sets `LLM_TIMEOUT_MS`, which
+defaults to 300000 ms, or 5 minutes. For streamed calls this limits the pause
+before the first token and between later response or reasoning tokens. An active
+stream can run longer than 5 minutes. Keepalive messages alone do not extend it.
+Calls without streaming keep a total time limit. HTTP header and body waits use
+the same budget, so a larger setting also works before a model starts replying.
+Raise the setting if a local model needs longer to load or process a large prompt,
+or shares the GPU with the engine. Timeout errors name the setting, and changes
+apply to the next call without a restart.
 
 ## Tips and limits
 

@@ -124,18 +124,19 @@ export class UnslothProvider extends LLMProvider {
       stream: true, // Unsloth often requires stream: true
     };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
-    });
+    return this.withCompletion(onChunk || (() => {}), async (fetch, onChunk) => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload),
+      });
 
-    if (!resp.ok) throw new Error(`Unsloth error: ${resp.status} ${await resp.text()}`);
+      if (!resp.ok) throw new Error(`Unsloth error: ${resp.status} ${await resp.text()}`);
 
-    return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+      return await readSSE(resp, onChunk || (() => {}), (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+    }, true);
   }
 }

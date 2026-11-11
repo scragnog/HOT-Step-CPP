@@ -105,20 +105,21 @@ export class GeminiProvider extends LLMProvider {
       contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
     };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) throw new Error(`Gemini API error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => data.candidates?.[0]?.content?.parts?.[0]?.text || null);
+      } else {
+        const data = await resp.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      }
     });
-
-    if (!resp.ok) throw new Error(`Gemini API error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.candidates?.[0]?.content?.parts?.[0]?.text || null);
-    } else {
-      const data = await resp.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    }
   }
 }

@@ -84,29 +84,31 @@ export class LMStudioProvider extends LLMProvider {
       payload.max_tokens = 8192;
     }
 
-    const doFetch = () => fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const doFetch = () => fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
+        body: JSON.stringify(payload),
+      });
+
+      let resp = await doFetch();
+      // If a server/model combination rejects the non-standard fields, retry
+      // once without them rather than failing the generation.
+      if (!resp.ok && noThink && resp.status === 400) {
+        await resp.body?.cancel();
+        delete payload.chat_template_kwargs;
+        delete payload.reasoning_effort;
+        resp = await doFetch();
+      }
+
+      if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+      } else {
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content || '';
+      }
     });
-
-    let resp = await doFetch();
-    // If a server/model combination rejects the non-standard fields, retry
-    // once without them rather than failing the generation.
-    if (!resp.ok && noThink && resp.status === 400) {
-      delete payload.chat_template_kwargs;
-      delete payload.reasoning_effort;
-      resp = await doFetch();
-    }
-
-    if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
-    } else {
-      const data = await resp.json();
-      return data.choices?.[0]?.message?.content || '';
-    }
   }
 }

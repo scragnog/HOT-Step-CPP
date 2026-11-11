@@ -72,21 +72,21 @@ export class LlamaCppProvider extends LLMProvider {
       payload.max_tokens = 8192;
     }
 
-    // 5-min timeout — prevents hung requests from blocking the generation queue
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) throw new Error(`llama.cpp error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+      } else {
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content || '';
+      }
     });
-
-    if (!resp.ok) throw new Error(`llama.cpp error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
-    } else {
-      const data = await resp.json();
-      return data.choices?.[0]?.message?.content || '';
-    }
   }
 }

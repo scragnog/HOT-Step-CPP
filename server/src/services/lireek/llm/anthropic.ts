@@ -81,29 +81,28 @@ export class AnthropicProvider extends LLMProvider {
       stream: !!onChunk,
     };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': config.lireek.anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
-    });
-
-    if (!resp.ok) throw new Error(`Anthropic error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      let fullText = '';
-      await readSSE(resp, (text) => { fullText += text; onChunk(text); }, (data) => {
-        if (data.type === 'content_block_delta' && data.delta?.text) return data.delta.text;
-        return null;
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.lireek.anthropicApiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(payload),
       });
-      return fullText;
-    } else {
-      const data: { content?: Array<{ type: string; text?: string }> } = await resp.json();
-      return data.content?.map(block => block.type === 'text' ? block.text ?? '' : '').join('') ?? '';
-    }
+
+      if (!resp.ok) throw new Error(`Anthropic error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => {
+          if (data.type === 'content_block_delta' && data.delta?.text) return data.delta.text;
+          return null;
+        }, (data) => data.delta?.thinking || null);
+      } else {
+        const data: { content?: Array<{ type: string; text?: string }> } = await resp.json();
+        return data.content?.map(block => block.type === 'text' ? block.text ?? '' : '').join('') ?? '';
+      }
+    });
   }
 }

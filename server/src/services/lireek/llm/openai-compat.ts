@@ -118,36 +118,39 @@ export class OpenAICompatProvider extends LLMProvider {
       headers['Authorization'] = `Bearer ${config.lireek.openaiCompatApiKey}`;
     }
 
-    const doFetch = () => fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const doFetch = () => fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      // Staged fallback. NInfer hard-400s on chat_template_kwargs but DOES honour
+      // reasoning_effort (verified 2026-08-18: 'none' drops reasoning to zero).
+      // A catch-all retry that strips both would silently restore full thinking, so
+      // drop the llama.cpp-only kwarg first and only surrender the effort field if
+      // the server still refuses.
+      let resp = await doFetch();
+      if (!resp.ok && resp.status === 400 && payload.chat_template_kwargs) {
+        await resp.body?.cancel();
+        delete payload.chat_template_kwargs;
+        resp = await doFetch();
+      }
+      if (!resp.ok && resp.status === 400) {
+        await resp.body?.cancel();
+        delete payload.reasoning_effort;
+        delete payload.enable_thinking;
+        resp = await doFetch();
+      }
+
+      if (!resp.ok) throw new Error(`${this.name} error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+      } else {
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content || '';
+      }
     });
-
-    // Staged fallback. NInfer hard-400s on chat_template_kwargs but DOES honour
-    // reasoning_effort (verified 2026-08-18: 'none' drops reasoning to zero).
-    // A catch-all retry that strips both would silently restore full thinking, so
-    // drop the llama.cpp-only kwarg first and only surrender the effort field if
-    // the server still refuses.
-    let resp = await doFetch();
-    if (!resp.ok && resp.status === 400 && payload.chat_template_kwargs) {
-      delete payload.chat_template_kwargs;
-      resp = await doFetch();
-    }
-    if (!resp.ok && resp.status === 400) {
-      delete payload.reasoning_effort;
-      delete payload.enable_thinking;
-      resp = await doFetch();
-    }
-
-    if (!resp.ok) throw new Error(`${this.name} error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
-    } else {
-      const data = await resp.json();
-      return data.choices?.[0]?.message?.content || '';
-    }
   }
 }

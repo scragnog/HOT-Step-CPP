@@ -20,23 +20,24 @@ export class OpenAIProvider extends LLMProvider {
       stream: !!onChunk,
     };
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.lireek.openaiApiKey}`,
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
+    return this.withCompletion(onChunk, async (fetch, onChunk) => {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.lireek.openaiApiKey}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) throw new Error(`OpenAI error: ${resp.status} ${await resp.text()}`);
+
+      if (onChunk) {
+        return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
+      } else {
+        const data = await resp.json();
+        return data.choices?.[0]?.message?.content || '';
+      }
     });
-
-    if (!resp.ok) throw new Error(`OpenAI error: ${resp.status} ${await resp.text()}`);
-
-    if (onChunk) {
-      return await readSSE(resp, onChunk, (data) => data.choices?.[0]?.delta?.content || null, (data) => data.choices?.[0]?.delta?.reasoning_content || null);
-    } else {
-      const data = await resp.json();
-      return data.choices?.[0]?.message?.content || '';
-    }
   }
 }
