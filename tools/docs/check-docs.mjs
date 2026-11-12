@@ -85,7 +85,7 @@ const isDanglingSymlink = (p) => { try { return fs.lstatSync(p).isSymbolicLink()
 const linkRe = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 for (const file of [...tracked, ...untrackedNew]) {
   // Scratch snapshots are not documentation sources.
-  if (file.startsWith('.tmp/')) continue;
+  if (file.startsWith('.tmp/') || /(^|\/)\.hotstep-/.test(file)) continue;
   let raw;
   try {
     raw = skipWorktree.has(file)
