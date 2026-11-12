@@ -10,6 +10,7 @@
 // The worker's side is trainingWorkers.ts (workerMirrorManifest,
 // workerMirrorFile, deleteWorkerMirrorRun) behind /api/training/worker/yue2-mirror*.
 // The same passes copy MM3 runs too (mirrorMm3Runs, /api/training/worker/mm3-mirror*).
+import { removeSync } from '../fsRemove.js';
 import fs from 'fs';
 import path from 'path';
 import { createHash, randomUUID } from 'crypto';
@@ -143,7 +144,7 @@ function sweepPartials(output: string): void {
   swept.add(output);
   let names: string[] = [];
   try { names = fs.readdirSync(output, { recursive: true }) as string[]; } catch { return; }
-  for (const rel of names) if (PARTIAL.test(path.basename(rel))) fs.rmSync(path.join(output, rel), { force: true });
+  for (const rel of names) if (PARTIAL.test(path.basename(rel))) removeSync(path.join(output, rel), { force: true });
 }
 
 /** Download one file to a unique .part, hashing as it streams, and rename it
@@ -169,7 +170,7 @@ async function fetchVerified(w: WorkerInfo, url: string, dest: string): Promise<
     } catch (err) {
       lastError = errorText(err);
     } finally {
-      fs.rmSync(part, { force: true });
+      removeSync(part, { force: true });
     }
   }
   throw new Error(lastError);
@@ -407,7 +408,7 @@ export async function deleteMm3RunFolder(run: string, dir: string, guard?: () =>
       if (!fs.existsSync(dir)) return;
       if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to delete a linked run folder: ${dir}`);
       removing = true;
-      fs.rmSync(dir, { recursive: true, force: true });
+      removeSync(dir, { recursive: true, force: true });
     });
   } catch (err) {
     if (!removing) writeMm3Records([...readMm3Records().filter(r => r.run !== run), ...before]);

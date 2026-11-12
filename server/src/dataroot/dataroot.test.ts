@@ -335,6 +335,48 @@ test('cross-volume: copies, verifies sizes, keeps the source on failure, cleans 
   assert.equal(readPointer(f.ptrFile)!.root, newRoot);
 });
 
+test('cross-volume cleanup removes non-ASCII source entries', () => {
+  const f = fixture();
+  const oldRoot = path.join(f.base, 'old-root');
+  const newRoot = path.join(f.base, 'new-root');
+  const rel = path.join('library', 'Folder \u2014 Caf\u00e9', 'track.txt');
+  write(path.join(oldRoot, rel), 'keep');
+  const { op } = planOperation('move', newRoot, { appRoot: f.app, currentRoot: oldRoot, currentDb: null });
+  const ptr = { version: 1 as const, root: oldRoot, pending: op };
+  const real = hooks.sameVolume;
+  hooks.sameVolume = () => false;
+  try { runPending(f.ptrFile, ptr, f.app, quiet); }
+  finally { hooks.sameVolume = real; }
+  assert.equal(fs.existsSync(path.join(oldRoot, rel)), false);
+  assert.equal(fs.readFileSync(path.join(newRoot, rel), 'utf8'), 'keep');
+  assert.equal(readPointer(f.ptrFile)!.pending, null);
+});
+
+test('a cleanup failure warns without failing a verified move', t => {
+  const f = fixture();
+  const oldRoot = path.join(f.base, 'old-root');
+  const newRoot = path.join(f.base, 'new-root');
+  const source = path.join(oldRoot, 'library', 'locked.txt');
+  write(source, 'keep');
+  const { op } = planOperation('move', newRoot, { appRoot: f.app, currentRoot: oldRoot, currentDb: null });
+  const ptr = { version: 1 as const, root: oldRoot, pending: op };
+  const real = hooks.sameVolume;
+  const rm = fs.rmSync;
+  const failure = t.mock.method(fs, 'rmSync', (...args: Parameters<typeof fs.rmSync>) => {
+    if (isInside(oldRoot, String(args[0]))) throw new Error('access denied');
+    return rm(...args);
+  });
+  const logs: string[] = [];
+  hooks.sameVolume = () => false;
+  try { runPending(f.ptrFile, ptr, f.app, line => logs.push(line)); }
+  finally { hooks.sameVolume = real; failure.mock.restore(); }
+  assert.equal(readPointer(f.ptrFile)!.root, newRoot);
+  assert.equal(readPointer(f.ptrFile)!.pending, null);
+  assert.equal(fs.readFileSync(path.join(newRoot, 'library', 'locked.txt'), 'utf8'), 'keep');
+  assert.ok(fs.existsSync(source));
+  assert.ok(logs.some(line => line.includes('WARNING') && line.includes(oldRoot) && line.includes('access denied')));
+});
+
 test('DB rewrite: a unique-key collision rolls back everything', () => {
   const f = fixture();
   const from = path.join(f.base, 'old');

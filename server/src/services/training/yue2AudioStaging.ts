@@ -1,5 +1,6 @@
 // YuE2 scans a flat folder. Keep the dataset's included audio and its sidecars
 // under the preprocess output: later stages reopen the manifest's source paths.
+import { removeSync } from '../fsRemove.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -34,13 +35,6 @@ function putFile(source: string, destination: string, link: (source: string, des
   }
 }
 
-/** Not fs.rmSync: on Windows, Node 24.11 silently skips a path with non-ASCII
- * characters (an em dash in a title), so the copy after it hit EEXIST. */
-function removeFile(file: string): void {
-  try { fs.unlinkSync(file); }
-  catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
-}
-
 /** Separation must use the same flattened names as preprocessing. Old caches
  * without an audio_dir retain the original-folder fallback, and so does a
  * cache whose audio_dir was moved away (the manifest is fingerprinted, so it
@@ -70,7 +64,7 @@ export function refreshYue2StagedSidecars(manifestPath: string): void {
       const destination = path.join(dir, `${stem(entry.name)}${suffix}`);
       // Older staging names may overlap suffixes; never unlink original files.
       if (path.resolve(source) === path.resolve(destination)) throw new Error('Invalid YuE2 staged sidecar mapping');
-      removeFile(destination);
+      removeSync(destination, { force: true });
       if (fs.existsSync(source)) putFile(source, destination, fs.linkSync);
     }
   }
@@ -141,7 +135,7 @@ export function stageYue2Audio(
     }
   }
   const names = yue2StagedNames(files);
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const sources: StagedSource[] = [];
   for (const s of files) {

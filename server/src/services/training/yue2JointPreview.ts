@@ -1,6 +1,7 @@
 // YuE2 checkpoint preview catalogue and request validation (plan 27).
 // Rendering is intentionally injected by the joint runner: this module only
 // owns bounded, durable metadata and safe file resolution.
+import { removeSync } from '../fsRemove.js';
 import fs from 'fs';
 import path from 'path';
 import { randomInt, randomUUID } from 'crypto';
@@ -162,8 +163,8 @@ export function pruneYue2JointPreviews(output: string, keepStep: number): number
   let gone = 0;
   for (const r of all) {
     if (r.step === keepStep || !r.file) continue;
-    fs.rmSync(path.join(output, 'previews', r.file), { force: true });
-    fs.rmSync(path.join(output, 'previews', r.file.replace(/\.wav$/i, '.mp3')), { force: true });
+    removeSync(path.join(output, 'previews', r.file), { force: true });
+    removeSync(path.join(output, 'previews', r.file.replace(/\.wav$/i, '.mp3')), { force: true });
     delete r.file;
     r.updatedAt = Date.now();
     gone++;
@@ -191,7 +192,7 @@ export function yue2JointPreviewMp3(wav: string): Promise<string | null> {
     pending = (ffmpeg
       ? execFileAsync(ffmpeg, ['-y', '-loglevel', 'error', '-i', wav, '-c:a', 'libmp3lame', '-b:a', '192k', '-f', 'mp3', tmp], { timeout: 120_000 })
         .then(() => { fs.renameSync(tmp, mp3); return mp3; })
-        .catch(() => { fs.rmSync(tmp, { force: true }); return null; })
+        .catch(() => { removeSync(tmp, { force: true }); return null; })
       : Promise.resolve(null))
       .finally(() => mp3Encodes.delete(mp3));
     mp3Encodes.set(mp3, pending);

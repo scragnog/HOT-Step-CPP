@@ -12,6 +12,7 @@
 // Default destination: <data dir>/backups/hotstep-<timestamp>.db. An existing
 // file is never overwritten.
 
+import { removeSync } from '../services/fsRemove.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -44,7 +45,7 @@ export async function backupDatabase(source: string, destination: string): Promi
       copy.close();
     }
   } catch (err) {
-    fs.rmSync(destination, { force: true });
+    removeSync(destination, { force: true });
     throw err;
   } finally {
     src.close();

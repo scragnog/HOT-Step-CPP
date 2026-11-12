@@ -10,6 +10,7 @@
  *
  * Converted files are cached alongside the original so re-runs skip conversion.
  */
+import { removeSync } from './fsRemove.js';
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
@@ -176,7 +177,7 @@ export async function cachedMp3(filePath: string, cacheDir: string): Promise<str
       { timeout: 300_000, maxBuffer: 16 * 1024 * 1024 });
     fs.renameSync(part, out);
   } catch (err: any) {
-    fs.rmSync(part, { force: true });
+    removeSync(part, { force: true });
     throw new Error(`ffmpeg MP3 conversion failed: ${err.stderr?.toString()?.slice(-500) || err.message}`);
   }
   return out;

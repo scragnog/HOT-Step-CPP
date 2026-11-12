@@ -10,6 +10,7 @@
 // writes its own dev pointer; from then on it works like a release, except
 // that nothing is migrated automatically and restart keeps the dev marker.
 
+import { removeSync } from '../services/fsRemove.js';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
@@ -96,10 +97,10 @@ function withLock<T>(prof: string, fn: () => T): T {
       let alive = false;
       try { if (pid) { process.kill(pid, 0); alive = true; } } catch (k: any) { alive = k.code === 'EPERM'; }
       if (alive) throw new Error(`another HOT-Step (PID ${pid}) is moving data`);
-      fs.rmSync(lock, { force: true });
+      removeSync(lock, { force: true });
     }
   }
-  try { return fn(); } finally { fs.rmSync(lock, { force: true }); }
+  try { return fn(); } finally { removeSync(lock, { force: true }); }
 }
 
 function portInUse(port: number, host = '127.0.0.1'): Promise<boolean> {

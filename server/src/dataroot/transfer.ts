@@ -8,6 +8,7 @@
 // (pending.mappings[].state) after every step, so a crash resumes. Existence
 // on both sides decides what a half-done rename means; nothing is overwritten.
 
+import { removeSync } from '../services/fsRemove.js';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -128,7 +129,7 @@ function copyMapping(m: Mapping, log: Log): void {
 }
 
 function cleanMapping(m: Mapping): void {
-  for (const n of entriesOf(m)) fs.rmSync(path.join(m.from, n), { recursive: true, force: true });
+  for (const n of entriesOf(m)) removeSync(path.join(m.from, n), { recursive: true, force: true });
   if (!m.exclude?.length) { try { fs.rmdirSync(m.from); } catch { /* not empty or gone */ } }
 }
 
@@ -503,14 +504,14 @@ function abandon(ptrFile: string, ptr: Pointer, log: Log): void {
         else throw new TransferError(`abandon: ${m.name} is split across volumes; finish the move instead`);
       }
     } else if (m.state === 'copied') {
-      for (const n of entriesOf(m)) fs.rmSync(path.join(m.to, n), { recursive: true, force: true });
+      for (const n of entriesOf(m)) removeSync(path.join(m.to, n), { recursive: true, force: true });
     }
   }
   if (op.envDone && op.envSource) {
     // Put back the destination's own settings, or drop the ones we wrote.
     const l = dataLayout(op.destination);
     const backup = `${l.envPath}.before-${op.kind}-${op.id.slice(0, 8)}`;
-    if (fs.existsSync(backup)) fs.renameSync(backup, l.envPath); else fs.rmSync(l.envPath, { force: true });
+    if (fs.existsSync(backup)) fs.renameSync(backup, l.envPath); else removeSync(l.envPath, { force: true });
   }
   log(`[Data] Abandoned ${op.kind} to ${op.destination}`);
   ptr.pending = null;
@@ -588,7 +589,10 @@ export function runPending(ptrFile: string, ptr: Pointer, appRoot: string, log: 
 
     for (const m of op.mappings) {
       if (m.state !== 'copied') continue;
-      cleanMapping(m);
+      // The verified destination and rewritten metadata are already complete.
+      // A leftover source must not turn a finished move into a startup failure.
+      try { cleanMapping(m); }
+      catch (err) { log(`[Data] WARNING: Source cleanup incomplete at ${m.from}: ${(err as Error).message}`); }
       m.state = 'cleaned';
       persist(ptrFile, ptr);
     }

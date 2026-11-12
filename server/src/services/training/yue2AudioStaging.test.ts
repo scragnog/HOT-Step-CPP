@@ -106,3 +106,14 @@ test('reserves every sidecar destination across distinct audio stems', t => {
       'planner caption or second track metadata');
   }
 });
+
+test('rebuilds staging under a non-ASCII output without retaining old files', t => {
+  const f = fixture(t);
+  f.write('Song \u2014 Caf\u00e9.wav', 'original audio');
+  f.write('keep.wav');
+  const output = path.join(f.output, 'Run \u2014 Caf\u00e9');
+  const dir = stageYue2Audio(f.samples(true), output);
+  stageYue2Audio(f.samples(true).filter(s => s.relPath === 'keep.wav'), output);
+  assert.deepEqual(fs.readdirSync(dir), ['keep.wav']);
+  assert.equal(fs.readFileSync(path.join(f.source, 'Song \u2014 Caf\u00e9.wav'), 'utf8'), 'original audio');
+});

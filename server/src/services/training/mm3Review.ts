@@ -12,6 +12,7 @@
 // choice here; the routes (mm3Ladder.ts, ops/mm3) hold the dataset lock and the
 // stale checks.
 
+import { removeSync } from '../fsRemove.js';
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../../db/database.js';
@@ -214,7 +215,7 @@ export function runMm3Cleanup(ds: Ds & { sourceDir: string }, run: Pick<Mm3RunSu
   const { others, previewsDir, previews, resume, caches } = parts(ds, run, step);
   let freed = 0; const done: string[] = [];
   if (choice.otherCheckpoints && others.length) {
-    for (const c of others) fs.rmSync(c.dir, { recursive: true, force: true });
+    for (const c of others) removeSync(c.dir, { recursive: true, force: true });
     freed += plan.otherCheckpoints.bytes; done.push(`${others.length} other checkpoint(s)`);
   }
   if (choice.otherPreviews && previews.length) {
@@ -222,18 +223,18 @@ export function runMm3Cleanup(ds: Ds & { sourceDir: string }, run: Pick<Mm3RunSu
       const wav = path.join(previewsDir, v.file);
       const { audioUrl: _url, ...rec } = v as TrainingPreview & { audioUrl?: string };
       fs.writeFileSync(`${wav}.json`, JSON.stringify({ ...rec, pruned: true }, null, 2), 'utf-8');
-      fs.rmSync(wav, { force: true });
-      fs.rmSync(wav.replace(/\.wav$/i, '.mp3'), { force: true });
+      removeSync(wav, { force: true });
+      removeSync(wav.replace(/\.wav$/i, '.mp3'), { force: true });
     }
     freed += plan.otherPreviews.bytes; done.push(`${previews.length} other preview(s)`);
   }
   if (choice.resume && resume.length) {
-    for (const f of resume) fs.rmSync(f, { force: true });
+    for (const f of resume) removeSync(f, { force: true });
     freed += plan.resume.bytes; done.push('resume state');
   }
   if (choice.caches && caches.length) {
     // listPreparedCaches has walked them (no links, nothing inside the source).
-    for (const c of caches) fs.rmSync(c.path, { recursive: true, force: false });
+    for (const c of caches) removeSync(c.path, { recursive: true, force: false });
     freed += plan.caches.bytes; done.push(`${caches.length} cache folder(s)`);
   }
   return { freedBytes: freed, done };
