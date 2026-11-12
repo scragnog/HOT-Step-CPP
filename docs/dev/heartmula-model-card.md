@@ -75,3 +75,17 @@ Native inference does not need the optional encoder pack for text generation.
 
 The publication manifest contains exact paths, byte sizes and SHA-256 values.
 Download these components through the HeartMuLa tab in the HOT-Step Model Manager.
+
+## MuLaCover
+
+[MuLaCover by MuLa Labs](https://github.com/HeartMuLa/MuLaCover) is a music
+cover generation model. The two `heartmula-mulacover-*-BF16.gguf` files are
+conversions of the [source weights](https://huggingface.co/HeartMuLa/MuLaCover).
+The safetensors weights were converted to GGUF, split into global and local
+parts, and stored as BF16.
+
+These two files are not covered by the Apache 2.0 licence used for the rest of
+this repository. The MuLaCover weights are licensed under
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/legalcode).
+The [MuLaCover model terms](MODEL_LICENSE-mulacover) also restrict generated
+outputs to non-commercial use. Commercial use requires a licence from MuLa Labs.

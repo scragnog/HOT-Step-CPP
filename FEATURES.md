@@ -264,7 +264,7 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Instrumental melody mode (YuE2) | With Instrumental on, choose Vocal wins (the melody moves to Ins and cuts overlapping Ins notes) or Resting Ins bars only (the melody moves only into bars where Ins is silent, as in the YuE2 instrumental ComfyUI node). Vocal is muted either way. |
 | Follow source (YuE2) | Optionally let the recording steer the composer through the real-audio tokenizer's codes, with an adherence dial, candidate count, hard restriction, an adherence curve over the song and a periodic wobble. Off while the pitch is shifted or a BPM is set. [Details](docs/user/studios/cover-studio.md) |
 | Adapter pair (YuE2) | Render with the base model or an explicit AR/NAR pair captured when you queue the cover. Custom starts from the model picker's pair, and Base notes when it ignores a picked adapter. |
-| HeartMuLa lead-sheet cover | Approved Prepare ABC, explicit topic/genre/instrument/mood tags, section-marked lyrics and seed; up to 300 seconds. Needs the MuLaCover model pack, whose weights and outputs are CC BY-NC 4.0; no download is offered yet. |
+| HeartMuLa lead-sheet cover | Approved Prepare ABC, explicit topic/genre/instrument/mood tags, section-marked lyrics and seed; up to 300 seconds. Needs the MuLaCover model pack, whose weights and outputs are CC BY-NC 4.0; download MuLaCover cover model from the HeartMuLa tab in Model Manager, including the HeartMuLa codec and tokenizer. Needs the Qwen3 Embedding BF16 text encoder. |
 | Serial cover queue | Queue more covers while one renders. |
 
 ## Repaint Studio

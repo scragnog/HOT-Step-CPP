@@ -7,7 +7,7 @@ export function MulacoverPackNotice() {
   const { t } = useTranslation();
   return <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-zinc-600 dark:text-zinc-400 space-y-1">
     <p className="font-semibold">{MULACOVER_PACK.name} · {MULACOVER_PACK.license}</p>
-    <p>{t('cover.heartmula.packNotice', 'MuLaCover weights and outputs are for non-commercial use. This is a separate cover model pack; the ordinary HeartMuLa models do not include it. Downloads are not available yet.')}</p>
+    <p>{t('cover.heartmula.packNotice', 'MuLaCover weights and outputs are for non-commercial use. This is a separate cover model pack; the ordinary HeartMuLa models do not include it. Download the MuLaCover cover model pack from the HeartMuLa tab in Model Manager. It includes the HeartMuLa codec and tokenizer.')}</p>
     <p>{t('cover.heartmula.needs', 'A cover needs the MuLaCover model files and the Qwen3 Embedding BF16 text encoder. Without them you can still prepare and save a lead sheet.')}</p>
   </div>;
 }

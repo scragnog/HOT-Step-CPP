@@ -78,9 +78,10 @@ currently needs the workflow draft created by uploading source audio.
 
 The MuLaCover card in Model Manager and Cover Studio shows **CC BY-NC 4.0**:
 weights and outputs are for non-commercial use. MuLaCover is a separate model
-pack, not included in the normal HeartMuLa generation models. No download is
-offered yet. A render needs the MuLaCover model files and the Qwen3 Embedding
-BF16 text encoder; without them you can prepare and save drafts, and a submitted
+pack, not included in the normal HeartMuLa generation models. Download
+**MuLaCover cover model** from the **HeartMuLa** tab in Model Manager. The pack
+includes the HeartMuLa codec and tokenizer. A render needs the MuLaCover model
+files and the Qwen3 Embedding BF16 text encoder; without them you can prepare and save drafts, and a submitted
 render reports which file is missing.
 Submission errors remain visible beside Generate cover and in the queue.
 
