@@ -14,8 +14,9 @@ ACE-Step 1.5 is the default and the only backend that supports every studio.
 YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
 conditioning. Stable Audio 3 also offers an instrumental source-audio refine
 in Cover Studio. HeartMuLa's MuLaCover mode uses the approved Prepare ABC lead
-sheet, four style tag fields and lyrics; its engine route and separate CC BY-NC
-model pack are pending. MiniMax-Music3 covers in Cover Studio by forcing the
+sheet, four style tag fields and lyrics. It needs the separate MuLaCover model pack
+(CC BY-NC 4.0, non-commercial, not yet downloadable from Model Manager) and the
+Qwen3 Embedding BF16 text encoder. MiniMax-Music3 covers in Cover Studio by forcing the
 source's encoded codes on its planner, blending the source audio into its flow
 stage, or both.
 
@@ -510,7 +511,7 @@ component and adapter choices when the picker changes or another backend is sele
 | Post-processing | Shared chain, including VST, mastering and StableStep |
 | Shared Lua sampler plugins | Solvers, schedulers and guidance on the codec decode, opt-in |
 | PP-VAE, Spectral Lifter | No |
-| Cover Studio | Yes, lead-sheet conditioning from approved Prepare ABC; engine route pending |
+| Cover Studio | Yes, MuLaCover lead-sheet cover from approved Prepare ABC, up to 300 s, ended by the model; needs the MuLaCover pack and Qwen3 Embedding BF16 |
 | Repaint, streaming, training, lyric alignment | No |
 | Output | 48 kHz stereo |
 

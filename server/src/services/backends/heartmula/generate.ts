@@ -9,7 +9,8 @@ import { wavDurationSec } from '../../audioCrop.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../../logger.js';
 import { heartmulaClient } from './client.js';
-import type { HeartmulaRequest } from './client.js';
+import type { HeartmulaCoverRequest, HeartmulaRequest } from './client.js';
+import type { HeartmulaCoverRolls } from '../../../contracts/studioWorkflows.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { GenerationContext, GenerationOutcome, BackendModelSelection } from '../types.js';
 import { heartmulaAdapterInfo, heartmulaPick, withHeartmulaTrigger } from './models.js';
@@ -48,11 +49,18 @@ function samplerPlugins(params: Readonly<Record<string, unknown>>): Partial<Hear
   return out;
 }
 
-/** Validate at enqueue time, before the job can enter the shared GPU lane. */
-export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, models: BackendModelSelection): HeartmulaRequest {
-  // Stage 3c installs the cover endpoint. Fail before model/tag resolution and
-  // never submit a symbolic cover to the plain generation endpoint.
-  if (params.taskType === 'cover' || params.heartmulaCover !== undefined) throw new Error('HeartMuLa covers are not available yet');
+/** MuLaCover's duration limit in the engine (/heartmula/props cover_max_duration_s). */
+export const HEARTMULA_COVER_MAX_DURATION_S = 300;
+
+/** Validate at enqueue time, before the job can enter the shared GPU lane. A cover
+ *  (Cover Studio's rolls) goes to /heartmula/cover on the MuLaCover variant, never
+ *  to plain synth; the engine checks the roll sizes and values. */
+export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, models: BackendModelSelection): HeartmulaRequest | HeartmulaCoverRequest {
+  const cover = params.taskType === 'cover' || params.heartmulaCover !== undefined;
+  const rolls = params.heartmulaCover as HeartmulaCoverRolls | undefined;
+  if (cover && (!rolls || typeof rolls !== 'object' || rolls.version !== 1)) {
+    throw new Error('A HeartMuLa cover needs the lead-sheet rolls Cover Studio builds from the approved score');
+  }
   const tags = params.heartmulaTags ?? params.tags ?? params.caption ?? params.prompt ?? params.songDescription ?? params.style;
   if (typeof tags !== 'string' || !tags.trim() || Buffer.byteLength(tags) > 4096) throw new Error('tags must be non-empty text of at most 4096 bytes');
   const lyrics = params.instrumental === true ? '' : params.lyrics ?? '';
@@ -62,7 +70,10 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
   for (const key of ['variant', 'global', 'local', 'flow', 'scalar_decoder', 'lmAdapter']) {
     if (typeof models[key] !== 'string') throw new Error(`Invalid HeartMuLa model selection: ${key}`);
   }
-  const pick = heartmulaPick(models, number(params.heartmulaAdapterStrength, 'adapter strength', 1, 0, 2));
+  // MuLaCover has its own LM pair and takes no HeartMuLa adapter; the codec pick is shared.
+  const pick = cover ? { variant: 'MuLaCover', global_type: '', local_type: '', flow_type: models.flow || '',
+    scalar_decoder_type: models.scalar_decoder || '', adapter: '', adapter_scale: 1 }
+    : heartmulaPick(models, number(params.heartmulaAdapterStrength, 'adapter strength', 1, 0, 2));
   // The adapter learned its trigger at the head of every sample's tags; lead with it here too.
   const tagged = pick.adapter ? withHeartmulaTrigger(tags, heartmulaAdapterInfo(pick.adapter).trigger) : tags;
   if (Buffer.byteLength(tagged) > 4096) throw new Error('tags with the adapter trigger exceed 4096 bytes');
@@ -81,15 +92,20 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
     ...pick, ...groups, tags: tagged, lyrics,
     // Create's Auto duration uses -1. Let audio EOS end the song within
     // HeartMuLa's maximum duration, while an omitted duration keeps 120 s.
-    duration_s: number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
+    // Covers (Auto from Cover Studio) take MuLaCover's own 300 s limit.
+    duration_s: cover
+      ? number(params.duration === -1 ? HEARTMULA_COVER_MAX_DURATION_S : params.duration, 'duration',
+        HEARTMULA_COVER_MAX_DURATION_S, 1, HEARTMULA_COVER_MAX_DURATION_S)
+      : number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
     ...(!params.randomSeed && mainSeed !== undefined ? { seed: mainSeed } : {}),
     ...(noiseSeed === undefined ? {} : { noise_seed: noiseSeed }),
     temperature: number(params.heartmulaTemperature, 'temperature', 1, Number.MIN_VALUE, 4),
-    topk: number(params.heartmulaTopK, 'topk', 50, 1, 8197, true),
+    topk: number(params.heartmulaTopK, 'topk', cover ? 250 : 50, 1, 8197, true),
     cfg_scale: number(params.heartmulaCfgScale, 'cfg scale', 1.5, 1, 10),
     codec_steps: number(params.heartmulaCodecSteps, 'codec steps', 10, 1, 100, true),
     codec_guidance: number(params.heartmulaCodecGuidance, 'codec guidance', 1.25, 1, 10),
     ...samplerPlugins(params),
+    ...(cover ? { rolls: rolls! } : {}),
   };
 }
 
@@ -101,10 +117,11 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
   const checkCancelled = () => {
     if (ctx.signal.aborted || job.status === 'cancelled') throw new Error('Cancelled');
   };
-  startGenerationLog(job.id, 'heartmula-text2music');
+  const task = job.params.taskType === 'cover' ? 'heartmula-cover' : 'heartmula-text2music';
+  startGenerationLog(job.id, task);
   try {
     checkCancelled();
-    const wire = { ...ctx.envelope.options.heartmula } as unknown as HeartmulaRequest;
+    const wire = { ...ctx.envelope.options.heartmula } as unknown as HeartmulaRequest | HeartmulaCoverRequest;
     // The retry loop may have drawn a new seed. Models and all other inputs
     // remain the immutable enqueue-time snapshot.
     if (ctx.attempt.reseeded) wire.seed = job.params.seed;
@@ -112,7 +129,10 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     job.params.seed = wire.seed;
     ctx.attempt.effective.seed = wire.seed;
     ctx.attempt.effective.models = { ...ctx.envelope.models };
-    logGenerationParams(job.id, wire as unknown as Record<string, unknown>);
+    // The rolls run to megabytes: log and store their size, not their values.
+    const { rolls, ...recorded } = wire as Partial<HeartmulaCoverRequest> & HeartmulaRequest;
+    logGenerationParams(job.id, recorded as unknown as Record<string, unknown>);
+    if (rolls) log('INFO', `[HeartMuLa] Cover lead sheet: ${rolls.length} sixteenth-note rows at ${rolls.bpm} BPM`);
     // What the engine is conditioned on, in plain text (the engine log repeats it).
     log('INFO', `[HeartMuLa] Tags sent to engine: ${wire.tags}`);
     if (wire.adapter) log('INFO', `[HeartMuLa] Adapter: ${path.basename(wire.adapter)} (strength ${wire.adapter_scale})`);
@@ -183,9 +203,10 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     }
     checkCancelled();
     const songId = randomUUID();
+    const { heartmulaCover: _rolls, ...params } = job.params as Record<string, unknown>;
     const trackParams = {
-      ...job.params, backend: 'heartmula', seed: detail.seed,
-      heartmulaRequest: wire, heartmulaResult: detail,
+      ...params, backend: 'heartmula', seed: detail.seed,
+      heartmulaRequest: recorded, heartmulaResult: detail,
     };
     getDb().prepare(`INSERT INTO songs
       (id, user_id, title, lyrics, style, caption, audio_url, duration, tags,
@@ -207,7 +228,7 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     job.status = 'succeeded';
     job.stage = 'Complete!';
     job.progress = 100;
-    finishGenerationLog(job.id, 'heartmula-text2music');
+    finishGenerationLog(job.id, task);
     return { endReason: 'completed', stages, artifacts, songIds: [songId], result: job.result };
   } catch (err) {
     const cancelled = ctx.signal.aborted || job.status === 'cancelled' || err instanceof Error && err.message.startsWith('Cancelled');
@@ -222,7 +243,7 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
       if (detail?.error) job.error = `${detail.error.code}: ${detail.error.message}`;
       if (detail?.admission) ctx.attempt.effective.admission = detail.admission;
     }
-    failGenerationLog(job.id, job.error, 'heartmula-text2music');
+    failGenerationLog(job.id, job.error, task);
     return { endReason: cancelled ? 'cancelled' : 'failed', stages, artifacts: [], songIds: [], error: job.error };
   }
 }

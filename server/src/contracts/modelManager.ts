@@ -73,6 +73,8 @@ export interface StarterPack {
   description: string;
   fileIds: string[];
   family?: FileFamily;
+  /** Licence of the pack's weights, shown on the pack card (e.g. MuLaCover's CC BY-NC 4.0). */
+  license?: string;
 }
 
 export interface ModelRegistryResponse {

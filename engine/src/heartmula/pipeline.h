@@ -25,10 +25,16 @@
 //
 // E. SEEDS. The LM draws come from HeartMuLaDraws(seed); the codec noise is Box-Muller
 //    on raw mt19937_64 words, so a noise seed gives the same noise on every platform.
+//
+// F. COVERS (MuLaCover, /heartmula/cover). A request with rolls takes MuLaCover's prompt
+//    (mulacover.h) and binds the rolls after the KV reserve; the caller supplies the
+//    Qwen style vector. Admission counts the context cache on top of the KV, and the
+//    duration limit is upstream's 300 s, not plain HeartMuLa's 240 s.
 
 #include "heartmula/codec-decode.h"
 #include "synth-finite.h"
 #include "heartmula/local-graph.h"
+#include "heartmula/mulacover.h"
 #include "heartmula/tokenizer.h"
 
 #include <array>
@@ -42,6 +48,7 @@
 
 #define HEARTMULA_FRAME_RATE        12.5
 #define HEARTMULA_MAX_DURATION_S    240
+#define HEARTMULA_COVER_MAX_DURATION_S 300  // upstream MuLaCover max_audio_length_ms default
 #define HEARTMULA_AUDIO_EOS         8193
 #define HEARTMULA_DEFAULT_RESERVE_MB 1536
 
@@ -394,6 +401,7 @@ struct HeartMuLaRequest {
     float       codec_guidance = 1.25f;
     std::vector<std::array<int32_t, HEARTMULA_CODEBOOKS>> codes;  // given: skip the LM
     bool        codes_only = false;
+    std::optional<HeartMuLaCoverInput> cover;  // note F: rolls given; style is the caller's
     // The job's own pick: absent keeps the current one, "" or null resets to default.
     std::optional<std::string> variant, global, local, flow, scalar, adapter;
     std::optional<float>       adapter_scale;
@@ -433,11 +441,78 @@ inline bool get_num(yyjson_val * v, double lo, double hi, bool integer, double *
     return std::isfinite(*out) && *out >= lo && *out <= hi && (!integer || *out == std::floor(*out));
 }
 
+// The rolls of a /heartmula/cover body (the server's HeartmulaCoverRolls): version 1,
+// `length` sixteenth-note rows, flat row-major 0/1 arrays, context_mask 1 = padding.
+// `bpm` is checked and not used: key positions are the row index (mulacover.h note A).
+inline bool parse_rolls(yyjson_val * v, HeartMuLaCoverInput * in, std::string * err) {
+    auto bad = [&](const std::string & m) { *err = "rolls: " + m; return false; };
+    if (!yyjson_is_obj(v)) return bad("must be an object");
+    double  d   = 0;
+    int64_t len = 0;
+    yyjson_val * f = yyjson_obj_get(v, "length");
+    if (!get_num(f, 1, HEARTMULA_COVER_MAX_STEPS, true, &d)) {
+        return bad("length must be an integer from 1 to " + std::to_string(HEARTMULA_COVER_MAX_STEPS) + " sixteenth notes");
+    }
+    len = (int64_t) d;
+    struct Field { const char * key; int64_t width; std::vector<float> * dst; };
+    std::vector<float> mask;
+    const Field fields[] = { { "pianoroll", 256, &in->melody }, { "drum_pianoroll", 128, &in->drums },
+                             { "chord", 12, &in->chords }, { "context_mask", 1, &mask } };
+    size_t       idx, max;
+    yyjson_val * k, * x;
+    yyjson_obj_foreach(v, idx, max, k, x) {
+        const std::string key = yyjson_get_str(k);
+        if (key == "version") {
+            if (!yyjson_is_int(x) || yyjson_get_int(x) != 1) return bad("version must be 1");
+        } else if (key == "dtype") {
+            if (!yyjson_is_str(x) || strcmp(yyjson_get_str(x), "float32") != 0) return bad("dtype must be float32");
+        } else if (key == "bpm") {
+            if (!get_num(x, 1e-6, 1000, false, &d)) return bad("bpm must be a positive number");
+        } else if (key != "length" && std::none_of(std::begin(fields), std::end(fields),
+                                                   [&](const Field & fl) { return key == fl.key; })) {
+            return bad("unknown field '" + key + "'");
+        }
+    }
+    for (const Field & fl : fields) {
+        yyjson_val * a = yyjson_obj_get(v, fl.key);
+        if (!yyjson_is_arr(a) || (int64_t) yyjson_arr_size(a) != len * fl.width) {
+            return bad(std::string(fl.key) + " must be an array of length x " + std::to_string(fl.width) + " values");
+        }
+        fl.dst->resize((size_t) (len * fl.width));
+        size_t       i, n;
+        yyjson_val * e;
+        yyjson_arr_foreach(a, i, n, e) {
+            if (!yyjson_is_num(e) || (yyjson_get_num(e) != 0.0 && yyjson_get_num(e) != 1.0)) {
+                return bad(std::string(fl.key) + " values must be 0 or 1");
+            }
+            (*fl.dst)[i] = (float) yyjson_get_num(e);
+        }
+    }
+    in->steps = len;
+    in->pad.resize((size_t) len);
+    for (size_t i = 0; i < mask.size(); i++) in->pad[i] = mask[i] != 0.0f;
+    if (std::all_of(in->pad.begin(), in->pad.end(), [](uint8_t p) { return p != 0; })) {
+        return bad("every row is padding");
+    }
+    return true;
+}
+
 }  // namespace heartmula_pipeline_detail
 
-// Parse a /heartmula/synth body (also the CLI's --request). On failure *err names the field.
-static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest * r, std::string * err) {
+// Parse a /heartmula/synth body (also the CLI's --request), or with `cover` a
+// /heartmula/cover body (note F). On failure *err names the field.
+static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest * r, std::string * err,
+                                    bool cover = false) {
     using namespace heartmula_pipeline_detail;
+    const int max_s = cover ? HEARTMULA_COVER_MAX_DURATION_S : HEARTMULA_MAX_DURATION_S;
+    if (cover) {
+        // pipeline.py _sanitize_parameters: up to 300 s, top-k 250 (cfg 1.5 and temperature 1 as plain).
+        r->duration_s  = HEARTMULA_COVER_MAX_DURATION_S;
+        r->topk        = MULACOVER_DEFAULT_TOPK;
+        r->cfg_scale   = MULACOVER_DEFAULT_CFG;
+        r->temperature = MULACOVER_DEFAULT_TEMPERATURE;
+        r->id          = "mulacover";
+    }
     yyjson_doc * doc = yyjson_read(body.data(), body.size(), 0);
     struct Free { yyjson_doc * d; ~Free() { yyjson_doc_free(d); } } guard{ doc };
     yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
@@ -463,7 +538,7 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
             if (!yyjson_is_str(v) || yyjson_get_len(v) > 32768) return bad("lyrics must be a string of at most 32768 bytes");
             r->lyrics = std::string(yyjson_get_str(v), yyjson_get_len(v));
         } else if (k == "duration_s") {
-            if (!get_num(v, 1, HEARTMULA_MAX_DURATION_S, false, &d)) return bad("duration_s must be a number from 1 to 240");
+            if (!get_num(v, 1, max_s, false, &d)) return bad("duration_s must be a number from 1 to " + std::to_string(max_s));
             r->duration_s = d;
         } else if (k == "seed") {
             if (!get_u64(v, &r->seed)) return bad("seed must be a non-negative integer or a decimal string");
@@ -534,7 +609,10 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
                 else if (yyjson_is_bool(pv)) vs = yyjson_get_bool(pv) ? "true" : "false";
                 r->plugin_params[yyjson_get_str(pk)] = vs;
             }
-        } else if (k == "codes") {
+        } else if (k == "rolls" && cover) {
+            r->cover.emplace();
+            if (!parse_rolls(v, &*r->cover, err)) return false;
+        } else if (k == "codes" && !cover) {
             if (!yyjson_is_arr(v) || yyjson_arr_size(v) < 1 || yyjson_arr_size(v) > 3000) return bad("codes must be an array of 1 to 3000 frames");
             size_t fi, fmax;
             yyjson_val * frame;
@@ -547,7 +625,7 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
                 }
                 r->codes.push_back(c);
             }
-        } else if (k == "codes_only") {
+        } else if (k == "codes_only" && !cover) {
             if (!yyjson_is_bool(v)) return bad("codes_only must be a bool");
             r->codes_only = yyjson_get_bool(v);
         } else if (k == "id") {
@@ -558,6 +636,7 @@ static bool heartmula_parse_request(const std::string & body, HeartMuLaRequest *
         }
     }
     if (!has_tags) return bad("tags is required");
+    if (cover && !r->cover) return bad("rolls is required");
     if (!r->codes.empty() && r->codes_only) return bad("codes and codes_only cannot be combined");
     if (!r->seed_given) r->seed = ((uint64_t) std::random_device{}() << 32) ^ std::random_device{}();
     if (!r->noise_seed_given) r->noise_seed = r->seed;
@@ -650,6 +729,14 @@ static uint64_t heartmula_kv_bytes(int64_t positions, int cfg_rows) {
     const HeartMuLaLmConfig c = heartmula_global_config();
     const int64_t n = std::min<int64_t>(heartmula_bucket(positions), c.n_ctx);
     return (uint64_t) c.n_layer * c.n_head_kv * c.head_dim * 2 * 2 * (uint64_t) n * (uint64_t) cfg_rows;
+}
+
+// MuLaCover's context cache as heartmula_cover_bind allocates it: per cover layer the F16
+// cross-attention and gate K/V, [384 x 8 + 12] x 2 per step and CFG row (941 MiB at 5000 x 2).
+static uint64_t heartmula_cover_cache_bytes(int64_t steps, int cfg_rows) {
+    return (uint64_t) HEARTMULA_COVER_LAYERS * 2 * 2 *
+           (HEARTMULA_COVER_CA_HD * HEARTMULA_COVER_HEADS + HEARTMULA_COVER_GATE_DIM) * (uint64_t) steps *
+           (uint64_t) cfg_rows;
 }
 
 struct HeartMuLaAdmission {
@@ -883,8 +970,13 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
 
     if (req.codes.empty()) {
         // ── LM phase ──
-        int64_t    muq = 0;
-        const auto ids = heartmula_prompt_ids(tok, req.tags, req.lyrics, &muq);
+        int64_t                    muq = 0;
+        std::optional<MuLaCoverPrompt> mc;  // note F
+        if (req.cover) {
+            mc  = mulacover_prompt(tok, req.tags, req.lyrics);
+            muq = mc->muq_idx;
+        }
+        const auto ids = mc ? mc->ids : heartmula_prompt_ids(tok, req.tags, req.lyrics, &muq);
         const int64_t T = (int64_t) ids.size();
         res->prompt_tokens = T;
         res->max_frames    = heartmula_max_frames(req.duration_s);
@@ -896,7 +988,8 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
         progress("admission", 0, 0);
         if (!keep_loaded) heartmula_free_codec(rt);
         uint64_t weights = heartmula_lm_need(*rt, p);
-        const uint64_t kv = heartmula_kv_bytes(positions, B);
+        // heartmula_kv_bytes leaves out the cover cache (3b): count it here.
+        const uint64_t kv = heartmula_kv_bytes(positions, B) + (req.cover ? heartmula_cover_cache_bytes(req.cover->steps, B) : 0);
         if (keep_loaded && rt->codec_bytes && weights + kv + heartmula_reserve_bytes() > heartmula_device_free(*rt)) {
             heartmula_free_codec(rt);  // co-residency only if both phases fit
         }
@@ -914,8 +1007,15 @@ static bool heartmula_generate(HeartMuLaRuntime * rt, const HeartMuLaResolved & 
             if (cancelled()) return finish("cancelled", "cancelled before loading the adapter");
             if (!heartmula_load_adapter(rt, p, &err)) return finish("incompatible", err);
         }
+        if (req.cover.has_value() != rt->cover.loaded) {
+            return finish("incompatible", req.cover ? "the " + p.variant + " model has no cover modules"
+                                                    : "MuLaCover renders covers only (POST /heartmula/cover)");
+        }
         if (!heartmula_lm_reserve(rt->lm, &g, B, positions, &err) || !heartmula_local_prepare(rt->lm, &lg, B, &err)) {
             return finish("vram_alloc_failed", err);
+        }
+        if (req.cover && !heartmula_cover_bind(rt->lm, rt->cover, &g, *req.cover, mc->qwen_idx, nullptr, &err)) {
+            return finish("vram_alloc_failed", err);  // inputs were checked at parse; what is left is memory
         }
         // lm-graph.h note F: scale 0 or no adapter builds the base graph.
         HeartMuLaAdapterScales scales = req.adapter_groups;

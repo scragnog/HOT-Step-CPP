@@ -36,9 +36,8 @@ export interface HeartmulaRequest extends HeartmulaPick {
   codec_steps: number;
   codec_guidance: number;
 }
-/** Stage 3c's /heartmula/cover body. The Node submission's heartmulaCover
- * becomes rolls; tags and sectioned lyrics use the ordinary top-level fields.
- * Submission remains disabled in mapHeartmulaRequest until that route exists. */
+/** The /heartmula/cover body: the Node submission's heartmulaCover becomes
+ * rolls; tags and sectioned lyrics use the ordinary top-level fields. */
 export interface HeartmulaCoverRequest extends HeartmulaRequest {
   rolls: HeartmulaCoverRolls;
 }
@@ -129,8 +128,9 @@ export const heartmulaClient = {
     }
     catch (err) { if (!(err instanceof HeartmulaEngineError && err.status === 404)) throw err; }
   },
-  async synth(wire: HeartmulaRequest): Promise<string> {
-    const result = await (await request('/heartmula/synth', wire)).json() as { id?: string };
+  async synth(wire: HeartmulaRequest | HeartmulaCoverRequest): Promise<string> {
+    const route = 'rolls' in wire ? '/heartmula/cover' : '/heartmula/synth';
+    const result = await (await request(route, wire, 'rolls' in wire ? 60_000 : 15_000)).json() as { id?: string };
     if (!result.id) throw new Error('HeartMuLa returned no job id');
     return result.id;
   },

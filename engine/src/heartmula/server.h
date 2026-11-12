@@ -11,9 +11,16 @@
 // serialises with every other family; g_hm_rt is touched only there. The HTTP
 // threads read the catalogue, the pick and a residency snapshot under g_hm.mtx;
 // the worker publishes that snapshot at every stage change.
+//
+// Covers. POST /heartmula/cover is /heartmula/synth plus `rolls` (pipeline.h note F),
+// on the MuLaCover variant, which plain synth and select-model refuse. Before the LM
+// phase the worker runs the tags through the BF16 Qwen3 embedding (the ACE text
+// encoder file; Q8_0 misses the FP32 reference by 6e-3) and frees it again.
 
 #include "heartmula/pipeline.h"
 #include "heartmula/codec-plugins.h"
+#include "bpe.h"
+#include "qwen3-enc.h"
 
 #include "audio-io.h"
 #include "httplib.h"
@@ -168,6 +175,50 @@ static bool hm_synth_ready_locked(HeartMuLaResolved * out, std::string * err) {
     return hm_resolve_locked(p, out, &status, err);
 }
 
+#define HM_COVER_VARIANT "MuLaCover"
+#define HM_COVER_QWEN    "Qwen3-Embedding-0.6B-BF16.gguf"  // registry entry embedding-bf16
+
+static bool hm_is_cover(const std::string & variant) {
+    return heartmula_pipeline_detail::lower(variant) == "mulacover";
+}
+
+// A cover's pick: MuLaCover's own global/local (the current pick's types belong to
+// another variant), the current codec choice, no adapter; then the request's fields.
+static HeartMuLaPick hm_cover_pick(const HeartMuLaRequest & r) {
+    HeartMuLaPick base = g_hm.requested;
+    base.global.clear();
+    base.local.clear();
+    base.adapter.clear();
+    HeartMuLaPick p = heartmula_request_pick(base, r);
+    p.variant       = HM_COVER_VARIANT;
+    return p;
+}
+
+// Caller holds g_hm.mtx. Missing-model contract: false with *status 503 and code
+// model_missing when the MuLaCover pair or the BF16 Qwen file is not installed, or the
+// resolver's 404/409 for a bad pick.
+static bool hm_cover_ready_locked(const HeartMuLaRequest & r, HeartMuLaResolved * out, int * status, const char ** code,
+                                  std::string * err) {
+    const bool installed = std::any_of(g_hm.cat.files.begin(), g_hm.cat.files.end(),
+                                       [](const HeartMuLaFile & f) { return f.role == HM_GLOBAL && hm_is_cover(f.variant); });
+    std::error_code ec;
+    const bool      qwen = std::filesystem::exists(std::filesystem::path(g_hm.models_dir) / HM_COVER_QWEN, ec);
+    if (!installed || !qwen) {
+        *status = 503;
+        *code   = "model_missing";
+        *err    = std::string("HeartMuLa covers need ") +
+               (!installed ? "the MuLaCover pack (heartmula-mulacover-global and -local GGUFs in the heartmula models folder)" : "") +
+               (!installed && !qwen ? " and " : "") +
+               (!qwen ? "the Qwen3 Embedding BF16 text encoder (" HM_COVER_QWEN "); the Q8_0 one is not precise enough" : "");
+        return false;
+    }
+    if (!hm_resolve_locked(hm_cover_pick(r), out, status, err)) {
+        *code = hm_status_code(*status);
+        return false;
+    }
+    return true;
+}
+
 static void hm_add_pick(yyjson_mut_doc * doc, yyjson_mut_val * root, const char * key, const std::string & variant,
                         const std::string * types) {
     yyjson_mut_val * o = yyjson_mut_obj(doc);
@@ -212,6 +263,17 @@ static void heartmula_handle_props(const httplib::Request &, httplib::Response &
     yyjson_mut_obj_add_bool(doc, root, "synth_ready", ready);
     yyjson_mut_obj_add_int(doc, root, "max_duration_s", HEARTMULA_MAX_DURATION_S);
     yyjson_mut_obj_add_int(doc, root, "context_length", heartmula_global_config().n_ctx);
+    {
+        HeartMuLaResolved cr;
+        int               cs = 0;
+        const char *      cc = "";
+        std::string       ce;
+        const bool        cover_ready = hm_cover_ready_locked(HeartMuLaRequest{}, &cr, &cs, &cc, &ce);
+        yyjson_mut_obj_add_bool(doc, root, "cover_ready", cover_ready);
+        yyjson_mut_obj_add_strcpy(doc, root, "cover_error", cover_ready ? "" : ce.c_str());
+        yyjson_mut_obj_add_int(doc, root, "cover_max_duration_s", HEARTMULA_COVER_MAX_DURATION_S);
+        yyjson_mut_obj_add_int(doc, root, "cover_max_steps", HEARTMULA_COVER_MAX_STEPS);
+    }
     yyjson_mut_val * d = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_val(doc, root, "defaults", d);
     yyjson_mut_obj_add_real(doc, d, "temperature", 1.0);
@@ -247,7 +309,8 @@ static void heartmula_handle_models(const httplib::Request & req, httplib::Respo
     yyjson_mut_val *         variants = yyjson_mut_arr(doc);
     std::vector<std::string> seen;
     for (const auto & f : g_hm.cat.files) {
-        if ((f.role == HM_GLOBAL || f.role == HM_LOCAL) && !f.variant.empty() &&
+        // MuLaCover is not a plain-synth variant (it renders covers only); its files stay under components.
+        if ((f.role == HM_GLOBAL || f.role == HM_LOCAL) && !f.variant.empty() && !hm_is_cover(f.variant) &&
             std::find(seen.begin(), seen.end(), f.variant) == seen.end()) {
             seen.push_back(f.variant);
             yyjson_mut_arr_add_strcpy(doc, variants, f.variant.c_str());
@@ -331,6 +394,10 @@ static void heartmula_handle_select_model(const httplib::Request & req, httplib:
     }
     std::lock_guard<std::mutex> lock(g_hm.mtx);
     const HeartMuLaPick next = heartmula_request_pick(g_hm.requested, r);
+    if (hm_is_cover(next.variant)) {
+        hm_error(res, 409, "incompatible", "MuLaCover renders covers only (POST /heartmula/cover); pick another variant");
+        return;
+    }
     HeartMuLaResolved   resolved;
     int                 status = 0;
     if (!hm_resolve_locked(next, &resolved, &status, &err)) {
@@ -394,6 +461,7 @@ static void heartmula_handle_unload(const httplib::Request &, httplib::Response 
 
 // Stage -> shared phase (contract "Progress").
 static JobPhase hm_phase(const std::string & s) {
+    if (s == "style") return JobPhase::LOADING_TEXT_ENC;
     if (s == "admission" || s == "loading_lm") return JobPhase::LOADING_DIT;
     if (s == "loading_adapter") return JobPhase::LOADING_ADAPTER;
     if (s == "prefill") return JobPhase::ENCODING_COND;
@@ -402,6 +470,55 @@ static JobPhase hm_phase(const std::string & s) {
     if (s == "codec_decode") return JobPhase::VAE_DECODE;
     if (s == "encoding_output") return JobPhase::ENCODING_OUTPUT;
     return JobPhase::QUEUED;
+}
+
+// Worker: the cover's style vector (upstream _encode_style) from the tags as the prompt
+// reads them. The BF16 encoder is loaded for this alone, after admission, and freed.
+static bool hm_cover_style(HeartMuLaRequest * req, const HeartMuLaTokenizer & tok, const HeartMuLaHooks & hooks,
+                           const char ** code, std::string * err) {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(g_hm.mtx);
+        path = (std::filesystem::path(g_hm.models_dir) / HM_COVER_QWEN).string();
+    }
+    hooks.progress("style", 0, 1);
+    std::error_code ec;
+    const uint64_t  bytes = (uint64_t) std::filesystem::file_size(path, ec);
+    if (ec) {
+        *code = "model_missing";
+        *err  = "HeartMuLa covers need the Qwen3 Embedding BF16 text encoder (" HM_COVER_QWEN ")";
+        return false;
+    }
+    heartmula_ensure_backend(&g_hm_rt);
+    const HeartMuLaAdmission a = heartmula_admit(g_hm_rt, "style", bytes, 0, 0, false, hooks);
+    if (!a.ok) {
+        *code = "vram_insufficient";
+        *err  = a.message();
+        return false;
+    }
+    const auto       t0  = std::chrono::steady_clock::now();
+    Qwen3GGML        qm  = {};
+    BPETokenizer     bpe = {};
+    std::vector<int> ids;
+    req->cover->style.assign(HEARTMULA_COVER_STYLE_DIM, 0.0f);
+    *code   = "load_failed";
+    bool ok = load_bpe_from_gguf(&bpe, path.c_str());
+    if (ok) {
+        ok = qwen3_load_text_encoder(&qm, path.c_str());
+        if (ok) {
+            ok = qwen3_style_vector(&qm, &bpe, mulacover_prompt(tok, req->tags, "").tags, req->cover->style.data(), &ids, err);
+            *code = "bad_request";  // the only refusal left is the 8192-token limit
+        } else {
+            *err = "cannot load " + path;
+        }
+        qwen3_free(&qm);
+    } else {
+        *err = "cannot read the tokenizer in " + path;
+    }
+    fprintf(stderr, "[HeartMuLa] style vector: %zu Qwen tokens, %.0f ms%s\n", ids.size(),
+            heartmula_pipeline_detail::ms_since(t0), ok ? "" : " (failed)");
+    hooks.progress("style", 1, 1);
+    return ok;
 }
 
 static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std::shared_ptr<HeartMuLaJobInfo> info) {
@@ -435,8 +552,11 @@ static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std:
         // Files can change between the request and the job (load-time checks run again).
         std::lock_guard<std::mutex> lock(g_hm.mtx);
         g_hm.cat = heartmula_discover(g_hm.models_dir);
-        if (!hm_resolve_locked(heartmula_request_pick(g_hm.requested, req), &r, &status, &err)) {
-            end(2, hm_status_code(status), err);
+        const char * code = "";
+        const bool   ok   = req.cover ? hm_cover_ready_locked(req, &r, &status, &code, &err)
+                                      : hm_resolve_locked(heartmula_request_pick(g_hm.requested, req), &r, &status, &err);
+        if (!ok) {
+            end(2, req.cover ? code : hm_status_code(status), err);
             return;
         }
         tok = hm_tokenizer_locked(r.file[HM_TOKENIZER].path, &err);
@@ -484,6 +604,17 @@ static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std:
         if (last != stage) hm_publish();
         last = stage;
     };
+    if (req.cover) {
+        const char * code = "";
+        if (!hm_cover_style(&req, *tok, hooks, &code, &err)) {
+            end(2, code, err);
+            return;
+        }
+        if (job->cancel.load()) {
+            end(3, "cancelled", "");
+            return;
+        }
+    }
     HeartMuLaResult res;
     const bool      ok = heartmula_generate(&g_hm_rt, r, *tok, req, g_keep_loaded, hooks, &res);
     {
@@ -540,23 +671,40 @@ static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std:
     end(1, "", "");
 }
 
-static void heartmula_handle_synth(const httplib::Request & req, httplib::Response & res) {
+// POST /heartmula/synth, or with `cover` POST /heartmula/cover (same job path).
+static void hm_submit(const httplib::Request & req, httplib::Response & res, bool cover) {
     HeartMuLaRequest r;
     std::string      err;
-    if (!heartmula_parse_request(req.body, &r, &err)) {
+    if (!heartmula_parse_request(req.body, &r, &err, cover)) {
         hm_error(res, 400, "bad_request", err);
+        return;
+    }
+    if (cover && r.variant && !r.variant->empty() && !hm_is_cover(*r.variant)) {
+        hm_error(res, 400, "bad_request", "variant must be " HM_COVER_VARIANT " or omitted");
+        return;
+    }
+    if (cover && r.adapter && !r.adapter->empty()) {
+        hm_error(res, 400, "bad_request", "HeartMuLa adapters do not apply to MuLaCover covers");
         return;
     }
     auto info = std::make_shared<HeartMuLaJobInfo>();
     {
         std::lock_guard<std::mutex> lock(g_hm.mtx);
         HeartMuLaResolved resolved;
-        if (!hm_synth_ready_locked(&resolved, &err)) {
+        int               status = 0;
+        const char *      code   = "";
+        if (cover) {
+            if (!hm_cover_ready_locked(r, &resolved, &status, &code, &err)) {
+                hm_error(res, status, code, err);
+                return;
+            }
+        } else if (!hm_synth_ready_locked(&resolved, &err)) {
             hm_error(res, 503, "unavailable", "HeartMuLa is not ready: " + err);
             return;
-        }
-        int status = 0;
-        if (!hm_resolve_locked(heartmula_request_pick(g_hm.requested, r), &resolved, &status, &err)) {
+        } else if (hm_is_cover(heartmula_request_pick(g_hm.requested, r).variant)) {
+            hm_error(res, 409, "incompatible", "MuLaCover renders covers only (POST /heartmula/cover)");
+            return;
+        } else if (!hm_resolve_locked(heartmula_request_pick(g_hm.requested, r), &resolved, &status, &err)) {
             hm_error(res, status, hm_status_code(status), err);
             return;
         }
@@ -567,7 +715,8 @@ static void heartmula_handle_synth(const httplib::Request & req, httplib::Respon
                 return;
             }
             int64_t       muq = 0;
-            const int64_t T   = (int64_t) heartmula_prompt_ids(*tok, r.tags, r.lyrics, &muq).size();
+            const int64_t T   = (int64_t) (cover ? mulacover_prompt(*tok, r.tags, r.lyrics).ids
+                                                 : heartmula_prompt_ids(*tok, r.tags, r.lyrics, &muq)).size();
             const int64_t F   = heartmula_max_frames(r.duration_s);
             const int64_t lim = heartmula_global_config().n_ctx;
             if (T + F + 1 > lim) {
@@ -586,7 +735,7 @@ static void heartmula_handle_synth(const httplib::Request & req, httplib::Respon
             info->prompt_tokens = (int) T;
             info->max_frames    = (int) F;
         }
-        info->pick = heartmula_request_pick(g_hm.requested, r);
+        info->pick = cover ? hm_cover_pick(r) : heartmula_request_pick(g_hm.requested, r);
     }
     info->seed       = r.seed;
     info->noise_seed = r.noise_seed;
@@ -602,6 +751,10 @@ static void heartmula_handle_synth(const httplib::Request & req, httplib::Respon
     }
     fprintf(stderr, "[HeartMuLa] job %s queued: %s, %.0f s, seed %llu\n", job->id.c_str(), r.id.c_str(), r.duration_s,
             (unsigned long long) r.seed);
+    if (r.cover) {
+        fprintf(stderr, "[HeartMuLa] cover: %lld lead-sheet steps, cfg %.2f, top-k %d, temperature %.2f\n",
+                (long long) r.cover->steps, r.cfg_scale, r.topk, r.temperature);
+    }
     // What the model is conditioned on, before the pipeline lower-cases and wraps it.
     fprintf(stderr, "[HeartMuLa] tags: %s\n", r.tags.c_str());
     if (r.lyrics.empty()) {
@@ -618,6 +771,14 @@ static void heartmula_handle_synth(const httplib::Request & req, httplib::Respon
     }
     work_push([job, r, info]() mutable { hm_synth_worker(job, std::move(r), info); });
     res.set_content("{\"id\":\"" + job->id + "\"}", "application/json");
+}
+
+static void heartmula_handle_synth(const httplib::Request & req, httplib::Response & res) {
+    hm_submit(req, res, false);
+}
+
+static void heartmula_handle_cover(const httplib::Request & req, httplib::Response & res) {
+    hm_submit(req, res, true);
 }
 
 static void heartmula_handle_job(const httplib::Request & req, httplib::Response & res) {
@@ -696,6 +857,7 @@ static void heartmula_register_routes(httplib::Server & svr, const char * models
     svr.Post("/heartmula/warm", on_worker(heartmula_handle_warm));
     svr.Post("/heartmula/unload", on_worker(heartmula_handle_unload));
     svr.Post("/heartmula/synth", heartmula_handle_synth);
+    svr.Post("/heartmula/cover", heartmula_handle_cover);
     svr.Get("/heartmula/job", heartmula_handle_job);
     svr.Post("/heartmula/encode", heartmula_handle_not_implemented);
     svr.Post("/heartmula/imatrix", heartmula_handle_not_implemented);

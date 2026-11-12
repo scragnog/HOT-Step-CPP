@@ -272,6 +272,29 @@ model. The original rules are still evaluated and shown per key. A manifest that
 unreadable, has fewer than 98 keys or lacks a key the engine produces fails the
 case.
 
+One row of the checker fails by design. On `synthetic-drums-cfg1.5`, the raw
+`s1.codebook1.logits` of the conditioned row flips one argmax against torch FP32:
+FP32 puts code 1064 at 18.4688 and code 3666 at 18.4625, 0.0063 apart. The engine's
+error on that key is 0.036, so it cannot resolve the gap, and the per-key near-tie
+test passes. Torch BF16 scores no flip only because both values round to the same
+BF16 number (18.5) and argmax takes the lower index, so the per-case flip count reads
+1 against 0. The guided logits, which sampling uses, agree with FP32. This row is an
+accepted exception and `mulacover-check` still exits 1 on that case; the gate stays
+per case, and any other failing row is a real finding.
+
+`POST /heartmula/cover` (`heartmula/server.h`, request and limits in the
+[HeartMuLa contract](../../engine/docs/HEARTMULA_CONTRACT.md)) runs a cover through
+the synth job path: the server sends the rolls Cover Studio builds from the approved
+score, the four-field tag line and the sectioned lyrics. The job encodes the tags with
+the BF16 Qwen3 embedding, frees it, binds the rolls after the KV reserve and samples
+with upstream's defaults (CFG 1.5, temperature 1.0, top-k 250). Admission counts
+the context cache on top of the KV. The duration limit is upstream's 300 s
+(3750 frames), not plain HeartMuLa's 240 s, and the model ends the song with audio
+EOS: a 16 s lead sheet rendered 80 s before EOS in the first worker run, which
+matches upstream's fixed default rather than the sheet length. MuLaCover is not a
+plain-synth variant: `/heartmula/synth` and `select-model` refuse it, and
+`/heartmula/models` leaves it out of `variants`.
+
 ## Startup checks and model validation
 
 Before accepting requests, `ace-server` runs a small F32 scale graph directly on

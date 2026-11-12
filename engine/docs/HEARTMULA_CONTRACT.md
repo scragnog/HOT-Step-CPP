@@ -80,6 +80,7 @@ with the status below. Field names are snake_case.
 | `POST /heartmula/warm` | Load the current pick for the LM phase. Idempotent |
 | `POST /heartmula/unload` | Free every HeartMuLa buffer. Idempotent |
 | `POST /heartmula/synth` | Queue a generation; returns the shared job id |
+| `POST /heartmula/cover` | Queue a MuLaCover cover from lead-sheet rolls; returns the shared job id |
 | `GET /heartmula/job?id=` | HeartMuLa progress detail and failure reasons |
 | `GET /job?id=`, `GET /job?id=&result=1` | Shared coarse status and the WAV result |
 | `POST /job?id=&cancel=1` | Shared cancel |
@@ -99,6 +100,10 @@ existing cancel path works unchanged.
   "synth_ready": true,
   "max_duration_s": 240,
   "context_length": 8192,
+  "cover_ready": true,
+  "cover_error": "",
+  "cover_max_duration_s": 300,
+  "cover_max_steps": 5000,
   "defaults": { "temperature": 1.0, "topk": 50, "cfg_scale": 1.5,
                 "codec_steps": 10, "codec_guidance": 1.25, "duration_s": 120 },
   "selected": { "variant": "3B", "global": "Q8_0", "local": "Q8_0",
@@ -122,6 +127,11 @@ existing cancel path works unchanged.
   select-model was last told. They differ when a requested file is missing.
 - `defaults` are heartlib's own defaults; the UI resets to them.
 - `errors` lists discovery and compatibility problems as plain sentences.
+- `cover_ready`: the MuLaCover global and local files and
+  `Qwen3-Embedding-0.6B-BF16.gguf` (in the models root) are installed and resolve with
+  the current codec pick. `cover_error` says what is missing, in the words a cover
+  job fails with. `cover_max_duration_s` and `cover_max_steps` are the limits of
+  `POST /heartmula/cover`.
 
 ### `GET /heartmula/models`
 
@@ -151,7 +161,7 @@ clears it back to the default (same rule as `/yue2/select-model`).
 
 | Field | Type | Meaning |
 |---|---|---|
-| `variant` | string | `3B` or `3B-happy-new-year`. Never substituted: if the variant has no global and local file, the request is a 404 |
+| `variant` | string | `3B` or `3B-happy-new-year`. Never substituted: if the variant has no global and local file, the request is a 404. `MuLaCover` is refused with 409 `incompatible`: it renders covers only, through `POST /heartmula/cover`, and `/heartmula/models` leaves it out of `variants` (its files stay under `components`) |
 | `global_type`, `local_type` | string | Quant token for each LM part, chosen independently |
 | `flow_type`, `scalar_decoder_type` | string | Quant token for each codec part, chosen independently |
 | `adapter` | string or null | Absolute path to a HeartMuLa LoRA GGUF. `""`/`null` removes it. One adapter in v1 |
@@ -237,6 +247,41 @@ same encoder YuE2 uses. With `codes_only`: `application/json`
 Completed status (`GET /job?id=`) carries `end_reason`: `completed` (audio EOS),
 `limit_hit` (reached the frame limit) or `cancelled`.
 
+### `POST /heartmula/cover`
+
+A MuLaCover cover (`heartmula/mulacover.h`) through the synth job path: same
+queue, `GET /heartmula/job`, result and cancel. The body is the synth body plus
+`rolls`, with these differences:
+
+| Field | Default | Validation | Meaning |
+|---|---|---|---|
+| `rolls` | required | object, below | The lead sheet on its sixteenth-note grid |
+| `tags` | required | as synth | The style line, e.g. `topic:[..]; genre:[..]; instrument:[..]; mood:[..]`. Passed to the prompt and to Qwen3-Embedding as text, as upstream does; an empty field such as `topic:[]` is only text, and all-empty tags give the zero style vector |
+| `duration_s` | 300 | number, 1 to 300 | Upper bound, upstream's `max_audio_length_ms` default. The model ends the song with audio EOS, which need not fall at the end of the lead sheet |
+| `topk` | 250 | as synth | Upstream's cover default; `temperature` 1.0 and `cfg_scale` 1.5 as synth |
+| `variant` | `MuLaCover` | `MuLaCover` or absent | The pick is MuLaCover's own global and local (default quants unless `global_type` or `local_type` is given) with the current codec pick |
+| `adapter` | none | absent or empty | HeartMuLa adapters do not apply to covers (400) |
+| `codes`, `codes_only` | | refused | Unknown fields here |
+
+`rolls`: `version` 1, `length` 1 to 5000 rows, optional `bpm` (positive, not used:
+key positions are the row index) and `dtype` (`float32`), and four flat row-major
+arrays of 0 or 1: `pianoroll` (length x 256, pitch x 2 onset, pitch x 2 + 1
+sustain), `drum_pianoroll` (length x 128), `chord` (length x 12 chroma) and
+`context_mask` (length, 1 = padding row). A wrong size or value, or a sheet that is
+all padding, is a 400 naming the field.
+
+Missing models: 503 `model_missing` at submit (and as the job error if files go
+between submit and start) when the MuLaCover pair or the BF16 Qwen3 embedding is
+not installed; the message names what to install. The Q8_0 embedding is not used:
+it misses upstream's FP32 style vector by 6e-3, against 1e-3 for BF16.
+
+The job first runs the tags through the BF16 Qwen3 embedding (stage `style`,
+after its own admission for the file size, freed straight after), then the LM
+phase. LM admission adds MuLaCover's context cache to the KV:
+`8 x 2 x 2 x (384 x 8 + 12) x steps x cfg rows` bytes, 941 MiB at 5000 steps with
+CFG. The context check is the synth one on the cover prompt (tags, style slot,
+MuQ slot, lyrics); at 300 s there are 3750 frames.
+
 ### `POST /heartmula/encode`
 
 Reserved for the encoder slice; 501 `not_implemented` until then. Shape:
@@ -254,6 +299,7 @@ enum in `hot-step-server.cpp`:
 | HeartMuLa phase (`stage`) | Shared `phase` | `phase_step` / `phase_total` |
 |---|---|---|
 | `queued` | `queued` | 0 / 0 |
+| `style` (covers) | `loading_text_enc` | 0 / 1, then 1 / 1 |
 | `admission` | `loading_dit` | 0 / 0 |
 | `loading_lm` | `loading_dit` | components loaded / to load |
 | `loading_adapter` | `loading_adapter` | 0 / 0 |

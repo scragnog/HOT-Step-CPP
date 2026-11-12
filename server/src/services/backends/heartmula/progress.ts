@@ -8,6 +8,7 @@ export function heartmulaStageText(d: Partial<HeartmulaJob>): { stage: string; p
   const frac = (done = 0, total = 0) => total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
   switch (d.stage) {
     case 'queued': return { stage: 'HeartMuLa: waiting for the GPU...', progress: 2 };
+    case 'style': return { stage: 'MuLaCover: encoding style tags...', progress: 3 };
     case 'admission': return { stage: 'HeartMuLa: checking VRAM...', progress: 3 };
     case 'loading_lm': return { stage: 'Loading HeartMuLa LM...', progress: 4 };
     case 'loading_adapter': return { stage: 'Loading HeartMuLa adapter...', progress: 6 };

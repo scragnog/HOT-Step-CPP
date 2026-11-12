@@ -17,6 +17,10 @@ export function heartmulaCoverLyrics(text: string): string {
   if (Buffer.byteLength(text) > 32768) throw new Error('HeartMuLa lyrics exceed 32768 bytes');
   const lyrics = text.trim();
   if (!lyrics) return '[Intro]';
+  // A marker must close on its own line; a lone bracket would reach the model as text.
+  if (/[[\]]/.test(lyrics.replace(/\[[^\]\r\n]+\]/g, ''))) {
+    throw new Error('HeartMuLa lyrics have an unclosed or stray bracket; section markers look like [Verse] on one line');
+  }
   const normalized = lyrics.replace(/\[([^\]\r\n]+)\]/g, (_all, raw: string) => {
     const match = /^(intro|verse|chorus|bridge|outro)(?:\s+\d+)?$/i.exec(raw.trim());
     if (!match) throw new Error(`Unsupported HeartMuLa lyric section: ${raw}`);

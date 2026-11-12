@@ -17,5 +17,8 @@ test('lyrics preserve supported sections, normalize numbered headings and reject
   assert.equal(heartmulaCoverLyrics('line'), '[Verse]\nline');
   assert.equal(heartmulaCoverLyrics(''), '[Intro]');
   assert.throws(() => heartmulaCoverLyrics('[Solo]\nline'), /Unsupported/);
+  for (const text of ['[oops\nline', '[Verse\n]\nline', 'line]', '[]']) {
+    assert.throws(() => heartmulaCoverLyrics(text), /unclosed or stray bracket/, JSON.stringify(text));
+  }
   assert.throws(() => heartmulaCoverLyrics('x'.repeat(32768)), /32768/);
 });
