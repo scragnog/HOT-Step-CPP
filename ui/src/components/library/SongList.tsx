@@ -28,6 +28,7 @@ import { displayTitle, displaySubtext } from '../../utils/songDisplay';
 import { formatRelativeDay } from '../../utils/dateUtils';
 import { applySelectClick } from '../../utils/rangeSelect';
 import { buildSongBadges, coverTag } from './songBadges';
+import { trackMetadata } from '../details/songFacts';
 
 function SongParameterBadges({ song }: { song: Song }) {
   const { t } = useTranslation();
@@ -946,7 +947,7 @@ const SongItem: React.FC<SongItemProps> = ({
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  const gp = song.generationParams;
+  const { bpm, keyScale } = trackMetadata(song);
 
   const handleClick = (e: React.MouseEvent) => {
     if (selectionMode) {
@@ -1075,14 +1076,14 @@ const SongItem: React.FC<SongItemProps> = ({
             </span>
           );
         })()}
-        {gp?.bpm && (
+        {bpm > 0 && (
           <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-100/50 dark:bg-zinc-800/50">
-            {gp.bpm} BPM
+            {bpm} BPM
           </span>
         )}
-        {gp?.keyScale && (
+        {keyScale && (
           <span className="text-[10px] text-zinc-500 font-medium px-1.5 py-0.5 rounded bg-zinc-100/50 dark:bg-zinc-800/50">
-            {gp.keyScale}
+            {keyScale}
           </span>
         )}
         <QualityBadge song={song} />
@@ -1703,8 +1704,7 @@ const SongTable: React.FC<SongTableProps> = ({
           {songs.map(song => {
             const isActive = currentSongId === song.id;
             const gp = song.generationParams || song.generation_params as any;
-            const bpm = song.bpm || gp?.bpm;
-            const keyScale = song.key_scale || gp?.keyScale;
+            const { bpm, keyScale } = trackMetadata(song);
             const model = song.dit_model || gp?.ditModel || '';
             const modelShort = model ? model.split('/').pop()?.replace(/\.gguf$/, '').substring(0, 16) : '';
             const src = (gp as any)?.source || 'create';

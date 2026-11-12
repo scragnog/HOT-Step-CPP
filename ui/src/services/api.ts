@@ -70,7 +70,7 @@ export function normalizeSong(s: any): Song {
     coverUrl: s.cover_url || s.coverUrl,
     cover_url: s.cover_url,
     duration: s.duration || 0,
-    bpm: s.bpm || gp?.bpm,
+    bpm: s.bpm,
     key_scale: s.key_scale,
     time_signature: s.time_signature,
     tags: s.tags || [],

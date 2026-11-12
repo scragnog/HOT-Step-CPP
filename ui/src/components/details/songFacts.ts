@@ -463,25 +463,26 @@ function coverFacts(gp: any, backend: Backend): Fact[] {
   return facts;
 }
 
-/** The handful of musical facts shown as chips above the parameters. Only the
- *  backends that actually measure them store them — MM3 and YuE2 write 0 and
- *  '' into bpm/key/time_signature, so those are dropped rather than shown as
- *  "0" and blank. */
-export function buildTrackChips(song: Song): Fact[] {
+/** Saved musical metadata for list rows, tables and details. Request values
+ *  are a fallback only for ACE-Step; other backends may ignore those inputs. */
+export function trackMetadata(song: Song): { bpm: number; keyScale: string; timeSignature: string } {
   const gp = params(song) || {};
-  const chips: Fact[] = [];
-  add(chips, 'Length', formatDuration(song.duration));
-
-  // The song's own columns are the only per-render truth. gp.bpm/keyScale are
-  // the global panel's values, which ACE-Step consumes as inputs and the other
-  // backends ignore entirely — reading them showed a YuE2 track as "138 bpm,
-  // C major" while its own plan said 70 bpm in 2/4.
   const ace = songBackend(song) === 'ace';
   const bpm = Number(song.bpm || (ace ? gp.bpm : 0) || 0);
-  if (bpm > 0) add(chips, 'Tempo', `${bpm} bpm`);
-  const key = String(song.key_scale || (ace ? gp.keyScale : '') || '').trim();
-  if (key) add(chips, 'Key', key);
-  const sig = String(song.time_signature || (ace ? gp.timeSignature : '') || '').trim();
-  if (sig) add(chips, 'Time', sig);
+  return {
+    bpm: bpm > 0 ? bpm : 0,
+    keyScale: String(song.key_scale || (ace ? gp.keyScale : '') || '').trim(),
+    timeSignature: String(song.time_signature || (ace ? gp.timeSignature : '') || '').trim(),
+  };
+}
+
+/** Musical facts above the parameters, omitting empty saved fields. */
+export function buildTrackChips(song: Song): Fact[] {
+  const chips: Fact[] = [];
+  add(chips, 'Length', formatDuration(song.duration));
+  const { bpm, keyScale, timeSignature } = trackMetadata(song);
+  if (bpm) add(chips, 'Tempo', `${bpm} bpm`);
+  if (keyScale) add(chips, 'Key', keyScale);
+  if (timeSignature) add(chips, 'Time', timeSignature);
   return chips;
 }

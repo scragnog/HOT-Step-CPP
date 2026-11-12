@@ -1,7 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFactGroups } from './songFacts';
+import { buildFactGroups, buildTrackChips } from './songFacts';
+import { normalizeSong } from '../../services/api';
 import type { Song } from '../../types';
+
+test('saved musical metadata wins and only ACE-Step falls back to request values (#344)', () => {
+  for (const backend of ['ace', 'yue2', 'minimax-m3', 'sa3']) {
+    const raw = { backend: 'ace', bpm: 0, key_scale: '', time_signature: '',
+      generation_params: JSON.stringify({ backend, bpm: 80, keyScale: 'D major', timeSignature: '4/4' }) };
+    const facts = (song: Song) => Object.fromEntries(buildTrackChips(song).map(f => [f.label, f.value]));
+    const empty = normalizeSong(raw);
+    assert.equal(empty.bpm, 0, 'normalization preserves empty saved columns');
+    assert.deepEqual(facts(empty), backend === 'ace'
+      ? { Tempo: '80 bpm', Key: 'D major', Time: '4/4' } : {});
+    assert.deepEqual(facts(normalizeSong({ ...raw, bpm: 68, key_scale: 'A minor', time_signature: '2/4' })),
+      { Tempo: '68 bpm', Key: 'A minor', Time: '2/4' });
+    assert.deepEqual(facts(normalizeSong({ ...raw, bpm: undefined, key_scale: undefined, time_signature: undefined })),
+      backend === 'ace' ? { Tempo: '80 bpm', Key: 'D major', Time: '4/4' } : {});
+  }
+});
 
 test('Cover Studio facts retain source identity, choices and covering tag', () => {
   const groups = buildFactGroups({ backend: 'yue2', generationParams: {
