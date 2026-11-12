@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.job.phaseCaptionLoading": "모델 로딩 / 오디오 인코딩 중",
+    "trainingStudio.job.phaseCaptionEncoding": "오디오 인코딩 중",
+    "trainingStudio.job.phaseCaptionWriting": "캡션 작성 중",
     "test": "이것은 테스트입니다",
     "sidebar.collapse": "축소",
     "sidebar.expand": "확장",

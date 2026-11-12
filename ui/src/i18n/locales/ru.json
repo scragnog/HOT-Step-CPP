@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.job.phaseCaptionLoading": "загрузка модели / кодирование аудио",
+    "trainingStudio.job.phaseCaptionEncoding": "кодирование аудио",
+    "trainingStudio.job.phaseCaptionWriting": "создание описания",
     "test": "Это тест",
     "sidebar.collapse": "Свернуть",
     "sidebar.expand": "Развернуть",

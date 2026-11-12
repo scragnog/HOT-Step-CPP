@@ -19,7 +19,7 @@ import { buildUserPrompt, captionProblem, parseStructuredResponse, CAPTION_INSTR
 import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
   applyFactSubstitution, captionWithMoss, correctFactsInProse, genreHint, isLocalCaptioner,
-  LOCAL_CAPTIONER_NAMES, MM3_INSTRUCTIONS, type LocalCaptioner,
+  LOCAL_CAPTIONER_NAMES, MM3_INSTRUCTIONS, type LocalCaptioner, type MossProgress,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import * as audioMeta from './audioMeta.js';
@@ -285,6 +285,7 @@ async function captionWithMossProvider(
     wantYue2?: boolean;
     signal?: AbortSignal;
     log?: (level: 'info' | 'warn', message: string) => void;
+    onProgress?: MossProgress;
   },
 ): Promise<Record<string, string>> {
   // One fact set drives both corrections: the MM3 `Basic Attributes:` line and
@@ -307,7 +308,7 @@ async function captionWithMossProvider(
     sample.audioPath, facts,
     {
       model: opts.model, wantMm3: opts.wantMm3, wantYue2: opts.wantYue2,
-      hint: genreHint(tagGenre), signal: opts.signal, log: opts.log,
+      hint: genreHint(tagGenre), signal: opts.signal, log: opts.log, onProgress: opts.onProgress,
     },
   );
 
@@ -434,6 +435,7 @@ export async function enhanceCaption(
     yue2Model?: string;
     signal?: AbortSignal;
     log?: (level: 'info' | 'warn', message: string) => void;
+    onProgress?: MossProgress;
   },
 ): Promise<Record<string, string>> {
   // Local, audio-grounded path. Checked BEFORE getProvider because 'moss' is not

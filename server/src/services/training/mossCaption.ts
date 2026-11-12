@@ -29,6 +29,8 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
+import { createInterface } from 'node:readline';
+import type { Readable } from 'node:stream';
 import { config, getFFmpegPath } from '../../config.js';
 import { CAPTION_INSTRUCTIONS } from './captionPrompt.js';
 import { normalizeYue2Caption } from '../lireek/prompts.js';
@@ -254,7 +256,45 @@ function retryLoopArgs(model: LocalCaptioner, modes: MossMode[]): string[] {
     ? ['--retry-loops', String(LYRICS_RETRY_REP_PENALTY)] : [];
 }
 
+export type MossPhase = 'caption-loading' | 'caption-encoding' | 'caption-writing';
+export type MossProgress = (phase: MossPhase, audioPath?: string) => void;
+
+/** Only ace-caption status lines; GGML diagnostics and failed writes are ignored. */
+export function parseMossProgressLine(line: string): {
+  phase: MossPhase; audioPath?: string; outputPath?: string; mode?: string;
+} | undefined {
+  const track = /^\[(?:MOSS|Flamingo)\] \(\d+\/\d+\) (.+?)\s*$/.exec(line);
+  if (track) return { phase: 'caption-encoding', audioPath: track[1] };
+  if (/^\[Flamingo\] loaded in \d+(?:\.\d+)?s:/.test(line)) return { phase: 'caption-encoding' };
+  if (/^\[MOSS\] \d+(?:\.\d+)? s audio -> \d+ mel frames -> \d+ audio tokens/.test(line)
+    || /^\[Flamingo\] \d+(?:\.\d+)? s audio -> \d+ audio tokens, encoded in /.test(line)) {
+    return { phase: 'caption-writing' };
+  }
+  const written = /^\[(?:MOSS|Flamingo)\] (prose|mm3|lyrics|yue2)\s+-> (.+?) \(\d+(?:\.\d+)?s\)\s*$/.exec(line);
+  if (written) return { phase: 'caption-writing', mode: written[1], outputPath: written[2] };
+  return undefined;
+}
+
+/** Shared by single-file and batch runs; readline preserves chunk boundaries and the final line. */
+export function watchMossProgress(
+  stderr: Readable,
+  opts: Pick<MossRunOptions, 'onProgress' | 'log'>,
+  audioPath?: string,
+  onWritten?: (outputPath: string, mode: string) => void,
+): void {
+  let currentPath = audioPath;
+  createInterface({ input: stderr, crlfDelay: Infinity }).on('line', line => {
+    const event = parseMossProgressLine(line);
+    if (!event) return;
+    if (event.audioPath) currentPath = event.audioPath;
+    opts.onProgress?.(event.phase, currentPath);
+    opts.log?.('info', line.trim());
+    if (event.outputPath && event.mode) onWritten?.(event.outputPath, event.mode);
+  });
+}
+
 export interface MossRunOptions {
+  onProgress?: MossProgress;
   /** Which local model; default MOSS. */
   model?: LocalCaptioner;
   modes: MossMode[];
@@ -372,13 +412,15 @@ async function runMossCaptionInner(
   }
 
   try {
+    opts.onProgress?.('caption-loading', audioPath);
     const stderr = await new Promise<string>((resolve, reject) => {
-      execFile(exe, args,
+      const child = execFile(exe, args,
         { timeout: 30 * 60_000, maxBuffer: 32 * 1024 * 1024, signal: opts.signal },
         (error, _stdout, errText) => {
           if (error) { reject(new Error(`ace-caption failed: ${String(errText || error).slice(0, 400)}`)); return; }
           resolve(errText || '');
         });
+      if (child.stderr) watchMossProgress(child.stderr, opts, audioPath);
     });
     const timing = /encode[^\n]*|\b\d+\.\d+\s*s\b/.exec(stderr);
     if (timing) opts.log?.('info', `${LOCAL_CAPTIONER_NAMES[model]}: ${timing[0].trim()}`);
@@ -841,6 +883,7 @@ export async function prepareMossBatch(
   audioPaths: string[],
   opts: {
     model?: LocalCaptioner;
+    onProgress?: MossProgress;
     wantMm3?: boolean; wantLyrics?: boolean; wantYue2?: boolean; maxSeconds?: number;
     /** audio path -> per-track hint (genreHint), appended to non-lyrics prompts. */
     hints?: Map<string, string>;
@@ -861,7 +904,7 @@ export async function prepareMossBatch(
       prose: CAPTION_INSTRUCTIONS, mm3: MM3_INSTRUCTIONS,
       lyrics: LYRICS_INSTRUCTIONS, yue2: YUE2_LOCAL_INSTRUCTIONS,
     },
-    maxSeconds: opts.maxSeconds, signal: opts.signal, log: opts.log,
+    maxSeconds: opts.maxSeconds, signal: opts.signal, log: opts.log, onProgress: opts.onProgress,
   });
   // Lyrics that ride the caption batch are claimed separately (takeLocalLyrics),
   // so the label job can use them per track whether or not it captions.
@@ -1008,6 +1051,7 @@ function runMossBatch(
         resolve(Object.keys(modeText).length > 0 ? modeText : undefined);
       };
 
+      opts.onProgress?.('caption-loading', audioPaths[0]);
       await new Promise<void>((resolve, reject) => {
         // A non-zero exit means SOME file failed, not that all did — the CLI
         // captions every readable track first. So resolve either way; per-file
@@ -1023,22 +1067,13 @@ function runMossBatch(
         // per written file. A track is complete when all its requested modes
         // have reported.
         const reported = new Map<number, number>();
-        let buffer = '';
-        child.stderr?.setEncoding('utf8');
-        child.stderr?.on('data', (chunk: string) => {
-          buffer += chunk;
-          let nl: number;
-          while ((nl = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
-            const m = /^\[(?:MOSS|Flamingo)\] \S+\s+-> (.+?) \(\d+(?:\.\d+)?s\)\s*$/.exec(line);
-            if (!m) continue;
-            const base = m[1].replace(/\.(?:prose|mm3|lyrics|yue2)\.txt$/, '').replace(/\.txt$/, '');
-            const i = bases.indexOf(base);
-            if (i < 0) continue;
-            const n = (reported.get(i) ?? 0) + 1;
-            reported.set(i, n);
-            if (n >= opts.modes.length) settle(i);
-          }
+        if (child.stderr) watchMossProgress(child.stderr, opts, audioPaths[0], outputPath => {
+          const base = outputPath.replace(/\.(?:prose|mm3|lyrics|yue2)\.txt$/, '').replace(/\.txt$/, '');
+          const i = bases.indexOf(base);
+          if (i < 0) return;
+          const n = (reported.get(i) ?? 0) + 1;
+          reported.set(i, n);
+          if (n >= opts.modes.length) settle(i);
         });
       });
 
@@ -1080,6 +1115,7 @@ export async function captionWithMoss(
   facts: LocalFacts,
   opts: {
     model?: LocalCaptioner;
+    onProgress?: MossProgress;
     wantMm3?: boolean;
     wantLyrics?: boolean;
     wantYue2?: boolean;
@@ -1118,6 +1154,7 @@ export async function captionWithMoss(
     maxSeconds: opts.maxSeconds,
     signal: opts.signal,
     log: opts.log,
+    onProgress: opts.onProgress,
   });
 
   const out: MossCaptionResult = { prose: raw.prose, lyrics: raw.lyrics };

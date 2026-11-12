@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.job.phaseCaptionLoading": "モデルを読み込み中 / 音声をエンコード中",
+    "trainingStudio.job.phaseCaptionEncoding": "音声をエンコード中",
+    "trainingStudio.job.phaseCaptionWriting": "キャプションを作成中",
     "test": "これはテストです",
     "sidebar.collapse": "折りたたむ",
     "sidebar.expand": "展開する",

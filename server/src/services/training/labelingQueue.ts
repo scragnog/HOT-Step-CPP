@@ -50,7 +50,7 @@ import { getDataset, updateCounters, updateDataset } from './datasetsRepo.js';
 import type { AceRequest } from '../aceClient.js';
 import {
   arbitrateSidecarGenre, clearMossBatch, dropLocalLyrics, genreHint, isLocalCaptioner,
-  prepareLocalLyrics, prepareMossBatch, takeLocalLyrics,
+  prepareLocalLyrics, prepareMossBatch, takeLocalLyrics, type MossProgress,
 } from './mossCaption.js';
 import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import { hasSectionTags, normaliseLyricTags, transferTags } from './lyricTags.js';
@@ -882,6 +882,17 @@ function markLabeled(
 
 // ── Label job (§4.7) ─────────────────────────────────────────────────────
 
+/** Keep the progress file paired with the engine's stage, even when a batch runs ahead. */
+function mossProgress(job: TrainingJob, targets: TrainingSample[]): MossProgress {
+  return (phase, audioPath) => {
+    if (isCancelled(job)) return;
+    job.phase = phase;
+    const sample = targets.find(sample => sample.audioPath === audioPath);
+    if (sample) job.currentSampleId = sample.sampleId;
+    emitProgress(job);
+  };
+}
+
 /** audio path -> genreHint(the file's own genre tag), for the local captioners. */
 async function tagGenreHints(samples: TrainingSample[]): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -1339,7 +1350,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
           // via `forced` — arbitration already weighed the existing value.
           let arbitratedGenre: string | undefined;
           if (opts.useCaption === true) {
-            job.phase = 'llm';
+            job.phase = isLocalCaptioner(opts.caption?.provider || config.lireek.defaultProvider) ? 'caption-loading' : 'llm';
             emitProgress(job);
             try {
               // Feed the freshest local results into the caption step, not just
@@ -1359,6 +1370,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
               };
               const fields = await captionLimiter.run(() => enhanceCaption(promptSample, ds, {
                 provider: opts.caption?.provider || config.lireek.defaultProvider,
+                onProgress: mossProgress(job, targets),
                 // Emit the MM3 Structured Caption alongside the AS1.5 block —
                 // MOSS does it as a second decode, Gemini as a second audio
                 // call. It is what `ace-train mm3-condition` reads.
@@ -1428,6 +1440,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
       if (localModel) {
         await prepareMossBatch(targets.map(t => t.audioPath), {
           model: localModel,
+          onProgress: mossProgress(job, targets),
           wantMm3: true,
           // Same rule enhanceCaption applies: local unless a chat provider was named.
           wantYue2: opts.caption?.wantYue2 !== false
@@ -1544,7 +1557,7 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
 
   job.status = 'running';
   job.startedAt = Date.now();
-  job.phase = 'llm';
+  job.phase = isLocalCaptioner(opts.provider) ? 'caption-loading' : 'llm';
   emitJob(job);
 
   try {
@@ -1565,6 +1578,7 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
     if (isLocalCaptioner(opts.provider)) {
       await prepareMossBatch(targets.map(s => s.audioPath), {
         model: opts.provider,
+        onProgress: mossProgress(job, targets),
         wantMm3: opts.wantMm3 !== false,
         wantYue2: opts.wantYue2 !== false
           && !(opts.yue2Provider && !isLocalCaptioner(opts.yue2Provider)),
@@ -1581,6 +1595,7 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
       try {
         const fields = await captionLimiter.run(() => enhanceCaption(sample, ds, {
           provider: opts.provider,
+          onProgress: mossProgress(job, targets),
           model: opts.model,
           includeLyricsExcerpt: opts.includeLyricsExcerpt !== false,
           temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.45,

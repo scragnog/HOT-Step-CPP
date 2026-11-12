@@ -20,6 +20,9 @@ const PHASE_KEYS: Record<string, string> = {
   lyrics: 'trainingStudio.job.phaseLyrics',
   normalise: 'trainingStudio.job.phaseNormalise',
   llm: 'trainingStudio.job.phaseLlm',
+  'caption-loading': 'trainingStudio.job.phaseCaptionLoading',
+  'caption-encoding': 'trainingStudio.job.phaseCaptionEncoding',
+  'caption-writing': 'trainingStudio.job.phaseCaptionWriting',
   build: 'trainingStudio.job.phaseBuild',
   // yue2-stems. Without this the raw phase enum is interpolated into the
   // translated sentence and non-English users read "separating" mid-sentence.
@@ -117,6 +120,8 @@ export const JobProgress: React.FC<{ hideEta?: boolean }> = ({ hideEta }) => {
 
   const pct = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
   const active = job.status === 'queued' || job.status === 'running';
+  const indeterminate = active && job.total === 1
+    && (job.kind === 'label' || job.kind === 'enhance-caption');
   const failedJob = job.status === 'failed';
   const current = job.currentSampleId ? samplesById[job.currentSampleId] : undefined;
   // Not every job walks dataset ROWS. The YuE2 cache stages walk audio files
@@ -135,7 +140,7 @@ export const JobProgress: React.FC<{ hideEta?: boolean }> = ({ hideEta }) => {
   // answers "when does the loss reach the target", the tile row's old one
   // answered "when does the epoch cap arrive") and both were labelled "ETA".
   const etaLabel = eta ? t('trainingStudio.job.eta', { eta }) : t('trainingStudio.job.etaEstimating');
-  const showEta = active && !hideEta && !isTrainingKind(job.kind);
+  const showEta = active && !indeterminate && !hideEta && !isTrainingKind(job.kind);
 
   // Retry has to re-run the job the card is actually showing. The enhance kinds
   // carry provider/model options this card does not have, so they use the
@@ -190,10 +195,18 @@ export const JobProgress: React.FC<{ hideEta?: boolean }> = ({ hideEta }) => {
       </div>
 
       {/* Bar */}
-      <div className="h-1.5 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
+      <div
+        role="progressbar"
+        aria-label={phaseLabel}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={indeterminate ? undefined : pct}
+        aria-valuetext={phaseLabel}
+        className="h-1.5 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden"
+      >
         <div
-          className={`h-full transition-all duration-300 ${failedJob ? 'bg-red-500' : 'bg-amber-500'}`}
-          style={{ width: `${pct}%` }}
+          className={`h-full transition-all duration-300 ${indeterminate ? 'animate-pulse' : ''} ${failedJob ? 'bg-red-500' : 'bg-amber-500'}`}
+          style={{ width: indeterminate ? '100%' : `${pct}%` }}
         />
       </div>
 

@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.job.phaseCaptionLoading": "loading model / encoding audio",
+    "trainingStudio.job.phaseCaptionEncoding": "encoding audio",
+    "trainingStudio.job.phaseCaptionWriting": "writing caption",
     "yue2Continuation.label": "Continue from recording (experimental)",
     "yue2Continuation.info": "Use a section of an uploaded recording as the beginning of a new YuE2 song. Score planning is turned off.",
     "yue2Continuation.upload": "Upload a recording",

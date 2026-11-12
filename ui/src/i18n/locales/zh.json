@@ -1,5 +1,8 @@
 {
   "translation": {
+    "trainingStudio.job.phaseCaptionLoading": "正在加载模型 / 编码音频",
+    "trainingStudio.job.phaseCaptionEncoding": "正在编码音频",
+    "trainingStudio.job.phaseCaptionWriting": "正在生成描述",
     "test": "这是一个测试",
     "sidebar.collapse": "折叠",
     "sidebar.expand": "展开",
