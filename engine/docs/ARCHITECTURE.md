@@ -1039,7 +1039,10 @@ POST /mm3/imatrix                Activation statistics for quantize --imatrix.
 POST /mm3/voc-decode, /mm3/dit-forward, /mm3/flow-sample, /mm3/depth-frame,
      /mm3/cond-encode, /mm3/lm-plan, /mm3/synth-e2e
                                  Bring-up and parity endpoints. They run outside
-                                 the job queue.
+                                 the job queue. /mm3/lm-plan also takes
+                                 "caption" + "lyrics" (assembled like training)
+                                 and "eos_trace": true (per-iteration EOS and
+                                 emitted-code statistics for every take).
 
 GET  /yue2/props                 YuE2 files, config, what is loaded.
 POST /yue2/warm, /yue2/unload    Load or free YuE2 weights.

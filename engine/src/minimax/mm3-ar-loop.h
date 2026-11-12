@@ -151,16 +151,21 @@ struct MM3ArResult {
     int64_t n_codebooks  = 0;  // 8 = 1 semantic + 7 acoustic
     int64_t sem_vocab    = 0;  // SV
     bool    eos_hit      = false;
-    // EOS trace (MM3ArOptions::eos_trace), one entry per iteration, take 0 only:
+    // EOS trace (MM3ArOptions::eos_trace), one entry per iteration, every take:
     //   eos_p_cond   softmax of the raw CONDITIONAL candidate row at EOS
+    //   eos_p_uncond the same on the raw UNCONDITIONAL row (what CFG subtracts)
     //   eos_p_final  what the sampler would draw: CFG-guided, masked by the
     //                conditional top-k, then top-k'd again (mm3_sample_top_k)
     //   eos_rank     EOS's rank in the conditional row (0 = argmax)
     //   eos_topk_ok  1 when EOS survived the conditional top-k mask
+    //   emit_lp      log-softmax of the raw conditional row at the code this
+    //                iteration emitted (the forced code under replay, EOS on
+    //                the iteration that ended the take)
+    //   emit_rank    that code's rank in the raw conditional row
     // Exists to answer "does the adapter still predict an ending at the true
     // end of a real track" under forced replay, without touching sampling.
-    std::vector<float>   eos_p_cond, eos_p_final;
-    std::vector<int32_t> eos_rank, eos_topk_ok;
+    std::vector<float>   eos_p_cond, eos_p_uncond, eos_p_final, emit_lp;
+    std::vector<int32_t> eos_rank, eos_topk_ok, emit_rank;
     // LRC text derived from the LM's own decode attention (mm3-align.h). Empty
     // when alignment was off, the track was instrumental, or alignment failed —
     // never a reason to fail the run.
@@ -1177,6 +1182,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             if (guide_it) {
                 gd_pre = cand_guided;  // per take: the fallback below reads it too
             }
+            double tr_cmax = 0.0, tr_lse = 0.0;  // eos_trace: raw conditional log-normaliser
             {
                 int64_t k = TOPK < NCAND ? (int64_t) TOPK : NCAND;
                 if (k < 1) {
@@ -1196,29 +1202,39 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                         cand_guided[(size_t) i] = -INFINITY;
                     }
                 }
-                if (opt.eos_trace && t == 0) {
+                if (opt.eos_trace) {
                     // Raw conditional softmax at EOS, and EOS's rank in that row.
-                    double  cmax = -INFINITY;
+                    double  cmax = -INFINITY, umax = -INFINITY;
                     int64_t rank = 0;
                     for (int64_t i = 0; i < NCAND; i++) {
                         const double x = (double) cand_cond[(size_t) i];
                         if (x > cmax) {
                             cmax = x;
                         }
+                        umax = std::max(umax, (double) cand_unc[(size_t) i]);
                         if (i > 0 && x > (double) cand_cond[0]) {
                             rank++;
                         }
                     }
-                    double csum = 0.0;
+                    double csum = 0.0, usum = 0.0;
                     for (int64_t i = 0; i < NCAND; i++) {
                         const double x = (double) cand_cond[(size_t) i];
                         if (std::isfinite(x)) {
                             csum += std::exp(x - cmax);
                         }
+                        const double y = (double) cand_unc[(size_t) i];
+                        if (std::isfinite(y)) {
+                            usum += std::exp(y - umax);
+                        }
                     }
                     const float p_cond = std::isfinite((double) cand_cond[0]) && csum > 0.0
                                              ? (float) (std::exp((double) cand_cond[0] - cmax) / csum)
                                              : 0.0f;
+                    const float p_unc = std::isfinite((double) cand_unc[0]) && usum > 0.0
+                                            ? (float) (std::exp((double) cand_unc[0] - umax) / usum)
+                                            : 0.0f;
+                    tr_cmax = cmax;
+                    tr_lse  = csum > 0.0 ? std::log(csum) : 0.0;
                     // What the draw would see: the second top-k over the guided row
                     // (mm3_sample_top_k), softmax over its survivors.
                     float p_final = 0.0f;
@@ -1253,10 +1269,11 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                             p_final = (float) (std::exp((double) g0 - gmax) / gsum);
                         }
                     }
-                    outs[0].eos_p_cond.push_back(p_cond);
-                    outs[0].eos_p_final.push_back(p_final);
-                    outs[0].eos_rank.push_back((int32_t) rank);
-                    outs[0].eos_topk_ok.push_back(std::isfinite(cand_guided[0]) ? 1 : 0);
+                    outs[t].eos_p_cond.push_back(p_cond);
+                    outs[t].eos_p_uncond.push_back(p_unc);
+                    outs[t].eos_p_final.push_back(p_final);
+                    outs[t].eos_rank.push_back((int32_t) rank);
+                    outs[t].eos_topk_ok.push_back(std::isfinite(cand_guided[0]) ? 1 : 0);
                 }
             }
 
@@ -1381,9 +1398,23 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                                       (int64_t) outs[t].semantic_all.size(), opt.knobs);
             }
 
+            // eos_trace: how the raw conditional row scored what was emitted.
+            const auto trace_emit = [&](int64_t ci) {
+                if (!opt.eos_trace) {
+                    return;
+                }
+                const double x    = (double) cand_cond[(size_t) ci];
+                int32_t      rank = 0;
+                for (int64_t i = 0; i < NCAND; i++) {
+                    rank += (double) cand_cond[(size_t) i] > x ? 1 : 0;
+                }
+                outs[t].emit_lp.push_back(std::isfinite(x) ? (float) (x - tr_cmax - tr_lse) : -1e30f);
+                outs[t].emit_rank.push_back(rank);
+            };
             // ── sample (or replay) ──
             if (forced_it && !soft_it) {
                 sem_code[(size_t) t] = fs_it;  // range-checked at entry
+                trace_emit(1 + fs_it);
             } else {
                 const int64_t idx = guide_pick >= 0 ? guide_pick
                                     : opt.knobs.any_active()
@@ -1391,6 +1422,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                                                              rngs[(size_t) t], &samp_scratch)
                                         : mm3_sample_top_k(cand_guided.data(), NCAND, TOPK, rngs[(size_t) t],
                                                            &samp_scratch);
+                trace_emit(idx);
                 if (idx == 0) {
                     // EOS. This take is finished; the others carry on. Its rows
                     // keep being computed (the batch shape is fixed for the run)
