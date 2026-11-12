@@ -15,7 +15,7 @@ YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
 conditioning. Stable Audio 3 also offers an instrumental source-audio refine
 in Cover Studio. HeartMuLa's MuLaCover mode uses the approved Prepare ABC lead
 sheet, four style tag fields and lyrics. It needs the separate MuLaCover model pack
-(CC BY-NC 4.0, non-commercial, not yet downloadable from Model Manager) and the
+(CC BY-NC 4.0, non-commercial, downloadable as MuLaCover cover model from the HeartMuLa tab in Model Manager) and the
 Qwen3 Embedding BF16 text encoder. MiniMax-Music3 covers in Cover Studio by forcing the
 source's encoded codes on its planner, blending the source audio into its flow
 stage, or both.
