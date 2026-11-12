@@ -245,9 +245,11 @@ Click a track (outside of selection mode) to open the right sidebar.
   subject or description text.
 - Play/pause, Edit, and the same track action menu as everywhere else.
 - Chips for length, tempo, key, and time signature, shown only when the
-  backend that made the track actually measures them. ACE-Step reports all
-  three; the other backends store no tempo, key or time signature, so those
-  chips are omitted rather than showing a meaningless value.
+  track has a saved value. ACE-Step reports all three; the other backends
+  store no tempo, key or time signature, so those chips are omitted rather
+  than showing the BPM and key that were set in the panel. A BPM or key you
+  save in Edit Metadata shows for any backend. The BPM and key on list rows
+  and in the table columns follow the same rule.
 - Collapsible sections: Prompt (the style/caption text), How it was made
   (the parameters that render's own backend used, grouped as Models,
   Sampling, Planner, Adapters, Reproduction for ACE-Step; Render, Adapter,
