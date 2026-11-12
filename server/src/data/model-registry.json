@@ -477,6 +477,22 @@
       ]
     },
     {
+      "id": "heartmula-mulacover",
+      "family": "heartmula",
+      "name": "MuLaCover cover model",
+      "description": "HeartMuLa's lead-sheet cover model for Cover Studio: BF16 global and local LM with the cover modules, plus the HeartMuLa codec and tokenizer. Needs the Qwen3 Embedding BF16 text encoder. Weights and outputs are for non-commercial use.",
+      "license": "CC BY-NC 4.0 + MuLaCover MODEL_LICENSE (non-commercial)",
+      "fileIds": [
+        "heartmula-mulacover-global-bf16",
+        "heartmula-mulacover-local-bf16",
+        "heartcodec-flow-q8_0",
+        "heartcodec-scalar-decoder-f16",
+        "heartcodec-rvq-f32",
+        "heartmula-tokenizer",
+        "embedding-bf16"
+      ]
+    },
+    {
       "id": "heartmula-encoder",
       "family": "heartmula",
       "name": "HeartCodec optional encoder pack",
@@ -10404,6 +10420,47 @@
         {
           "filename": "NOTICE"
         }
+      ]
+    },
+    {
+      "id": "heartmula-mulacover-global-bf16",
+      "filename": "heartmula-mulacover-global-BF16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-mulacover-global-BF16.gguf",
+      "displayName": "MuLaCover global (BF16)",
+      "variant": "heartmula-mulacover-global",
+      "quant": "BF16",
+      "sizeBytes": 7755339840,
+      "sha256": "6b7a7d889242ae121f7c1b8d2a9ecd6de3d09eba9e831ee9bd42a0ce020f77a7",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "MuLaCover cover model, global LM with the cover modules. CC BY-NC 4.0 with the MuLaCover model licence: weights and outputs are non-commercial.",
+      "tags": [
+        "cover"
+      ],
+      "companions": [
+        {
+          "filename": "MODEL_LICENSE-mulacover"
+        }
+      ]
+    },
+    {
+      "id": "heartmula-mulacover-local-bf16",
+      "filename": "heartmula-mulacover-local-BF16.gguf",
+      "role": "heartmula",
+      "family": "heartmula",
+      "subdir": "heartmula",
+      "repoPath": "heartmula-mulacover-local-BF16.gguf",
+      "displayName": "MuLaCover local (BF16)",
+      "variant": "heartmula-mulacover-local",
+      "quant": "BF16",
+      "sizeBytes": 994370080,
+      "sha256": "5d35548e2474ca5bcc28fde9ed54629ea80d14c8181abc5c1b5f990c84a810d3",
+      "repo": "scragnog/HeartMuLa-GGUF",
+      "description": "MuLaCover cover model, local decoder. CC BY-NC 4.0 with the MuLaCover model licence: weights and outputs are non-commercial.",
+      "tags": [
+        "cover"
       ]
     },
     {

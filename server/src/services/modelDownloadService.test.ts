@@ -37,7 +37,8 @@ test('all five generation backends have complete packs referencing real catalogu
 test('every HeartMuLa download agrees with the measured publication inventory', () => {
   const manifest = JSON.parse(fs.readFileSync(new URL('../../../docs/dev/heartmula-hf-manifest.json', import.meta.url), 'utf8'));
   const weights = manifest.files.filter((f: any) => f.upload && f.path.endsWith('.gguf'));
-  const entries = catalogue.files.filter((f: any) => f.family === 'heartmula');
+  // MuLaCover was published later under its own licence and is not in this manifest.
+  const entries = catalogue.files.filter((f: any) => f.family === 'heartmula' && !f.id.startsWith('heartmula-mulacover-'));
   assert.equal(entries.length, weights.length);
   for (const file of weights) {
     const entry = entries.find((f: any) => f.filename === file.path);

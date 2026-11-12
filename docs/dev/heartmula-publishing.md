@@ -7,7 +7,7 @@ The full inventory is published in [HeartMuLa-GGUF](https://huggingface.co/scrag
 
 ## Exact upload set
 
-The 126 source entries are uploaded at root-level repository paths: 123 GGUFs totalling 150,260,222,528 bytes, plus three quant provenance manifests. The source inventory totals 150,260,271,695 bytes. The provenance manifests retain their original build paths for reproducibility; those paths are not installation requirements. README, LICENSE, NOTICE and manifest.json bring the hosted total to 150,260,314,195 bytes in 130 files.
+The 126 source entries are uploaded at root-level repository paths: 123 GGUFs totalling 150,260,222,528 bytes, plus three quant provenance manifests. The source inventory totals 150,260,271,695 bytes. The provenance manifests retain their original build paths for reproducibility; those paths are not installation requirements. README, LICENSE, NOTICE and manifest.json bring the hosted total to 150,260,314,195 bytes in 130 files. The MuLaCover cover model (`heartmula-mulacover-global-BF16.gguf`, `heartmula-mulacover-local-BF16.gguf` and `MODEL_LICENSE-mulacover`) was added to the repository later under CC BY-NC 4.0 and its own model terms. It is not in this manifest; its sizes and SHA-256 are in `server/src/data/model-registry.json`.
 
 The publication includes these metadata files:
 
