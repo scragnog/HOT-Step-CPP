@@ -199,8 +199,12 @@ static HeartMuLaPick hm_cover_pick(const HeartMuLaRequest & r) {
 // resolver's 404/409 for a bad pick.
 static bool hm_cover_ready_locked(const HeartMuLaRequest & r, HeartMuLaResolved * out, int * status, const char ** code,
                                   std::string * err) {
-    const bool installed = std::any_of(g_hm.cat.files.begin(), g_hm.cat.files.end(),
-                                       [](const HeartMuLaFile & f) { return f.role == HM_GLOBAL && hm_is_cover(f.variant); });
+    // Both halves of the pair: one without the other is a partial install, not a bad pick.
+    auto has = [](int role) {
+        return std::any_of(g_hm.cat.files.begin(), g_hm.cat.files.end(),
+                           [role](const HeartMuLaFile & f) { return f.role == role && hm_is_cover(f.variant); });
+    };
+    const bool installed = has(HM_GLOBAL) && has(HM_LOCAL);
     std::error_code ec;
     const bool      qwen = std::filesystem::exists(std::filesystem::path(g_hm.models_dir) / HM_COVER_QWEN, ec);
     if (!installed || !qwen) {
@@ -474,8 +478,11 @@ static JobPhase hm_phase(const std::string & s) {
 
 // Worker: the cover's style vector (upstream _encode_style) from the tags as the prompt
 // reads them. The BF16 encoder is loaded for this alone, after admission, and freed.
-static bool hm_cover_style(HeartMuLaRequest * req, const HeartMuLaTokenizer & tok, const HeartMuLaHooks & hooks,
-                           const char ** code, std::string * err) {
+// Admission first drops what the cover pick `p` no longer names (keep-loaded leftovers
+// of another pick), then, if the encoder still does not fit, the cover's own idle
+// codec, other families' idle weights (heartmula_admit) and last the resident LM.
+static bool hm_cover_style(HeartMuLaRequest * req, const HeartMuLaResolved & p, const HeartMuLaTokenizer & tok,
+                           const HeartMuLaHooks & hooks, const char ** code, std::string * err) {
     std::string path;
     {
         std::lock_guard<std::mutex> lock(g_hm.mtx);
@@ -490,7 +497,13 @@ static bool hm_cover_style(HeartMuLaRequest * req, const HeartMuLaTokenizer & to
         return false;
     }
     heartmula_ensure_backend(&g_hm_rt);
-    const HeartMuLaAdmission a = heartmula_admit(g_hm_rt, "style", bytes, 0, 0, false, hooks);
+    heartmula_drop_stale(&g_hm_rt, &p);
+    if (bytes + heartmula_reserve_bytes() > heartmula_device_free(g_hm_rt)) heartmula_free_codec(&g_hm_rt);
+    HeartMuLaAdmission a = heartmula_admit(g_hm_rt, "style", bytes, 0, 0, false, hooks);
+    if (!a.ok && g_hm_rt.lm.loaded) {
+        heartmula_free_lm(&g_hm_rt);
+        a = heartmula_admit(g_hm_rt, "style", bytes, 0, 0, false, hooks);
+    }
     if (!a.ok) {
         *code = "vram_insufficient";
         *err  = a.message();
@@ -606,7 +619,7 @@ static void hm_synth_worker(std::shared_ptr<Job> job, HeartMuLaRequest req, std:
     };
     if (req.cover) {
         const char * code = "";
-        if (!hm_cover_style(&req, *tok, hooks, &code, &err)) {
+        if (!hm_cover_style(&req, r, *tok, hooks, &code, &err)) {
             end(2, code, err);
             return;
         }
