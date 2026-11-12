@@ -128,8 +128,7 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
  *  request needs; the draft document supplies the resolved asset and, for
  *  YuE2 or HeartMuLa, the approved ABC score (409 if not approved).
  *  HeartMuLa requires heartmulaTags, ignores caption and YuE2 controls, and
- *  derives fresh rolls from that approved score. Its generation backend still
- *  returns "HeartMuLa covers are not available yet" until the engine is ready.
+ *  derives fresh rolls from that approved score.
  *  `prepare` (YuE2/HeartMuLa, optional) is contracts/yue2Prepare.ts's document:
  *  when sent, both its confirmations must be current and its structure must
  *  be the approved score, and the lyrics rendered are the ones it exports,

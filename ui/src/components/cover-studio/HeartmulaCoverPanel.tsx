@@ -8,7 +8,7 @@ export function MulacoverPackNotice() {
   return <div role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-zinc-600 dark:text-zinc-400 space-y-1">
     <p className="font-semibold">{MULACOVER_PACK.name} · {MULACOVER_PACK.license}</p>
     <p>{t('cover.heartmula.packNotice', 'MuLaCover weights and outputs are for non-commercial use. This is a separate cover model pack; the ordinary HeartMuLa models do not include it. Downloads are not available yet.')}</p>
-    <p>{t('cover.heartmula.pending', 'HeartMuLa covers are not available yet. You can prepare and save a lead sheet while engine support is pending.')}</p>
+    <p>{t('cover.heartmula.needs', 'A cover needs the MuLaCover model files and the Qwen3 Embedding BF16 text encoder. Without them you can still prepare and save a lead sheet.')}</p>
   </div>;
 }
 
@@ -32,7 +32,7 @@ export function HeartmulaCoverPanel({ tags, onTags, seed, onSeed, canGenerate, g
       <input className={inputClass} type="number" min={-1} max={Number.MAX_SAFE_INTEGER} step={1} value={seed}
         onChange={e => onSeed(Math.max(-1, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(e.target.value)))))} />
     </label>
-    <p className="text-xs text-zinc-500">{t('cover.heartmula.lyricsInfo', 'Confirm the lead sheet and assign lyrics in Prepare. Supported lyric sections: Intro, Verse, Chorus, Bridge and Outro. Unmarked lyrics start as Verse; instrumental uses Intro. Generation is limited to 240 seconds.')}</p>
+    <p className="text-xs text-zinc-500">{t('cover.heartmula.lyricsInfo', 'Confirm the lead sheet and assign lyrics in Prepare. Supported lyric sections: Intro, Verse, Chorus, Bridge and Outro. Unmarked lyrics start as Verse; instrumental uses Intro. A cover runs up to 300 seconds; the model ends the song.')}</p>
     {error && <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">{error}</p>}
     <button type="button" onClick={onGenerate} disabled={!canGenerate} className="rounded-lg bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-700 dark:text-cyan-300 disabled:opacity-50">
       {t('cover.heartmula.generate', 'Generate cover')}
