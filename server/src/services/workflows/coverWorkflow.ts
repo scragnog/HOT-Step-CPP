@@ -423,7 +423,10 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const finished = await ctx.audio.wait(item.id);
     ctx.throwIfCancelled();
     if (finished.status !== 'succeeded') throw new Error(finished.error || `Audio ${finished.status}`);
-    return { request, audioIntentId: item.id, audio: finished.result, elapsedSeconds: finished.elapsedSeconds };
+    const { heartmulaCover, ...recorded } = request;
+    const rolls = heartmulaCover as import('../../contracts/studioWorkflows.js').HeartmulaCoverRolls | undefined;
+    return { request: { ...recorded, ...(rolls ? { heartmulaCoverRows: rolls.length, heartmulaCoverBpm: rolls.bpm } : {}) },
+      audioIntentId: item.id, audio: finished.result, elapsedSeconds: finished.elapsedSeconds };
   } }];
 }
 export function registerCoverWorkflows(deps: CoverDeps = {}) {

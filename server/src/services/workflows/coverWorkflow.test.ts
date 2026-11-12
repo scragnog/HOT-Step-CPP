@@ -199,6 +199,12 @@ test('HeartMuLa uses approved ABC, explicit tags and sectioned lyrics without Yu
   await s.jobs.settled();
   assert.equal(s.jobs.get(job.id).status, 'succeeded');
   assert.equal([...s.items.values()][0].request.backend, 'heartmula');
+  assert.ok([...s.items.values()][0].request.heartmulaCover, 'the audio queue retains the engine input');
+  const result = s.jobs.get(job.id).result as { request: Record<string, unknown> };
+  assert.equal(result.request.heartmulaCover, undefined, 'the persisted workflow result omits the rolls');
+  assert.equal(result.request.heartmulaCoverRows, 16);
+  assert.equal(result.request.heartmulaCoverBpm, 90);
+  assert.ok(JSON.stringify(result).length < 4096);
   s.db.close();
 });
 

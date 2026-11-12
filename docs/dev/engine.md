@@ -288,10 +288,12 @@ the synth job path: the server sends the rolls Cover Studio builds from the appr
 score, the four-field tag line and the sectioned lyrics. The job encodes the tags with
 the BF16 Qwen3 embedding, frees it, binds the rolls after the KV reserve and samples
 with upstream's defaults (CFG 1.5, temperature 1.0, top-k 250). Admission counts
-the context cache on top of the KV. The duration limit is upstream's 300 s
-(3750 frames), not plain HeartMuLa's 240 s, and the model ends the song with audio
-EOS: a 16 s lead sheet rendered 80 s before EOS in the first worker run, which
-matches upstream's fixed default rather than the sheet length. MuLaCover is not a
+the context cache on top of the KV. The engine allows up to 300 s (3750 frames).
+The Node wrapper sets `duration_s` to the unpadded sheet length, calculated as
+sixteenth-note rows times 15 divided by BPM, clamped to 1 through 300 s. A shorter
+caller duration wins, and audio EOS can end the song earlier. The cover workflow
+result stores the roll row count and BPM instead of the full arrays; the audio
+queue retains those arrays for generation. MuLaCover is not a
 plain-synth variant: `/heartmula/synth` and `select-model` refuse it, and
 `/heartmula/models` leaves it out of `variants`.
 

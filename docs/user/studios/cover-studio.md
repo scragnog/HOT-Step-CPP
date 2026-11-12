@@ -68,8 +68,9 @@ adapters do not condition this mode. **Seed** is -1 for random, or a fixed whole
 number. Tags and seed are saved with the cover draft separately from SA3 settings.
 
 Use Intro, Verse, Chorus, Bridge and Outro lyric section markers. Unmarked
-lyrics start as Verse. An instrumental cover uses Intro. A cover runs up to
-300 seconds and the model ends the song. The approved ABC supplies melody, chords and tempo.
+lyrics start as Verse. An instrumental cover uses Intro. A cover stops at the
+lead sheet's length, up to 300 seconds; the model can end it earlier. Trailing
+padding does not extend the song. The approved ABC supplies melody, chords and tempo.
 Chord roots and slash chords accept ASCII or Unicode flats and sharps, including
 the symbols produced by SheetSage2 score parsing.
 HeartMuLa uses the same confirmed score/lyrics checks as YuE2, with no YuE2

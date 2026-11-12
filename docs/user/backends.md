@@ -511,7 +511,7 @@ component and adapter choices when the picker changes or another backend is sele
 | Post-processing | Shared chain, including VST, mastering and StableStep |
 | Shared Lua sampler plugins | Solvers, schedulers and guidance on the codec decode, opt-in |
 | PP-VAE, Spectral Lifter | No |
-| Cover Studio | Yes, MuLaCover lead-sheet cover from approved Prepare ABC, up to 300 s, ended by the model; needs the MuLaCover pack and Qwen3 Embedding BF16 |
+| Cover Studio | Yes, MuLaCover lead-sheet cover from approved Prepare ABC, capped at the sheet length and 300 s; the model can end earlier. Needs the MuLaCover pack and Qwen3 Embedding BF16 |
 | Repaint, streaming, training, lyric alignment | No |
 | Output | 48 kHz stereo |
 

@@ -88,14 +88,26 @@ export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, m
   } : {};
   const mainSeed = seed(params.seed, 'seed');
   const noiseSeed = seed(params.heartmulaNoiseSeed, 'noise seed');
+  let coverDuration = HEARTMULA_COVER_MAX_DURATION_S;
+  if (cover) {
+    let rows = number(rolls!.length, 'lead-sheet length', 0, 1, 5000, true);
+    const bpm = number(rolls!.bpm, 'lead-sheet bpm', 0, 1e-6, 1000);
+    if (!rows || !bpm || !Array.isArray(rolls!.context_mask) || rolls!.context_mask.length !== rows
+        || rolls!.context_mask.some(value => value !== 0 && value !== 1)) {
+      throw new Error('Invalid lead-sheet length, bpm or context mask');
+    }
+    // Only trailing padding shortens the sheet; masked rows inside it retain their time.
+    while (rows > 0 && rolls!.context_mask[rows - 1] === 1) rows--;
+    coverDuration = Math.max(1, Math.min(HEARTMULA_COVER_MAX_DURATION_S, rows * 15 / bpm));
+  }
   return {
     ...pick, ...groups, tags: tagged, lyrics,
     // Create's Auto duration uses -1. Let audio EOS end the song within
     // HeartMuLa's maximum duration, while an omitted duration keeps 120 s.
-    // Covers (Auto from Cover Studio) take MuLaCover's own 300 s limit.
+    // Covers stop at the unpadded sheet length or a shorter caller limit.
     duration_s: cover
-      ? number(params.duration === -1 ? HEARTMULA_COVER_MAX_DURATION_S : params.duration, 'duration',
-        HEARTMULA_COVER_MAX_DURATION_S, 1, HEARTMULA_COVER_MAX_DURATION_S)
+      ? Math.min(coverDuration, number(params.duration === -1 ? HEARTMULA_COVER_MAX_DURATION_S : params.duration, 'duration',
+        HEARTMULA_COVER_MAX_DURATION_S, 1, HEARTMULA_COVER_MAX_DURATION_S))
       : number(params.duration === -1 ? 240 : params.duration, 'duration', 120, 1, 240),
     ...(!params.randomSeed && mainSeed !== undefined ? { seed: mainSeed } : {}),
     ...(noiseSeed === undefined ? {} : { noise_seed: noiseSeed }),
