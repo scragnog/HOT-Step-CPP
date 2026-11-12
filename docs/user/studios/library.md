@@ -45,6 +45,10 @@ the list before its file exists, with a live percentage badge and progress
 bar; the grid card hides its menu until then. It is already playable, just
 not downloadable yet.
 
+Renaming a finished song also updates its server-owned generation queue row
+after a page reload. Each take in a multi-song render uses its own saved title.
+If the song record is missing, the queue shows the title captured at submission.
+
 ## Comparing generation settings
 
 Grid cards, list rows and table titles show small parameter badges. YuE2 shows

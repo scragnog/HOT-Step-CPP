@@ -583,6 +583,11 @@ function _claimSongDelivery(songId: string): boolean {
   return true;
 }
 
+function serverItemTitle(server: AudioIntentItem, take: number): string {
+  const view = server.meta?.view as AudioQueueItem | undefined;
+  return server.songTitles?.[take] ?? view?.generation?.title ?? String(server.request.title ?? 'Untitled');
+}
+
 function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): AudioQueueItem {
   const view = server.meta?.view as AudioQueueItem | undefined;
   const base = view?.generation ? view : {
@@ -604,6 +609,7 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
   const take = base.mm3Take ?? 0;
   return {
     ...base, ...previous, id: base.id, serverQueueId: server.id, status,
+    generation: { ...(previous?.generation ?? base.generation), title: serverItemTitle(server, take) },
     jobId: server.jobId ?? undefined,
     stage: server.waiting ?? (server.status === 'held' ? 'Waiting for resume' : status === 'succeeded' ? 'Complete!' : previous?.stage),
     error: server.error ?? undefined,
@@ -642,6 +648,7 @@ function projectTakeSiblings(item: AudioQueueItem, server: AudioIntentItem, prev
     };
     Object.assign(s, { mm3TakeCount: count, mm3TakeOf: item.id, batchId: item.batchId, jobId: item.jobId,
       serverQueueId: item.serverQueueId, elapsed: item.elapsed });
+    s.generation = { ...s.generation, title: serverItemTitle(server, t) };
     if (songIds[t]) {
       Object.assign(s, { status: 'succeeded', progress: 100, stage: 'Complete!', error: undefined, songId: songIds[t],
         audioUrl: result?.audioUrls?.[t] ?? s.audioUrl,
@@ -982,9 +989,7 @@ window.addEventListener('song-postprocess-reverted', (e: Event) => {
   if (songId) _syncMastered(songId, '');
 });
 
-// A rename from the song menu. The row keeps its new title for this page;
-// ponytail: a server-owned queue row re-reads its submitted title on reload,
-// write it back to the intent's view if that matters.
+// Apply menu renames immediately; server snapshots also read current song titles.
 window.addEventListener('song-renamed', (e: Event) => {
   const { songId, title } = (e as CustomEvent).detail || {};
   if (!songId || !title) return;

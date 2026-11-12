@@ -138,13 +138,19 @@ function attemptElapsedSeconds(
   return Math.round(((attempt.endedAt ?? fallbackEnd) - attempt.startedAt) / 1000);
 }
 
-function toItem(r: Row, now: number): AudioIntentItem {
+function toItem(r: Row, now: number, db: Database.Database): AudioIntentItem {
+  const result = r.result ? JSON.parse(r.result) : null;
+  const songTitles = (Array.isArray(result?.songIds) ? result.songIds : []).map((id: unknown) => {
+    if (typeof id !== 'string') return null;
+    const song = db.prepare('SELECT title FROM songs WHERE id = ? AND user_id = ?').get(id, r.user_id) as { title: string } | undefined;
+    return song?.title ?? null;
+  });
   return {
     id: r.id, idempotencyKey: r.idempotency_key, status: r.status, engine: r.engine,
     request: JSON.parse(r.request), meta: r.meta ? JSON.parse(r.meta) : null,
     jobId: r.job_id, attempt: r.attempt, previousJobIds: JSON.parse(r.previous_job_ids),
     waiting: r.waiting, cancelRequested: r.cancel_requested === 1, error: r.error,
-    result: r.result ? JSON.parse(r.result) : null, createdAt: r.created_at, updatedAt: r.updated_at,
+    result, songTitles, createdAt: r.created_at, updatedAt: r.updated_at,
     elapsedSeconds: elapsedSecondsFor(r, now),
   };
 }
@@ -170,7 +176,7 @@ export class AudioIntentQueue {
   get(id: string): AudioIntentItem {
     const r = this.row(id);
     if (!r) throw new AudioQueueError(404, `Queue item ${id} not found`);
-    return toItem(r, this.now());
+    return toItem(r, this.now(), this.db);
   }
 
   dismiss(id: string): void {
@@ -185,7 +191,7 @@ export class AudioIntentQueue {
       ? this.db.prepare('SELECT * FROM audio_intents WHERE status = ? ORDER BY created_at, rowid').all(status)
       : this.db.prepare('SELECT * FROM audio_intents ORDER BY created_at, rowid').all();
     const now = this.now();
-    return (rows as Row[]).map(r => toItem(r, now));
+    return (rows as Row[]).map(r => toItem(r, now, this.db));
   }
 
   /** Import a verified browser backup atomically. A submitted legacy job is
@@ -303,7 +309,7 @@ export class AudioIntentQueue {
     if (existing.request_hash !== hash) {
       throw new AudioQueueError(409, `Idempotency key '${existing.idempotency_key}' is already used by a different request`);
     }
-    return { item: toItem(existing, this.now()), created: false };
+    return { item: toItem(existing, this.now(), this.db), created: false };
   }
 
   /** Cancel an item. Pending stops at once; submitting is cancelled as soon as

@@ -24,6 +24,33 @@ const {
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
+test('renamed per-take titles survive refresh and reload, missing songs keep the submitted title', async () => {
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async () => ok({ song: {} })) as typeof fetch;
+  const server = { id: 'rename-server', status: 'succeeded', request: { title: 'Request title' },
+    meta: { view: { id: 'rename-row', generation: { title: 'Submitted' } } },
+    result: { songIds: ['first', 'second', 'missing'], audioUrls: ['/a', '/b', '/c'] },
+    songTitles: ['Renamed first', 'Renamed second', null], createdAt: 1 };
+  try {
+    for (const reload of [true, false, true]) {
+      if (reload) _resetAudioQueueForTests([]);
+      await applyServerItems([server as never]);
+      assert.deepEqual(_queueItemsForTests().map(r => r.generation.title), ['Renamed first', 'Renamed second', 'Submitted']);
+    }
+    server.songTitles = ['Renamed again', null, 'Recovered third'];
+    await applyServerItems([server as never]);
+    assert.deepEqual(_queueItemsForTests().map(r => r.generation.title), ['Renamed again', 'Submitted', 'Recovered third']);
+    assert.equal(server.meta.view.generation.title, 'Submitted');
+    assert.equal(server.request.title, 'Request title');
+    _resetAudioQueueForTests([]);
+    await applyServerItems([{ ...server, meta: null, songTitles: [null, 'Second', null] } as never]);
+    assert.deepEqual(_queueItemsForTests().map(r => r.generation.title), ['Request title', 'Second', 'Request title']);
+  } finally {
+    _resetAudioQueueForTests();
+    globalThis.fetch = saved;
+  }
+});
+
 test('MM3 variations: one row per take, boxed, kept across refreshes and a reload', async () => {
   localStorage.setItem(OWNER_KEY, 'server');
   const saved = globalThis.fetch;

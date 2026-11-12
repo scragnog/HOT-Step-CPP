@@ -477,6 +477,12 @@ server. It is null until the job starts running (queue wait does not count), cou
 it runs, and is frozen once the item reaches a final status, from the job's own start and end
 times when the job is still known.
 
+Every item read includes `songTitles`, the current titles in `result.songIds` order.
+An entry is null when the song is missing or belongs to a different user; no song IDs
+means an empty array. The browser uses these titles for each take, falling back to the
+captured title when an entry is null. Older snapshots may omit the field. Renames never
+change the stored `request`, request hash, `meta` or job `result`.
+
 How each transition happens:
 - **Submit.** A claim (pending to submitting) is one guarded update, so a cancel racing a
   submit, or two executors, cannot both act on an item.

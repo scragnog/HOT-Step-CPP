@@ -10,6 +10,7 @@ type Job = { status: string; error?: string; result?: unknown };
 
 /** A fake generation queue: records submits, holds jobs, can hold a submit open. */
 function harness(db = new Database(':memory:')) {
+  db.exec('CREATE TABLE IF NOT EXISTS songs (id TEXT PRIMARY KEY, user_id TEXT, title TEXT)');
   const submits: Array<{ body: Record<string, unknown>; userId: string }> = [];
   const cancels: string[] = [];
   const jobs = new Map<string, Job>();
@@ -43,6 +44,31 @@ function harness(db = new Database(':memory:')) {
 }
 
 const req = (extra: Record<string, unknown> = {}) => ({ caption: 'c', lyrics: 'l', seed: 1, expectedBackend: 'yue2', ...extra });
+
+test('queue reads use current per-take song titles without changing the captured intent', () => {
+  const h = harness();
+  try {
+    const input = { idempotencyKey: 'rename', request: req({ title: 'Submitted' }),
+      meta: { view: { generation: { title: 'Submitted' } } } };
+    const { item } = h.queue.enqueue(input, 'u');
+    h.db.prepare('UPDATE audio_intents SET status = ?, result = ? WHERE id = ?')
+      .run('succeeded', JSON.stringify({ songIds: ['first', 'missing', 'third', 'foreign'] }), item.id);
+    h.db.prepare('INSERT INTO songs (id, user_id, title) VALUES (?, ?, ?)').run('first', 'u', 'Original');
+    h.db.prepare('INSERT INTO songs (id, user_id, title) VALUES (?, ?, ?)').run('third', 'u', 'Third take');
+    h.db.prepare('INSERT INTO songs (id, user_id, title) VALUES (?, ?, ?)').run('foreign', 'other', 'Private');
+    const captured = h.db.prepare('SELECT request, request_hash, meta, result FROM audio_intents WHERE id = ?').get(item.id);
+    h.db.prepare('UPDATE songs SET title = ? WHERE id = ?').run('Renamed', 'first');
+    const reloaded = new AudioIntentQueue(h.deps);
+    for (const read of [reloaded.get(item.id), reloaded.list()[0], reloaded.list('succeeded')[0], reloaded.enqueue(input, 'u').item]) {
+      assert.deepEqual(read.songTitles, ['Renamed', null, 'Third take', null]);
+      assert.equal(read.request.title, 'Submitted');
+      assert.deepEqual(read.meta, input.meta);
+    }
+    h.db.prepare('DELETE FROM songs WHERE id = ?').run('first');
+    assert.deepEqual(reloaded.get(item.id).songTitles, [null, null, 'Third take', null]);
+    assert.deepEqual(h.db.prepare('SELECT request, request_hash, meta, result FROM audio_intents WHERE id = ?').get(item.id), captured);
+  } finally { h.db.close(); }
+});
 
 test('browser import is atomic, idempotent, validates items, and resumes only chosen pending work', async () => {
   const h = harness();

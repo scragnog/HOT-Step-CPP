@@ -43,6 +43,10 @@ export interface AudioIntentItem {
   cancelRequested: boolean;
   error: string | null;
   result: Record<string, unknown> | null;
+  /** Current song titles in result.songIds order; null for a missing song.
+   *  Display only: the captured request and metadata remain unchanged.
+   *  Absent in snapshots from older servers. */
+  songTitles?: Array<string | null>;
   createdAt: number;
   updatedAt: number;
   /** Real generation time in seconds, computed server-side so it never
