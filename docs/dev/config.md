@@ -248,6 +248,7 @@ The server binds `127.0.0.1` and only answers other machines when you opt in:
 - Requests whose `Host` is not loopback, an IP literal, `SERVER_HOST`, a `CORS_ORIGINS` host or
   an `ALLOWED_HOSTS` entry get 403. This blocks DNS rebinding. Reaching the server by IP needs
   nothing extra; a name such as `mybox` or `mybox.tail1234.ts.net` must be in `ALLOWED_HOSTS`.
+- Loopback browser origins are trusted only on this server's port and the Vite dev port 3000; other local tools (another localhost port) must be listed in `CORS_ORIGINS`.
 - Browser pages from a non-loopback origin may only read (GET/HEAD) unless the origin is in
   `CORS_ORIGINS`. A page served by this server and opened by IP counts as same-origin.
 - Vite dev from another machine: `ui/vite.config.ts` proxies with `changeOrigin`, so the server

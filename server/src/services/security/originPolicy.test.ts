@@ -17,7 +17,7 @@ test('isLoopbackHost', () => {
 
 test('loopback and absent origins are allowed', () => {
   assert.equal(isAllowedOrigin(undefined, []), true);
-  for (const o of ['http://localhost:3000', 'http://127.0.0.1:3001', 'https://localhost', 'http://[::1]:5173'])
+  for (const o of ['http://localhost:3000', 'http://127.0.0.1:3001', 'http://[::1]:3001'])
     assert.equal(isAllowedOrigin(o, []), true, o);
 });
 
@@ -68,4 +68,18 @@ test('host allowlist', async () => {
 test('IPv6 same-origin compare is case-insensitive', () => {
   assert.equal(isAllowedOrigin('http://[FE80::1]:3001', [], '[fe80::1]:3001'), true);
   assert.equal(isAllowedOrigin('http://[fe80::1]:3001', [], '[FE80::1]:3001'), true);
+});
+
+test('loopback origins are trusted only on the server port or the Vite dev port', () => {
+  const ports = [3001, 3000];
+  for (const o of ['http://localhost:3001', 'http://127.0.0.1:3000', 'http://[::1]:3001'])
+    assert.equal(originRejection('POST', '/api/generate', o, [], undefined, ports), null, o);
+  for (const o of ['http://localhost:8080', 'http://127.0.0.1:5173', 'http://localhost'])
+    assert.equal(originRejection('POST', '/api/generate', o, [], undefined, ports), 403, o);
+  assert.equal(originRejection('POST', '/api/generate', 'http://localhost:8080', ['http://localhost:8080'], undefined, ports), null);
+});
+
+test('DAW path check is case-insensitive', () => {
+  assert.equal(originRejection('GET', '/API/V1/DAW/status', 'https://evil.example', []), 403);
+  assert.equal(originRejection('GET', '/Api/v1/Daw', 'https://evil.example', []), 403);
 });

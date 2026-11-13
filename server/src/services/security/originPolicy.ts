@@ -6,7 +6,16 @@
 // change state. Requests with no Origin (curl, native DAW plugins, same-origin GETs)
 // are not affected by this check.
 
-const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d{1,5})?$/i;
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::(\d{1,5}))?$/i;
+/** Vite dev server port (ui/vite.config.ts server.port). */
+export const VITE_DEV_PORT = 3000;
+
+/** Loopback origins are trusted only on these ports: this server's own port and the Vite
+ *  dev port. Other local tools on other ports must be listed in CORS_ORIGINS. */
+export function defaultLoopbackPorts(): number[] {
+  const own = parseInt(process.env.SERVER_PORT || '3001', 10);
+  return [Number.isFinite(own) ? own : 3001, VITE_DEV_PORT];
+}
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export function defaultServerHost(env: string | undefined): string {
@@ -27,9 +36,11 @@ const IP_HOST = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:.]+\])(:\d{1,5})?$/i;
 
 /** `host` is the request Host header. A same-origin page reached by IP literal (LAN or
  *  Tailscale) is allowed; hostnames are not, so DNS rebinding cannot pass this way. */
-export function isAllowedOrigin(origin: string | undefined, extra: readonly string[], host?: string): boolean {
+export function isAllowedOrigin(origin: string | undefined, extra: readonly string[], host?: string,
+  loopbackPorts: readonly number[] = defaultLoopbackPorts()): boolean {
   if (!origin) return true;
-  if (LOOPBACK_ORIGIN.test(origin)) return true;
+  const lb = LOOPBACK_ORIGIN.exec(origin);
+  if (lb && lb[2] !== undefined && loopbackPorts.includes(parseInt(lb[2], 10))) return true;
   const o = origin.replace(/\/+$/, '').toLowerCase();
   const hl = host?.trim().toLowerCase();
   if (hl && IP_HOST.test(hl) && (o === `http://${hl}` || o === `https://${hl}`)) return true;
@@ -38,9 +49,11 @@ export function isAllowedOrigin(origin: string | undefined, extra: readonly stri
 }
 
 /** Returns 403 when the request must be refused for its Origin, else null. */
-export function originRejection(method: string, path: string, origin: string | undefined, extra: readonly string[], host?: string): number | null {
-  if (isAllowedOrigin(origin, extra, host)) return null;
-  const isDaw = path === '/api/v1/daw' || path.startsWith('/api/v1/daw/');
+export function originRejection(method: string, path: string, origin: string | undefined, extra: readonly string[], host?: string,
+  loopbackPorts: readonly number[] = defaultLoopbackPorts()): number | null {
+  if (isAllowedOrigin(origin, extra, host, loopbackPorts)) return null;
+  const p = path.toLowerCase();
+  const isDaw = p === '/api/v1/daw' || p.startsWith('/api/v1/daw/');
   if (isDaw || !SAFE_METHODS.has(method.toUpperCase())) return 403;
   return null;
 }
