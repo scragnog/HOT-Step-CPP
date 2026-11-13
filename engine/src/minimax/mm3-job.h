@@ -1107,7 +1107,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     const int flow_total_hint = req.gen.steps;
     MM3ProgressCb progress = [&](const MM3GenProgress & p) {
         const std::string stage = p.stage;
-        if (stage == "ar") {
+        if (stage == "ar" || stage == "handoff") {
             job_set_phase(*job, JobPhase::ENCODING_COND, (int) p.step, (int) p.n_steps);
         } else if (stage == "cond") {
             job_set_phase(*job, JobPhase::ENCODING_COND, (int) (p.window + 1), (int) p.n_windows);

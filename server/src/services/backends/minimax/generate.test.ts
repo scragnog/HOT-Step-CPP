@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
+  MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, minimaxStageText, mm3LowStepShift,
 } from './generate.js';
 import { mm3PlankDir } from './plank.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
@@ -109,6 +109,13 @@ test('MM3 base handoff rides Require Natural Ending, only with an LM adapter', (
   assert.deepEqual({ ...req({}), eos_handoff: undefined }, { ...off, eos_handoff: undefined });
   assert.equal(Object.hasOwn(req({ mm3RequireEnding: false }), 'eos_handoff'), false);
   assert.equal(Object.hasOwn(req({ mm3LmAdapter: 'no-such-run/adapter_model.safetensors' }), 'eos_handoff'), false);
+});
+
+test('MM3 base handoff progress is labelled as the base ending, not another planning round', () => {
+  const d = { stage: 'handoff', window: 2, n_windows: 4, step: 100, n_steps: 7500, require_eos: true, takes: 4 } as any;
+  const t = minimaxStageText(d, 0).stage;
+  assert.match(t, /base model ending take 3 of 4/);
+  assert.doesNotMatch(t, /planning/);
 });
 
 test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => {

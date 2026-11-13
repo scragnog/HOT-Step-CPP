@@ -1756,6 +1756,13 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 ho.blend                     = nullptr;
                 ho.on_frame_ready            = nullptr;
                 ho.on_takes_frame_ready      = nullptr;
+                // Its own stage name: reported as "ar", each rescue restarted the
+                // planning bar from frame 0 and read as another failed round.
+                ho.on_frame = [&progress, t, K](int64_t f, int64_t total) {
+                    if (progress) {
+                        progress(MM3GenProgress{ "handoff", t, K, f, total });
+                    }
+                };
                 MM3ArResult r;
                 if (!mm3_ar_plan_takes(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), ho, &r,
                                        err)) {

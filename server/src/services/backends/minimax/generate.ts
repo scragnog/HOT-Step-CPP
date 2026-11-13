@@ -986,6 +986,13 @@ export function minimaxStageText(d: Mm3JobDetail, elapsedSec: number): { stage: 
         progress: 10 + Math.round(frac(d.step, d.n_steps) * 25),
       };
     }
+    case 'handoff':
+      // Base Model Ending: the base plays out capped take `window` of `n_windows`.
+      // Not a new planning round, so it does not reuse the 'ar' wording.
+      return {
+        stage: `MiniMax-Music3: base model ending take ${d.window + 1} of ${d.n_windows} (frame ${d.step}/${d.n_steps})`,
+        progress: 35,
+      };
     case 'cond':
       return { stage: `MiniMax-Music3: conditioning (window ${d.window + 1}/${d.n_windows})`, progress: 36 + Math.round(frac(d.window + 1, d.n_windows) * 4) };
     case 'flow': {
