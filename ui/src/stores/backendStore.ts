@@ -184,7 +184,7 @@ export interface BackendExtensionParam {
   max?: number;
   step?: number;
   options?: { value: string; label: string }[];
-  visible_when?: { key: string; equals: string };
+  visible_when?: { key: string; equals?: string; not_equals?: string; greater_than?: number; less_than?: number };
 }
 
 export interface BackendCapabilities {

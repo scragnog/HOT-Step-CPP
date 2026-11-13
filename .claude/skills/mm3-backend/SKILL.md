@@ -176,12 +176,13 @@ counts localises a drop to the wire rather than the UI.
 ## Natural-ending candidates (SHIPPED 2026-09-09, 00e3e7af)
 
 `POST /mm3/synth` accepts `require_eos: true` and `eos_rounds: N` (1..16) with
-`takes: K`. The planner runs K takes in one batched pass (seed+t); any take that
-reaches max_frames without EOS is DROPPED before the flow stage; until K have
-ended (1 with `stop_after_first_eos`) the plan repeats at seed + K (round r plans
-seed + r*K + t) up to `eos_rounds` times, banking each round's endings, which
-take the first slots (2026-11-11; before that one ending stopped the rounds, so
-4 takes with 1 ending rendered 1 song). Since 242645c4 a run where nothing ever ends renders the longest capped
+`takes: K`. The planner runs K takes in one batched pass (seed+t). Since
+`9132f479`, the first round with any natural ending stops planning: its ended
+takes render and the rest are dropped. If no take ends and the base handoff is
+on, that round's capped takes are rescued in take order until the first rescue
+ends, then that one song renders. Only a round with no ending and no rescue
+advances to seed + K (round r plans seed + r*K + t), up to `eos_rounds` times.
+This applies to every round. Since 242645c4 a run where nothing ever ends renders the longest capped
 plan anyway and reports `eos_fallback: true`, which the server relays as a
 warning rather than a normal success. `min_frames` adds a floor: a candidate
 that ends shorter is dropped and re-planned like one that never ended
@@ -191,7 +192,8 @@ that ends shorter is dropped and re-planned like one that never ended
 whenever candidates were in play. A streamed render with `require_eos` stays
 serial: the candidates need the whole plan before anything renders (logged).
 Server (`minimax/generate.ts`): `mm3RequireEnding` (default on, Generation
-dropdown) sends at least 3 takes (`mm3Takes` raises it for variations), eos_rounds 4,
+dropdown) normally sends at least 3 takes (`mm3Takes` raises it for variations;
+Plan below 1 keeps at most 2 for one or two requested songs), eos_rounds 4,
 and `stop_after_first_eos` when one song was asked for; `mm3MinLength` (default
 on) derives `min_frames` from the lyrics at 4 words/s with a 15 s floor. It reads
 the surviving count/seeds from the completion detail.
@@ -229,12 +231,15 @@ blocks per launch (mmf tiles 32 rows; rank 256). What is left is the B side
 (mmf, 3-6 us per launch) and the adds.
 
 **Base handoff (2026-11-13, `eos_handoff`, UI "Base Model Ending", default on).** What
-replaced the fade. With `require_eos` and an LM adapter, when round 1 ends fewer takes than
-wanted, its capped takes are rescued in take order until the count is met: cue from the
+replaced the fade. With `require_eos` and an LM adapter, a round with any natural
+ending renders its ended takes without rescue. A round where nothing ended
+rescues its capped takes in take order and stops at the first rescue that ends.
+Only a round with no ending and no rescue advances to the next round, up to
+`eos_rounds`, then the existing fallback. The rescue cue comes from the
 take's own lyric timing (`mm3_align_handoff_cue`: last line the full and the cap-50 s
 alignments place within 2 s, plus 25 s; none past cap-20 s), then the base re-reads the
 prefix on a cache it builds itself (`forced_continue`, no adapter; merged: the pristine LM is
-reloaded via `handoff_swap` and merged again before a later round, never delta-subtracted) and samples to EOS or the cap. Kept rescues sort after natural endings and render as
+reloaded via `handoff_swap` and merged again before a later round, never delta-subtracted) and samples to EOS or the cap. A kept rescue renders as
 a splice: the capped plan's own windows up to the crossfade, the base plan in full, 1 s linear
 crossfade on the cue. Two traps it was built around: base weights on the adapter's KV collapse
 plans into static (0 of 8 ended, 8 of 8 degraded), and re-rendering the adapter prefix from the
@@ -260,22 +265,32 @@ same row positions exactly. Costs (5090, q8_0, PiSSA r128 adapter, 2 takes,
 on the card with ~4.5 GB of other apps. The rows double: at f16, 3 takes wanted
 a 14.3 GB KV, filled the 32 GB card and ran ~10x slower. **Since 2026-11-11 the LM
 alone may run 16 rows (`MM3_MAX_LM_ROWS`, 4 takes) and the request's `lm_kv_q8`
-stores the KV at Q8_0**; the server sends it only when the plan dial is below 1
-and the user asked for more than 2 variations (`mm3KvQ8`, "Compact Planner
-Cache", default on), and otherwise keeps 2 takes there, ending candidates
-included. KV at 300 s: 2 takes f16 8.44 GB, 4 takes q8 8.96 GB. Per AR iteration
+stores the KV at Q8_0**. Since 2026-11-13 the server sends it for every valid
+LM-adapter Plan render below 1 while `mm3KvQ8` ("Compact Planner Cache",
+default on) is not false. The toggle appears whenever an adapter is picked and
+Plan is below 1. Requests for one or two songs still use at most two takes per
+round, ending candidates included; three or four requested variations can use
+up to four. Toggle off keeps f16 and at most two takes. Changing cache precision
+changes the audio of a seed; Plan 1 and base-model requests keep their prior
+behavior. KV at 300 s: 2 takes f16 8.44 GB, 4 takes q8 8.96 GB. Per AR iteration
 (LM + depth + host), steps 500-5000, 5090, q8_0 LM, plan 0.25: 2 takes f16 22.4
 ms, 4 takes q8 31.5 ms (7.9 per take against 11.2), 4 takes at plan 1 f16 23.9.
 Past 8 rows ggml's MMQ beat splitting into 8-row MMVQ matmuls (38.2 ms;
-`MM3_LM_ROW_SPLIT=1` keeps the split for A/B). Not yet measured on a 24 GB card,
-which was already at 23.5 of 24.5 GB with 2 takes. A graph input for the mask (uploaded per step)
+`MM3_LM_ROW_SPLIT=1` keeps the split for A/B). Four Plan takes remain unmeasured
+on a 24 GB card; the two-take comparison is below. A graph input for the mask (uploaded per step)
 cost +3.8 ms/step at one take; the resident tensor costs +0.85. Merge mode
 has no base weights, so the server forces runtime; an adapter with an artist
 token or KV prefix ignores the dial (it would need a per-row attention mask).
 At plan 0 the mix returns the base logit outright, so an adapter -inf cannot
 veto a base code; the fatal non-finite threshold stays one dead row per take
 per step (the base rows only widen the reported percentage).
-**4090 (24 GB):** 1 take, 300 s, plan-only: 16.2 ms/step at 1, 18.3 at 0.5,
+**4090 (24 GB), 2026-11-13:** one song, two candidates, Plan 0.75, full-strength
+runtime PiSSA r256, LM q8_0 and other model roles f16, 30 flow steps, one round,
+300 s cap. f16 KV: 20.7 ms/LM step, 24,002 MiB peak; q8 KV: 19.5 ms/LM step,
+19,612 MiB peak. Both selected a natural ending. Whole-card peaks sampled about
+every 2 s, card otherwise idle, Tensor-core unlock inactive. The earlier severe
+spill slowdown did not recur on the clean card, but f16 left only 562 MiB free.
+Receipts: HOTSTEP-1197. **Earlier measurements:** 1 take, 300 s, plan-only: 16.2 ms/step at 1, 18.3 at 0.5,
 peak 20.5 GB. 2 takes below 1 spills under `/mm3/lm-plan` (DiT and vocoder
 stay resident there) but fits the app's staged `/mm3/synth`: 21.8 ms/step,
 peak 23.5 of 24.5 GB. Do not add VRAM to that path without re-checking it.

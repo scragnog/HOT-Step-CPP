@@ -60,9 +60,10 @@ export const BackendExtensionControls: React.FC<{
   };
   const params = declared.filter((p) => {
     if (hide?.includes(p.key)) return false;
-    const vw = p.visible_when as { key: string; equals?: string; not_equals?: string; greater_than?: number } | undefined;
+    const vw = p.visible_when;
     if (!vw) return true;
     if (vw.greater_than !== undefined) return Number(valueOf(vw.key)) > vw.greater_than;
+    if (vw.less_than !== undefined) return Number(valueOf(vw.key)) < vw.less_than;
     const cur = String(valueOf(vw.key) ?? '');
     if (vw.not_equals !== undefined) return Number(cur) !== Number(vw.not_equals) && cur !== vw.not_equals;
     return cur === vw.equals;

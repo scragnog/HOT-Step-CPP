@@ -123,8 +123,15 @@ What sets it apart:
 - Variations Per Render (1 to 4) renders several different songs from one prompt in a
   single pass, sharing the planner. Each request is otherwise one take. With the LM
   adapter's Plan dial below 1 the planner runs two models per variation, which doubles
-  its memory; above 2 variations, Compact Planner Cache (on by default) stores that
-  memory at 8 bits so 3 or 4 fit. Turned off, Plan renders stop at 2. The queue shows
+  its memory. Compact Planner Cache is on by default whenever an LM adapter is
+  selected and Plan is below 1, including one- and two-song renders. It stores
+  planner memory at 8 bits. One or two requested songs still use at most two
+  candidates per planning round; three or four variations can use up to four.
+  Turn the toggle off for the f16 cache and a maximum of two takes. Switching
+  cache precision changes what a seed renders. On an idle 24 GB RTX 4090, a
+  one-song request with two candidates at Plan 0.75 and a full-strength runtime
+  PiSSA rank-256 adapter measured 20.7 ms per LM step and 24,002 MiB peak VRAM
+  with f16, versus 19.5 ms and 19,612 MiB with compact cache. The queue shows
   each variation as its own row inside one batch box, as it does for a YuE2 batch, and
   each finished variation is saved and listed as its own song (and sent to the playlist
   as its own track when that option is on).

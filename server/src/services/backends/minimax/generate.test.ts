@@ -133,7 +133,7 @@ test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => 
   assert.equal(noAdapter.lm_adapter_plan, undefined);
 });
 
-test('MM3 plan dial: more than 2 takes ride the q8 planner cache, otherwise 2 as before', (t) => {
+test('MM3 plan dial: compact cache applies below 1 while one or two songs keep their candidate budget', (t) => {
   const installed = listMm3LmAdapters()[0];
   if (!installed) return t.skip('no MM3 LM adapter installed');
   const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file };
@@ -144,10 +144,26 @@ test('MM3 plan dial: more than 2 takes ride the q8 planner cache, otherwise 2 as
   const off = req({ mm3LmAdapterScalePlan: 0.25, mm3Takes: 4, mm3KvQ8: false });
   assert.equal(off.takes, 2);
   assert.equal(Object.hasOwn(off, 'lm_kv_q8'), false);
-  // The ending check's own 3 candidates stay at 2 and f16 when one song was asked.
+  // Compact cache must not raise the ending check's candidate count to three.
   const one = req({ mm3LmAdapterScalePlan: 0.25 });
   assert.equal(one.takes, 2);
-  assert.equal(Object.hasOwn(one, 'lm_kv_q8'), false);
+  assert.equal(one.lm_kv_q8, true);
+  for (const mm3Takes of [1, 2]) {
+    for (const mm3LmAdapterScalePlan of [0, 0.25, 0.75]) {
+      for (const mm3RequireEnding of [false, true]) {
+        const settings = { mm3Takes, mm3LmAdapterScalePlan, mm3RequireEnding };
+        const compact = req(settings);
+        assert.equal(compact.takes ?? 1, mm3RequireEnding ? 2 : mm3Takes);
+        assert.equal(compact.lm_kv_q8, true);
+        const full = req({ ...settings, mm3KvQ8: false });
+        assert.equal(full.takes, compact.takes);
+        assert.equal(Object.hasOwn(full, 'lm_kv_q8'), false);
+      }
+    }
+  }
+  const three = req({ mm3LmAdapterScalePlan: 0.75, mm3Takes: 3 });
+  assert.equal(three.takes, 3);
+  assert.equal(three.lm_kv_q8, true);
   // Plan 1: no base rows, nothing changes.
   const plain = req({ mm3LmAdapterScalePlan: 1, mm3Takes: 4 });
   assert.equal(plain.takes, 4);

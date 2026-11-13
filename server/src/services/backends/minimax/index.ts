@@ -582,19 +582,18 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: 1,
       },
       {
-        // The plan dial's base rows double the planner's rows, so more than 2
-        // takes only fit in VRAM with the KV cache at q8_0 (generate.ts kvQ8).
+        // Compact cache leaves headroom for every Plan render below 1.
         key: 'mm3KvQ8',
         type: 'toggle',
         label: 'Compact Planner Cache',
         hint: 'With the LM adapter\'s Plan dial below 1, stores the planner\'s memory at '
-            + '8 bits so 3 or 4 variations fit in VRAM (4 use about what 2 do without it). '
-            + 'Off keeps full precision and limits Plan renders to 2 variations. No effect '
-            + 'when Plan is 1.',
+            + '8 bits for every render to reduce VRAM use, including one or two songs. '
+            + 'One or two requested songs still use at most two candidates per round; '
+            + '3 or 4 variations can use up to four. Off uses the f16 cache and limits '
+            + 'Plan renders to 2 variations. Changing cache precision changes what a seed '
+            + 'renders. No effect when Plan is 1.',
         default: true,
-        // ponytail: greater_than is read by BackendExtensionControls only; add it to
-        // aceClient's visible_when type when that file is free.
-        visible_when: { key: 'mm3Takes', greater_than: 2 } as { key: string; equals?: string },
+        visible_when: { key: 'mm3LmAdapterScalePlan', less_than: 1 },
       },
       {
         // ── Natural endings ──

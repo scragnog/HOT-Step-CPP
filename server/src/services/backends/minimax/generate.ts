@@ -527,17 +527,16 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // it rather than fighting: asking for more variations than the ending check
   // needs simply raises the candidate count.
   //
-  // The plan dial below 1 doubles the planner's rows. More than 2 takes then
-  // need the engine's 16-row budget, which is only affordable with the KV cache
-  // at q8_0 (mm3KvQ8, default on): 4 takes cost about the VRAM 2 do at f16.
-  // Otherwise, and for the ending check's own candidates when the user asked
-  // for 2 or fewer songs, it stays at 2 takes, as before the budget grew.
+  // The plan dial below 1 doubles the planner's rows. Compact Planner Cache
+  // (mm3KvQ8, default on) uses q8_0 for every such render to leave VRAM headroom.
+  // One or two requested songs still use at most two candidates, even at q8;
+  // more variations can use the 16-row LM budget only while compact is on.
   const planRaw = Number(params.mm3LmAdapterScalePlan);
   const planRows = !!lmAdapterPath && fs.existsSync(lmAdapterPath)
     && Number.isFinite(planRaw) && planRaw >= 0 && planRaw < 1;
-  const kvQ8 = planRows && askedTakes > 2 && params.mm3KvQ8 !== false;
+  const kvQ8 = planRows && params.mm3KvQ8 !== false;
   const wantTakes = requireEnding ? Math.max(MM3_ENDING_TAKES, askedTakes) : askedTakes;
-  const takes = planRows && !kvQ8 ? Math.min(2, wantTakes) : wantTakes;
+  const takes = planRows && (askedTakes <= 2 || !kvQ8) ? Math.min(2, wantTakes) : wantTakes;
   if (planRows && wantTakes > takes) {
     notes.push(`LM adapter plan dial below 1: ${takes} takes per planning round`
       + (askedTakes > 2 ? ' (Compact Planner Cache is off)' : ''));
