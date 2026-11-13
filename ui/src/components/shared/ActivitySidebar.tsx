@@ -18,7 +18,7 @@ import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { PlaylistSidebar } from '../playlist/PlaylistSidebar';
 import { TerminalPanel } from '../terminal/TerminalPanel';
-import { usePlaylist } from '../lyric-studio/playlistStore';
+import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
 /** Smallest a section may be dragged to, and the room left for the one below. */
@@ -126,6 +126,10 @@ interface ActivitySidebarProps {
   queueCountColor?: string;
   /** Show the Terminal section at the bottom of the column. */
   showTerminal?: boolean;
+  /** Row swiped/dragged left past the threshold — delete from library. */
+  onPlaylistSwipeLeft?: (item: PlaylistItem) => void;
+  /** Row swiped/dragged right past the threshold — remove from playlist only. */
+  onPlaylistSwipeRight?: (item: PlaylistItem) => void;
 }
 
 export const ActivitySidebar: React.FC<ActivitySidebarProps> = ({
@@ -134,6 +138,8 @@ export const ActivitySidebar: React.FC<ActivitySidebarProps> = ({
   compact = false,
   queueCountColor = 'bg-pink-500/20 text-pink-300',
   showTerminal = false,
+  onPlaylistSwipeLeft,
+  onPlaylistSwipeRight,
 }) => {
   const { t } = useTranslation();
   const queueCount = useAudioGenQueueSelector(s =>
@@ -194,7 +200,12 @@ export const ActivitySidebar: React.FC<ActivitySidebarProps> = ({
           onTabChange={(id) => setTopTab(id as 'playlist' | 'recent')}
         >
           {topTab === 'playlist' ? (
-            <PlaylistSidebar embedded />
+            <PlaylistSidebar
+              embedded
+              swipeEnabled={true}
+              onSwipeLeft={onPlaylistSwipeLeft}
+              onSwipeRight={onPlaylistSwipeRight}
+            />
           ) : (
             <UnifiedRecentSongs
               showToast={showToast}

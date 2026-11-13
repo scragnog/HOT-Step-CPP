@@ -5,7 +5,7 @@
  * Track list rendering adapted from the original FloatingPlaylist.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Play, X, Trash2, ChevronUp, ChevronDown,
@@ -20,14 +20,204 @@ import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { SongActionsMenu, songFromPlaylistItem } from '../shared/SongActionsMenu';
 import { CoverImage } from '../shared/CoverImage';
 
+/** Fraction of row width a swipe must travel to trigger an action. */
+const SWIPE_THRESHOLD = 0.3;
+
+interface SwipeableRowProps {
+  item: PlaylistItem;
+  onSwipeLeft?: (item: PlaylistItem) => void;
+  onSwipeRight?: (item: PlaylistItem) => void;
+  children: React.ReactNode;
+}
+
+/**
+ * Wraps a playlist row with horizontal swipe gesture support (touch + mouse).
+ * Drag state is tracked via refs to avoid re-renders during tracking;
+ * only the visual swipe delta lives in state.
+ */
+const SwipeableRow: React.FC<SwipeableRowProps> = ({ item, onSwipeLeft, onSwipeRight, children }) => {
+  const [swipeDelta, setSwipeDelta] = useState(0);
+  const dragState = useRef({
+    startX: 0,
+    startY: 0,
+    rowWidth: 0,
+    isHorizontalSwipe: false,
+    isTracking: false,
+  });
+  // True once the pointer has moved far enough to count as a drag rather than a click.
+  const wasDragged = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  /** Begin tracking a swipe from the given pointer position. */
+  const startDrag = useCallback((clientX: number, clientY: number) => {
+    const rowEl = rowRef.current;
+    const rowWidth = rowEl ? rowEl.getBoundingClientRect().width : 0;
+    dragState.current = {
+      startX: clientX,
+      startY: clientY,
+      rowWidth,
+      isHorizontalSwipe: false,
+      isTracking: true,
+    };
+    wasDragged.current = false;
+  }, []);
+
+  /** Track pointer movement, clamping to the row width. */
+  const moveDrag = useCallback((clientX: number, clientY: number) => {
+    const state = dragState.current;
+    if (!state.isTracking) return;
+    const deltaX = clientX - state.startX;
+    const deltaY = clientY - state.startY;
+
+    // If vertical movement dominates, cancel swipe tracking and let
+    // the browser handle default vertical scrolling.
+    if (!state.isHorizontalSwipe) {
+      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+        state.isTracking = false;
+        setSwipeDelta(0);
+        return;
+      }
+      state.isHorizontalSwipe = true;
+    }
+
+    // Mark as a real drag once the pointer moves more than a few pixels.
+    if (!wasDragged.current && (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)) {
+      wasDragged.current = true;
+    }
+
+    const clamped = Math.max(-state.rowWidth, Math.min(state.rowWidth, deltaX));
+    setSwipeDelta(clamped);
+  }, []);
+
+  /** End tracking, fire the callback if the threshold was crossed, snap back. */
+  const endDrag = useCallback((clientX: number) => {
+    const state = dragState.current;
+    if (!state.isTracking) return;
+    state.isTracking = false;
+
+    const deltaX = clientX - state.startX;
+    const threshold = state.rowWidth * SWIPE_THRESHOLD;
+
+    if (deltaX < -threshold && onSwipeLeft) {
+      onSwipeLeft(item);
+    } else if (deltaX > threshold && onSwipeRight) {
+      onSwipeRight(item);
+    }
+
+    // Always snap back to origin.
+    setSwipeDelta(0);
+  }, [item, onSwipeLeft, onSwipeRight]);
+
+  // ── Touch handlers ──────────────────────────────────────────────────────────
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    startDrag(touch.clientX, touch.clientY);
+  }, [startDrag]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    moveDrag(touch.clientX, touch.clientY);
+  }, [moveDrag]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    const touch = e.changedTouches[0];
+    endDrag(touch.clientX);
+  }, [endDrag]);
+
+  // ── Mouse handlers (desktop drag) ───────────────────────────────────────────
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Left button only — leave right-click (context menu) untouched.
+    if (e.button !== 0) return;
+    startDrag(e.clientX, e.clientY);
+
+    const onMove = (ev: MouseEvent) => {
+      moveDrag(ev.clientX, ev.clientY);
+      // Only lock the cursor / selection once it's a real drag, so plain
+      // clicks feel normal.
+      if (wasDragged.current) {
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+      }
+    };
+    const onUp = (ev: MouseEvent) => {
+      endDrag(ev.clientX);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [startDrag, moveDrag, endDrag]);
+
+  // Suppress the click that follows a drag so it doesn't trigger click-to-play.
+  const handleClickCapture = useCallback((e: React.MouseEvent) => {
+    if (wasDragged.current) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, []);
+
+  const threshold = dragState.current.rowWidth * SWIPE_THRESHOLD;
+  const showLeftBg = threshold > 0 && swipeDelta <= -threshold;
+  const showRightBg = threshold > 0 && swipeDelta >= threshold;
+
+  return (
+    <div
+      className="relative overflow-hidden"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onMouseDown={handleMouseDown}
+      onClickCapture={handleClickCapture}
+    >
+      {/* Left-swipe background — revealed on the right as the row moves left. */}
+      <div
+        className={`absolute inset-0 flex items-center justify-end pr-4 transition-colors duration-150 ${showLeftBg ? 'bg-red-500/20' : 'bg-transparent'}`}
+      >
+        <div className={`flex items-center gap-1 text-red-400 text-[10px] font-medium transition-opacity duration-150 ${showLeftBg ? 'opacity-100' : 'opacity-0'}`}>
+          <Trash2 className="w-3 h-3" />
+          <span>Delete</span>
+        </div>
+      </div>
+      {/* Right-swipe background — revealed on the left as the row moves right. */}
+      <div
+        className={`absolute inset-0 flex items-center justify-start pl-4 transition-colors duration-150 ${showRightBg ? 'bg-emerald-500/20' : 'bg-transparent'}`}
+      >
+        <div className={`flex items-center gap-1 text-emerald-400 text-[10px] font-medium transition-opacity duration-150 ${showRightBg ? 'opacity-100' : 'opacity-0'}`}>
+          <X className="w-3 h-3" />
+          <span>Remove</span>
+        </div>
+      </div>
+      {/* Row content — shifts horizontally by the swipe delta. */}
+      <div ref={rowRef} style={{ transform: `translateX(${swipeDelta}px)` }} className="relative z-10">
+        {children}
+      </div>
+    </div>
+  );
+};
+
 interface PlaylistSidebarProps {
   /** Omitted when embedded — the host section owns the header. */
   onClose?: () => void;
   /** Rendered inside a tabbed section: no header row, actions move to the footer. */
   embedded?: boolean;
+  /** Enable horizontal swipe gestures on playlist rows (mobile). */
+  swipeEnabled?: boolean;
+  /** Called when a row is swiped left past the threshold (delete). */
+  onSwipeLeft?: (item: PlaylistItem) => void;
+  /** Called when a row is swiped right past the threshold (remove). */
+  onSwipeRight?: (item: PlaylistItem) => void;
 }
 
-export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embedded = false }) => {
+export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({
+  onClose,
+  embedded = false,
+  swipeEnabled = false,
+  onSwipeLeft,
+  onSwipeRight,
+}) => {
   const playlist = usePlaylist();
   const { t } = useTranslation();
   const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
@@ -159,9 +349,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
           <div className="divide-y divide-white/5">
             {playlist.items.map((item, idx) => {
               const isPlaying = currentSongId === item.id;
-              return (
-                <div key={item.id}
-                  className={`group flex items-center gap-2 px-3 py-2 hover:bg-white/[0.04] transition-colors ${isPlaying ? 'bg-pink-500/10' : ''}`}>
+              const rowClassName = `group flex items-center gap-2 px-3 py-2 hover:bg-white/[0.04] transition-colors ${isPlaying ? 'bg-pink-500/10' : ''}`;
+              const rowContent = (
+                <>
                   {/* Track number / play button */}
                   <div className="w-6 flex-shrink-0 flex items-center justify-center">
                     <span className={`text-[10px] font-mono group-hover:hidden ${isPlaying ? 'text-pink-400 font-bold' : 'text-zinc-600'}`}>
@@ -225,7 +415,23 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
                       {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
                     </span>
                   )}
-                </div>
+                </>
+              );
+
+              if (!swipeEnabled) {
+                return (
+                  <div key={item.id} className={rowClassName}>
+                    {rowContent}
+                  </div>
+                );
+              }
+
+              return (
+                <SwipeableRow key={item.id} item={item} onSwipeLeft={onSwipeLeft} onSwipeRight={onSwipeRight}>
+                  <div className={rowClassName}>
+                    {rowContent}
+                  </div>
+                </SwipeableRow>
               );
             })}
           </div>

@@ -67,6 +67,7 @@ import { TrainingStudio } from './components/training-studio/TrainingStudio';
 import { CompareStudio } from './components/compare-studio/CompareStudio';
 import { setPendingCompareSongs } from './services/compareApi';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
+import { MobilePlaylistOverlay } from './components/playlist/MobilePlaylistOverlay';
 import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
 import {
   usePlaybackSelector,
@@ -93,7 +94,7 @@ import {
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
 import type { CreateIntent } from '../../server/src/contracts/resolution';
-import { addToPlaylist } from './components/lyric-studio/playlistStore';
+import { addToPlaylist, usePlaylist, type PlaylistItem } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
@@ -181,7 +182,11 @@ const AppContent: React.FC = () => {
   const songsQuery = useQuery({ ...songsOptions(), enabled: !!token });
   const songs = songsQuery.data?.songs ?? NO_SONGS;
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobilePlaylistOpen, setMobilePlaylistOpen] = useState(false);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<PlaylistItem | null>(null);
+  const [deleteConfirmDismissed, setDeleteConfirmDismissed] = useState(false);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
+  const { remove: removeFromPlaylist } = usePlaylist();
 
   // Resizable panel widths (persisted)
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
@@ -625,6 +630,55 @@ const AppContent: React.FC = () => {
     if (selectedSong?.id === song.id) setSelectedSong(null);
     showToast(`Deleted "${song.title}"`, 'success');
   }, [token, selectedSong, queryClient]);
+
+  // ── Mobile playlist swipe handlers ──────────────────────────────
+  const handleDeleteFromPlaylist = useCallback(async (item: PlaylistItem) => {
+    if (!token) return;
+    try {
+      // Pause first if this is the currently playing track — prevents the
+      // playback engine from racing with the deletion and skipping tracks.
+      if (currentTrack?.id === item.id && isPlaying) {
+        pbTogglePlay(); // pause
+        await new Promise(r => setTimeout(r, 100)); // let the pause settle
+      }
+      await songApi.delete(item.id);
+      removeFromPlaylist(item.id);
+      if (currentTrack?.id === item.id) pbNext();
+      void removeSongs(queryClient, [item.id]);
+      showToast(`Deleted "${item.title}"`, 'success');
+    } catch (err: any) {
+      showToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }, [token, currentTrack?.id, isPlaying, queryClient, removeFromPlaylist]);
+
+  const handleSwipeLeft = useCallback((item: PlaylistItem) => {
+    if (localStorage.getItem('hs-playlist-delete-confirm-dismissed') === 'true') {
+      void handleDeleteFromPlaylist(item);
+    } else {
+      setPendingDeleteItem(item);
+      setDeleteConfirmDismissed(false);
+    }
+  }, [handleDeleteFromPlaylist]);
+
+  const handleSwipeRight = useCallback((item: PlaylistItem) => {
+    removeFromPlaylist(item.id);
+  }, [removeFromPlaylist]);
+
+  const handleDeleteConfirm = useCallback(() => {
+    if (!pendingDeleteItem) return;
+    if (deleteConfirmDismissed) {
+      localStorage.setItem('hs-playlist-delete-confirm-dismissed', 'true');
+    } else {
+      localStorage.removeItem('hs-playlist-delete-confirm-dismissed');
+    }
+    const item = pendingDeleteItem;
+    setPendingDeleteItem(null);
+    void handleDeleteFromPlaylist(item);
+  }, [pendingDeleteItem, deleteConfirmDismissed, handleDeleteFromPlaylist]);
+
+  const handleDeleteCancel = useCallback(() => {
+    setPendingDeleteItem(null);
+  }, []);
 
   // Global desktop hotkeys (see utils/hotkeys.ts); "?" opens the cheat sheet.
   const [showHotkeyHelp, setShowHotkeyHelp] = useState(false);
@@ -1268,7 +1322,10 @@ const AppContent: React.FC = () => {
           GlobalParamBar so both desktop and mobile bars share the same
           backdrop and z-level. */}
       <JobProgressWatcher />
-      <GlobalParamBar onOpenMobileNav={() => setMobileNavOpen(true)} />
+      <GlobalParamBar
+        onOpenMobileNav={() => { setMobileNavOpen(true); setMobilePlaylistOpen(false); }}
+        onOpenMobilePlaylist={() => { setMobilePlaylistOpen(true); setMobileNavOpen(false); }}
+      />
 
       {/* Asks before running a generation queue restored from a previous
           session, rather than starting it unattended (issue #100). Renders
@@ -1316,6 +1373,13 @@ const AppContent: React.FC = () => {
           onToggleAssistant={() => setShowAssistant(prev => !prev)}
         />
         </DiscoPulseWrapper>
+
+        <MobilePlaylistOverlay
+          isOpen={mobilePlaylistOpen}
+          onClose={() => setMobilePlaylistOpen(false)}
+          onSwipeLeft={handleSwipeLeft}
+          onSwipeRight={handleSwipeRight}
+        />
 
         {/* Left stack — everything the activity column does NOT cover. The
             player lives in here rather than spanning the window, so the
@@ -1481,6 +1545,8 @@ const AppContent: React.FC = () => {
             showToast={showToast}
             compact={activitySidebarWidth < 380}
             showTerminal
+            onPlaylistSwipeLeft={handleSwipeLeft}
+            onPlaylistSwipeRight={handleSwipeRight}
           />
         </DiscoPulseWrapper>
 
@@ -1556,6 +1622,45 @@ const AppContent: React.FC = () => {
         onConfirm={() => confirmDialog?.onConfirm()}
         onCancel={() => setConfirmDialog(null)}
       />
+
+      {/* Mobile playlist delete confirm dialog — custom inline with "Don't ask again" */}
+      {pendingDeleteItem && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/30 dark:bg-black/60 backdrop-blur-sm drawer-backdrop-in"
+            onClick={handleDeleteCancel}
+          />
+          <div className="relative bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl drawer-slide-in-right">
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Delete song?</h3>
+            <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4">
+              Delete "{pendingDeleteItem.title}"{pendingDeleteItem.artistName ? ` by ${pendingDeleteItem.artistName}` : ''}? This cannot be undone.
+            </p>
+            <label className="flex items-center gap-2 mb-6 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={deleteConfirmDismissed}
+                onChange={(e) => setDeleteConfirmDismissed(e.target.checked)}
+                className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-600 text-pink-600 focus:ring-pink-500"
+              />
+              <span className="text-xs text-zinc-600 dark:text-zinc-400">Don't ask again</span>
+            </label>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={handleDeleteCancel}
+                className="px-4 py-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 font-semibold hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="px-4 py-2 rounded-lg font-semibold transition-colors bg-red-600 text-white hover:bg-red-500"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ABCompareModal />
 

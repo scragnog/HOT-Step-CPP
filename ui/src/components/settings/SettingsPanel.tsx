@@ -132,11 +132,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   // option rather than silently reading as "Auto".
   const gpuRaw = (envValues.CUDA_VISIBLE_DEVICES || '').trim();
   const gpuMatch = gpuRaw
-    ? detectedGpus.find(g => g.uuid && g.uuid.toLowerCase() === gpuRaw.toLowerCase())
-      ?? detectedGpus.find(g => String(g.index) === gpuRaw)
+    ? gpuRaw.toLowerCase() === 'all'
+      ? undefined  // 'all' is valid, handled separately
+      : detectedGpus.find(g => g.uuid && g.uuid.toLowerCase() === gpuRaw.toLowerCase())
+        ?? detectedGpus.find(g => String(g.index) === gpuRaw)
     : undefined;
-  const gpuSelectValue = gpuRaw ? (gpuMatch ? (gpuMatch.uuid || String(gpuMatch.index)) : gpuRaw) : '';
-  const gpuSelectUnknown = !!gpuRaw && !gpuMatch;
+  const gpuSelectValue = gpuRaw.toLowerCase() === 'all' ? 'all' : (gpuRaw ? (gpuMatch ? (gpuMatch.uuid || String(gpuMatch.index)) : gpuRaw) : '');
+  const gpuSelectUnknown = !!gpuRaw && gpuRaw.toLowerCase() !== 'all' && !gpuMatch;
 
   // Multi-GPU opt-in: comma-separated UUIDs, same stable ids as the picker above.
   const workerGpuSet = new Set((envValues.ACESTEPCPP_WORKER_GPUS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
@@ -228,7 +230,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <ParamLabel
                     label="GPU Device"
                     className="setting-label"
-                    info="Which GPU the engine should use. Auto picks the card with the most VRAM. Pick a specific card to pin the engine to it instead, useful with more than one GPU in the machine. Requires a restart to take effect."
+                    info="Which GPU the engine should use. Auto picks the card with the most VRAM. All keeps every GPU visible (use GGML_BACKEND in .env to pick one). Pick a specific card to pin the engine to it instead. Requires a restart to take effect."
                   />
                 </div>
                 {detectedGpus.length > 0 ? (
@@ -240,6 +242,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     className="min-w-[180px] max-w-[360px]"
                     options={[
                       { value: '', label: 'Auto (most VRAM)' },
+                      { value: 'all', label: 'All GPUs (keep all visible)' },
                       ...detectedGpus.map((gpu) => ({
                         value: gpu.uuid || String(gpu.index),
                         label: `GPU ${gpu.index}: ${gpu.name} (${Math.round(gpu.memoryMB / 1024)} GB)`,
