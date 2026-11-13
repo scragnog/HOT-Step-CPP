@@ -1368,8 +1368,14 @@ Other adapter paths:
   splitting into 8-row matrix-vector matmuls (`MM3_LM_ROW_SPLIT=1`): 31.5 against 38.2 ms
   per AR iteration at 16 rows on a 5090. The request's `lm_kv_q8` stores the KV cache at
   Q8_0 so 4 takes fit. The depth decoder and flow stage only see the adapter rows.
-- Base handoff (`eos_handoff`, `mm3-pipeline.h`): with `require_eos`, capped adapter takes of
-  round 1 get a cue from `mm3_align_handoff_cue` (`mm3-align.h`): the LRC replay of the whole
+- Natural endings (`require_eos`, `mm3-pipeline.h`): the first round with an ending wins.
+  Every take of that round that ended (and passes `min_frames`) renders, up to the count
+  asked for; no later round is planned for the rest (HOTSTEP-1201; before that, rounds ran
+  until every asked-for take had ended). A bare `min_frames` floor without `require_eos`
+  still banks and re-plans.
+- Base handoff (`eos_handoff`, `mm3-pipeline.h`): with `require_eos`, in any round where no
+  take ended by itself, capped adapter takes are rescued in take order until the first rescue
+  ends, which renders alone. Each gets a cue from `mm3_align_handoff_cue` (`mm3-align.h`): the LRC replay of the whole
   take, and the DTW again on its first `cap - 50 s` columns (decode attention is causal, so no
   second replay); the last line both place within 2 s, plus 25 s. The rescue pass is
   `mm3_ar_plan_takes` with the prefix forced and `forced_continue`, one take, no adapter

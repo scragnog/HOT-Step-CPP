@@ -337,18 +337,20 @@ tested adapter that ended no more takes and turned every capped one to static ov
 two minutes. A preset saved with it still loads; the setting is ignored.
 
 **Base Model Ending** in the Generation dropdown (shown when an LM adapter is picked, on by
-default) takes its place. It only acts when **Require Natural Ending** is on. If the first
-round of candidates ends fewer songs than you asked for, each take that ran to the cap is cut
-25 s after its last lyric line that the alignment places steadily, and the base model re-reads
-the song up to that point and plays it on until it ends. The take keeps your adapter's audio
-up to the switch, joined to the base model's audio with a 1 s crossfade. Natural endings
-always come first; a rescued take is listed after them, and the generation log names it. A
-take with no steady lyric line, or whose switch would come later than 4:40, is not rescued,
-and a rescue that still reaches the cap is dropped like any capped take. Each rescue costs
-one more plan from the switch onward and one more render of that take. In Merge mode a
-rescue first reloads the unmerged base model, which adds a model load; the adapter is merged
-again only if another planning round follows. A render that needs no rescue keeps its mode and
-costs nothing extra.
+default) takes its place. It only acts when **Require Natural Ending** is on, and only on a
+round of candidates where no take ended by itself: a round with even one natural ending
+renders the takes that ended and stops there. Otherwise the round's capped takes are rescued
+in order until the first rescue ends, and that one song is rendered. Each is cut 25 s after
+its last lyric line that the alignment places steadily, and the base model re-reads the song
+up to that point and plays it on until it ends. The take keeps your adapter's audio up to the
+switch, joined to the base model's audio with a 1 s crossfade, and the generation log names
+it. A take with no steady lyric line, or whose switch would come later than 4:40, is not
+rescued, and a rescue that still reaches the cap is dropped like any capped take. If no
+rescue ends, the next round is planned and the same steps repeat. Each rescue costs one more
+plan from the switch onward and one more render of that take. In Merge mode a rescue first
+reloads the unmerged base model, which adds a model load; the adapter is merged again only if
+another planning round follows. A render that needs no rescue keeps its mode and costs
+nothing extra.
 
 An adapter that fails to load fails the job. It never renders the base model silently.
 

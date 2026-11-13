@@ -872,10 +872,13 @@ struct MM3GenRequest {
 
     /** Natural-ending candidates (2026-09-09). The takes are candidates: any
      *  take that reaches max_frames without EOS is DROPPED before stage 2 and
-     *  never rendered, and when no take of a round ended the planner runs
-     *  again with every seed moved on by the take count (round r plans
-     *  seed + r*K + t, flow noise included). After `eos_rounds` rounds with
-     *  no ending the call fails. Serial path only: an interleaved stream has
+     *  never rendered. The first round with an ending wins: every take of it
+     *  that ended is rendered (up to the count asked for) and no further
+     *  round is planned for the rest. Only a round where nothing ended (and
+     *  no rescue ended, see eos_handoff) is followed by another, with every
+     *  seed moved on by the take count (round r plans seed + r*K + t, flow
+     *  noise included). After `eos_rounds` rounds with no ending the longest
+     *  plan is kept (eos_fallback). Serial path only: an interleaved stream has
      *  already played what it planned, so there nothing is dropped or
      *  re-planned (logged once). Why this exists: a capped plan is only
      *  known to be capped at the last frame, so the cheapest reliable way to
@@ -892,9 +895,9 @@ struct MM3GenRequest {
      *  seeds. Works with require_eos off too, in which case "accepted" means
      *  long enough and nothing else. */
     int  min_frames  = 0;
-    /** Base handoff (2026-11-13). With require_eos and an LM adapter, when the
-     *  first round ends fewer takes than are wanted, its capped takes are
-     *  rescued in take order until the count is met: each is cut at its lyric
+    /** Base handoff (2026-11-13). With require_eos and an LM adapter, when a
+     *  round ends no take by itself, its capped takes are rescued in take
+     *  order until the first rescue ends: each is cut at its lyric
      *  cue (mm3_align_handoff_cue), the base model re-reads the prefix on a
      *  cache it builds itself and samples on to EOS or the cap. A rescue that
      *  ends is kept after the natural endings and rendered as a splice: the
@@ -1001,6 +1004,7 @@ struct MM3Rescue {
     uint64_t    seed = 0;   // the take's flow-noise seed, used by both renders
     double      cue  = 0.0;
     int         slot = -1;
+    int         round = 0;  // the planning round the capped take came from
 };
 
 struct MM3GenResult {
@@ -1689,14 +1693,14 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                     ars[(size_t) t]      = MM3ArResult{};
                     tk[(size_t) t].seed += (uint64_t) K;   // the flow noise follows its plan
                 }
-                fprintf(stderr, "[MM3-Pipe] natural ending: %zu of %d wanted after round %d; re-planning %d at seed "
-                                "%llu (round %d of %d)\n", bank_ar.size(), want, round, K,
-                        (unsigned long long) aopt.seed, round + 1, rounds_max);
+                fprintf(stderr, "[MM3-Pipe] natural ending: %zu of %d wanted after round %d (%zu natural, %zu rescued); "
+                                "re-planning %d at seed %llu (round %d of %d)\n", bank_ar.size() + resc.size(), want,
+                        round, bank_ar.size(), resc.size(), K, (unsigned long long) aopt.seed, round + 1, rounds_max);
                 if (progress) {
                     progress(MM3GenProgress{ "ar", -1, 0, 0, aopt.max_frames });
                 }
             }
-            aopt.handoff_cue = handoff && round == 0;
+            aopt.handoff_cue = handoff;
             if (!mm3_ar_plan_takes(m, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), aopt, ars.data(),
                                    err)) {
                 return false;
@@ -1718,11 +1722,11 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 }
             }
             n_short_all += n_short;
-            // Base handoff: round 1 only, capped takes in take order, until the
-            // count is met. The base re-reads the prefix up to the cue on its
-            // own cache (runtime: no adapter; merged: the pristine base reloaded)
-            // and plays on from there.
-            for (int t = 0; aopt.handoff_cue && t < K && (int) (bank_ar.size() + resc.size()) + n_keep < want; t++) {
+            // Base handoff: any round where nothing ended by itself, capped takes
+            // in take order, until the first rescue ends. The base re-reads the
+            // prefix up to the cue on its own cache (runtime: no adapter; merged:
+            // the pristine base reloaded) and plays on from there.
+            for (int t = 0; aopt.handoff_cue && t < K && bank_ar.empty() && resc.empty() && n_keep == 0; t++) {
                 MM3ArResult & a = ars[(size_t) t];
                 if (a.eos_hit || a.handoff_cut <= 0) {
                     continue;
@@ -1778,16 +1782,20 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                         end - a.handoff_cue);
                 if (ok) {
                     MM3Rescue rs;
-                    rs.cue  = a.handoff_cue;
-                    rs.seed = tk[(size_t) t].seed;
-                    rs.orig = std::move(a);
-                    rs.plan = std::move(r);
+                    rs.cue   = a.handoff_cue;
+                    rs.seed  = tk[(size_t) t].seed;
+                    rs.round = round;
+                    rs.orig  = std::move(a);
+                    rs.plan  = std::move(r);
                     resc.push_back(std::move(rs));
                     n_capped_all--;
                 }
             }
             const int have = (int) (bank_ar.size() + resc.size()) + n_keep;
-            if (have >= want || (have > 0 && round + 1 >= rounds_max)) {
+            // Natural endings: the first round with an ending wins (Rob's rule,
+            // HOTSTEP-1201). Re-planning to fill the count cost 14 minutes in a
+            // live job and found nothing. A bare length floor still re-plans.
+            if (have >= want || (have > 0 && (req.require_eos || round + 1 >= rounds_max))) {
                 fprintf(stderr,
                         "[MM3-Pipe] candidates: %d of %d kept in round %d (%zu from earlier rounds, %zu rescued, %d "
                         "wanted); the rest are dropped (%d too short)\n",
@@ -1887,7 +1895,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             for (size_t i = 0; i < resc.size() && (int) nar.size() < want; i++) {
                 resc[i].slot           = (int) nar.size();
                 slot_resc[nar.size()]  = (int) i;
-                slot_round[nar.size()] = 0;
+                slot_round[nar.size()] = resc[i].round;
                 keep[nar.size()]       = 1;
                 nar.push_back(std::move(resc[i].plan));
                 nseed.push_back(resc[i].seed);
