@@ -52,6 +52,9 @@ decoder the captured pre-decoder states, which isolates it from the encoder),
   the queries. The rotation width comes from the head count, not the head
   size. Positions are `linspace(-1, 1)` over the latents ("pixel") and
   `0..T-1` over time ("lang"); the frequencies come from the checkpoint.
-- Top-2 routing decides on probabilities that can be a few 1e-6 apart. A
-  backend whose rounding differs from the reference can pick the other
-  expert, which shows up as a local cluster of large encoder differences.
+- LayerNorm is two-pass: `rms_norm(x - mean(x))`, then weight and bias.
+  ggml-cuda's `ggml_norm` takes the variance as E[x^2] - mean^2 in one pass;
+  the extra noise flipped top-2 router choices whose 2nd and 3rd
+  probabilities are a few 1e-6 apart (49 such decisions on the main capture),
+  and the encoder missed the gate on four of five captures.
+- `max_abs` rejects any non-finite value; `spike --self-test` checks that.

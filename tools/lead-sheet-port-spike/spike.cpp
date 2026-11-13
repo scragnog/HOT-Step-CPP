@@ -7,7 +7,8 @@
 // per-op profile and timings. Written from the capture contract and the model
 // inventory; not a port of the reference source.
 //
-// usage: spike <model.gguf> <capture-dir> [--cpu] [--tf32] [--profile] [--reps N]
+// usage: spike --self-test
+//        spike <model.gguf> <capture-dir> [--cpu] [--tf32] [--profile] [--reps N]
 //              [--dec-from-capture] [--no-eos-stop]
 
 #include "ggml.h"
@@ -179,7 +180,10 @@ static ggml_tensor * linear(ggml_context * c, Model & m, ggml_tensor * x, const 
     return y;
 }
 static ggml_tensor * layer_norm(ggml_context * c, Model & m, ggml_tensor * x, const std::string & p) {
-    x = ggml_norm(c, x, 1e-5f);
+    // Two-pass: centre first, then RMS. ggml-cuda's ggml_norm takes the variance as
+    // E[x^2] - mean^2 in one pass, which cancels badly when |mean| >> std and
+    // misses the 1e-3 gate on the encoder.
+    x = ggml_rms_norm(c, ggml_sub(c, x, ggml_mean(c, x)), 1e-5f);
     return ggml_add(c, ggml_mul(c, x, m.get(p + ".weight")), m.get(p + ".bias"));
 }
 
@@ -449,8 +453,9 @@ static void print_prof(const char * label, Prof & p) {
 static double max_abs(const float * a, const float * b, size_t n, size_t * at = nullptr) {
     double m = 0; size_t w = 0;
     for (size_t i = 0; i < n; ++i) {
-        double d = fabs((double) a[i] - (double) b[i]);
-        if (!(d <= m)) { m = d; w = i; }   // NaN-safe: NaN becomes the max
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) { if (at) *at = i; return INFINITY; }
+        const double d = fabs((double) a[i] - (double) b[i]);
+        if (d > m) { m = d; w = i; }
     }
     if (at) *at = w;
     return m;
@@ -469,6 +474,20 @@ static void row(const char * point, double err, int ok_tok, int n_tok) {
 }
 
 int main(int argc, char ** argv) {
+    if (argc == 2 && !strcmp(argv[1], "--self-test")) {
+        // the gate must fail on any non-finite value, wherever it sits
+        const float nan = NAN, inf = INFINITY;
+        const float z[3] = {0, 0, 0};
+        const float cases[4][3] = {{nan, 0, 0}, {0, nan, 0}, {0, 0, inf}, {0, 0.0005f, 0}};
+        const bool want_fail[4] = {true, true, true, false};
+        int bad = 0;
+        for (int i = 0; i < 4; ++i) {
+            const bool fails = !(max_abs(cases[i], z, 3) < 1e-3) || !(max_abs(z, cases[i], 3) < 1e-3);
+            if (fails != want_fail[i]) { printf("self-test case %d wrong\n", i); bad++; }
+        }
+        printf("self-test: %s\n", bad ? "FAIL" : "PASS");
+        return bad ? 1 : 0;
+    }
     if (argc < 3) { fprintf(stderr, "usage: spike <model.gguf> <capture-dir> [--cpu] [--tf32] [--profile] [--reps N]\n"); return 2; }
     const std::string cap = argv[2];
     bool use_cpu = false, profile = false, dec_from_capture = false, no_eos_stop = false;
@@ -530,6 +549,7 @@ int main(int argc, char ** argv) {
     Prof penc;
     for (int rep = 0; rep < reps + (profile ? 1 : 0); ++rep) {
         const bool prof_run = profile && rep == reps;
+        const double t0 = now_ms();   // graph build, alloc, upload, compute
         ggml_init_params ip = { meta_sz, meta_buf.data(), true };
         ggml_context * c = ggml_init(ip);
         ggml_cgraph * gf = ggml_new_graph_custom(c, 65536, false);
@@ -548,7 +568,6 @@ int main(int argc, char ** argv) {
         ggml_backend_sched_reset(sched);
         if (prof_run) { penc.last = now_ms(); ggml_backend_sched_set_eval_callback(sched, prof_cb, &penc); }
         else ggml_backend_sched_set_eval_callback(sched, nullptr, nullptr);
-        const double t0 = now_ms();
         if (!ggml_backend_sched_alloc_graph(sched, gf)) { fprintf(stderr, "alloc failed\n"); return 1; }
         ggml_backend_tensor_set(x, pre.data(), 0, ggml_nbytes(x));
         ggml_backend_tensor_set(rt.cos_lat, cl.data(), 0, ggml_nbytes(rt.cos_lat));
@@ -675,7 +694,9 @@ int main(int argc, char ** argv) {
     int steps = 0;
     Prof pdec_prof;
     std::vector<double> step_ms;
+    const double t_loop0 = now_ms();
     for (int P = 0; P < MAX_TOK; ++P) {
+        const double t0 = now_ms();   // graph build, reset, alloc, compute, readback, argmax
         ggml_init_params ip = { meta_sz, meta_buf.data(), true };
         ggml_context * c = ggml_init(ip);
         ggml_cgraph * gf = ggml_new_graph_custom(c, 65536, false);
@@ -687,7 +708,6 @@ int main(int argc, char ** argv) {
         ggml_backend_sched_reset(sched);
         const bool prof_step = profile && P == 1;
         if (prof_step) ggml_backend_sched_set_eval_callback(sched, prof_cb, &pdec_prof);
-        const double t0 = now_ms();
         if (!ggml_backend_sched_alloc_graph(sched, gf)) { fprintf(stderr, "alloc failed\n"); return 1; }
         ggml_backend_tensor_set(tok, cur.data(), 0, S * sizeof(int));
         int32_t p32 = P;
@@ -695,15 +715,14 @@ int main(int argc, char ** argv) {
         if (prof_step) pdec_prof.last = now_ms();
         ggml_backend_sched_graph_compute(sched, gf);
         ggml_backend_tensor_get(logits, lg.data(), 0, lg.size() * sizeof(float));
+        std::vector<int> am;
+        argmax_rows(lg.data(), S, VOCAB, am);
         const double dt = now_ms() - t0;
         if (prof_step) ggml_backend_sched_set_eval_callback(sched, nullptr, nullptr);
         if (P == 0) report_placement("dec-step", sched, gf);
         if (!prof_step) { t_dec_total += dt; step_ms.push_back(dt); }
         ggml_free(c);
         steps++;
-
-        std::vector<int> am;
-        argmax_rows(lg.data(), S, VOCAB, am);
         cur = am;
         if (P == 0) {
             std::vector<int> ra; argmax_rows(ref_pre_lg.data(), S, VOCAB, ra);
@@ -726,6 +745,7 @@ int main(int argc, char ** argv) {
         }
         if (!any && !no_eos_stop) break;
     }
+    const double t_loop = now_ms() - t_loop0;
     int tok_ok = 0;
     for (int s = 0; s < S; ++s) tok_ok += got[s] == ref_tok[s];
     printf("PARITY | %-26s | streams equal %d/%d | len %zu vs ref %zu | %s\n", "full greedy decode", tok_ok, S,
@@ -734,13 +754,18 @@ int main(int argc, char ** argv) {
 
     std::sort(step_ms.begin(), step_ms.end());
     printf("TIME | encoder+proj+crossKV per batch of %d: best %.2f ms, first %.2f ms\n", B, t_enc_best, t_enc_first);
-    printf("TIME | decode: %d steps in %.2f ms, median step %.3f ms, min %.3f, max %.3f (incl. graph build, alloc, logits readback)\n",
-           steps, t_dec_total, step_ms[step_ms.size() / 2], step_ms.front(), step_ms.back());
+    printf("TIME | decode: %d steps, %zu timed (profiled step excluded), sum %.2f ms, median step %.3f ms, min %.3f, max %.3f"
+           " (each: graph build, reset, alloc, compute, logits readback, argmax)\n",
+           steps, step_ms.size(), t_dec_total, step_ms[step_ms.size() / 2], step_ms.front(), step_ms.back());
+    printf("TIME | decode loop wall %.2f ms for %d steps%s\n", t_loop, steps,
+           profile ? " (includes one per-node-synced profile step and parity checks; time without --profile)"
+                   : " (includes parity checks)");
 
     // decode-step cost at the far end of the cache, for the 256-token worst case
     {
         for (int P : {127, 255}) {
             for (int r = 0; r < 3; ++r) {
+                const double t0 = now_ms();
                 ggml_init_params ip = { meta_sz, meta_buf.data(), true };
                 ggml_context * c = ggml_init(ip);
                 ggml_cgraph * gf = ggml_new_graph_custom(c, 65536, false);
@@ -750,13 +775,14 @@ int main(int argc, char ** argv) {
                 ggml_set_output(logits);
                 ggml_build_forward_expand(gf, logits);
                 ggml_backend_sched_reset(sched);
-                const double t0 = now_ms();
                 ggml_backend_sched_alloc_graph(sched, gf);
                 ggml_backend_tensor_set(tok, cur.data(), 0, S * sizeof(int));
                 int32_t p32 = P;
                 ggml_backend_tensor_set(pos, &p32, 0, sizeof(p32));
                 ggml_backend_sched_graph_compute(sched, gf);
                 ggml_backend_tensor_get(logits, lg.data(), 0, lg.size() * sizeof(float));
+                std::vector<int> am;
+                argmax_rows(lg.data(), S, VOCAB, am);
                 const double dt = now_ms() - t0;
                 ggml_free(c);
                 if (r == 2) { printf("TIME | decode step at P=%d: %.3f ms\n", P, dt); }
