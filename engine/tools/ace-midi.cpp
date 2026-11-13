@@ -31,6 +31,8 @@
 #include "midi-abc.h"
 #include "midi-grid.h"
 #include "safetensors.h"
+#include "chordnet/inference.h"
+#include "yyjson.h"
 
 // ---------------------------------------------------------------------------
 // Config
@@ -1962,6 +1964,226 @@ static int run_export(const std::string & events_path, const std::string & beats
 }
 
 // ---------------------------------------------------------------------------
+// ChordNet chords (lead-sheet source): --chords and --validate-chords.
+// CPU only; needs no MuScriptor model. Engine code: src/chordnet/.
+// ---------------------------------------------------------------------------
+
+static int chord_threads() { return backend_cpu_n_threads(); }  // GGML_N_THREADS overrides
+
+static bool chord_load(const std::string & model, const std::string & vocab, chordnet::Weights & w,
+                       std::vector<chordnet::Template> & tpl) {
+    if (model.empty() || vocab.empty()) {
+        fprintf(stderr, "[ace-midi] chord modes need --chord-model <gguf> and --chord-vocab <tsv>\n");
+        return false;
+    }
+    return chordnet::load_weights(w, model) && chordnet::load_templates(vocab, tpl);
+}
+
+// Segments in seconds, no beat rounding: [[label, onset, offset], ...]
+static int run_chords(const std::string & model, const std::string & vocab, const std::string & audio,
+                      const std::string & out_path) {
+    chordnet::Weights               w;
+    std::vector<chordnet::Template> tpl;
+    if (!chord_load(model, vocab, w, tpl)) return 1;
+    int                sr   = 0;
+    std::vector<float> mono = load_audio_mono(audio, &sr);
+    chordnet::Result   r;
+    const int threads = chord_threads();
+    chordnet::transcribe(w, tpl, mono, sr, threads, r);
+    chordnet::free_weights(w);
+    char buf[512];
+    snprintf(buf, sizeof buf, "{\"tuning\": %.17g, \"frames\": %d, \"segments\": [", r.tuning, r.T);
+    std::string j = buf;
+    for (size_t i = 0; i < r.segs.size(); i++) {
+        snprintf(buf, sizeof buf, "%s[\"%s\", %.17g, %.17g]", i ? ", " : "", r.segs[i].label.c_str(), r.segs[i].onset,
+                 r.segs[i].offset);
+        j += buf;
+    }
+    j += "]}\n";
+    if (!write_file(out_path, j.data(), j.size())) return 1;
+    fprintf(stderr, "[ace-midi] chords: %zu segments, %.1f s audio, %d threads: features %.0f ms, model %.0f ms, decode %.0f ms\n",
+            r.segs.size(), (double) mono.size() / sr, threads, r.ms_features, r.ms_model, r.ms_decode);
+    return 0;
+}
+
+// max |a - b|; a size mismatch or any non-finite value fails (INFINITY)
+static double chord_err(const std::vector<float> & a, const std::vector<float> & b) {
+    if (a.size() != b.size()) return INFINITY;
+    double m = 0.0;
+    for (size_t i = 0; i < a.size(); i++) {
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) return INFINITY;
+        m = std::max(m, std::fabs((double) a[i] - (double) b[i]));
+    }
+    return m;
+}
+
+static int g_chord_fail = 0;
+
+// One PARITY row: chained from the source audio, fed from the stage's captured input.
+static void chord_row(const std::string & cap, const std::string & point, double chained, double fed, double gate,
+                      const char * unit = "") {
+    const bool ok = chained < gate && (std::isnan(fed) || fed < gate);
+    if (!ok) g_chord_fail++;
+    char f[32];
+    if (std::isnan(fed)) snprintf(f, sizeof f, "-");
+    else snprintf(f, sizeof f, "%.3g%s", fed, unit);
+    printf("PARITY %-16s %-20s chained=%.3g%s fed=%s gate<%g%s %s\n", cap.c_str(), point.c_str(), chained, unit, f, gate,
+           unit, ok ? "PASS" : "FAIL");
+}
+
+static std::vector<std::string> json_strings(yyjson_val * arr) {
+    std::vector<std::string> out;
+    size_t       i, n;
+    yyjson_val * v;
+    yyjson_arr_foreach(arr, i, n, v) out.push_back(yyjson_get_str(v) ? yyjson_get_str(v) : "");
+    return out;
+}
+
+// Frames whose label differs; the first one's Viterbi score margin (this
+// port's label minus the reference label, in this port's scores) to *detail.
+static double label_miss(const std::vector<std::string> & mine, const std::vector<std::string> & ref,
+                         const chordnet::Decoded & d, std::string * detail) {
+    if (mine.size() != ref.size()) return INFINITY;
+    int miss = 0;
+    for (size_t t = 0; t < mine.size(); t++) {
+        if (mine[t] == ref[t]) continue;
+        if (!miss++) {
+            const size_t C = d.names.size();
+            size_t       a = 0, b = 0;
+            for (size_t k = 0; k < C; k++) {
+                if (d.names[k] == mine[t]) a = k;
+                if (d.names[k] == ref[t]) b = k;
+            }
+            char buf[256];
+            snprintf(buf, sizeof buf, "first miss frame %zu: %s over %s, score margin %.6g", t, mine[t].c_str(),
+                     ref[t].c_str(), (double) d.score[t * C + a] - d.score[t * C + b]);
+            *detail = buf;
+        }
+    }
+    return miss;
+}
+
+// Labels must match one for one (else INFINITY); then the max onset/offset error in seconds.
+static double segment_err(const std::vector<chordnet::Segment> & a, yyjson_val * ref) {
+    if (yyjson_arr_size(ref) != a.size()) return INFINITY;
+    double m = 0.0;
+    for (size_t i = 0; i < a.size(); i++) {
+        yyjson_val * s   = yyjson_arr_get(ref, i);
+        const char * lab = yyjson_get_str(yyjson_arr_get(s, 0));
+        if (!lab || a[i].label != lab) return INFINITY;
+        m = std::max({ m, std::fabs(a[i].onset - yyjson_get_num(yyjson_arr_get(s, 1))),
+                       std::fabs(a[i].offset - yyjson_get_num(yyjson_arr_get(s, 2))) });
+    }
+    return m;
+}
+
+static int run_validate_chords(const std::string & model, const std::string & vocab, std::string dir) {
+    using namespace chordnet;
+    while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\')) dir.pop_back();
+    const std::string     cap = dir.substr(dir.find_last_of("/\\") + 1);
+    Weights               w;
+    std::vector<Template> tpl;
+    if (!chord_load(model, vocab, w, tpl)) return 1;
+    const int threads = chord_threads();
+
+    yyjson_doc * man = yyjson_read_file((dir + "/manifest.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc * run = yyjson_read_file((dir + "/run.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc * lab = yyjson_read_file((dir + "/chord-frame-labels.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc * seg = yyjson_read_file((dir + "/chords-seconds.json").c_str(), 0, nullptr, nullptr);
+    yyjson_val * tun = man ? yyjson_obj_get(yyjson_doc_get_root(man), "tuning_bins") : nullptr;
+    std::string  audio;
+    if (run) {
+        yyjson_val * cmd = yyjson_obj_get(yyjson_doc_get_root(run), "command");
+        for (size_t i = 0; i + 1 < yyjson_arr_size(cmd); i++) {
+            const char * a = yyjson_get_str(yyjson_arr_get(cmd, i));
+            const char * b = yyjson_get_str(yyjson_arr_get(cmd, i + 1));
+            if (a && b && !strcmp(a, "--audio")) audio = b;
+        }
+    }
+    auto done = [&]() {
+        yyjson_doc_free(man);
+        yyjson_doc_free(run);
+        yyjson_doc_free(lab);
+        yyjson_doc_free(seg);
+        free_weights(w);
+    };
+    if (!tun || !yyjson_is_num(tun) || !lab || !seg || audio.empty()) {
+        printf("PARITY %-16s no ChordNet capture (upstream stopped before it): skipped\n", cap.c_str());
+        done();
+        return 0;
+    }
+    const double ref_tuning = yyjson_get_num(tun);
+    auto         rd = [&](const std::string & name) { return read_f32_file(dir + "/chord." + name + ".f32"); };
+    const double NaN = std::nan("");
+    const double G   = 1e-3;
+
+    // chained: the source audio through every stage
+    int                sr   = 0;
+    std::vector<float> mono = load_audio_mono(audio, &sr);
+    Result             c;
+    transcribe(w, tpl, mono, sr, threads, c);
+
+    const std::vector<float> wav = rd("waveform-22050"), hyb = rd("hybrid-cqt"), mag = rd("cqt-magnitude");
+    const std::vector<float> x0  = rd("fold0.crop-18-270");
+    chord_row(cap, "waveform-22050", chord_err(c.wav, wav), NaN, G);
+    chord_row(cap, "tuning", std::fabs(c.tuning - ref_tuning), std::fabs(estimate_tuning(wav) - ref_tuning), G);
+    int                      Tf      = 0;
+    const std::vector<float> hyb_fed = hybrid_cqt(wav, ref_tuning, &Tf);
+    chord_row(cap, "hybrid-cqt", chord_err(c.mag, hyb), chord_err(hyb_fed, hyb), G);
+    std::vector<float> mag_fed(hyb.size());
+    for (size_t i = 0; i < hyb.size(); i++) mag_fed[i] = std::fabs(hyb[i]);
+    chord_row(cap, "cqt-magnitude", chord_err(c.mag, mag), chord_err(mag_fed, mag), G);
+    const int T = (int) (mag.size() / NBINS);
+    chord_row(cap, "crop-18-270", chord_err(c.x, x0), chord_err(crop(mag, T), x0), G);
+
+    ggml_backend_t be = cpu_backend(threads);
+    for (int k = 0; k < NFOLD; k++) {
+        const std::string        f = "fold" + std::to_string(k);
+        const std::vector<float> x = rd(f + ".crop-18-270"), cnn = rd(f + ".cnn"), lstm = rd(f + ".lstm");
+        FoldOut                  fed, tmp;
+        std::vector<float>       proj[2];
+        run_graph(be, w.fold[k], x.data(), T, false, fed, proj);
+        chord_row(cap, f + ".cnn", chord_err(c.fold[k].cnn, cnn), chord_err(fed.cnn, cnn), G);
+        run_graph(be, w.fold[k], cnn.data(), T, true, tmp, proj);
+        run_lstm(w.fold[k], proj, T, fed.lstm);
+        chord_row(cap, f + ".lstm", chord_err(c.fold[k].lstm, lstm), chord_err(fed.lstm, lstm), G);
+        run_heads(w.fold[k], lstm, T, fed);
+        for (int h = 0; h < NHEAD; h++) {
+            const std::string p = f + ".head" + std::to_string(h);
+            const std::vector<float> ref = rd(p);
+            chord_row(cap, p, chord_err(c.fold[k].head[h], ref), chord_err(fed.head[h], ref), G);
+        }
+    }
+    ggml_backend_free(be);
+
+    FoldOut ref_heads[NFOLD];
+    for (int k = 0; k < NFOLD; k++)
+        for (int h = 0; h < NHEAD; h++) ref_heads[k].head[h] = rd("fold" + std::to_string(k) + ".head" + std::to_string(h));
+    std::vector<float> mean_fed[NHEAD], mean_ref[NHEAD];
+    fold_mean(ref_heads, T, mean_fed);
+    for (int h = 0; h < NHEAD; h++) {
+        mean_ref[h] = rd("mean.head" + std::to_string(h));
+        chord_row(cap, "mean.head" + std::to_string(h), chord_err(c.mean[h], mean_ref[h]), chord_err(mean_fed[h], mean_ref[h]), G);
+    }
+
+    const std::vector<std::string> ref_labels = json_strings(yyjson_doc_get_root(lab));
+    const Decoded                  dfed       = viterbi(tpl, mean_ref, T);
+    std::string                    dc, df;
+    const double                   mc = label_miss(frame_labels(c.dec), ref_labels, c.dec, &dc);
+    const double                   mf = label_miss(frame_labels(dfed), ref_labels, dfed, &df);
+    chord_row(cap, "viterbi-labels", mc, mf, 0.5, " frames");
+    if (!dc.empty()) printf("       chained %s\n", dc.c_str());
+    if (!df.empty()) printf("       fed %s\n", df.c_str());
+    yyjson_val * sref = yyjson_doc_get_root(seg);
+    chord_row(cap, "segments", segment_err(c.segs, sref), segment_err(segments(ref_labels), sref), 1e-6, " s");
+    printf("TIMING %-16s %.2f s audio, %d threads: features %.0f ms, model %.0f ms, decode %.0f ms\n", cap.c_str(),
+           (double) mono.size() / sr, threads, c.ms_features, c.ms_model, c.ms_decode);
+    done();
+    printf("chord parity %s: %d failing row(s)\n", g_chord_fail ? "FAIL" : "PASS", g_chord_fail);
+    return g_chord_fail ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
 
 /** Release everything load_model() allocated, in reverse order.
  *
@@ -1997,6 +2219,7 @@ int main(int argc, char ** argv) {
     bool   jsonl  = false;
     bool   is_raw = false;
     double tol    = 1e-3;
+    std::string chord_model, chord_vocab, chord_audio, chord_validate;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--self-test-grid")) return grid_self_test();
         else if (!strcmp(argv[i], "--beat-model") && i + 1 < argc) beat_model = argv[++i];
@@ -2031,6 +2254,10 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--jsonl")) jsonl = true;
         else if (!strcmp(argv[i], "--tol") && i + 1 < argc) tol = atof(argv[++i]);
         else if (!strcmp(argv[i], "--device") && i + 1 < argc) device = argv[++i];
+        else if (!strcmp(argv[i], "--chords") && i + 1 < argc) chord_audio = argv[++i];
+        else if (!strcmp(argv[i], "--validate-chords") && i + 1 < argc) chord_validate = argv[++i];
+        else if (!strcmp(argv[i], "--chord-model") && i + 1 < argc) chord_model = argv[++i];
+        else if (!strcmp(argv[i], "--chord-vocab") && i + 1 < argc) chord_vocab = argv[++i];
     }
     {
         const double l2 = opts.beat_scale > 0 ? log2(opts.beat_scale) : 0.5;
@@ -2051,6 +2278,11 @@ int main(int argc, char ** argv) {
         if (!run_beats(beat_model, mono, sr, &tr)) return 1;
         grid_midi({}, tr, (double) mono.size() / sr, opts, beats_out);
         return 0;
+    }
+    if (!chord_validate.empty()) return run_validate_chords(chord_model, chord_vocab, chord_validate);
+    if (!chord_audio.empty()) {
+        if (out_path == "out.mid") out_path = "chords.json";
+        return run_chords(chord_model, chord_vocab, chord_audio, out_path);
     }
     if (!export_events.empty()) {
         if (beats_in.empty()) {
@@ -2092,7 +2324,11 @@ int main(int argc, char ** argv) {
                 "                              beats and grid only, no transcription model\n"
                 "  ace-midi --export <events.jsonl> --beats-in <beats.json> [options] --out x.mid\n"
                 "                              re-export a transcription, no model needed\n"
-                "  ace-midi --self-test-grid   grid maths on synthetic beats\n");
+                "  ace-midi --self-test-grid   grid maths on synthetic beats\n"
+                "  ace-midi --chords <audio> --chord-model <gguf> --chord-vocab <tsv> [--out chords.json]\n"
+                "                              ChordNet chord segments in seconds, CPU (GGML_N_THREADS)\n"
+                "  ace-midi --validate-chords <capture dir> --chord-model <gguf> --chord-vocab <tsv>\n"
+                "                              ChordNet parity against a reference capture\n");
         return 2;
     }
 
