@@ -87,11 +87,12 @@ across every view, not just Library.
 | Variant switch (No Adapter / Unmastered / Mastered) | Only shown when a track has that variant. Each segment plays it and carries its own small download button for that exact render. |
 | A / B (after Play A/B) | Takes the variant switch's place: shows which pinned track is playing and flips to the other; the x beside it leaves A/B mode. |
 | Trim/crop | Toggles trim mode; the waveform below becomes clickable to set in/out points. |
+| Fade in / out | Toggles fade mode. Choose Intro or Outro, then press and drag on the waveform to set the fade length: an intro runs from the start to the pointer, an outro from the pointer to the end. Pick a curve (Linear, Exponential, Logarithmic, S-curve); the waveform shades the fade and draws its curve, and the player volume follows it so you can hear it before applying. Apply fade rewrites the audio file (and the mastered file, if there is one) and cannot be undone. Trim and fade modes are exclusive. |
 | Volume | Slider plus mute toggle. |
 | Edit / Download / Delete | Quick actions on the currently loaded track. |
 
 Above the transport, a collapsible area (only expands while something is
-playing, or trim mode is on) holds section markers, the waveform, a
+playing, or trim or fade mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
 On a phone, tap the song title or cover in the mini player to open the

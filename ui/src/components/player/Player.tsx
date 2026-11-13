@@ -7,7 +7,7 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Activity, Scissors, X,
+  Activity, Scissors, X, TrendingUp,
 } from 'lucide-react';
 import { DiscoIcon } from './DiscoIcon';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +51,8 @@ interface PlayerProps {
   onToggleSpectrum: () => void;
   trimMode: boolean;
   onToggleTrimMode: () => void;
+  fadeMode: boolean;
+  onToggleFadeMode: () => void;
   discoMode: boolean;
   onToggleDisco: () => void;
   abMode: boolean;
@@ -137,6 +139,8 @@ export const Player: React.FC<PlayerProps> = ({
   onToggleSpectrum,
   trimMode,
   onToggleTrimMode,
+  fadeMode,
+  onToggleFadeMode,
   discoMode,
   onToggleDisco,
   abMode,
@@ -417,6 +421,21 @@ export const Player: React.FC<PlayerProps> = ({
           ariaLabel={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
         >
           <Scissors size={15} />
+        </HintButton>
+
+        {/* Fade in / out — hidden on mobile */}
+        <HintButton
+          label={fadeMode ? t('fade.exit', 'Exit fade mode') : t('player.fade', 'Fade in / out')}
+          info={t('player.fadeInfo', 'Shows the fade controls above the waveform: choose intro or outro, drag the fade length on the waveform, pick a curve and apply. The player previews the fade while the controls are open. Applying rewrites the audio file, so it cannot be undone.')}
+          onClick={onToggleFadeMode}
+          className={`p-1.5 rounded-lg transition-all max-[1023px]:hidden ${
+            fadeMode
+              ? 'text-amber-400 bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+              : 'text-zinc-500 hover:text-amber-400 hover:bg-amber-500/5'
+          }`}
+          ariaLabel={fadeMode ? t('fade.exit', 'Exit fade mode') : t('player.fade', 'Fade in / out')}
+        >
+          <TrendingUp size={15} />
         </HintButton>
 
 

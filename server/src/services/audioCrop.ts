@@ -12,6 +12,7 @@
 import fs from 'fs';
 import { bumpRevision } from './lyricsRevision.js';
 import { formatLrcTimestamp, shiftWordStamps, splitLrcLine } from './lrcExport.js';
+import { fadeInGain, type FadeCurve, type FadeKind } from '../contracts/fade.js';
 
 // ── WAV parsing ──────────────────────────────────────────────────────────────
 
@@ -171,6 +172,35 @@ export function cropWavFile(
 
   const newDurationSec = croppedSamples / info.sampleRate;
   return { newDurationSec };
+}
+
+// ── Manual fade ──────────────────────────────────────────────────────────────
+
+/**
+ * Fade a WAV file in place: the first (`in`) or last (`out`) `lengthSec`
+ * seconds ramp from or to silence along `curve`. The length is clamped to the
+ * file. Duration and sidecars are untouched. Returns the length applied.
+ */
+export function fadeWavFile(wavPath: string, kind: FadeKind, lengthSec: number, curve: FadeCurve): number {
+  const buf = fs.readFileSync(wavPath);
+  const info = parseWavHeader(buf);
+  const bytesPerSample = info.bitsPerSample / 8;
+  const frameSize = bytesPerSample * info.numChannels;
+  const totalFrames = Math.floor(info.dataSize / frameSize);
+  const n = Math.min(totalFrames, Math.round(lengthSec * info.sampleRate));
+  if (n <= 0) throw new Error('Fade length must be above zero');
+
+  for (let i = 0; i < n; i++) {
+    // Fade-in: frame i at progress i/n. Fade-out: the mirror, so the last frame is silent.
+    const frame = kind === 'in' ? i : totalFrames - n + i;
+    const gain = fadeInGain(curve, kind === 'in' ? i / n : (n - 1 - i) / n);
+    for (let ch = 0; ch < info.numChannels; ch++) {
+      applySampleGain(buf, info.dataOffset + frame * frameSize + ch * bytesPerSample, info.bitsPerSample, gain);
+    }
+  }
+
+  fs.writeFileSync(wavPath, buf);
+  return n / info.sampleRate;
 }
 
 /** Apply a gain multiplier to a single sample at the given buffer offset */

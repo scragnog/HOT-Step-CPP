@@ -202,6 +202,10 @@ function startFrames(): void {
 
     const t = a.currentTime;
     for (const fn of frameListeners) fn(t, state.duration);
+    if (gainShape) {
+      const v = state.volume * Math.max(0, Math.min(1, gainShape(t, state.duration)));
+      if (a.volume !== v) a.volume = v;
+    }
 
     // React only hears about it ten times a second. The playhead is already
     // smooth via the frame channel, and re-rendering the tree at 60 Hz to move
@@ -396,6 +400,16 @@ export function seek(seconds: number): void {
 
 export function seekFraction(fraction: number): void {
   seek(fraction * (state.duration || 0));
+}
+
+/** A per-frame gain on top of the volume, for previewing an edit (the
+ *  playbar's fade mode) before it is written. Sampled while playing; null
+ *  restores the plain volume. */
+let gainShape: ((t: number, duration: number) => number) | null = null;
+
+export function setGainShape(fn: ((t: number, duration: number) => number) | null): void {
+  gainShape = fn;
+  if (!fn && el) el.volume = state.volume;
 }
 
 export function setVolume(v: number): void {

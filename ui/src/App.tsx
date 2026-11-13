@@ -43,6 +43,7 @@ import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricTimelineMarks } from './components/player/LyricTimelineMarks';
 import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
+import { FadeControls } from './components/player/FadeControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
@@ -84,6 +85,8 @@ import {
   setSpectrumEnabled as pbSetSpectrumEnabled,
   setPlaybackVariant as pbSetPlaybackVariant,
   setTrimMode as pbSetTrimMode,
+  setFadeMode as pbSetFadeMode,
+  handleFadeDrag as pbHandleFadeDrag,
   handleTrimClick as pbHandleTrimClick,
   reloadCurrentTrack as pbReloadCurrentTrack,
   toggleAB as pbToggleAB,
@@ -227,6 +230,14 @@ const AppContent: React.FC = () => {
   const trimInPoint = usePlaybackSelector(s => s.trimInPoint);
   const trimOutPoint = usePlaybackSelector(s => s.trimOutPoint);
   const trimClickCount = usePlaybackSelector(s => s.trimClickCount);
+  const fadeMode = usePlaybackSelector(s => s.fadeMode);
+  const fadeKind = usePlaybackSelector(s => s.fadeKind);
+  const fadeLength = usePlaybackSelector(s => s.fadeLength);
+  const fadeCurve = usePlaybackSelector(s => s.fadeCurve);
+  const fadeOverlay = useMemo(
+    () => (fadeMode ? { kind: fadeKind, curve: fadeCurve, length: fadeLength } : null),
+    [fadeMode, fadeKind, fadeCurve, fadeLength],
+  );
   const abMode = usePlaybackSelector(s => s.abMode);
   const abActiveLabel = usePlaybackSelector(s => s.playMastered && s.abMode ? 'B' as const : 'A' as const);
   const discoMode = useDiscoMode();
@@ -1359,8 +1370,8 @@ const AppContent: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateRows: (playerActive || trimMode) ? '1fr' : '0fr',
-                opacity: (playerActive || trimMode) ? 1 : 0,
+                gridTemplateRows: (playerActive || trimMode || fadeMode) ? '1fr' : '0fr',
+                opacity: (playerActive || trimMode || fadeMode) ? 1 : 0,
                 transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
               }}
             >
@@ -1387,6 +1398,12 @@ const AppContent: React.FC = () => {
                   onCancel={() => pbSetTrimMode(false)}
                 />
               )}
+              {fadeMode && (
+                <FadeControls
+                  songId={currentTrack?.id ?? null}
+                  audioUrl={currentTrack?.audioUrl ?? null}
+                />
+              )}
               {/* One waveform. The live-render canvas replaces it rather than
                   stacking: a track still being written has no file to draw peaks
                   from, so its envelope comes from mm3StreamStore as windows land. */}
@@ -1399,11 +1416,13 @@ const AppContent: React.FC = () => {
                     trimIn={trimMode ? trimInPoint : null}
                     trimOut={trimMode ? trimOutPoint : null}
                     onClickTime={trimMode ? pbHandleTrimClick : undefined}
+                    fade={fadeOverlay}
+                    onDragTime={fadeMode ? pbHandleFadeDrag : undefined}
                   />
                 )}
                 {/* Where each syllable starts, over the bars. Clicks pass
                     through, so the waveform still owns seeking. */}
-                {!isStreamTrack && !trimMode && (
+                {!isStreamTrack && !trimMode && !fadeMode && (
                   <LyricTimelineMarks
                     audioUrl={currentTrack?.audioUrl ?? undefined}
                     duration={duration}
@@ -1459,6 +1478,8 @@ const AppContent: React.FC = () => {
               onToggleSpectrum={() => pbSetSpectrumEnabled(!spectrumEnabled)}
               trimMode={trimMode}
               onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
+              fadeMode={fadeMode}
+              onToggleFadeMode={() => pbSetFadeMode(!fadeMode)}
               abMode={abMode}
               abActiveLabel={abActiveLabel}
               onToggleAB={pbToggleAB}

@@ -17,6 +17,7 @@ import { useSyncExternalStore } from 'react';
 import {
   subscribe, getSnapshot, subscribeFrame, seekFraction,
 } from '../../audio/engine';
+import { fadeGainAt, type FadeCurve, type FadeKind } from '../../../../server/src/contracts/fade';
 
 interface WaveformProps {
   height?: number;
@@ -27,13 +28,18 @@ interface WaveformProps {
   /** Takes over what a click means. Trim mode uses it to place IN/OUT points
    *  instead of seeking. Without it, a click seeks. */
   onClickTime?: (seconds: number) => void;
+  /** Fade mode's pending fade: the attenuated region is shaded and its curve
+   *  drawn. */
+  fade?: { kind: FadeKind; curve: FadeCurve; length: number } | null;
+  /** Press-and-drag reports the time under the pointer; replaces seeking. */
+  onDragTime?: (seconds: number) => void;
 }
 
 const BAR_W = 2;
 const BAR_GAP = 1;
 
 export const Waveform: React.FC<WaveformProps> = ({
-  height = 56, trimIn, trimOut, onClickTime,
+  height = 56, trimIn, trimOut, onClickTime, fade, onDragTime,
 }) => {
   const state = useSyncExternalStore(subscribe, getSnapshot);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -171,6 +177,26 @@ export const Waveform: React.FC<WaveformProps> = ({
       }
     }
 
+    // Fade mode: darken by how much each column is turned down, and draw the
+    // gain curve over it.
+    if (dur > 0 && fade && fade.length > 0) {
+      const x0 = fade.kind === 'in' ? 0 : ((dur - fade.length) / dur) * cssW;
+      const x1 = fade.kind === 'in' ? (fade.length / dur) * cssW : cssW;
+      ctx.beginPath();
+      for (let x = Math.floor(x0); x <= Math.ceil(x1); x++) {
+        const g = fadeGainAt(fade.kind, fade.curve, fade.length, dur, (x / cssW) * dur);
+        ctx.fillStyle = `rgba(0, 0, 0, ${(0.65 * (1 - g)).toFixed(3)})`;
+        ctx.fillRect(x, 0, 1, height);
+        const y = height - 1 - g * (height - 2);
+        if (x === Math.floor(x0)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+      ctx.fillRect((fade.kind === 'in' ? x1 : x0) - 1, 0, 2, height);
+    }
+
     // Playhead.
     if (dur > 0 && t > 0) {
       ctx.fillStyle = '#ec4899';
@@ -185,7 +211,7 @@ export const Waveform: React.FC<WaveformProps> = ({
       ctx.fillRect(hx - 1, 0, 2, height);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, currentTime, height, trimIn, trimOut]);
+  }, [duration, currentTime, height, trimIn, trimOut, fade]);
 
   // Repaint on any state the composite depends on.
   useEffect(() => { paint(); }, [paint]);
@@ -199,19 +225,36 @@ export const Waveform: React.FC<WaveformProps> = ({
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const timeAt = (clientX: number): number | null => {
+    const wrap = wrapRef.current;
+    if (!wrap || !duration) return null;
+    const rect = wrap.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration;
+  };
+
   return (
     <div
       ref={wrapRef}
-      className="relative w-full cursor-pointer select-none"
+      className={`relative w-full select-none ${onDragTime ? 'cursor-ew-resize touch-none' : 'cursor-pointer'}`}
       style={{ height }}
+      onPointerDown={onDragTime ? (e) => {
+        const t = timeAt(e.clientX);
+        if (t == null) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        onDragTime(t);
+      } : undefined}
       onClick={(e) => {
-        const wrap = wrapRef.current;
-        if (!wrap || !duration) return;
-        const rect = wrap.getBoundingClientRect();
-        const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        if (onClickTime) onClickTime(frac * duration);
-        else seekFraction(frac);
+        if (onDragTime) return;
+        const t = timeAt(e.clientX);
+        if (t == null) return;
+        if (onClickTime) onClickTime(t);
+        else seekFraction(t / duration);
       }}
+      onPointerMove={onDragTime ? (e) => {
+        if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+        const t = timeAt(e.clientX);
+        if (t != null) onDragTime(t);
+      } : undefined}
       onMouseMove={(e) => {
         const wrap = wrapRef.current;
         if (!wrap) return;

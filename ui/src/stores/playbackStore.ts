@@ -32,6 +32,7 @@ import {
 import { setPitchRatio } from '../audio/pitchShift';
 import { forgetPeaks } from '../audio/peaksClient';
 import * as engine from '../audio/engine';
+import { fadeGainAt, type FadeCurve, type FadeKind } from '../../../server/src/contracts/fade';
 import i18n from '../i18n';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
@@ -172,6 +173,13 @@ export interface PlaybackState {
   trimOutPoint: number | null;
   trimClickCount: number;  // 0 = waiting for IN, 1 = waiting for OUT, 2 = both set
 
+  // ── Fade Mode ──
+  fadeMode: boolean;
+  fadeKind: FadeKind;
+  /** Seconds; 0 until a length has been dragged out on the waveform. */
+  fadeLength: number;
+  fadeCurve: FadeCurve;
+
   // ── A/B Comparison Mode ──
   abMode: boolean;
   abTrackA: PlaybackTrack | null;
@@ -300,6 +308,11 @@ let _state: PlaybackState = {
   trimInPoint: null,
   trimOutPoint: null,
   trimClickCount: 0,
+
+  fadeMode: false,
+  fadeKind: 'in',
+  fadeLength: 0,
+  fadeCurve: 'linear',
 
   abMode: false,
   abTrackA: null,
@@ -596,6 +609,8 @@ export function stop(): void {
     trimInPoint: null,
     trimOutPoint: null,
     trimClickCount: 0,
+    fadeMode: false,
+    fadeLength: 0,
     abMode: false,
     abTrackA: null,
     abTrackB: null,
@@ -806,7 +821,39 @@ export function setSpectrumEnabled(v: boolean): void {
 // ── Trim Mode ────────────────────────────────────────────────────────────────
 
 export function setTrimMode(on: boolean): void {
-  setState({ trimMode: on, trimInPoint: null, trimOutPoint: null, trimClickCount: 0 });
+  setState({ trimMode: on, trimInPoint: null, trimOutPoint: null, trimClickCount: 0, ...(on ? { fadeMode: false } : {}) });
+}
+
+// ── Fade Mode ────────────────────────────────────────────────────────────────
+//
+// Choose intro or outro, drag the length out on the waveform, pick a curve.
+// While the mode is on the player volume follows the fade, so it can be heard
+// before it is written; the engine reads this store's state every frame.
+
+engine.setGainShape((t, duration) => {
+  const { fadeMode, fadeKind, fadeCurve, fadeLength } = _state;
+  return fadeMode ? fadeGainAt(fadeKind, fadeCurve, fadeLength, duration, t) : 1;
+});
+
+export function setFadeMode(on: boolean): void {
+  setState({ fadeMode: on, fadeLength: 0, ...(on ? { trimMode: false, trimInPoint: null, trimOutPoint: null, trimClickCount: 0 } : {}) });
+}
+
+export function setFadeKind(kind: FadeKind): void {
+  setState({ fadeKind: kind, fadeLength: 0 });
+}
+
+export function setFadeCurve(curve: FadeCurve): void {
+  setState({ fadeCurve: curve });
+}
+
+/** A click or drag on the waveform in fade mode: the fade runs from the track
+ *  edge to the pointer. */
+export function handleFadeDrag(timeSec: number): void {
+  const { fadeKind } = _state;
+  const duration = engine.getSnapshot().duration || _state.duration;
+  const len = fadeKind === 'in' ? timeSec : duration - timeSec;
+  setState({ fadeLength: Math.max(0, Math.min(duration, len)) });
 }
 
 /** Handle a click on the waveform during trim mode */
@@ -857,6 +904,7 @@ export function reloadCurrentTrack(newDuration?: number): void {
 
   if (newDuration !== undefined) setState({ duration: newDuration });
   setTrimMode(false);
+  setFadeMode(false);
 }
 
 // ── React Hooks ──────────────────────────────────────────────────────────────

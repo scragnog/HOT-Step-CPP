@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wavDurationSec } from './audioCrop.js';
+import { fadeWavFile, wavDurationSec } from './audioCrop.js';
 
 /** A minimal RIFF/WAVE file: `format` 1 = PCM, 3 = IEEE float. */
 function wav(file: string, opts: { format: number; bits: number; rate: number; channels: number; frames: number }): void {
@@ -30,6 +30,33 @@ test('wavDurationSec measures the engine\'s float32 output and PCM16 alike', () 
     wav(pcm, { format: 1, bits: 16, rate: 44100, channels: 2, frames: 44100 * 8 });
     assert.equal(wavDurationSec(pcm), 8);
     assert.equal(wavDurationSec(path.join(dir, 'missing.wav')), 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fadeWavFile ramps the start or end along the curve and leaves the rest alone', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wavfade-'));
+  try {
+    // 10 mono PCM16 frames at 10 Hz, all at full scale: a 0.5 s fade covers 5.
+    const f = path.join(dir, 'f.wav');
+    wav(f, { format: 1, bits: 16, rate: 10, channels: 1, frames: 10 });
+    const fill = () => { const b = fs.readFileSync(f); for (let i = 0; i < 10; i++) b.writeInt16LE(10000, 44 + i * 2); fs.writeFileSync(f, b); };
+    const read = () => { const b = fs.readFileSync(f); return Array.from({ length: 10 }, (_, i) => b.readInt16LE(44 + i * 2)); };
+
+    fill();
+    assert.equal(fadeWavFile(f, 'in', 0.5, 'linear'), 0.5);
+    assert.deepEqual(read(), [0, 2000, 4000, 6000, 8000, 10000, 10000, 10000, 10000, 10000]);
+
+    fill();
+    fadeWavFile(f, 'out', 0.5, 'exponential');
+    assert.deepEqual(read(), [10000, 10000, 10000, 10000, 10000, 6400, 3600, 1600, 400, 0]);
+
+    // Longer than the file: clamped, never past the data chunk.
+    fill();
+    assert.equal(fadeWavFile(f, 'in', 99, 'scurve'), 1);
+    assert.equal(read()[0], 0);
+    assert.equal(fs.statSync(f).size, 44 + 20);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

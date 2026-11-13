@@ -21,6 +21,7 @@ import type {
   MonitorStatusResponse, MonitorSeekResponse,
 } from '../../../server/src/contracts/vst';
 import type { ReportLogsResponse } from '../../../server/src/contracts/reportLogs';
+import type { FadeCurve, FadeKind } from '../../../server/src/contracts/fade';
 import type { EngineWorkersResponse, EnvResponse, EnvUpdateResponse, GpusResponse } from '../../../server/src/contracts/settings';
 import type {
   ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
@@ -118,6 +119,9 @@ export const songApi = {
   // it is silent — that line is the sole notifier on failure (R2). Sole consumer.
   crop: (id: string, inPoint: number, outPoint: number, audioUrl?: string) =>
     post<{ cropped: boolean; newDuration: number }>(`/songs/${id}/crop`, { inPoint, outPoint, audioUrl }, { silent: true }),
+  // Fade mode (player/FadeControls) shows its own inline error, like crop.
+  fade: (id: string, body: { kind: FadeKind; lengthSec: number; curve: FadeCurve; audioUrl?: string }) =>
+    post<{ faded: boolean; lengthSec: number }>(`/songs/${id}/fade`, body, { silent: true }),
   listIds: (opts?: ReadOptions) => get<{ ids: string[] }>('/songs/ids', opts),
   getRecentSongs: (source?: string, limit = 50, opts?: ReadOptions) =>
     get<{ songs: UnifiedRecentSong[] }>(
