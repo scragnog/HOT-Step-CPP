@@ -13,8 +13,8 @@
 // sinc: cutoff 0.47843592 of the lower rate, beta 13.04003601, support 194.5
 // samples at the lower rate (fit residual 3e-8). The CQT's 2:1 and 4:1 steps
 // and a 44.1 kHz source are therefore reproduced; soxr's start-up transient
-// on 4:1 is not modelled and moves the CQT by under 1e-5. Other ratios use
-// the same sinc as an approximation; see to_model_rate in inference.h.
+// on 4:1 is not modelled and moves the CQT by under 1e-5. 48 kHz uses
+// the same sinc as an approximation; see admitted_rate in inference.h.
 
 #include <algorithm>
 #include <cmath>

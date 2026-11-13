@@ -1142,6 +1142,25 @@ mp3-codec -i song.wav -o song.mp3 -b 192
 mp3-codec -i song.mp3 -o song.wav --format wav32
 ```
 
+## ace-midi chords reference
+
+ChordNet chord recognition, CPU only; no MuScriptor model is loaded. Design, admitted
+rates, output schema and parity status: [ace-midi chords](../../docs/dev/engine.md#ace-midi-chords-chordnet).
+
+```
+Usage: ace-midi --chords <audio> --chord-model <gguf> --chord-vocab <tsv> [--out chords.json]
+       ace-midi --validate-chords <capture dir> --chord-model <gguf> --chord-vocab <tsv>
+
+  --chords <audio>           WAV or MP3 at 22050, 44100 or 48000 Hz (else exit 2)
+  --chord-model <gguf>       Five-fold f32 GGUF from engine/tools/convert-chordnet.py
+  --chord-vocab <tsv>        Chord templates (server/src/data/lead-sheet/chordnet-templates.tsv)
+  --out <file>               Segments JSON (default chords.json)
+  --validate-chords <dir>    PARITY rows against a tools/lead-sheet-reference capture
+```
+
+Exit codes: 0 success; 1 unreadable model, templates or capture, or a failed parity row;
+2 a source rate that is not admitted. `GGML_N_THREADS` sets the CPU thread count.
+
 ## quantize reference
 
 GGUF requantizer for ACE-Step, MiniMax-Music3 and YuE2 files. It reads a BF16 or

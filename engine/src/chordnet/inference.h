@@ -34,16 +34,15 @@ static double now_ms() {
 }
 
 // librosa.load(sr=22050, mono=True) after the caller's channel mean.
-// Only 22,050 Hz (no resampling) and 44,100 Hz (soxr's 2:1 stage, measured
-// exactly) reproduce librosa. soxr runs every other ratio as a cascade with an
-// interpolated polyphase stage that the single fitted sinc only approximates:
-// on adversarial noise up to 1.8e-2 on the waveform and 1.3e-3 on the CQT
-// (8 and 96 kHz); 48 kHz music stays within 3e-4 and 3e-5.
-static bool exact_rate(int sr) { return sr == SR || sr == 2 * SR; }
+// Admitted source rates: 22,050 Hz (no resampling) and 44,100 Hz (soxr's 2:1
+// stage, reproduced exactly), plus 48,000 Hz, where soxr cascades 2:1 with an
+// interpolated polyphase stage that the fitted sinc approximates (white noise:
+// waveform 1.7e-3, CQT 1.5e-4; music captures: 2.8e-4 and 2.6e-5). Other
+// rates miss further (8 and 96 kHz noise: CQT 1.2e-3 and 1.3e-3), so callers
+// resample them first. See docs/dev/engine.md.
+static bool admitted_rate(int sr) { return sr == SR || sr == 44100 || sr == 48000; }
 
 static std::vector<float> to_model_rate(const std::vector<float> & mono, int sr) {
-    if (!exact_rate(sr))
-        fprintf(stderr, "[chordnet] %d Hz input: resampling to 22050 Hz approximates librosa (exact from 22050 and 44100 Hz only)\n", sr);
     return sr == SR ? mono : resample(mono, sr, SR, false);
 }
 

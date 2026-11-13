@@ -1979,6 +1979,15 @@ static bool chord_load(const std::string & model, const std::string & vocab, cho
     return chordnet::load_weights(w, model) && chordnet::load_templates(vocab, tpl);
 }
 
+// The source audio at an admitted rate (chordnet::admitted_rate), else empty.
+static std::vector<float> chord_audio(const std::string & path, int * sr) {
+    std::vector<float> mono = load_audio_mono(path, sr);
+    if (chordnet::admitted_rate(*sr)) return mono;
+    fprintf(stderr, "[ace-midi] %s: %d Hz is not admitted for chords; resample to 22050, 44100 or 48000 Hz first\n",
+            path.c_str(), *sr);
+    return {};
+}
+
 // Segments in seconds, no beat rounding: [[label, onset, offset], ...]
 static int run_chords(const std::string & model, const std::string & vocab, const std::string & audio,
                       const std::string & out_path) {
@@ -1986,7 +1995,11 @@ static int run_chords(const std::string & model, const std::string & vocab, cons
     std::vector<chordnet::Template> tpl;
     if (!chord_load(model, vocab, w, tpl)) return 1;
     int                sr   = 0;
-    std::vector<float> mono = load_audio_mono(audio, &sr);
+    std::vector<float> mono = chord_audio(audio, &sr);
+    if (mono.empty()) {
+        chordnet::free_weights(w);
+        return 2;
+    }
     chordnet::Result   r;
     const int threads = chord_threads();
     chordnet::transcribe(w, tpl, mono, sr, threads, r);
@@ -2146,7 +2159,11 @@ static int run_validate_chords(const std::string & model, const std::string & vo
 
     // chained: the source audio through every stage
     int                sr   = 0;
-    std::vector<float> mono = load_audio_mono(audio, &sr);
+    std::vector<float> mono = chord_audio(audio, &sr);
+    if (mono.empty()) {
+        done();
+        return 2;
+    }
     Result             c;
     transcribe(w, tpl, mono, sr, threads, c);
 

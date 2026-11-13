@@ -71,7 +71,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
 | `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption, YuE2 fields or section-tagged lyrics out. `--hint` (or a third `--src-list` column) is appended to every non-lyrics prompt. Decoding is greedy unless `--temperature` > 0, then nucleus sampling (`--top-p`, `--seed`). Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
-| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below) |
+| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below). `--chords` runs ChordNet chord recognition on the CPU (see [ace-midi chords](#ace-midi-chords-chordnet)) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
@@ -177,6 +177,95 @@ fixed 120 BPM file, byte for byte (`--validate-midi`).
 | `--abc-out <file> [--abc-ins <program>] [--abc-melody-only]` | Also write a YuE2 two-voice ABC lead sheet (`tools/midi-abc.h`) through SheetSage2's notation stage: voice notes → Vocal, one instrument's top line → Ins, a Krumhansl key estimate and half-bar template chords, notes pre-snapped to the 4-per-beat subbeat grid. Prints a `{"type":"abc",...}` summary line |
 | `--track <audio>` | Beats and grid only (needs `--beat-model` and `--beats-out`) |
 | `--self-test-grid` | Grid maths on synthetic beats with known answers |
+
+### ace-midi chords (ChordNet)
+
+`ace-midi --chords` is a native port of the chord recogniser MuLaCover uses for its
+lead sheets: Music X Lab's ISMIR 2019 large-vocabulary ChordNet (MIT code), five folds
+averaged. It runs on the CPU only and needs no MuScriptor model. The code is in
+`engine/src/chordnet/`; its notices are in `engine/src/chordnet/LICENSE`.
+
+```
+ace-midi --chords <audio> --chord-model <chordnet-F32.gguf> --chord-vocab <templates.tsv> [--out chords.json]
+ace-midi --validate-chords <capture dir> --chord-model <gguf> --chord-vocab <tsv>
+```
+
+The pipeline follows upstream up to its beat rounding: mono audio at 22,050 Hz,
+librosa's tuning estimate, the hybrid CQT (288 bins, 36 per octave from F#0, hop 512),
+the 18:270 crop, then per fold a CNN (InstanceNorm, SELU) and a bidirectional LSTM with
+six chord-factor heads. The fold mean of the head probabilities feeds a Viterbi decode
+over 301 chord templates with transition penalty 30. The CNN and the LSTM input
+projections run as a GGML graph on the CPU backend; the recurrence, heads and decode are
+plain loops. `GGML_N_THREADS` sets the thread count.
+
+Output (`--out`, default `chords.json`):
+
+```json
+{"tuning": 0.06, "frames": 690, "segments": [["N", 0, 0.0929], ["C#:maj", 0.0929, 0.6734]]}
+```
+
+`tuning` is in bins of 1/36 octave. Segments are contiguous `[label, onset, offset]` in
+seconds, at CQT frame resolution (512 / 22,050 s). No beat snapping happens here: the
+caller rounds to its own grid.
+
+**Admitted input rates.** `--chords` accepts 22,050, 44,100 and 48,000 Hz and exits 2 on
+any other rate; callers resample other sources first. librosa resamples with soxr's HQ
+recipe. Its 2:1 stage is a Kaiser-windowed sinc that the port reproduces to 3e-8, so
+22,050 and 44,100 Hz match exactly. For other ratios soxr runs a cascade with an
+interpolated polyphase stage, which the same sinc only approximates. Reviewer's measured
+figures (2 s of seeded tone or noise; maximum absolute error against librosa) are a
+record, not a pass:
+
+| Source rate | Signal | Waveform | CQT |
+|---|---|---|---|
+| 8,000 | tone / noise | 1.9e-3 / 3.7e-3 | 7.1e-5 / 1.2e-3 |
+| 16,000 | tone / noise | 5.2e-4 / 2.0e-3 | 6.8e-5 / 2.6e-4 |
+| 22,050 | tone / noise | 0 / 0 | 1.9e-6 / 1.9e-7 |
+| 32,000 | tone / noise | 1.2e-4 / 3.3e-4 | 9.2e-6 / 2.3e-5 |
+| 44,100 | tone / noise | 1.5e-7 / 7.5e-8 | 2.9e-6 / 1.7e-7 |
+| 48,000 | tone / noise | 1.2e-4 / 1.7e-3 | 1.1e-5 / 1.5e-4 |
+| 96,000 | tone / noise / clipped noise | 1.7e-4 / 5.0e-3 / 1.8e-2 | 1.4e-5 / 3.7e-4 / 1.3e-3 |
+
+The tuning estimate and the frame count matched in every row. 48 kHz is admitted because
+the model reads the CQT, and on the two 48 kHz reference captures the waveform is within
+2.8e-4 and the CQT within 2.6e-5.
+
+**Weights.** `engine/tools/convert-chordnet.py --weights <dir> --inventory
+tools/lead-sheet-reference/inventory.json --out chordnet-F32.gguf` writes the five
+checkpoints into one f32 GGUF after a strict inventory check (names, shapes, 500,772
+parameters per fold). `condition_linear` is left out because upstream never calls it.
+The checkpoints' terms are unconfirmed, so the GGUF is a local file only: it is not in
+the repository, the model registry or any download. The templates come from
+`--vocab-out <tsv> --upstream <MuLaCover chord dir>` and ship as
+`server/src/data/lead-sheet/chordnet-templates.tsv`, with its MIT notice beside it.
+
+**Validation.** `--validate-chords` reads a capture written by
+`tools/lead-sheet-reference/` and prints one `PARITY` row per capture point. Each row runs
+twice: chained from the capture's source audio, and fed from that stage's captured input.
+The gates are those in `tools/lead-sheet-reference/tolerances.json`: below 1e-3 for
+arrays and tuning, exact labels, 1e-6 s for seconds. A capture is skipped, with exit 0,
+only when its manifest records the upstream rejection that stopped it before ChordNet.
+Anything missing or unreadable fails.
+
+On the reference captures, `v2-vocal`, `v2-instrumental` and `v2-silent` pass every row
+(worst error 2.8e-4). `library-vocal` is a recorded upstream rejection (no positive BPM).
+`v2-vocal-stem` fails eight rows: the CNN on folds 0, 1 and 4 (1.45e-3, 1.76e-3, 1.74e-3)
+and the chained LSTM on all five folds. Its heads, frame labels and segments pass.
+
+That miss is a discrepancy in the reference, recorded as a finding rather than a pass.
+The captured float32 CNN output differs from the same network run in float64 by 1.45e-3,
+1.76e-3, 9.8e-4, 8.4e-4 and 1.73e-3 on folds 0 to 4. Running only conv1a and its norm in
+float64 brings that to between 2.5e-6 and 3.0e-6. The stem is quiet (CQT median 8e-5), so conv1a's
+per-channel spread is about 1e-4 next to biases up to 0.53. The float32 bias add loses
+the signal, and InstanceNorm, whose variance sits far below its eps of 1e-5, scales that
+rounding by about 316. The port leaves the conv biases out, because an affine-free
+InstanceNorm cancels them exactly, and lands within 2.3e-6 of float64. Its miss against
+the reference therefore equals the reference's own error. The gate and `tolerances.json`
+are unchanged. The check is `_experiments/lead-sheet-port/f64-check.py <capture> <fold>`,
+run in the reference venv.
+
+Measured CPU time for a 240 s, 48 kHz stereo file, all five folds, 16 threads on a Ryzen 9
+9950X3D: features 2.4 s, model 7.8 s, decode 0.04 s, peak working set about 790 MB.
 
 ## HeartMuLa
 
