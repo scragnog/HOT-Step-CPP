@@ -250,6 +250,10 @@ The server binds `127.0.0.1` and only answers other machines when you opt in:
   `CORS_ORIGINS`. A page served by this server and opened by IP counts as same-origin.
 - Vite dev from another machine: `ui/vite.config.ts` proxies with `changeOrigin`, so the server
   sees the browser's `http://<lan-ip>:3000` Origin. Set `CORS_ORIGINS=http://<lan-ip>:3000`.
+- Using the UI by name (MagicDNS or a LAN hostname): set `CORS_ORIGINS=http://<name>:3001`.
+  `ALLOWED_HOSTS` alone lets GET requests through, but writes from that page get 403.
+  `CORS_ORIGINS` also adds the name to the `Host` allowlist, so one setting covers both.
+- Using the UI by Tailscale or LAN IP needs nothing beyond `SERVER_HOST`.
 
 `.env.example` also lists `VITE_PORT` and `VITE_HOST`. Nothing reads them: `dev.bat` starts
 Vite with `--port 3000 --host`, and `ui/vite.config.ts` sets port 3000 and host `0.0.0.0`.

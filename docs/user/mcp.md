@@ -78,9 +78,9 @@ design, not something the MCP server weakens further. Anyone who can reach
 the server's URL can submit generations and start jobs that occupy the GPU,
 some for a long time. Keep `HOTSTEP_URL` pointed at your own machine
 (`127.0.0.1`) unless you have deliberately put something else, such as a
-firewall or an authenticated tunnel, in front of it. The server listens on
-every network interface by default (`SERVER_HOST`, default `0.0.0.0`), so the
-same applies to anyone on your network, with or without an MCP server.
+firewall or an authenticated tunnel, in front of it. The server listens only on
+`127.0.0.1` by default. If you set `SERVER_HOST=0.0.0.0` to reach it from other
+machines, the same applies to anyone on your network, with or without an MCP server.
 
 `lyricstudio` makes no HTTP calls to the app; it opens the database file
 directly. Its optional LAN endpoint for discussions is separate and needs a

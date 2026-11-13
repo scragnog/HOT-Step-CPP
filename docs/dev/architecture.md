@@ -22,7 +22,7 @@ Browser
   |  dev (agents):  http://localhost:3000  (Vite HMR, proxies /api /audio /references to :3001)
   |  prod (end users): http://localhost:3001
   v
-Node server   server/src/index.ts   Express on 0.0.0.0:3001
+Node server   server/src/index.ts   Express on 127.0.0.1:3001
   |-- /api/*         route files in server/src/routes/
   |-- /audio         <data dir>/audio         (generated songs)
   |-- /references    <data dir>/references    (mastering reference tracks)

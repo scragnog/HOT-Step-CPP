@@ -29,8 +29,9 @@ response fields it does not know. The one versioned surface is the DAW facade un
 | Lifetime | Tokens live in server memory only. Every server restart invalidates them; the next call answers `401 { "error": "Unauthorized" }` and the client fetches a new token from `/api/auth/auto`. |
 | Unauthenticated routes | Job status (`GET /api/generate/status/:id`), cancel, cancel-all, queue, reset-queue, the STORM and MM3 stream routes, `/api/download/:id` and the media mounts below do not check the token. |
 
-Exposure today: the Node server binds `SERVER_HOST`, default `0.0.0.0` (`server/src/config.ts:221-224`),
-CORS is open (`server/src/index.ts:80`), and the Vite dev server binds `0.0.0.0:3000`
+Exposure today: the Node server binds `SERVER_HOST`, default `127.0.0.1` (`server/src/config.ts`).
+Foreign Origins and unknown `Host` headers are refused (`server/src/services/security/originPolicy.ts`,
+see [Configuration](config.md#lan-and-tailscale-access-opt-in)), and the Vite dev server binds `0.0.0.0:3000`
 (`ui/vite.config.ts`). A few gates look at where a call comes from:
 
 - The training-worker token gate (`workerTokenGate`, `server/src/services/training/trainingWorkers.ts`)
