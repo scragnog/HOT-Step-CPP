@@ -3468,7 +3468,7 @@ int main(int argc, char ** argv) {
 
     // Host and Origin guard. Refuses requests whose Host header is a
     // non-IP hostname (DNS rebinding) or whose Origin is a web page other
-    // than the local app. Extra hostnames: --allow-host or
+    // than the engine's own built-in UI. Extra hostnames: --allow-host or
     // ACESTEPCPP_ALLOWED_HOSTS. Extra origins: --allow-origin or
     // ACESTEPCPP_ALLOWED_ORIGINS (comma separated).
     {
@@ -3484,14 +3484,7 @@ int main(int argc, char ** argv) {
                 allowed_hosts.push_back(h);
             }
         }
-        int node_port = 3001;
-        if (const char * sp = getenv("SERVER_PORT")) {
-            int v = atoi(sp);
-            if (v > 0) {
-                node_port = v;
-            }
-        }
-        std::vector<int> trusted_ports = { port, node_port, 3000 };
+        std::vector<int> trusted_ports = origin_guard::default_trusted_ports(port);
         std::string      cfg_host      = host;
         svr.set_pre_routing_handler([allowed, allowed_hosts, trusted_ports, cfg_host](const httplib::Request & req,
                                                                        httplib::Response &      res) {

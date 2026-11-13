@@ -14,9 +14,11 @@
 //   ACESTEPCPP_ALLOWED_HOSTS, or any IP literal (IPv6 may carry a %zone). A hostname that is not an
 //   IP literal is what DNS rebinding needs, so it is refused.
 //   Origin header: missing is allowed. "null" is refused. Otherwise it must
-//   be http(s)://127.0.0.1|localhost|[::1] on one of the trusted ports
-//   (engine port, Node server port, Vite dev port), or appear exactly in
-//   the opt-in list (--allow-origin / ACESTEPCPP_ALLOWED_ORIGINS).
+//   be http(s)://127.0.0.1|localhost|[::1] on the engine's own port (its
+//   built-in web UI), or appear exactly in the opt-in list (--allow-origin /
+//   ACESTEPCPP_ALLOWED_ORIGINS). The app UI never calls the engine from the
+//   browser (Node proxies it and sends no Origin), so ports 3000/3001 are
+//   not trusted by default.
 
 #include <algorithm>
 #include <cctype>
@@ -65,17 +67,41 @@ inline std::vector<std::string> parse_csv(const std::string & csv) {
     return out;
 }
 
+// True if s is a decimal port number 0..65535.
+inline bool valid_port(const std::string & s) {
+    if (s.empty() || s.size() > 5) {
+        return false;
+    }
+    for (char c : s) {
+        if (!std::isdigit((unsigned char) c)) {
+            return false;
+        }
+    }
+    return std::stoi(s) <= 65535;
+}
+
 // Returns the hostname part of a Host header value: "[::1]:8085" -> "::1",
-// "Example.com:80" -> "example.com". Lowercased.
+// "Example.com:80" -> "example.com". Lowercased. Returns "" when the value
+// is malformed (unclosed bracket, junk after ']', bad port).
 inline std::string host_name(const std::string & host_header) {
     std::string h = to_lower(trim(host_header));
     if (!h.empty() && h[0] == '[') {
         size_t close = h.find(']');
-        return close == std::string::npos ? h.substr(1) : h.substr(1, close - 1);
+        if (close == std::string::npos) {
+            return "";
+        }
+        std::string rest = h.substr(close + 1);
+        if (!rest.empty() && !(rest[0] == ':' && valid_port(rest.substr(1)))) {
+            return "";
+        }
+        return h.substr(1, close - 1);
     }
     size_t colon = h.find(':');
     // More than one colon without brackets: treat as a bare IPv6 literal.
     if (colon != std::string::npos && h.find(':', colon + 1) == std::string::npos) {
+        if (!valid_port(h.substr(colon + 1))) {
+            return "";
+        }
         h = h.substr(0, colon);
     }
     while (!h.empty() && h.back() == '.') {
@@ -145,6 +171,9 @@ inline bool host_allowed(const std::string &              host_header,
         return true;
     }
     std::string h = host_name(host_header);
+    if (h.empty()) {
+        return false;
+    }
     if (h == "localhost" || h == "::1") {
         return true;
     }
@@ -160,6 +189,11 @@ inline bool host_allowed(const std::string &              host_header,
         }
     }
     return is_ipv4_literal(h) || is_ipv6_literal(h);
+}
+
+// Loopback ports whose pages may call the engine by default: only its own.
+inline std::vector<int> default_trusted_ports(int engine_port) {
+    return { engine_port };
 }
 
 // True if a request with this Origin header may proceed.

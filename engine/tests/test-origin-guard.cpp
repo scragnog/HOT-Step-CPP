@@ -36,6 +36,13 @@ int main() {
     check(host_allowed("127.0.0.1:8085", cfg), true, "host 127.0.0.1:8085");
     check(host_allowed("[::1]:8095", cfg), true, "host [::1]:8095");
     check(host_allowed("[::1]", cfg), true, "host [::1]");
+    check(host_allowed("[::1]evil", cfg), false, "host [::1]evil");
+    check(host_allowed("[::1]:80x", cfg), false, "host [::1]:80x");
+    check(host_allowed("[::1]:70000", cfg), false, "host [::1]:70000");
+    check(host_allowed("[::1", cfg), false, "host [::1 unclosed");
+    check(host_allowed("127.0.0.1:abc", cfg), false, "host 127.0.0.1:abc");
+    check(host_allowed("127.0.0.1:65536", cfg), false, "host 127.0.0.1:65536");
+    check(host_allowed("127.0.0.1:65535", cfg), true, "host 127.0.0.1:65535");
     check(host_allowed("192.168.1.5", cfg), true, "host 192.168.1.5");
     check(host_allowed("192.168.1.5:8085", cfg), true, "host 192.168.1.5:8085");
     check(host_allowed("999.1.1.1", cfg), false, "host 999.1.1.1");
@@ -56,22 +63,28 @@ int main() {
     check(host_allowed("myhost.test.evil.com", cfg, ah), false, "allow-host suffix miss");
 
     // Origin header
-    const std::vector<int>         ports = { 8085, 3001, 3000 };
+    const std::vector<int>         ports = default_trusted_ports(8085);
     const std::vector<std::string> none;
     check(origin_allowed("http://evil.com", ports, none), false, "origin evil.com");
     check(origin_allowed("null", ports, none), false, "origin null");
     check(origin_allowed("NULL", ports, none), false, "origin NULL");
-    check(origin_allowed("http://127.0.0.1:3001", ports, none), true, "origin 127.0.0.1:3001");
-    check(origin_allowed("http://localhost:3000", ports, none), true, "origin localhost:3000");
-    check(origin_allowed("HTTP://LOCALHOST:3000", ports, none), true, "origin upper localhost:3000");
-    check(origin_allowed("http://localhost:3000/", ports, none), true, "origin trailing slash");
+    check(origin_allowed("http://127.0.0.1:3001", ports, none), false, "origin 127.0.0.1:3001");
+    check(origin_allowed("http://localhost:3000", ports, none), false, "origin localhost:3000");
+    check(origin_allowed("HTTP://LOCALHOST:8085", ports, none), true, "origin upper localhost:8085");
+    check(origin_allowed("http://localhost:8085/", ports, none), true, "origin trailing slash");
     check(origin_allowed("http://[::1]:8085", ports, none), true, "origin [::1]:8085");
-    check(origin_allowed("https://127.0.0.1:3001", ports, none), true, "origin https 3001");
+    check(origin_allowed("https://127.0.0.1:8085", ports, none), true, "origin https 8085");
     check(origin_allowed("http://localhost:8080", ports, none), false, "origin localhost:8080");
     check(origin_allowed("http://localhost", ports, none), false, "origin localhost no port");
     check(origin_allowed("http://127.0.0.1:30011", ports, none), false, "origin port prefix 30011");
     check(origin_allowed("http://localhost:3000.evil.com", ports, none), false, "origin suffix trick");
     check(origin_allowed("", ports, none), true, "origin empty");
+    check(origin_allowed("http://127.0.0.1:8085", ports, none), true, "origin own port");
+    {
+        std::vector<std::string> optin = parse_csv("http://localhost:3000,http://127.0.0.1:3001");
+        check(origin_allowed("http://localhost:3000", ports, optin), true, "origin 3000 opted in");
+        check(origin_allowed("http://127.0.0.1:3001", ports, optin), true, "origin 3001 opted in");
+    }
 
     // Opt-in CSV
     std::vector<std::string> allowed = parse_csv(" http://MyHost.test:3001/ , ,https://a.example ");
