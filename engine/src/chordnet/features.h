@@ -8,11 +8,13 @@
 // vqt with early downsampling. Where librosa computes in float32 (the tuning
 // histogram), the same float32 steps are kept, because a bin edge decides it.
 //
-// librosa resamples with soxr's "HQ" recipe. Its response was measured from
-// outside (impulses through soxr 1.1.0) and fits a linear-phase
-// Kaiser-windowed sinc: cutoff 0.47843592 of the lower rate, beta 13.04003601,
-// support 194.5 samples at the lower rate (fit residual 3e-8). soxr's start-up
-// transient on 4:1 is not modelled; it moves the CQT by under 1e-5.
+// librosa resamples with soxr's "HQ" recipe. Its 2:1 stage was measured from
+// outside (impulses through soxr 1.1.0) and is a linear-phase Kaiser-windowed
+// sinc: cutoff 0.47843592 of the lower rate, beta 13.04003601, support 194.5
+// samples at the lower rate (fit residual 3e-8). The CQT's 2:1 and 4:1 steps
+// and a 44.1 kHz source are therefore reproduced; soxr's start-up transient
+// on 4:1 is not modelled and moves the CQT by under 1e-5. Other ratios use
+// the same sinc as an approximation; see to_model_rate in inference.h.
 
 #include <algorithm>
 #include <cmath>

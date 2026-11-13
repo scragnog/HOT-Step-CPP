@@ -2107,10 +2107,37 @@ static int run_validate_chords(const std::string & model, const std::string & vo
         yyjson_doc_free(seg);
         free_weights(w);
     };
-    if (!tun || !yyjson_is_num(tun) || !lab || !seg || audio.empty()) {
-        printf("PARITY %-16s no ChordNet capture (upstream stopped before it): skipped\n", cap.c_str());
+    // A capture without chord tensors is skipped only when its manifest records
+    // the upstream rejection that stopped it; anything else missing fails.
+    yyjson_doc * tns = yyjson_read_file((dir + "/tensors.json").c_str(), 0, nullptr, nullptr);
+    bool has_chord = false;
+    if (tns) {
+        size_t       i, n;
+        yyjson_val * k, * v;
+        yyjson_obj_foreach(yyjson_doc_get_root(tns), i, n, k, v) has_chord |= !strncmp(yyjson_get_str(k), "chord.", 6);
+        yyjson_doc_free(tns);
+    }
+    yyjson_val * mroot  = man ? yyjson_doc_get_root(man) : nullptr;
+    const char * status = yyjson_get_str(yyjson_obj_get(mroot, "status"));
+    yyjson_val * skips  = yyjson_obj_get(mroot, "skips");
+    if (man && tns && !has_chord && status && !strcmp(status, "captured-with-upstream-rejection") && yyjson_arr_size(skips) > 0) {
+        printf("PARITY %-16s upstream rejected it before ChordNet (%s): skipped\n", cap.c_str(),
+               yyjson_get_str(yyjson_arr_get(skips, 0)) ? yyjson_get_str(yyjson_arr_get(skips, 0)) : "?");
         done();
         return 0;
+    }
+    std::string missing;
+    if (!man) missing += " manifest.json";
+    if (!tns) missing += " tensors.json";
+    if (!has_chord) missing += " chord.* tensors";
+    if (!tun || !yyjson_is_num(tun)) missing += " tuning_bins";
+    if (!lab) missing += " chord-frame-labels.json";
+    if (!seg) missing += " chords-seconds.json";
+    if (audio.empty()) missing += " run.json --audio";
+    if (!missing.empty()) {
+        printf("PARITY %-16s FAIL: capture incomplete or unreadable:%s\n", cap.c_str(), missing.c_str());
+        done();
+        return 1;
     }
     const double ref_tuning = yyjson_get_num(tun);
     auto         rd = [&](const std::string & name) { return read_f32_file(dir + "/chord." + name + ".f32"); };
