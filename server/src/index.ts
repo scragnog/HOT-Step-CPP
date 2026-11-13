@@ -8,6 +8,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import { isAllowedOrigin, isLoopbackHost, originRejection, parseCorsOrigins } from './services/security/originPolicy.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -105,7 +106,17 @@ void startYue2Mirror();
 const app = express();
 
 // Middleware
-app.use(cors());
+// Origin policy: loopback origins, same-origin by IP, and CORS_ORIGINS are allowed. A foreign
+// Origin may not change state or reach the DAW bridge, so a web page cannot drive this server.
+const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
+app.use((req, res, next) => {
+  const status = originRejection(req.method, req.path, req.get('origin'), corsOrigins, req.get('host'));
+  if (status) { res.status(status).json({ error: 'Origin not allowed' }); return; }
+  next();
+});
+app.use(cors((req, cb) => {
+  cb(null, { origin: isAllowedOrigin(req.headers.origin, corsOrigins, req.headers.host) });
+}));
 // Training on another PC: a worker checks its token first; the controller's
 // proxy goes before the body parsers so proxied bodies stream through.
 app.use('/api', workerTokenGate);
@@ -494,6 +505,10 @@ async function warmEngineOnStartup(): Promise<void> {
 const server = app.listen(config.server.port, config.server.host, () => {
   console.log(`[Server] HOT-Step CPP v${APP_VERSION}`);
   console.log(`[Server] Listening on http://localhost:${config.server.port}`);
+  if (!isLoopbackHost(config.server.host)) {
+    console.warn(`[Server] WARNING: bound to ${config.server.host}, reachable from other machines on the network.`);
+    console.warn('[Server] Unset SERVER_HOST to keep it local. Browser origins other than this host need CORS_ORIGINS.');
+  }
   console.log(`[Server] ace-server URL: ${config.aceServer.url}`);
   if (DATA_ROOT) console.log(`[Server] Data folder: ${DATA_ROOT}`);
   console.log(`[Server] Data directory: ${config.data.dir}`);
