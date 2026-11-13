@@ -1162,6 +1162,29 @@ Exit codes: 0 success (including a capture skipped for a recorded upstream rejec
 1 unreadable audio, model, templates or capture, or a failed parity row. Other source
 rates print an approximation notice on stderr. `GGML_N_THREADS` sets the CPU thread count.
 
+## ace-midi YourMT3+ reference
+
+The YourMT3+ front half, from audio to encoder states. It loads no MuScriptor model, and
+it has no transcribe mode yet. Design, parity findings, placement and times:
+[ace-midi YourMT3+](../../docs/dev/engine.md#ace-midi-yourmt3-front-half).
+
+```
+Usage: ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <gguf> [--device cpu] [--yourmt3-dump <dir>]
+       ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]
+
+  --yourmt3-model <gguf>      f32 GGUF from engine/tools/convert-yourmt3.py (local only)
+  --validate-yourmt3 <dir>    PARITY rows against a tools/lead-sheet-reference capture:
+                              padded waveform, spectrogram, pre-encoder, encoder per batch
+  --yourmt3-dump <dir>        with --validate-yourmt3: write b<k>.{chained,fed}.<point>.f32
+  --yourmt3-encode <audio>    WAV or MP3 at any rate through the encoder; prints
+                              PLACEMENT and TIMING lines, writes nothing
+  --device auto|cpu|<name>    backend (default auto = best available)
+```
+
+Exit codes: 0 success (including a capture skipped for a recorded upstream rejection);
+1 unreadable audio, model or capture, or a failed parity row; 2 a YourMT3 mode without
+`--yourmt3-model`.
+
 ## quantize reference
 
 GGUF requantizer for ACE-Step, MiniMax-Music3 and YuE2 files. It reads a BF16 or

@@ -32,6 +32,8 @@
 #include "midi-grid.h"
 #include "safetensors.h"
 #include "chordnet/inference.h"
+#include "train/yue2-aitk-sha256.h"
+#include "yourmt3/encoder.h"
 #include "yyjson.h"
 
 // ---------------------------------------------------------------------------
@@ -2007,7 +2009,7 @@ static int run_chords(const std::string & model, const std::string & vocab, cons
 }
 
 // max |a - b|; a size mismatch or any non-finite value fails (INFINITY)
-static double chord_err(const std::vector<float> & a, const std::vector<float> & b) {
+static double parity_err(const std::vector<float> & a, const std::vector<float> & b) {
     if (a.size() != b.size()) return INFINITY;
     double m = 0.0;
     for (size_t i = 0; i < a.size(); i++) {
@@ -2017,13 +2019,13 @@ static double chord_err(const std::vector<float> & a, const std::vector<float> &
     return m;
 }
 
-static int g_chord_fail = 0;
+static int g_parity_fail = 0;
 
 // One PARITY row: chained from the source audio, fed from the stage's captured input.
-static void chord_row(const std::string & cap, const std::string & point, double chained, double fed, double gate,
-                      const char * unit = "") {
+static void parity_row(const std::string & cap, const std::string & point, double chained, double fed, double gate,
+                       const char * unit = "") {
     const bool ok = chained < gate && (std::isnan(fed) || fed < gate);
-    if (!ok) g_chord_fail++;
+    if (!ok) g_parity_fail++;
     char f[32];
     if (std::isnan(fed)) snprintf(f, sizeof f, "-");
     else snprintf(f, sizeof f, "%.3g%s", fed, unit);
@@ -2152,16 +2154,16 @@ static int run_validate_chords(const std::string & model, const std::string & vo
 
     const std::vector<float> wav = rd("waveform-22050"), hyb = rd("hybrid-cqt"), mag = rd("cqt-magnitude");
     const std::vector<float> x0  = rd("fold0.crop-18-270");
-    chord_row(cap, "waveform-22050", chord_err(c.wav, wav), NaN, G);
-    chord_row(cap, "tuning", std::fabs(c.tuning - ref_tuning), std::fabs(estimate_tuning(wav) - ref_tuning), G);
+    parity_row(cap, "waveform-22050", parity_err(c.wav, wav), NaN, G);
+    parity_row(cap, "tuning", std::fabs(c.tuning - ref_tuning), std::fabs(estimate_tuning(wav) - ref_tuning), G);
     int                      Tf      = 0;
     const std::vector<float> hyb_fed = hybrid_cqt(wav, ref_tuning, &Tf);
-    chord_row(cap, "hybrid-cqt", chord_err(c.mag, hyb), chord_err(hyb_fed, hyb), G);
+    parity_row(cap, "hybrid-cqt", parity_err(c.mag, hyb), parity_err(hyb_fed, hyb), G);
     std::vector<float> mag_fed(hyb.size());
     for (size_t i = 0; i < hyb.size(); i++) mag_fed[i] = std::fabs(hyb[i]);
-    chord_row(cap, "cqt-magnitude", chord_err(c.mag, mag), chord_err(mag_fed, mag), G);
+    parity_row(cap, "cqt-magnitude", parity_err(c.mag, mag), parity_err(mag_fed, mag), G);
     const int T = (int) (mag.size() / NBINS);
-    chord_row(cap, "crop-18-270", chord_err(c.x, x0), chord_err(crop(mag, T), x0), G);
+    parity_row(cap, "crop-18-270", parity_err(c.x, x0), parity_err(crop(mag, T), x0), G);
 
     ggml_backend_t be = cpu_backend(threads);
     for (int k = 0; k < NFOLD; k++) {
@@ -2170,15 +2172,15 @@ static int run_validate_chords(const std::string & model, const std::string & vo
         FoldOut                  fed, tmp;
         std::vector<float>       proj[2];
         run_graph(be, w.fold[k], x.data(), T, false, fed, proj);
-        chord_row(cap, f + ".cnn", chord_err(c.fold[k].cnn, cnn), chord_err(fed.cnn, cnn), G);
+        parity_row(cap, f + ".cnn", parity_err(c.fold[k].cnn, cnn), parity_err(fed.cnn, cnn), G);
         run_graph(be, w.fold[k], cnn.data(), T, true, tmp, proj);
         run_lstm(w.fold[k], proj, T, fed.lstm);
-        chord_row(cap, f + ".lstm", chord_err(c.fold[k].lstm, lstm), chord_err(fed.lstm, lstm), G);
+        parity_row(cap, f + ".lstm", parity_err(c.fold[k].lstm, lstm), parity_err(fed.lstm, lstm), G);
         run_heads(w.fold[k], lstm, T, fed);
         for (int h = 0; h < NHEAD; h++) {
             const std::string p = f + ".head" + std::to_string(h);
             const std::vector<float> ref = rd(p);
-            chord_row(cap, p, chord_err(c.fold[k].head[h], ref), chord_err(fed.head[h], ref), G);
+            parity_row(cap, p, parity_err(c.fold[k].head[h], ref), parity_err(fed.head[h], ref), G);
         }
     }
     ggml_backend_free(be);
@@ -2190,7 +2192,7 @@ static int run_validate_chords(const std::string & model, const std::string & vo
     fold_mean(ref_heads, T, mean_fed);
     for (int h = 0; h < NHEAD; h++) {
         mean_ref[h] = rd("mean.head" + std::to_string(h));
-        chord_row(cap, "mean.head" + std::to_string(h), chord_err(c.mean[h], mean_ref[h]), chord_err(mean_fed[h], mean_ref[h]), G);
+        parity_row(cap, "mean.head" + std::to_string(h), parity_err(c.mean[h], mean_ref[h]), parity_err(mean_fed[h], mean_ref[h]), G);
     }
 
     const std::vector<std::string> ref_labels = json_strings(yyjson_doc_get_root(lab));
@@ -2198,16 +2200,182 @@ static int run_validate_chords(const std::string & model, const std::string & vo
     std::string                    dc, df;
     const double                   mc = label_miss(frame_labels(c.dec), ref_labels, c.dec, &dc);
     const double                   mf = label_miss(frame_labels(dfed), ref_labels, dfed, &df);
-    chord_row(cap, "viterbi-labels", mc, mf, 0.5, " frames");
+    parity_row(cap, "viterbi-labels", mc, mf, 0.5, " frames");
     if (!dc.empty()) printf("       chained %s\n", dc.c_str());
     if (!df.empty()) printf("       fed %s\n", df.c_str());
     yyjson_val * sref = yyjson_doc_get_root(seg);
-    chord_row(cap, "segments", segment_err(c.segs, sref), segment_err(segments(ref_labels), sref), 1e-6, " s");
+    parity_row(cap, "segments", segment_err(c.segs, sref), segment_err(segments(ref_labels), sref), 1e-6, " s");
     printf("TIMING %-16s %.2f s audio, %d threads: features %.0f ms, model %.0f ms, decode %.0f ms\n", cap.c_str(),
            (double) mono.size() / sr, threads, c.ms_features, c.ms_model, c.ms_decode);
     done();
-    printf("chord parity %s: %d failing row(s)\n", g_chord_fail ? "FAIL" : "PASS", g_chord_fail);
-    return g_chord_fail ? 1 : 0;
+    printf("chord parity %s: %d failing row(s)\n", g_parity_fail ? "FAIL" : "PASS", g_parity_fail);
+    return g_parity_fail ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// YourMT3+ front half (lead-sheet source): --validate-yourmt3 and
+// --yourmt3-encode. Audio to encoder states only; the decoder comes in a
+// later stage. Backend from --device (auto = best). Engine code: src/yourmt3/.
+// ---------------------------------------------------------------------------
+
+static double span_err(const float * a, const float * b, size_t n) {
+    double m = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) return INFINITY;
+        m = std::max(m, std::fabs((double) a[i] - (double) b[i]));
+    }
+    return m;
+}
+
+static void yourmt3_timing(const char * label, const yourmt3::FrontHalf & f, double seconds, const char * be) {
+    printf("TIMING %-16s %.2f s audio, %d segments, %s: resample %.0f ms, spectrogram %.0f ms, pre-encoder %.0f ms, "
+           "encoder %.0f ms\n",
+           label, seconds, f.n_seg, be, f.ms_resample, f.ms_spec, f.ms_pre, f.ms_enc);
+}
+
+// Audio through the encoder; prints placement and stage times, writes nothing.
+static int run_yourmt3_encode(const std::string & model, const std::string & audio) {
+    const double t0 = yourmt3::now_ms();
+    yourmt3::Encoder e;
+    if (!yourmt3::encoder_init(e, model)) return 1;
+    const double t_load = yourmt3::now_ms() - t0;
+    int                sr   = 0;
+    std::vector<float> mono = load_audio_mono(audio, &sr);
+    const double       t1   = yourmt3::now_ms();
+    yourmt3::FrontHalf f;
+    yourmt3::front_half(e, mono, sr, f, false);
+    printf("TIMING load %.0f ms (GGUF read, upload, backend init); front half %.0f ms\n", t_load, yourmt3::now_ms() - t1);
+    yourmt3_timing("encode", f, (double) mono.size() / sr, ggml_backend_name(e.bp.backend));
+    yourmt3::encoder_free(e);
+    return 0;
+}
+
+// One capture file, checked against tensors.json (byte count and sha256).
+static std::vector<float> capture_tensor(const std::string & dir, yyjson_val * tensors, const std::string & key,
+                                         std::string * missing) {
+    yyjson_val * t     = yyjson_obj_get(tensors, key.c_str());
+    const char * file  = yyjson_get_str(yyjson_obj_get(t, "file"));
+    const char * sha   = yyjson_get_str(yyjson_obj_get(t, "sha256"));
+    const size_t bytes = (size_t) yyjson_get_uint(yyjson_obj_get(t, "bytes"));
+    std::vector<float> v;
+    if (!file || !sha || !bytes || bytes % 4) {
+        *missing += " " + key + " (tensors.json entry)";
+        return v;
+    }
+    FILE * fp = fopen((dir + "/" + file).c_str(), "rb");
+    if (fp) {
+        v.resize(bytes / 4);
+        const size_t got = fread(v.data(), 1, bytes, fp);
+        const bool   eof = fgetc(fp) == EOF;
+        fclose(fp);
+        if (got != bytes || !eof || yue2_aitk::sha256::bytes(v.data(), bytes).hex() != sha) {
+            *missing += std::string(" ") + file + " (size or sha256 differs)";
+            v.clear();
+        }
+    } else {
+        *missing += std::string(" ") + file;
+    }
+    return v;
+}
+
+// dump (optional): this run's chained and fed outputs per batch, for offline checks.
+static int run_validate_yourmt3(const std::string & model, std::string dir, const std::string & dump) {
+    using namespace yourmt3;
+    while (!dir.empty() && (dir.back() == '/' || dir.back() == '\\')) dir.pop_back();
+    const std::string cap = dir.substr(dir.find_last_of("/\\") + 1);
+    yyjson_doc *      man = yyjson_read_file((dir + "/manifest.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc *      run = yyjson_read_file((dir + "/run.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc *      tns = yyjson_read_file((dir + "/tensors.json").c_str(), 0, nullptr, nullptr);
+    yyjson_val *      troot = tns ? yyjson_doc_get_root(tns) : nullptr;
+    auto              done  = [&]() {
+        yyjson_doc_free(man);
+        yyjson_doc_free(run);
+        yyjson_doc_free(tns);
+    };
+    std::string audio;
+    if (run) {
+        yyjson_val * cmd = yyjson_obj_get(yyjson_doc_get_root(run), "command");
+        for (size_t i = 0; i + 1 < yyjson_arr_size(cmd); i++) {
+            const char * a = yyjson_get_str(yyjson_arr_get(cmd, i));
+            const char * b = yyjson_get_str(yyjson_arr_get(cmd, i + 1));
+            if (a && b && !strcmp(a, "--audio")) audio = b;
+        }
+    }
+    int n_batch = 0;
+    while (troot && yyjson_obj_get(troot, ("mt3.b" + std::to_string(n_batch) + ".waveform-padded").c_str())) n_batch++;
+    // Skipped only on a recorded upstream rejection before YourMT3; anything else missing fails.
+    yyjson_val * mroot  = man ? yyjson_doc_get_root(man) : nullptr;
+    const char * status = yyjson_get_str(yyjson_obj_get(mroot, "status"));
+    yyjson_val * skips  = yyjson_obj_get(mroot, "skips");
+    if (man && tns && !n_batch && status && !strcmp(status, "captured-with-upstream-rejection") && yyjson_arr_size(skips) > 0) {
+        printf("PARITY %-16s upstream rejected it before YourMT3 (%s): skipped\n", cap.c_str(),
+               yyjson_get_str(yyjson_arr_get(skips, 0)) ? yyjson_get_str(yyjson_arr_get(skips, 0)) : "?");
+        done();
+        return 0;
+    }
+    std::string missing;
+    if (!man) missing += " manifest.json";
+    if (!tns) missing += " tensors.json";
+    if (!n_batch) missing += " mt3.b0.* tensors";
+    if (audio.empty()) missing += " run.json --audio";
+    static const char * POINT[4] = { "waveform-padded", "linear-spectrogram", "pre-encoder", "encoder" };
+    std::vector<std::vector<float>> ref((size_t) n_batch * 4);
+    for (int k = 0; k < n_batch; k++)
+        for (int p = 0; p < 4; p++)
+            ref[k * 4 + p] = capture_tensor(dir, troot, "mt3.b" + std::to_string(k) + "." + POINT[p], &missing);
+    if (!missing.empty()) {
+        printf("PARITY %-16s FAIL: capture incomplete or unreadable:%s\n", cap.c_str(), missing.c_str());
+        done();
+        return 1;
+    }
+
+    Encoder e;
+    if (!encoder_init(e, model)) {
+        done();
+        return 1;
+    }
+    // chained: the source audio through every stage
+    int                sr   = 0;
+    std::vector<float> mono = load_audio_mono(audio, &sr);
+    FrontHalf          c;
+    front_half(e, mono, sr, c);
+    const double NaN = std::nan("");
+    const double G   = 1e-3;
+    const size_t per[4] = { (size_t) SEG, (size_t) NFRAME * NBIN, (size_t) NFRAME * 128 * 128, (size_t) NFRAME * N_LAT * D_ENC };
+    const std::vector<float> * chained[4] = { &c.wav, &c.spec, &c.pre, &c.enc };
+    for (int k = 0; k < n_batch; k++) {
+        const int B = (int) (ref[k * 4].size() / SEG);
+        bool shape_ok = B > 0 && (size_t) (k * BATCH + B) <= (size_t) c.n_seg;
+        for (int p = 0; p < 4; p++) shape_ok &= ref[k * 4 + p].size() == B * per[p];
+        if (!shape_ok) {
+            printf("PARITY %-16s FAIL: batch %d shapes differ from this run (%d segments chained)\n", cap.c_str(), k, c.n_seg);
+            g_parity_fail++;
+            continue;
+        }
+        // fed: each stage from the captured input of that stage
+        const std::vector<float> spec = spectrogram(ref[k * 4].data(), B, e.w.window.data());
+        const std::vector<float> pre  = pre_encode(e, ref[k * 4 + 1].data(), B);
+        const std::vector<float> enc  = encode(e, ref[k * 4 + 2].data(), B);
+        const std::vector<float> * fed[4] = { nullptr, &spec, &pre, &enc };
+        if (!dump.empty())
+            for (int p = 1; p < 4; p++) {
+                const std::string b = dump + "/b" + std::to_string(k) + ".";
+                const size_t      n = ref[k * 4 + p].size();
+                if (!write_file(b + "chained." + POINT[p] + ".f32", chained[p]->data() + (size_t) k * BATCH * per[p], n * 4) ||
+                    !write_file(b + "fed." + POINT[p] + ".f32", fed[p]->data(), n * 4))
+                    g_parity_fail++;
+            }
+        for (int p = 0; p < 4; p++) {
+            const std::vector<float> & r = ref[k * 4 + p];
+            const double ch = span_err(chained[p]->data() + (size_t) k * BATCH * per[p], r.data(), r.size());
+            parity_row(cap, "b" + std::to_string(k) + "." + POINT[p], ch, fed[p] ? span_err(fed[p]->data(), r.data(), r.size()) : NaN, G);
+        }
+    }
+    yourmt3_timing(cap.c_str(), c, (double) mono.size() / sr, ggml_backend_name(e.bp.backend));
+    encoder_free(e);
+    done();
+    printf("yourmt3 parity %s: %d failing row(s)\n", g_parity_fail ? "FAIL" : "PASS", g_parity_fail);
+    return g_parity_fail ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2247,6 +2415,7 @@ int main(int argc, char ** argv) {
     bool   is_raw = false;
     double tol    = 1e-3;
     std::string chord_model, chord_vocab, chord_audio, chord_validate;
+    std::string mt3_model, mt3_validate, mt3_audio, mt3_dump;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--self-test-grid")) return grid_self_test();
         else if (!strcmp(argv[i], "--beat-model") && i + 1 < argc) beat_model = argv[++i];
@@ -2285,6 +2454,10 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--validate-chords") && i + 1 < argc) chord_validate = argv[++i];
         else if (!strcmp(argv[i], "--chord-model") && i + 1 < argc) chord_model = argv[++i];
         else if (!strcmp(argv[i], "--chord-vocab") && i + 1 < argc) chord_vocab = argv[++i];
+        else if (!strcmp(argv[i], "--yourmt3-model") && i + 1 < argc) mt3_model = argv[++i];
+        else if (!strcmp(argv[i], "--validate-yourmt3") && i + 1 < argc) mt3_validate = argv[++i];
+        else if (!strcmp(argv[i], "--yourmt3-encode") && i + 1 < argc) mt3_audio = argv[++i];
+        else if (!strcmp(argv[i], "--yourmt3-dump") && i + 1 < argc) mt3_dump = argv[++i];
     }
     {
         const double l2 = opts.beat_scale > 0 ? log2(opts.beat_scale) : 0.5;
@@ -2305,6 +2478,23 @@ int main(int argc, char ** argv) {
         if (!run_beats(beat_model, mono, sr, &tr)) return 1;
         grid_midi({}, tr, (double) mono.size() / sr, opts, beats_out);
         return 0;
+    }
+    // Default to the validated CPU backend unless explicitly overridden.
+    // GGML_BACKEND env (read by backend_init) still wins if the user set it.
+    if (!getenv("GGML_BACKEND") && device != "auto") {
+#ifdef _WIN32
+        _putenv_s("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str());
+#else
+        setenv("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str(), 1);
+#endif
+    }
+    if (!mt3_validate.empty() || !mt3_audio.empty()) {
+        if (mt3_model.empty()) {
+            fprintf(stderr, "[ace-midi] YourMT3 modes need --yourmt3-model <gguf>\n");
+            return 2;
+        }
+        ggml_time_init();
+        return mt3_validate.empty() ? run_yourmt3_encode(mt3_model, mt3_audio) : run_validate_yourmt3(mt3_model, mt3_validate, mt3_dump);
     }
     if (!chord_validate.empty()) return run_validate_chords(chord_model, chord_vocab, chord_validate);
     if (!chord_audio.empty()) {
@@ -2355,18 +2545,14 @@ int main(int argc, char ** argv) {
                 "  ace-midi --chords <audio> --chord-model <gguf> --chord-vocab <tsv> [--out chords.json]\n"
                 "                              ChordNet chord segments in seconds, CPU (GGML_N_THREADS)\n"
                 "  ace-midi --validate-chords <capture dir> --chord-model <gguf> --chord-vocab <tsv>\n"
-                "                              ChordNet parity against a reference capture\n");
+                "                              ChordNet parity against a reference capture\n"
+                "  ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <gguf> [--device cpu]\n"
+                "           [--yourmt3-dump <dir>]  YourMT3+ front half (waveform, spectrogram, pre-encoder,\n"
+                "                              encoder) against a reference capture; the dump keeps\n"
+                "                              this run's chained and fed outputs\n"
+                "  ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]\n"
+                "                              audio through the YourMT3+ encoder: placement and times only\n");
         return 2;
-    }
-
-    // Default to the validated CPU backend unless explicitly overridden.
-    // GGML_BACKEND env (read by backend_init) still wins if the user set it.
-    if (!getenv("GGML_BACKEND") && device != "auto") {
-#ifdef _WIN32
-        _putenv_s("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str());
-#else
-        setenv("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str(), 1);
-#endif
     }
 
     if (!draft_dir.empty() && (draft_k < 1 || draft_k > MIDI_MAX_DRAFT_K)) {

@@ -71,7 +71,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
 | `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption, YuE2 fields or section-tagged lyrics out. `--hint` (or a third `--src-list` column) is appended to every non-lyrics prompt. Decoding is greedy unless `--temperature` > 0, then nucleus sampling (`--top-p`, `--seed`). Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
-| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below). `--chords` runs ChordNet chord recognition on the CPU (see [ace-midi chords](#ace-midi-chords-chordnet)) |
+| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below). `--chords` runs ChordNet chord recognition on the CPU (see [ace-midi chords](#ace-midi-chords-chordnet)). `--validate-yourmt3` and `--yourmt3-encode` run the YourMT3+ front half (see [ace-midi YourMT3+](#ace-midi-yourmt3-front-half)) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
@@ -267,6 +267,114 @@ run in the reference venv.
 
 Measured CPU time for a 240 s, 48 kHz stereo file, all five folds, 16 threads on a Ryzen 9
 9950X3D: features 2.4 s, model 7.8 s, decode 0.04 s, peak working set about 790 MB.
+
+### ace-midi YourMT3+ (front half)
+
+The melody transcriber MuLaCover uses is YourMT3+ (the YPTF.MoE+Multi checkpoint). This
+stage ports its front half: audio in, encoder states out. The decoder, the event
+tokens and a transcribe mode come in a later stage. The code is in `engine/src/yourmt3/`
+and its notices are in `engine/src/yourmt3/LICENSE`.
+
+```
+ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <yourmt3-F32.gguf> [--device cpu] [--yourmt3-dump <dir>]
+ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]
+```
+
+`--yourmt3-encode` runs the front half and prints the backend placement and stage
+times. It writes nothing. `--device` picks the backend as for MuScriptor (`auto` is the
+best available).
+
+**Pipeline.** The audio is reduced to mono float32 (the channel mean), then resampled
+to 16 kHz with `torchaudio.functional.resample`, which is what upstream calls. That is a
+Hann-windowed sinc on the gcd-reduced ratio, with nothing that depends on the rate, so
+every integer source rate takes the exact path and no notice is printed. On synthetic
+captures at 8, 11.025, 22.05, 32 and 96 kHz (music and white noise) and on the
+44.1 and 48 kHz references, the padded waveform is within 3.6e-7. The audio is
+zero-padded to whole 32,767-sample segments and handled in batches of 8, as upstream
+does. Each segment gets a magnitude STFT (n_fft 2048, hop 300, periodic Hann, centred
+with reflect padding): DC dropped, `log(x + 1e-5)`, min-max normalised per segment, 110
+frames by 1024 bins. The FFT runs in double on the host. The conv pre-encoder (three
+residual 3x3 blocks, eval BatchNorm, ReLU, 1x2 average pooling) and the Perceiver-TF
+encoder (26 latents; three blocks of spectral cross-attention, two local and two
+temporal layers, each with a top-2 mixture of eight experts; partial RoPE on the
+queries) run as two GGML graphs. The 6b spike's numerics rules apply: strict F32 on every
+matmul, and two-pass LayerNorm. The pre-encoder's F32 convolutions use ggml-cuda's fp32
+direct kernel.
+
+**Weights.** `engine/tools/convert-yourmt3.py --ckpt <last.ckpt> --inventory
+tools/lead-sheet-reference/inventory.json --out yourmt3-F32.gguf` checks the state
+dictionary against the inventory (655 names, shapes and dtypes; 47,078,022 parameters)
+and writes one f32 GGUF. Two kinds of entry are left out: the six BatchNorm
+`num_batches_tracked` counters, unused in eval, and the 15 per-layer
+`rotary_emb.freqs`, which are the same shared parameters as the three encoder-level
+ones (the converter checks that they are equal). Training state in the checkpoint
+(optimizer, schedulers, hyper-parameters, tokenizer objects) is never read into the GGUF.
+The loader checks the full tensor set, decoder included, and uploads it. Redistribution
+of the checkpoint is not cleared, so the GGUF is a local file only: it is not in the
+repository, the model registry or any download.
+
+**Validation.** `--validate-yourmt3` reads a capture written by
+`tools/lead-sheet-reference/`. It checks every capture file's size and sha256 against
+`tensors.json`. It then prints one `PARITY` row per point and batch: padded waveform,
+linear spectrogram, pre-encoder and encoder. Each row runs twice: chained from the
+capture's source audio, and fed from that stage's captured input. The gate is below 1e-3
+(`tolerances.json`), and any non-finite value fails. A capture is skipped, with exit 0,
+only when its manifest records an upstream rejection before YourMT3. Anything missing or
+corrupt fails and is named. `--yourmt3-dump <dir>` writes this run's chained and fed
+outputs.
+
+Results on the five reference captures (max abs error, chained / fed; the waveform row
+has no fed run):
+
+| Capture | Waveform | Spectrogram | Pre-encoder CPU | Pre-encoder CUDA | Encoder CPU | Encoder CUDA |
+|---|---|---|---|---|---|---|
+| `library-vocal` | 1.5e-7 | 6.8e-3 / 8.1e-3 | 11.4 / 1.25e-3 | 11.4 / 1.83e-3 | 2.08 / 3.6e-5 | 2.08 / 3.1e-5 |
+| `v2-instrumental` | 3.6e-7 | 1.05e-3 / 1.01e-3 | 2.22 / 1.80e-3 | 2.22 / 2.08e-3 | 0.60 / 4.2e-5 | 0.60 / 3.5e-5 |
+| `v2-silent` | 2.4e-7 | 5.8e-4 / 5.1e-4 | 0.66 / 1.53e-3 | 0.66 / 2.08e-3 | 1.16 / 3.4e-5 | 1.16 / 2.7e-5 |
+| `v2-vocal` | 2.4e-7 | 5.8e-4 / 5.1e-4 | 0.66 / 1.53e-3 | 0.66 / 2.08e-3 | 1.16 / 3.4e-5 | 1.16 / 3.9e-5 |
+| `v2-vocal-stem` | 7e-10 | 4.0e-5 / 3.3e-5 | 0.040 / 7.9e-4 | 0.040 / 1.65e-3 | 3.8e-4 / 7.8e-5 | 3.9e-4 / 3.6e-5 |
+
+The waveform and the fed encoder pass everywhere. The waveform and spectrogram are
+computed on the host, so CPU and CUDA give the same figures for them. The other misses
+come from the reference, and they are recorded as a finding. The gate and `tolerances.json` are unchanged. The evidence
+comes from upstream's own modules run in float64 on the same inputs:
+
+- Spectrogram: torch's float32 STFT is up to 8.1e-3 from float64 (5.0e-4 on `v2-vocal`).
+  The port's double FFT is within 1.7e-7 of float64 on every capture. The error sits in
+  near-silent bins, where `log(x + 1e-5)` magnifies float32 rounding.
+- Pre-encoder: one block-0 BatchNorm channel has running variance 8.5e-5 (scale 412), and
+  outputs reach 2508, where one float32 ulp is 2.4e-4. Fed the same captured spectrogram,
+  torch float32 is 6.7e-4 to 1.07e-3 from float64. The port is 6.9e-4 to 1.28e-3 on the
+  CPU, and 1.8e-3 to 2.1e-3 on CUDA, whose direct kernel sums 1,152 terms in sequence.
+- Chained rows: a 1e-5 change in the spectrogram moves the pre-encoder by 0.67. So every
+  float32 implementation lands far from every other one. Torch's own float32 chain is
+  0.03 to 10.7 from a float64 chain on the pre-encoder, and 2.8e-4 to 1.18 on the
+  encoder.
+
+What matters downstream is the tokens. Upstream's float32 decoder, fed the port's chained
+encoder states (CPU or CUDA), decodes 104 of 104 streams equal to the reference on
+`library-vocal`, `v2-instrumental` and `v2-vocal-stem`. On `v2-vocal` and `v2-silent`
+it decodes 103 of 104; the stream that differs is segment 0, channel 5. A float64 torch
+chain from the same audio differs on that same stream, so there the port agrees with
+float64 rather than with the float32 reference. Fed from the captured pre-encoder, every
+stream matches. The token gate for the full port should take this into account. The
+checks are `_experiments/lead-sheet-port/yourmt3-f64-check.py` and
+`yourmt3-token-check.py`, run from the upstream clone in the reference venv on a
+`--yourmt3-dump` directory.
+
+**Placement.** Both graphs place every node on the compute backend, with one split each:
+35 nodes for the pre-encoder and 891 for the encoder, nothing on the CPU under CUDA.
+The scheduler pins graph inputs to the CPU. Left there, the encoder's channel-token
+permute and its cross-attention LayerNorm statistics followed them (6 splits), so the
+inputs are allocated on the compute backend.
+
+**Time.** For a 240 s, 48 kHz stereo file on an RTX 5090 with nothing else on the card,
+the full front half takes 7.0 s, which is 118 segments in 15 batches. The parts are
+model load 0.36 s, resample 0.05 s, spectrogram 0.25 s, pre-encoder 5.7 s and encoder
+0.91 s. The peak is 1.7 GB of VRAM above idle. On 16 CPU threads, a 16 s clip takes
+about 2.3 s in the pre-encoder and 1.8 s in the encoder. An im2col and strict SGEMM
+pre-encoder would probably be several times faster (an estimate, not measured). It was
+not built, because 7 s sits well inside the 300 s Prepare budget.
 
 ## HeartMuLa
 
