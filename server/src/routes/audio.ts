@@ -64,9 +64,10 @@ router.get('/peaks', (req, res) => {
   if (!filePath) return res.status(400).json({ error: 'url is not a servable audio path' });
 
   const peaks = getPeaks(filePath);
-  // Peaks are immutable for a given file version and the cache key already
-  // covers changes, so let the browser keep them for the session.
-  res.setHeader('Cache-Control', 'private, max-age=3600');
+  // The URL is not a file version: a crop, fade or post-process pass rewrites
+  // the file in place. Make the browser revalidate; an unchanged envelope
+  // costs a 304 against Express's ETag.
+  res.setHeader('Cache-Control', 'no-cache');
   res.json(peaks);
 });
 
