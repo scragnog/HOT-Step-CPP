@@ -612,7 +612,8 @@ async function capabilities(): Promise<BackendCapabilities> {
         label: 'Require Natural Ending',
         hint: 'Plans candidates together. For one requested song, stops the batch '
             + 'at the first natural ending and renders that song. Variations keep '
-            + 'all candidates that end. Re-plans with fresh seeds if none end before '
+            + 'the candidates that end in the first round with an ending, and drop '
+            + 'the rest rather than re-plan. Re-plans with fresh seeds if none end before '
             + 'the ceiling, then renders the longest plan anyway. Costs up to 12 '
             + 'planning passes when nothing ends, so turn it off if your adapter '
             + 'writes songs longer than the Duration you asked for.',
@@ -651,7 +652,8 @@ async function capabilities(): Promise<BackendCapabilities> {
             + 'steadily placed lyric line and the base model plays the song out '
             + 'from there and ends it. The take keeps the adapter\'s audio up to '
             + 'the switch, with a 1 s crossfade. Each rescue adds about one more '
-            + 'plan and render of that take. Natural endings are always used first.',
+            + 'plan and render of that take. Acts only on a round where no take '
+            + 'ended by itself, and stops at the first rescue that ends.',
         default: true,
         visible_when: { key: 'mm3LmAdapter', not_equals: '' },
       },

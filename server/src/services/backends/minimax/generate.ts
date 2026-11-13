@@ -549,7 +549,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       + `stage. `
       + (askedTakes === 1
         ? 'The batch stops at the first natural ending and renders that one song. '
-        : `Rounds continue until ${takes} candidates have ended or the rounds run out, so a short round only costs time. `)
+        : 'The first round that has an ending wins: the candidates that ended in it are rendered and the rest '
+          + 'are dropped, not re-planned. '
+          + (lmAdapterPath && fs.existsSync(lmAdapterPath) && params.mm3BaseHandoff !== false
+            ? 'With Base Model Ending, a round where none ended rescues its capped candidates in order until '
+              + 'the first one ends, and renders that one. '
+            : ''))
       + `Turn "Require Natural Ending" off to render whatever the planner produced.`,
     );
   }
@@ -658,8 +663,9 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         require_eos: true,
         eos_rounds: MM3_ENDING_ROUNDS,
         ...(askedTakes === 1 ? { stop_after_first_eos: true } : {}),
-        // Base handoff: the engine rescues capped adapter takes of the first
-        // round (base renders are untouched). Omitted when off or without an
+        // Base handoff: the engine rescues capped adapter takes of a round where
+        // none ended, until the first rescue ends (base renders are untouched).
+        // Omitted when off or without an
         // adapter, so those requests are what they were.
         ...(params.mm3BaseHandoff !== false && lmAdapterPath && fs.existsSync(lmAdapterPath)
           ? { eos_handoff: true } : {}),
@@ -1414,6 +1420,13 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         + `${tooShort} too short, `
         + `${Math.max(0, dropped - capped - tooShort)} other candidates not selected`
         + (seeds.length ? ` (seeds ${seeds.join(', ')})` : ''));
+      // The first round with an ending wins, so a render can come back with
+      // fewer songs than were planned per round.
+      const wanted = req.stop_after_first_eos ? 1 : Number(req.takes ?? 1);
+      if (req.require_eos && !finalDetail?.eos_fallback && nTakes < wanted) {
+        log('INFO', `[MM3] ${wanted - nTakes} of ${wanted} ${plural(wanted, 'song', 'songs')} dropped for want of an `
+          + `ending: rendering the ${nTakes} that ended in round ${rounds}, the first round with an ending`);
+      }
       if (rescued.length) {
         log('INFO', `[MM3] Base handoff: ${rescued.length} capped ${plural(rescued.length, 'take', 'takes')} ended by `
           + 'the base model ('
