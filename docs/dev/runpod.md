@@ -127,7 +127,16 @@ and the models, adapters and data paths together. Do not set `HOT_STEP_ROOT` to 
 container; its entrypoint uses the container layout above. See
 [Configuration](config.md#other-env-files) for the local Compose environment file.
 
-`SERVER_HOST=0.0.0.0` and `SERVER_PORT=3001` expose the Node server to the proxy.
+The server binds `127.0.0.1` by default, so a pod must opt in. Set `SERVER_HOST=0.0.0.0` and
+`SERVER_PORT=3001` to expose the Node server to the proxy. The proxy sends a `Host` header the
+server does not know, so also set one of these:
+
+- `CORS_ORIGINS=https://<pod-id>-3001.proxy.runpod.net` if you use the UI through the proxy.
+  This allows the host and lets the browser make write requests (POST, PUT, DELETE).
+- `ALLOWED_HOSTS=<pod-id>-3001.proxy.runpod.net` if you only need reads or non-browser clients.
+  Browser writes from that origin still get 403 without `CORS_ORIGINS`.
+
+Without either, every request through the proxy gets 403.
 `ACESTEPCPP_HOST=127.0.0.1` and `ACESTEPCPP_PORT=8085` keep the engine inside the
 container. The entrypoint refuses to replace a non-empty directory or a mounted
 directory at one of the container paths above; mount the volume at `/workspace`

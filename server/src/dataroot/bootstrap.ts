@@ -21,6 +21,7 @@ import {
   readPointer, writePointer,
   type Pointer,
 } from './paths.js';
+import { defaultServerHost } from '../services/security/originPolicy.js';
 import { planOperation, runPending, sharedRoot } from './transfer.js';
 import { CHECKOUT_ROOT, accessibleRoot, pointerLocation, selectPointerRoot } from './locate.js';
 
@@ -243,7 +244,7 @@ function escapeHtml(s: string): string {
 /** The only thing a broken data location serves. Never returns. */
 async function serveErrorPage(error: string, pointerPath: string | null): Promise<never> {
   const port = parseInt(process.env.SERVER_PORT || '3001', 10);
-  const host = process.env.SERVER_HOST || '0.0.0.0';
+  const host = defaultServerHost(process.env.SERVER_HOST);
   console.error(`\n[Data] HOT-Step cannot start: ${error}\n`);
   const body = `<!doctype html><meta charset="utf-8"><title>HOT-Step: data folder problem</title>
 <body style="font-family:sans-serif;max-width:46em;margin:3em auto;line-height:1.5">

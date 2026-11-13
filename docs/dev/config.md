@@ -232,9 +232,31 @@ checkout back at its own folders; data that already moved stays in the data fold
 | Variable | Default | Settings | Effect |
 |---|---|---|---|
 | `SERVER_PORT` | `3001` | Environment, Restart | Port the Node server listens on. The Vite proxy in `ui/vite.config.ts` is hard-coded to `3001`, so dev mode breaks if you change it |
-| `SERVER_HOST` | `0.0.0.0` | env only | Interface the Node server binds to |
+| `SERVER_HOST` | `127.0.0.1` | env only | Interface the Node server binds to. Loopback by default |
+| `ALLOWED_HOSTS` | empty | env only | Comma list of extra hostnames accepted in the `Host` header (LAN names, Tailscale MagicDNS) |
+| `CORS_ORIGINS` | empty | env only | Comma list of extra browser origins allowed to call the API, for example `http://192.168.1.20:3000` |
 | `ACESTEPCPP_PORT` | `8085` | Environment, Restart | Engine port. Passed as `--port`; the server connects to `http://<host>:<port>` |
 | `ACESTEPCPP_HOST` | `127.0.0.1` | Environment, Restart | Engine bind address, passed as `--host`, and the host the server connects to |
+
+### LAN and Tailscale access (opt-in)
+
+The server binds `127.0.0.1` and only answers other machines when you opt in:
+
+- `SERVER_HOST=0.0.0.0` to listen beyond loopback. Do not bind a single LAN or Tailscale IP:
+  the server then stops listening on `127.0.0.1`, which breaks the local DAW plugin and the
+  server's calls to itself. To limit who can connect, use a firewall rule instead.
+- Requests whose `Host` is not loopback, an IP literal, `SERVER_HOST`, a `CORS_ORIGINS` host or
+  an `ALLOWED_HOSTS` entry get 403. This blocks DNS rebinding. Reaching the server by IP needs
+  nothing extra; a name such as `mybox` or `mybox.tail1234.ts.net` must be in `ALLOWED_HOSTS`.
+- Loopback browser origins are trusted only on this server's port and the Vite dev port 3000; other local tools (another localhost port) must be listed in `CORS_ORIGINS`.
+- Browser pages from a non-loopback origin may only read (GET/HEAD) unless the origin is in
+  `CORS_ORIGINS`. A page served by this server and opened by IP counts as same-origin.
+- Vite dev from another machine: `ui/vite.config.ts` proxies with `changeOrigin`, so the server
+  sees the browser's `http://<lan-ip>:3000` Origin. Set `CORS_ORIGINS=http://<lan-ip>:3000`.
+- Using the UI by name (MagicDNS or a LAN hostname): set `CORS_ORIGINS=http://<name>:3001`.
+  `ALLOWED_HOSTS` alone lets GET requests through, but writes from that page get 403.
+  `CORS_ORIGINS` also adds the name to the `Host` allowlist, so one setting covers both.
+- Using the UI by Tailscale or LAN IP needs nothing beyond `SERVER_HOST`.
 
 `.env.example` also lists `VITE_PORT` and `VITE_HOST`. Nothing reads them: `dev.bat` starts
 Vite with `--port 3000 --host`, and `ui/vite.config.ts` sets port 3000 and host `0.0.0.0`.
@@ -358,6 +380,8 @@ Exposed in Settings > Environment > Server and hot-reloaded. Code: `server/src/s
 | `TRAINING_WORKERS` | empty | Workers this machine drives: `Name=http://host:3001`, comma-separated. Enables `/api/workers` and the studio's Train on / Run on controls |
 | `TRAINING_WORKER_TOKEN` | empty | Sent as `x-hotstep-worker-token` on every call to a worker |
 | `WORKER_TOKEN` | empty | Set = this machine is a worker: every `/api` request from a non-loopback address must carry this token (401 otherwise) |
+
+The server binds `127.0.0.1` by default, so a worker must also set `SERVER_HOST=0.0.0.0` or the controller cannot reach it. Set `WORKER_TOKEN` too. The server logs a warning at startup when `WORKER_TOKEN` is set but it is bound to loopback.
 
 A worker keeps pushed datasets under `<TRAINING_DIR>/worker-datasets/<slug>`, with the controller's dataset id and slug. Every machine records the last linked YuE2 pair per slug in `<TRAINING_DIR>/yue2-linked.json`; the controller's pull reads the worker's copy.
 
