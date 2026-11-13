@@ -166,6 +166,9 @@ struct MM3ArResult {
     // end of a real track" under forced replay, without touching sampling.
     std::vector<float>   eos_p_cond, eos_p_uncond, eos_p_final, emit_lp;
     std::vector<int32_t> eos_rank, eos_topk_ok, emit_rank;
+    //   watch_p      raw conditional softmax summed over MM3ArOptions::eos_watch
+    //                (empty when no codes are watched)
+    std::vector<float>   watch_p;
     // LRC text derived from the LM's own decode attention (mm3-align.h). Empty
     // when alignment was off, the track was instrumental, or alignment failed —
     // never a reason to fail the run.
@@ -267,6 +270,9 @@ struct MM3ArOptions {
     // Record per-iteration EOS statistics into MM3ArResult (see there). Costs
     // two O(NCAND) passes per step on the host; off by default.
     bool    eos_trace       = false;
+    // Semantic codes whose raw conditional probability eos_trace sums into
+    // watch_p each iteration (a model's wind-down set). Needs eos_trace.
+    std::vector<int32_t> eos_watch;
     // Forced replay normally stops at the end of the forced frames. With this
     // on it hands over to free sampling there and runs to EOS or max_frames:
     // the model continues someone else's plan (lever 4b, 2026-09-08: the base
@@ -1410,6 +1416,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
                 outs[t].emit_lp.push_back(std::isfinite(x) ? (float) (x - tr_cmax - tr_lse) : -1e30f);
                 outs[t].emit_rank.push_back(rank);
+                if (!opt.eos_watch.empty()) {
+                    double pw = 0.0;
+                    for (int32_t c : opt.eos_watch) {
+                        const double y = (double) cand_cond[(size_t) (1 + c)];  // range-checked at entry
+                        pw += std::isfinite(y) ? std::exp(y - tr_cmax - tr_lse) : 0.0;
+                    }
+                    outs[t].watch_p.push_back((float) pw);
+                }
             };
             // ── sample (or replay) ──
             if (forced_it && !soft_it) {

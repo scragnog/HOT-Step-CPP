@@ -1070,6 +1070,8 @@ static bool mm3_json_bool(yyjson_val * root, const char * key, bool dflt) {
 //                   trainer's and /mm3/synth's own assembly.
 //   eos_trace       true -> per-iteration EOS and emitted-code statistics for
 //                   every take (MM3ArResult), JSON body only.
+//   eos_watch       [codes] with eos_trace: per-iteration raw conditional
+//                   probability summed over these semantic codes (watch_p).
 //   ids_cond,       explicit token id rows, bypassing the tokenizer. When given
 //   ids_uncond      they win over `prompt`; `ids_uncond` alone may be omitted and
 //                   is then derived by the 3-token CFG mask rule.
@@ -1320,6 +1322,19 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
         }
     }
 
+    {
+        bool has_w = false;
+        if (!mm3_json_int_array(root, "eos_watch", &opt.eos_watch, &has_w)) {
+            mm3_json_error(res, 400, "eos_watch must be an array of integers");
+            return;
+        }
+        for (int32_t c : opt.eos_watch) {
+            if (c < 0 || (int64_t) c >= (int64_t) g_mm3.lm_cfg.semantic_vocab_size) {
+                mm3_json_error(res, 400, "eos_watch code out of range");
+                return;
+            }
+        }
+    }
     std::vector<int32_t> f_sem, f_ac;
     bool                 has_sem = false, has_ac = false;
     if (!mm3_json_int_array(root, "forced_semantic", &f_sem, &has_sem) ||
@@ -1490,6 +1505,13 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
         yyjson_mut_obj_add_val(o, et, "topk_ok", ok);
         yyjson_mut_obj_add_val(o, et, "emit_lp", el);
         yyjson_mut_obj_add_val(o, et, "emit_rank", er);
+        if (!tr.watch_p.empty()) {
+            yyjson_mut_val * wp = yyjson_mut_arr(o);
+            for (float v : tr.watch_p) {
+                yyjson_mut_arr_add_real(o, wp, (double) v);
+            }
+            yyjson_mut_obj_add_val(o, et, "watch_p", wp);
+        }
         yyjson_mut_obj_add_val(o, dst, "eos_trace", et);
     };
     if (opt.eos_trace) {
