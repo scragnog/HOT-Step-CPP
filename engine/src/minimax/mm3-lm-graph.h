@@ -337,10 +337,20 @@ struct MM3LmGraph {
     // that shares the weight read across rows (see mm3_lm_mm). Baked into the
     // cached slots, so mm3_lm_set_takes owns it and a change tears them down.
     bool                       fold_rows = false;
+    // Plan dial (MM3ArOptions::lm_adapter_plan < 1): a second copy of every
+    // take's CFG pair, rows [cfg_rows * n_takes, 2 * that), with the adapter
+    // delta masked off (dmask). Same prompt, same fed-back codes; the AR
+    // loop mixes the two models' logits and the depth decoder keeps reading
+    // the adapter rows, which come first. Off = today's graph exactly.
+    bool                       base_rows = false;
+    // The per-row 1/0 on the adapter delta, F32 [1, 1, B]: 1 on the adapter
+    // rows, 0 on the base rows. Its values only depend on rows(), so it lives
+    // in the KV buffer and is written once there, never uploaded per step.
+    ggml_tensor *              dmask     = nullptr;
 
     // The real batch. EVERY graph shape and every host<->device transfer size
     // keys off this, never off cfg_rows and never off a compile-time ceiling.
-    int rows() const { return cfg_rows * n_takes; }
+    int rows() const { return cfg_rows * n_takes * (base_rows ? 2 : 1); }
 
     MM3LmSlot prefill;
     MM3LmSlot decode;
@@ -390,6 +400,7 @@ static void mm3_lm_free_kv(MM3LmGraph * g) {
     g->kv_ctx = nullptr;
     g->kv_k.clear();
     g->kv_v.clear();
+    g->dmask    = nullptr;
     g->n_ctx    = 0;
     g->kv_bytes = 0;
     g->kv_pos   = 0;
@@ -427,9 +438,11 @@ static void mm3_lm_free(MM3LmGraph * g) {
 // Set (or clear) the runtime LM adapter + scales for subsequent graphs. The
 // scales are baked into the cached prefill/decode graphs as constants, so any
 // change frees the slots — they rebuild lazily on the next step (graph
-// construction only; weights and the KV cache are untouched). Only call
-// BETWEEN generations: an adapter swap mid-sequence would splice two different
-// models' hidden-state streams through one KV cache.
+// construction only; weights and the KV cache are untouched). Call it between
+// generations, with one deliberate exception: the AR loop's strength schedule
+// (MM3LmAdapterSchedule) changes the scale mid-song on purpose, keeping the
+// KV built under the earlier strength. Swapping to a DIFFERENT adapter
+// mid-sequence is still never right.
 static void mm3_lm_set_adapter(MM3LmGraph * g, const MM3LmAdapter * ad, const MM3LmAdapterScales & sc) {
     // Before the early return: a re-run norm pass (base reload) resets nrm to
     // the trained scale while the dials stay put.
@@ -602,13 +615,28 @@ static ggml_tensor * mm3_lm_attn_f32(ggml_context * ctx, ggml_tensor * q, ggml_t
 // The prefill path is untouched on both settings: there ne1 is already T (the
 // whole prompt), so it is a real GEMM and belongs on the MMQ/cuBLAS path it
 // already takes.
+//
+// `dmask` (plan dial, [1, 1, B]) switches the adapter off per row. Plain LoRA
+// masks the rank-r intermediate, B (mask * A x): one small op, and x * 1 is
+// exact, so the adapter rows compute what they always did. DoRA and LoKr
+// rescale or reshape the output, so they mask the whole contribution instead,
+// y = Wx + mask * (adapted - Wx). Null = no mask, today's graph.
+//
+// The mask is MM3LmGraph::dmask, a tensor in the KV buffer, not a graph input.
+// Measured on a 5090, q8_0, one take: as an input uploaded each step it cost
+// +3.8 ms/step whether the mask was one op or three per module (one split
+// either way, so not a backend hop); as a resident tensor, +0.85 ms.
 static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x, const MM3LmAdapter * ad,
-                               const MM3LmAdapterScales & sc, int layer, int module, bool want_fold) {
+                               const MM3LmAdapterScales & sc, int layer, int module, bool want_fold,
+                               ggml_tensor * dmask = nullptr) {
     const bool fold = want_fold && x->ne[1] == 1 && x->ne[2] > 1 && x->ne[3] == 1 && ggml_is_contiguous(x);
     if (fold) {
         x = ggml_reshape_2d(ctx, x, x->ne[0], x->ne[2]);  // [H, 1, B] -> [H, B]
     }
-    ggml_tensor * y = ggml_mul_mat(ctx, w, x);
+    ggml_tensor * y  = ggml_mul_mat(ctx, w, x);
+    ggml_tensor * y0 = y;
+    ggml_tensor * mk = dmask && fold ? ggml_reshape_2d(ctx, dmask, 1, dmask->ne[2]) : dmask;
+    bool          masked = false;
     if (ad) {
         // Reaching here with a merge-only parameterization, or with DoRA whose
         // norms were never computed, would apply SOMETHING — pair 1 of a LoHa,
@@ -630,7 +658,12 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
             // distorted model instead of the base, and merge and runtime
             // disagreed about the same adapter at the same dials.
             if (s != 0.0f) {
-                ggml_tensor * d = ggml_mul_mat(ctx, p.b, ggml_mul_mat(ctx, p.a, x));
+                ggml_tensor * ax = ggml_mul_mat(ctx, p.a, x);
+                if (mk && !p.has_dora()) {
+                    ax     = ggml_mul(ctx, ax, mk);
+                    masked = true;
+                }
+                ggml_tensor * d = ggml_mul_mat(ctx, p.b, ax);
                 y               = ggml_add(ctx, y, ggml_scale(ctx, d, s));
                 if (p.has_dora()) {
                     // DoRA: y <- y * (m / ||W + s*BA||_col). The norm comes from
@@ -664,6 +697,9 @@ static ggml_tensor * mm3_lm_mm(ggml_context * ctx, ggml_tensor * w, ggml_tensor 
             }
         }
     }
+    if (mk && !masked && y != y0) {
+        y = ggml_add(ctx, y0, ggml_mul(ctx, ggml_sub(ctx, y, y0), mk));
+    }
     if (fold) {
         y = ggml_reshape_3d(ctx, y, y->ne[0], 1, y->ne[1]);  // [N, B] -> [N, 1, B]
     }
@@ -679,7 +715,7 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
                                   ggml_tensor * kcache, ggml_tensor * vcache, int64_t n_kv_pad, bool use_flash,
                                   ggml_tensor ** out_scores = nullptr, const MM3LmAdapter * ad = nullptr,
                                   const MM3LmAdapterScales * ad_sc = nullptr, int layer_idx = 0,
-                                  bool fold_rows = false) {
+                                  bool fold_rows = false, ggml_tensor * dmask = nullptr) {
     const int64_t H   = (int64_t) c.embedding_length;
     const int64_t D   = (int64_t) c.key_length;
     const int64_t Nh  = (int64_t) c.head_count;
@@ -691,9 +727,9 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
 
     ggml_tensor * n = mm3_lm_rms(ctx, h, w.attn_norm, c.rms_eps);
 
-    ggml_tensor * q = mm3_lm_mm(ctx, w.attn_q, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_Q, fold_rows);  // [Nh*D, T, B]
-    ggml_tensor * k = mm3_lm_mm(ctx, w.attn_k, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_K, fold_rows);  // [Nkv*D, T, B]
-    ggml_tensor * v = mm3_lm_mm(ctx, w.attn_v, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_V, fold_rows);
+    ggml_tensor * q = mm3_lm_mm(ctx, w.attn_q, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_Q, fold_rows, dmask);  // [Nh*D, T, B]
+    ggml_tensor * k = mm3_lm_mm(ctx, w.attn_k, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_K, fold_rows, dmask);  // [Nkv*D, T, B]
+    ggml_tensor * v = mm3_lm_mm(ctx, w.attn_v, n, ad, sc_local, layer_idx, MM3_LM_ADAPTER_V, fold_rows, dmask);
 
     q = ggml_reshape_4d(ctx, q, D, Nh, T, B);
     k = ggml_reshape_4d(ctx, k, D, Nkv, T, B);
@@ -732,14 +768,14 @@ static ggml_tensor * mm3_lm_block(ggml_context * ctx, ggml_cgraph * gf, const MM
     }
     attn = ggml_reshape_3d(ctx, attn, H, T, B);  // [D, Nh, T, B] -> [H, T, B]
 
-    h = ggml_add(ctx, h, mm3_lm_mm(ctx, w.attn_output, attn, ad, sc_local, layer_idx, MM3_LM_ADAPTER_O, fold_rows));
+    h = ggml_add(ctx, h, mm3_lm_mm(ctx, w.attn_output, attn, ad, sc_local, layer_idx, MM3_LM_ADAPTER_O, fold_rows, dmask));
 
     // SwiGLU: down(silu(gate) * up).
     ggml_tensor * n2   = mm3_lm_rms(ctx, h, w.ffn_norm, c.rms_eps);
-    ggml_tensor * gate = ggml_silu(ctx, mm3_lm_mm(ctx, w.ffn_gate, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_GATE, fold_rows));
-    ggml_tensor * up   = mm3_lm_mm(ctx, w.ffn_up, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_UP, fold_rows);
+    ggml_tensor * gate = ggml_silu(ctx, mm3_lm_mm(ctx, w.ffn_gate, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_GATE, fold_rows, dmask));
+    ggml_tensor * up   = mm3_lm_mm(ctx, w.ffn_up, n2, ad, sc_local, layer_idx, MM3_LM_ADAPTER_UP, fold_rows, dmask);
     return ggml_add(ctx, h,
-                    mm3_lm_mm(ctx, w.ffn_down, ggml_mul(ctx, gate, up), ad, sc_local, layer_idx, MM3_LM_ADAPTER_DOWN, fold_rows));
+                    mm3_lm_mm(ctx, w.ffn_down, ggml_mul(ctx, gate, up), ad, sc_local, layer_idx, MM3_LM_ADAPTER_DOWN, fold_rows, dmask));
 }
 
 // Build one slot. `decode` selects the input mode: false = token ids for T
@@ -861,8 +897,10 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
         // row layout is take-major: the result indexes as r + P*t, i.e. exactly
         // t*cfg_rows + r. At K = 1, P = 2 this produces the same two rows the
         // old ggml_concat(fb, fb, 2) did, in the same order.
+        // Base rows (plan dial) are a second copy of all K pairs, fed the
+        // same codes: one more repeat axis, outermost.
         fb = ggml_cont(ctx, fb);
-        h  = ggml_reshape_3d(ctx, ggml_repeat_4d(ctx, fb, H, P, K, 1), H, 1, B);  // [H, 1, B]
+        h  = ggml_reshape_3d(ctx, ggml_repeat_4d(ctx, fb, H, P, K, g->base_rows ? 2 : 1), H, 1, B);  // [H, 1, B]
     }
 
     // Alignment probe: keep a handle on every layer's post-softmax attention so
@@ -879,7 +917,7 @@ static bool mm3_lm_build_slot(const MM3Model & m, MM3LmGraph * g, MM3LmSlot * s,
         const bool want = g->dump_attn || (g->align_capture && mm3_align_layer_needed((int) i));
         h = mm3_lm_block(ctx, gf, c, m.lm.blk[i], h, s->in_pos, s->in_mask, s->in_rows, g->kv_k[i], g->kv_v[i],
                          n_kv_pad, g->use_flash_attn && !want, want ? &sc : nullptr, g->adapter, &g->adapter_scales,
-                         (int) i, g->fold_rows);
+                         (int) i, g->fold_rows, g->adapter ? g->dmask : nullptr);
         if (want && sc) {
             ggml_set_name(sc, ("mm3_lm_attn_" + std::to_string(i)).c_str());
             ggml_set_output(sc);
@@ -955,7 +993,9 @@ static int64_t mm3_lm_bucket(int64_t n) {
 // change tears them down exactly like a weight swap does. Clamped by the
 // caller (mm3_clamp_takes); this only enforces the hard kernel ceiling so a
 // bad call site can never silently push ggml off the matrix-vector path.
-static void mm3_lm_set_takes(MM3LmGraph * g, int takes) {
+// `base_rows` adds the plan dial's base copy of every pair (MM3LmGraph); it
+// changes rows() the same way, so it tears down the same things.
+static void mm3_lm_set_takes(MM3LmGraph * g, int takes, bool base_rows = false) {
     if (takes < 1) {
         takes = 1;
     }
@@ -973,12 +1013,13 @@ static void mm3_lm_set_takes(MM3LmGraph * g, int takes) {
         return e[0] == '0' ? 0 : 1;
     }();
     const bool fold = forced >= 0 ? forced == 1 : true;
-    if (g->n_takes == takes && g->fold_rows == fold) {
+    if (g->n_takes == takes && g->fold_rows == fold && g->base_rows == base_rows) {
         return;
     }
     mm3_lm_free(g);
     g->n_takes   = takes;
     g->fold_rows = fold;
+    g->base_rows = base_rows;
 }
 
 // Grows only; a shrink would throw away a valid allocation for nothing.
@@ -1085,7 +1126,7 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     const int64_t Nkv = (int64_t) c.head_count_kv;
     const int     L   = (int) c.block_count;
 
-    ggml_init_params ip = { (size_t) (L * 2) * ggml_tensor_overhead() + 1024, NULL, /*no_alloc*/ true };
+    ggml_init_params ip = { (size_t) (L * 2 + 1) * ggml_tensor_overhead() + 1024, NULL, /*no_alloc*/ true };
     g->kv_ctx           = ggml_init(ip);
     if (!g->kv_ctx) {
         if (err) {
@@ -1105,6 +1146,10 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
         snprintf(nm, sizeof(nm), "mm3.lm.kv_v.%d", i);
         ggml_set_name(g->kv_v[(size_t) i], nm);
     }
+    if (g->base_rows) {
+        g->dmask = ggml_new_tensor_3d(g->kv_ctx, GGML_TYPE_F32, 1, 1, g->rows());
+        ggml_set_name(g->dmask, "mm3.lm.delta_rows");
+    }
     g->kv_buf = ggml_backend_alloc_ctx_tensors(g->kv_ctx, g->backend);
     if (!g->kv_buf) {
         ggml_free(g->kv_ctx);
@@ -1120,12 +1165,18 @@ static bool mm3_lm_prepare(const MM3Model & m, MM3LmGraph * g, int64_t n_ctx_nee
     // The attention window is padded past kv_pos; the masked tail must read
     // finite values, never uninitialised F16 bit patterns that decode to NaN.
     ggml_backend_buffer_clear(g->kv_buf, 0);
+    if (g->dmask) {
+        std::vector<float> v((size_t) g->rows(), 0.0f);
+        std::fill(v.begin(), v.begin() + g->rows() / 2, 1.0f);  // adapter half first
+        ggml_backend_tensor_set(g->dmask, v.data(), 0, v.size() * sizeof(float));
+    }
 
     g->n_ctx    = want;
     g->kv_bytes = ggml_backend_buffer_get_size(g->kv_buf);
     g->kv_pos   = 0;
 
-    const std::string takes_note = g->n_takes > 1 ? " (" + std::to_string(g->n_takes) + " takes)" : std::string();
+    const std::string takes_note = (g->n_takes > 1 ? " (" + std::to_string(g->n_takes) + " takes)" : std::string()) +
+                                   (g->base_rows ? " (half base rows, plan dial)" : "");
     fprintf(stderr,
             "[MM3-LM] KV cache: %lld positions x %d layers x %d row%s%s = %.2f GB (%.0f kB/position), %s, flash=%s\n",
             (long long) want, L, g->rows(), g->rows() == 1 ? "" : "s", takes_note.c_str(),
@@ -1435,9 +1486,10 @@ static bool mm3_lm_prefill(const MM3Model & m, MM3LmGraph * g, const int32_t * i
     //
     // At cfg_rows = 1 the unconditional row is never built, so ids_uncond is
     // accepted and ignored rather than made optional at every call site.
+    // Base rows (plan dial) are takes n_takes..2*n_takes-1 of the same prompt.
     const int64_t B = (int64_t) g->rows();
     g->ids_host.resize((size_t) (n_prompt * B));
-    for (int t = 0; t < g->n_takes; t++) {
+    for (int t = 0; t < (int) (B / g->cfg_rows); t++) {
         int32_t * blk = g->ids_host.data() + (size_t) (t * g->cfg_rows) * (size_t) n_prompt;
         memcpy(blk, ids_cond, (size_t) n_prompt * sizeof(int32_t));
         if (g->cfg_rows > 1) {
@@ -1496,8 +1548,9 @@ static bool mm3_lm_decode(const MM3Model & m, MM3LmGraph * g, const int32_t * se
         if (!mm3_lm_build_slot(m, g, &g->decode, 1, n_kv_pad, /*decode*/ true, err)) {
             return false;
         }
-        fprintf(stderr, "[MM3-LM] Decode graph: kv=%lld, %d nodes, %.1f MB compute\n", (long long) n_kv_pad,
-                g->decode.n_nodes, (double) g->decode.compute_bytes / (1024.0 * 1024.0));
+        fprintf(stderr, "[MM3-LM] Decode graph: kv=%lld, %d nodes, %d splits, %.1f MB compute\n",
+                (long long) n_kv_pad, g->decode.n_nodes, ggml_backend_sched_get_n_splits(g->decode.sched),
+                (double) g->decode.compute_bytes / (1024.0 * 1024.0));
     }
 
     // Take-major blocks of [sem, ac0..ac_{NC-1}], matching the slot's reshape.

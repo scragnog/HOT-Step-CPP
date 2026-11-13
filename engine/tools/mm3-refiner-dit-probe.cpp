@@ -10,6 +10,7 @@
 // end-to-end conditioning check. GGML_BACKEND=CPU forces the CPU backend.
 #include "minimax/mm3-refiner-dit.h"
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>

@@ -154,13 +154,19 @@ export function genreHint(genre: string | undefined | null): string {
  * instead of Primary:/Secondary: sub-lines on 5/9 americanfootball tracks
  * (999/1000 templates split them), and once appended a 12-line run of bare
  * "Chorus:"/"Verse N:" labels after the final field.
+ *
+ * A third rule (copy labels exactly) and the `<Specific Genre>` placeholder
+ * came from Music Flamingo on a lounge-covers dataset: it echoed the old
+ * `<Genre / Subgenre>` back as a literal label, and with the genre hint
+ * appended it dropped whole fields on 56/130 tracks. The rule brought that to
+ * 11/56 on a greedy re-run; moving the hint before the template made it worse.
  */
 export const MM3_INSTRUCTIONS: string =
   'Listen to this track and write a Structured Caption in exactly the format below.\n\n'
   + "Use these three section labels on their own lines, with no markdown, no '#', and no "
   + 'extra sections:\n\n'
   + 'Global Metadata\n'
-  + 'Basic Attributes: bpm is <N>. key is <X>, and scale is <major|minor>. <Genre / Subgenre>.\n'
+  + 'Basic Attributes: bpm is <N>. key is <X>, and scale is <major|minor>. <Specific Genre>.\n'
   + 'Global Emotional Progression: <how the emotional arc moves across the song>\n'
   + 'Application Scenarios & Imagery: <where this music would be used; concrete visual imagery>\n'
   + 'Sonics & Production Profile: <soundstage, density, frequency balance, dynamics, mix character>\n'
@@ -176,6 +182,8 @@ export const MM3_INSTRUCTIONS: string =
   + 'Groove & Foundation Progression: <rhythm section, feel changes, section by section>\n'
   + 'Embellishments, Textures & Spatial FX: <risers, sweeps, reverse reverb, glitches, ambience>\n\n'
   + 'Rules:\n'
+  + '- Copy every section and field label exactly as written above, each one once; do not '
+  + 'rename, merge or skip any.\n'
   + '- Describe only what you actually hear. Do not invent an exact BPM or key if unsure.\n'
   + '- If the track is instrumental, say so under Vocal Details and name the lead instrument.\n'
   + '- Do NOT quote or summarise the lyrics anywhere.\n'
@@ -214,8 +222,9 @@ export function resolveMossPaths(model: LocalCaptioner = 'moss'): { paths: MossP
     .find(p => fs.existsSync(p));
   const audio = path.join(modelsDir, `${model}-aud-f16.gguf`);
 
-  if (!lm) return { missing: `no ${model}-lm-*.gguf in ${modelsDir}` };
-  if (!fs.existsSync(audio)) return { missing: `${model}-aud-f16.gguf missing from ${modelsDir}` };
+  const get = 'download it in Model Manager > Shared > Captioning';
+  if (!lm) return { missing: `no ${model}-lm-*.gguf in ${modelsDir}; ${get}` };
+  if (!fs.existsSync(audio)) return { missing: `${model}-aud-f16.gguf missing from ${modelsDir}; ${get}` };
   return { paths: { exe, modelsDir, lm, audio } };
 }
 
@@ -626,6 +635,22 @@ const MM3_LABELS: readonly string[] = [
   'Embellishments, Textures & Spatial FX:',
 ];
 
+/** Near-miss label -> official label, applied anywhere in a line. */
+const MM3_LABEL_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bBasic (?:Elements|Metadata):/g, 'Basic Attributes:'],
+  [/\b(?:Instrumentation & Production )?Instrument(?:al)? Scenarios & Imagery:/g, 'Application Scenarios & Imagery:'],
+  [/\bInstrument(?:al|ation)? (?:Description|Overview|Arrangement) \(Primary\/Secondary Layering\):/g,
+    'Instrument Lifecycle Description (Primary/Secondary Layering):'],
+  [/\bEmbellishments & Textures & Spatial FX:/g, 'Embellishments, Textures & Spatial FX:'],
+  [/\bSonics & Production Profile [A-Z][A-Za-z &]*:/g, 'Sonics & Production Profile:'],
+];
+
+const reEscape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+const MM3_SECTION_ALT = [...MM3_SECTIONS].join('|');
+/** The space before a label (optionally led by its section header) that ends a sentence or a bare header. */
+const MM3_INLINE_LABEL_SPLIT = new RegExp(
+  `(?<=[.!?"”)]|^(?:${MM3_SECTION_ALT})) (?=(?:(?:${MM3_SECTION_ALT}) )?(?:${MM3_LABELS.map(reEscape).join('|')}))`);
+
 /**
  * Reshape MOSS's raw MM3 output into the official template shape — measured
  * over all 1000 upstream files, not assumed: zero blank lines, zero
@@ -642,6 +667,15 @@ const MM3_LABELS: readonly string[] = [
  */
 export function normalizeMm3Shape(mm3: string): string {
   let lines = mm3.split('\n').map(l => l.trim()).filter(l => l !== '');
+
+  // Canonicalise near-miss labels, then give every label welded mid-line its
+  // own line. Music Flamingo, with the genre hint after the template, wrote
+  // "Basic Elements:", "Instrumental Description (…)" and an inline
+  // ". Instrumental Scenarios & Imagery:"; left alone, the first gained a
+  // second Basic Attributes line above it and the rest folded into the
+  // previous field.
+  lines = lines.map(l => MM3_LABEL_ALIASES.reduce((s, [re, to]) => s.replace(re, to), l));
+  lines = lines.flatMap(l => l.split(MM3_INLINE_LABEL_SPLIT));
 
   // Split anything welded onto the ILD header — upstream keeps it bare.
   const ild = 'Instrument Lifecycle Description (Primary/Secondary Layering):';
@@ -703,6 +737,8 @@ export function applyFactSubstitution(mm3: string, facts: LocalFacts): string {
   const built = buildBasicAttributes(facts, mm3);
   if (bi >= 0) {
     lines[bi] = built;
+    // A drifted duplicate ("Basic Elements:", canonicalised) would contradict it.
+    for (let i = lines.length - 1; i > bi; i--) if (lines[i].startsWith('Basic Attributes:')) lines.splice(i, 1);
   } else {
     const gi = lines.findIndex(l => l === 'Global Metadata');
     lines.splice(gi + 1, 0, built);

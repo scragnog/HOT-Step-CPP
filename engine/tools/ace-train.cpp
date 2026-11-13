@@ -14,6 +14,7 @@
 #include "minimax/mm3-tokenizer.h"
 #include "minimax/mm3-request.h"
 #include "minimax/mm3-ar-loop.h"
+#include "minimax/mm3-hiddens-file.h"
 #include "minimax/mm3-cond-graph.h"
 #include "minimax/mm3-rvq-encode.h"  // audio -> RVQ codes (open-RVQ 169M)
 #include "minimax/mm3-rec7.h"        // audio -> LM frame hiddens (rec7 state encoder)
@@ -68,6 +69,7 @@
 #include "train/heartmula-prepare.h"  // HeartMuLa: audio + text -> codes + prompt ids
 #include "train/heartmula-train-run.h"  // HeartMuLa backbone LoRA trainer
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -257,6 +259,9 @@ static void print_usage(void) {
             "                q8_0 base (CUDA) and --pissa/--hot-pizza: each layer's BF16\n"
             "                weights are built as W - s B0 A0, so the frozen branch\n"
             "                leaves the graph (~11 % per step). Not bit-identical.\n"
+            "                [--ckpt-offload on|off] default off. The per-layer\n"
+            "                activation checkpoints live in pinned host RAM, two on\n"
+            "                the GPU: less VRAM for PCIe copies. Bit-identical.\n"
             "  mm3-lm-loss   Teacher-forced training forward, scored. --lm --depth --codes\n"
             "                --caption [--lyrics] [--max-frames N] [--crop-offset N]\n"
             "                [--target-shift N] [--no-prompt]  (falsification diagnostics).\n"
@@ -288,6 +293,11 @@ static void print_usage(void) {
             "                golden window from engine/tools/rvq-encoder-fixture.py.\n"
             "                Writes <out>/codes/<id>.codes, int32 [frames+1, 8], row 0 the\n"
             "                duplicated warm-up row. Replaces the WSL python exporter.\n"
+            "                [--guide-k N] also writes <id>.guide: the encoder's top-N\n"
+            "                semantic codes and log-softmax per frame (Y2GD), for the\n"
+            "                synth request's lm_guide_file. mm3-launder takes it too,\n"
+            "                plus [--keep-wav <dir>] to keep its render as <id>.wav and\n"
+            "                [--keep-hiddens <dir>] to keep its condition as <id>.mm3hiddens.\n"
             "  mm3-preprocess  MiniMax-Music3 dataset -> flow-DiT target latents.\n"
             "                --dataset <dataset.json> --enc <mm3-enc-*.gguf> --out <dir>\n"
             "                [--ffmpeg <path>] [--max-duration <sec>] [--tf32 on|off]\n"
@@ -2350,6 +2360,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
         else if (!strcmp(argv[i], "--tf32"))          a.tf32         = !strcmp(next("--tf32"), "on");
         else if (!strcmp(argv[i], "--pissa-fold"))    a.pissa_fold   = !strcmp(next("--pissa-fold"), "on");
+        else if (!strcmp(argv[i], "--ckpt-offload"))  a.ckpt_offload = !strcmp(next("--ckpt-offload"), "on");
         else if (!strcmp(argv[i], "--depth-loss-weight")) a.depth_loss_weight = atof(next("--depth-loss-weight"));
         else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
@@ -3248,6 +3259,26 @@ static int cmd_mm3_retarget(int argc, char ** argv) {
     return mm3_retarget_run(a);
 }
 
+// One source-guide frame (yue2-guide.h layout, MM3ArOptions::guide): the k
+// best semantic ids of an [SV] encoder logits row, best first, with their
+// log-softmax over all SV codes. Written next to the argmax that becomes the
+// .codes file, so the guide and the plank describe the same frames.
+static void mm3_guide_topk(const float * row, int64_t SV, int64_t k, int32_t * ids, float * lp) {
+    float mx = row[0];
+    for (int64_t v = 1; v < SV; v++) mx = std::max(mx, row[v]);
+    double z = 0.0;
+    for (int64_t v = 0; v < SV; v++) z += std::exp((double) (row[v] - mx));
+    const float lse = mx + (float) std::log(z);
+    std::vector<int32_t> order((size_t) SV);
+    for (int64_t v = 0; v < SV; v++) order[(size_t) v] = (int32_t) v;
+    std::partial_sort(order.begin(), order.begin() + k, order.end(),
+                      [&](int32_t a, int32_t b) { return row[a] > row[b] || (row[a] == row[b] && a < b); });
+    for (int64_t j = 0; j < k; j++) {
+        ids[j] = order[(size_t) j];
+        lp[j]  = row[order[(size_t) j]] - lse;
+    }
+}
+
 // ─── mm3-codes ──────────────────────────────────────────────────────────────
 //
 // Audio -> RVQ codes, the input side of MM3 LM training. Replaces the WSL
@@ -3263,7 +3294,7 @@ static int cmd_mm3_retarget(int argc, char ** argv) {
 // DUPLICATED warm-up row the cache format carries and the LM path expects.
 static int cmd_mm3_codes(int argc, char ** argv) {
     std::string ds_path, rvq_path, enc_path, out_dir, fixture, ffmpeg = "ffmpeg";
-    int         max_duration = 0;
+    int         max_duration = 0, guide_k = 0;
     bool        tf32 = false;
 
     for (int i = 1; i < argc; i++) {
@@ -3276,6 +3307,7 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--enc"))          enc_path     = next("--enc");
         else if (!strcmp(argv[i], "--out"))          out_dir      = next("--out");
         else if (!strcmp(argv[i], "--fixture"))      fixture      = next("--fixture");
+        else if (!strcmp(argv[i], "--guide-k"))      guide_k      = atoi(next("--guide-k"));
         else if (!strcmp(argv[i], "--ffmpeg"))       ffmpeg       = next("--ffmpeg");
         else if (!strcmp(argv[i], "--max-duration")) max_duration = atoi(next("--max-duration"));
         else if (!strcmp(argv[i], "--tf32"))         tf32         = !strcmp(next("--tf32"), "on");
@@ -3516,6 +3548,8 @@ static int cmd_mm3_codes(int argc, char ** argv) {
             continue;
         }
 
+        const auto t_dec0 = std::chrono::steady_clock::now();
+
         // --ffmpeg none: the caller already wrote a stereo WAV at the encoder's
         // rate, and it is read as it stands.
         const bool        direct = ffmpeg == "none";
@@ -3565,6 +3599,7 @@ static int cmd_mm3_codes(int argc, char ** argv) {
             continue;
         }
 
+        const auto t_enc0 = std::chrono::steady_clock::now();
         const float *      chans[2] = { planar, planar + T };
         std::vector<float> lat;
         int64_t            L = 0;
@@ -3607,6 +3642,14 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         std::vector<int32_t> sem((size_t) n_frames, 0);
         std::vector<char>    done((size_t) n_frames, 0);
         bool                 song_ok = true;
+        const int64_t        GK = std::min<int64_t>(guide_k, SV);
+        Yue2Guide            guide;
+        if (GK > 0) {
+            guide.T = n_frames;
+            guide.K = GK;
+            guide.ids.resize((size_t) (n_frames * GK));
+            guide.lp.resize((size_t) (n_frames * GK));
+        }
 
         for (size_t wi = 0; wi < win.size() && song_ok; wi++) {
             const int64_t        t0   = win[wi];
@@ -3647,6 +3690,10 @@ static int cmd_mm3_codes(int argc, char ** argv) {
                 memcpy(&feats[(size_t) (t * D)], &wfeats[(size_t) (j * D)], (size_t) D * sizeof(float));
                 sem[(size_t) t]  = argmax_sem(wlogits.data(), j);
                 done[(size_t) t] = 1;
+                if (GK > 0) {
+                    mm3_guide_topk(wlogits.data() + (size_t) (j * SV), SV, GK, &guide.ids[(size_t) (t * GK)],
+                                   &guide.lp[(size_t) (t * GK)]);
+                }
             }
         }
         if (!song_ok) { fail_n++; continue; }
@@ -3684,9 +3731,19 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         if (!cf) { fprintf(stderr, "[mm3-codes] cannot write %s\n", cp.c_str()); fail_n++; continue; }
         fwrite(rows.data(), sizeof(int32_t), rows.size(), cf);
         fclose(cf);
+        if (GK > 0 && !yue2_guide_write(out_dir + "/codes/" + stem + ".guide", guide, &err)) {
+            fprintf(stderr, "[mm3-codes] %s\n", err.c_str());
+            fail_n++;
+            continue;
+        }
         ok_n++;
         fprintf(stderr, "[mm3-codes] %zu/%zu %s  %lld frames -> %s\n", idx, n_samples, stem.c_str(),
                 (long long) n_frames, cp.c_str());
+        const auto t_end = std::chrono::steady_clock::now();
+        fprintf(stderr, "[mm3-codes] %zu/%zu OK %s: decode %lld ms, encode %lld ms\n", idx, n_samples,
+                stem.c_str(),
+                (long long) std::chrono::duration_cast<std::chrono::milliseconds>(t_enc0 - t_dec0).count(),
+                (long long) std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_enc0).count());
         jl("{\"type\":\"progress\",\"completed\":%zu,\"total\":%zu,\"failed\":%zu,\"phase\":\"codes\"}",
            idx, n_samples, fail_n);
     }
@@ -6160,10 +6217,12 @@ static int cmd_train_dit(int argc, char ** argv) {
 //
 // Output: the standard mm3-codes cache layout (<out>/codes/<id>.codes, warm-up
 // row 0), so the trainer consumes a laundered cache with zero changes.
+// --guide-k N adds <id>.guide beside it (mm3_guide_topk); --keep-wav <dir>
+// keeps the launder render that is otherwise discarded.
 static int cmd_mm3_launder(int argc, char ** argv) {
     std::string ds_path, rvq_path, enc_path, rec7_path, models_dir, out_dir, ffmpeg = "ffmpeg";
-    std::string lm_quant = "q8_0";
-    int         max_duration = 359, steps = 30;
+    std::string lm_quant = "q8_0", keep_wav, keep_hiddens;
+    int         max_duration = 359, steps = 30, guide_k = 0;
     uint64_t    seed = 42;
 
     for (int i = 1; i < argc; i++) {
@@ -6182,6 +6241,9 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--max-duration")) max_duration = atoi(next("--max-duration"));
         else if (!strcmp(argv[i], "--steps"))        steps        = atoi(next("--steps"));
         else if (!strcmp(argv[i], "--seed"))         seed         = (uint64_t) atoll(next("--seed"));
+        else if (!strcmp(argv[i], "--guide-k"))      guide_k      = atoi(next("--guide-k"));
+        else if (!strcmp(argv[i], "--keep-wav"))     keep_wav     = next("--keep-wav");
+        else if (!strcmp(argv[i], "--keep-hiddens")) keep_hiddens = next("--keep-hiddens");
         else if (!strcmp(argv[i], "--jsonl"))        g_jsonl      = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
@@ -6259,7 +6321,8 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         if (doc) yyjson_doc_free(doc);
         return 1;
     }
-    if (!pm_mkdir_p(out_dir) || !pm_mkdir_p(out_dir + "/codes")) {
+    if (!pm_mkdir_p(out_dir) || !pm_mkdir_p(out_dir + "/codes") || (!keep_wav.empty() && !pm_mkdir_p(keep_wav)) ||
+        (!keep_hiddens.empty() && !pm_mkdir_p(keep_hiddens))) {
         yyjson_doc_free(doc);
         fprintf(stderr, "cannot create %s\n", out_dir.c_str());
         return 1;
@@ -6397,6 +6460,19 @@ static int cmd_mm3_launder(int argc, char ** argv) {
             memcpy(dst + H, fr.hiddens.data(), (size_t) (NC * H) * sizeof(float));
         }
         if (!song_ok) { fail_n++; continue; }
+        if (!keep_hiddens.empty()) {
+            // The renderer condition itself, for state-swap probes. "external":
+            // rec7 read it from audio, no LM made it (mm3-job.h accepts that key).
+            MM3HiddensFile hf;
+            hf.frames        = T;
+            hf.num_codebooks = LAY;
+            hf.embedding_len = H;
+            hf.model_key     = "external";
+            const std::string hp = keep_hiddens + "/" + stem + ".mm3hiddens";
+            if (!mm3_hiddens_write(hp, hf, cond.data(), &err)) {
+                fprintf(stderr, "[mm3-launder] %s: %s\n", hp.c_str(), err.c_str());
+            }
+        }
 
         // ── 5. the flow DiT, stage 1 skipped, window latents kept ──
         MM3GenRequest greq;
@@ -6417,6 +6493,13 @@ static int cmd_mm3_launder(int argc, char ** argv) {
                     err.c_str());
             fail_n++;
             continue;
+        }
+        if (!keep_wav.empty()) {
+            // The launder render itself: the ceiling for anything built on its codes.
+            const std::string wp = keep_wav + "/" + stem + ".wav";
+            if (!audio_write_wav(wp.c_str(), gres.audio.data(), (int) gres.n_samples, gres.sample_rate)) {
+                fprintf(stderr, "[mm3-launder] cannot write %s\n", wp.c_str());
+            }
         }
         const int64_t NW = (int64_t) gres.window_latents.size();
         if (NW == 0 || gres.window_L.size() != gres.window_latents.size()) {
@@ -6476,6 +6559,14 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         std::vector<float>   feats((size_t) (n_frames * D));
         std::vector<int32_t> sem((size_t) n_frames, 0);
         std::vector<char>    done((size_t) n_frames, 0);
+        const int64_t        GK = std::min<int64_t>(guide_k, SV);
+        Yue2Guide            guide;
+        if (GK > 0) {
+            guide.T = n_frames;
+            guide.K = GK;
+            guide.ids.resize((size_t) (n_frames * GK));
+            guide.lp.resize((size_t) (n_frames * GK));
+        }
         for (size_t wi = 0; wi < win.size() && song_ok; wi++) {
             const int64_t        t0   = win[wi];
             const int64_t        base = starts[(size_t) t0];
@@ -6512,6 +6603,9 @@ static int cmd_mm3_launder(int argc, char ** argv) {
                 }
                 sem[(size_t) t]  = (int32_t) best;
                 done[(size_t) t] = 1;
+                if (GK > 0) {
+                    mm3_guide_topk(row, SV, GK, &guide.ids[(size_t) (t * GK)], &guide.lp[(size_t) (t * GK)]);
+                }
             }
         }
         if (!song_ok) { fail_n++; continue; }
@@ -6539,6 +6633,11 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         if (!cf) { fprintf(stderr, "[mm3-launder] cannot write %s\n", cp.c_str()); fail_n++; continue; }
         fwrite(rows.data(), sizeof(int32_t), rows.size(), cf);
         fclose(cf);
+        if (GK > 0 && !yue2_guide_write(out_dir + "/codes/" + stem + ".guide", guide, &err)) {
+            fprintf(stderr, "[mm3-launder] %s\n", err.c_str());
+            fail_n++;
+            continue;
+        }
         ok_n++;
         fprintf(stderr, "[mm3-launder] %zu/%zu %s  %lld frames in %.0f s -> %s\n", idx, n_samples,
                 stem.c_str(), (long long) n_frames, (double) (ggml_time_ms() - t_song) / 1000.0,

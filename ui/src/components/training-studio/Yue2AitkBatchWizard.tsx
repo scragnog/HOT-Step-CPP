@@ -11,6 +11,7 @@ import { ArrowRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
+import { TRAINED_BY_FAMILY } from './plugins/chips';
 
 interface Props { open: boolean; onClose: () => void; family?: 'yue2' | 'heartmula' | 'mm3'; onSelect?: (ids: string[]) => void }
 
@@ -27,8 +28,8 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose, family = '
   const [filter, setFilter] = useState('');
   const [showTrained, setShowTrained] = useState(false);
 
-  // A dataset with a linked YuE2 pair is trained (the grid's "done" chip).
-  const isTrained = (d: typeof datasets[number]) => family === 'yue2' && !!(d.assets?.yue2?.arAdapter && d.assets?.yue2?.narAdapter);
+  // A dataset with the family's adapter linked is trained (the grid's "done" chip).
+  const isTrained = (d: typeof datasets[number]) => TRAINED_BY_FAMILY[family](d.assets);
   const trainedCount = datasets.filter(isTrained).length;
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -73,12 +74,12 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose, family = '
         <div className="flex items-center gap-2 mb-2">
           <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('trainingStudio.batch.filter', 'Filter…')}
             className="flex-1 rounded-lg bg-zinc-100 dark:bg-black/20 p-2 text-xs" />
-          {family === 'yue2' && <label className="flex items-center gap-1.5 text-[11px] text-zinc-500 whitespace-nowrap">
+          <label className="flex items-center gap-1.5 text-[11px] text-zinc-500 whitespace-nowrap">
             <Toggle size="sm" accent="amber" checked={showTrained} onChange={setShowTrained} aria-label={t('trainingStudio.yue2.aitkBatch.showTrained', 'Show trained')} />
-            <span title={t('trainingStudio.yue2.aitkBatch.showTrainedInfo', 'Datasets that already have a linked YuE2 adapter pair are hidden so the list shows only what is still to train. Turn this on to retrain one.')}>
+            <span title={t('trainingStudio.yue2.aitkBatch.showTrainedInfo', 'Datasets that already have a linked adapter are hidden so the list shows only what is still to train. Turn this on to retrain one.')}>
               {t('trainingStudio.yue2.aitkBatch.showTrainedCount', 'Show trained ({{count}})', { count: trainedCount })}
             </span>
-          </label>}
+          </label>
           <button type="button" className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
             onClick={() => setChecked(prev => { const next = { ...prev }; const all = visible.every(d => next[d.id]); for (const d of visible) next[d.id] = !all; return next; })}>
             {visible.every(d => checked[d.id]) ? t('trainingStudio.batch.selectNone', 'Select none') : t('trainingStudio.batch.selectAll', 'Select all')}

@@ -19,6 +19,41 @@ the Training Studio. Flow-DiT LoRAs merge only through the `MM3_ADAPTER` env var
 (`mm3_apply_adapters`, `engine/src/minimax/mm3-model.h`), and the native DiT trainer
 (`ace-train mm3-train-dit`) is CLI-only. Output = raw 44.1 kHz stereo WAV (app norm is 48 k;
 PP-VAE and Spectral Lifter, which assume ACE's VAE, are skipped for MM3).
+Cover Studio automatically prepares each source: dataset BPM/key/lyrics and
+`<stem>.mm3.txt` first, ordinary source analysis and queued Music-Flamingo lyrics
+otherwise. The source caption can be edited; an empty caption offers a
+Music-Flamingo button, with Model Manager guidance when unavailable.
+`POST /api/mm3/cover/source-prep` queues lyrics/caption on the labeling GPU lane
+alongside encoding and returns them in the job summary's `result`.
+The panel always sends `launder: true` to `POST /api/mm3/cover/encode`.
+API callers can still use plain `mm3-codes`. Laundering needs rec7 and the encoder,
+takes roughly real time and about 14.5 GB of VRAM. Advanced holds `launderSteps`
+(default 30) and `launderSeed` (42; -1 records the random seed actually used).
+Source SHA-256, byte size and requested launder settings identify reusable planks;
+`force: true` on encode bypasses reuse. The sidecar and song facts record launder
+settings and model files. LM quant stays Q8_0.
+Target artist/album/track captions use the source BPM, key and scale while keeping
+the genre tail. Selecting an album applies its saved `mm3_adapter_path` through
+the global params store. Match 100 omits forceBias for semantic hard pinning;
+below 100 it sends `round(10^(3 * match/100))`, shown as bias in song facts.
+Trim and planner seed remain; patterns and audio2audio remain API-only.
+Source guide (`lm_guide_*`, API `mm3Guide*`; `--guide-k` on mm3-codes/mm3-launder)
+ports YuE2's Follow-source mix to the semantic draw: the LM picks among the
+encoder's top-K codes. Guide frame j is emitted frame j and iteration 0 reads
+frame 0. Scale 1 with k 1 is byte-identical to the hard pin; keep that gate when
+touching the loop. Round 8 of the cover probe (one real song, K 32): agreement
+with the source tracks the scale almost linearly, and even at 0.9 the LM puts
+only about 0.2 of its mass on the candidates. The guide lowers the cost of
+following, but it does not make the LM agree. A vocal-forward source (backing
+-12 dB) raised adapter word recall from 0.43 to 0.83. Vocal only comes back
+spectrally off (LTAS about 20 dB), and a second pass loses words.
+Round 9: the flow DiT renders mostly from stream 0, the LM's hidden row. Swapping
+streams 1 to 7 of a cover for the clean launder's moved the audio 0.15 dB; swapping
+stream 0 alone turned it into the launder. Nudging stream 0 until the drawn code
+is in its top 10 (`lm_state_fix`) needs only about 3% of its norm and changes the
+audio by 0.3 dB. A greedy depth decoder (`lm_depth_greedy`) derails the plan.
+Blending the whole block between cover and launder (`--keep-hiddens`, then
+`forced_frame_hiddens_file` under model key `external`) is a smooth dial.
 
 Deep docs (local, gitignored): `docs/plans/multi-backend-architecture.md` (architecture plan,
 day-0 findings, op inventory) and `docs/plans/mm3-gguf-layout.md` (GGUF contract + loader
@@ -164,6 +199,52 @@ hides the control in MM3 mode. Batched take 0
 is a different song from the same seed by design (check-mm3-ensemble.mjs).
 Knock-ons: Save Plan To Disk is dead while the toggle is on; each ended
 candidate costs its own flow pass.
+
+**Adapter fade (2026-11-08, 28c79e42, opt-in, no UI dial yet).** Adapters
+suppress the base's ending instinct, so `lm_adapter_fade_*` (engine
+ARCHITECTURE.md) can step the LM adapter down to the base for the tail
+(`MM3LmAdapterSchedule`; runtime mode only, the server forces it). Plan-only
+count, one adapter, one prompt, 12 takes, 300 s cap: control 2/12, base 12/12,
+**ramp from 210 s to the base at 270 s 9/12**, hard handoff at 210 s 5/12, ramp
+or handoff at 150 s 2/12 and 0/12. A fade during the lyrics loses: the base
+then has to finish the adapter's song and runs to the cap. A fade after the
+last lyric works. On that prompt the base sang the sheet by ~183 s and the
+adapter by ~260 s; the 210 s start was base pace + 30 s. Runtime mode costs
+about +44% LM step on q8_0 against merge.
+
+**Plan dial (2026-11-09, `lm_adapter_plan`, UI "Plan", default 1).** Splits
+the adapter's two jobs at the semantic/acoustic seam: the LM's semantic draw
+is the plan, the depth decoder reading the LM hidden is the voice. Below 1
+every take gets a second CFG pair (`MM3LmGraph::base_rows`, rows
+`[K*P, 2*K*P)`) on the same prompt and the same fed-back codes, with the
+adapter delta masked off by a resident `[1, 1, B]` tensor in the KV buffer
+(`mm3_lm_mm`: plain LoRA masks `A x`; DoRA and LoKr mask the whole
+contribution). The loop mixes each row as `base + plan * (adapter - base)`
+before CFG and the conditional top-k, draws once, feeds the code to all four
+rows, and the depth decoder keeps reading the adapter rows. **Parity rule:**
+at 1, or with no runtime adapter, there are no base rows: same graph, same
+draws. Proven by WAV hash: plan 1.0 at seed 20261208, 3 takes reproduced the
+fade study's three control WAVs byte for byte; `check-mm3-ensemble.mjs
+--adapter` section 4 holds it. The base rows match a pure-base batch at the
+same row positions exactly. Costs (5090, q8_0, PiSSA r128 adapter, 2 takes,
+300 s): LM step 15.0 -> 18.2 ms, KV 4.8 -> 9.6 GB, peak 23.4 -> 29.4 GB
+on the card with ~4.5 GB of other apps. The rows double, so takes clamp to 2
+(`mm3_max_takes(c, plan_rows)`): 3 takes wanted a 14.3 GB KV, filled the 32
+GB card and ran ~10x slower. A graph input for the mask (uploaded per step)
+cost +3.8 ms/step at one take; the resident tensor costs +0.85. Merge mode
+has no base weights, so the server forces runtime; an adapter with an artist
+token or KV prefix ignores the dial (it would need a per-row attention mask).
+At plan 0 the mix returns the base logit outright, so an adapter -inf cannot
+veto a base code; the fatal non-finite threshold stays one dead row per take
+per step (the base rows only widen the reported percentage).
+**4090 (24 GB):** 1 take, 300 s, plan-only: 16.2 ms/step at 1, 18.3 at 0.5,
+peak 20.5 GB. 2 takes below 1 spills under `/mm3/lm-plan` (DiT and vocoder
+stay resident there) but fits the app's staged `/mm3/synth`: 21.8 ms/step,
+peak 23.5 of 24.5 GB. Do not add VRAM to that path without re-checking it.
+**The base's ending instinct did not come back:** natural endings were 1/6 at
+1, 0/6 at 0.5, 0/6 at 0 on that prompt with 2 takes on the 5090 (the base
+alone: 12/12), and 1/12 below 1 at 1 take across both cards. The base
+plans over the adapter's acoustic codes, which is not the base's own song.
 
 ## The trap list (each cost real debugging — do not relearn)
 

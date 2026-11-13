@@ -11,6 +11,7 @@
 // windows run unless --all is given. GGML_BACKEND=CPU forces the CPU backend.
 #include "minimax/mm3-refiner-clap.h"
 
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>

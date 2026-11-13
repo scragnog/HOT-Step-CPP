@@ -17,13 +17,13 @@ import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/traini
 // validated recipe lives. This form seeds itself from that response, so a
 // change on the server reaches the UI without an edit here.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, ChevronRight, Cpu, Loader2, Play, ShieldCheck, XCircle,
+  AlertTriangle, ChevronDown, ChevronRight, Loader2, Play, ShieldCheck, XCircle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { estimateMm3PeakMb, estimateMm3PrefixMb, mm3FlashVramCalibrated, type Mm3PresetName } from '../../services/trainingApi';
+import { dispatchMm3Batch, estimateMm3PeakMb, estimateMm3PrefixMb, mm3FlashVramCalibrated, type Mm3PresetName } from '../../services/trainingApi';
 import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -36,10 +36,16 @@ import { useMm3Status } from './useMm3Status';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { TrainingEtaLine } from './TrainingEtaLine';
 import { previewsFromRows, trainingRunEta } from './trainingRunEta';
-import { TrainingPreviewSettings } from './TrainingPreviewPanel';
+import { TrainingPreviewSettings, TrainingPresetChoice } from './TrainingPreviewPanel';
+import { TrainingBatchCard, TrainingRunPanel } from './Yue2StageCard';
+import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { ChangedSettingsRow, readStored, useNamedPresets, UserPresetRow, writeStored, type NamedPreset } from './trainingUserPresets';
+import { lossDescentRate, lossTargetEta } from './trainingTargetEta';
+import { formatDurationMs } from '../../utils/trainingEta';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
-import { runQueries } from '../../queries/training-runs/queries';
-import { useQuery } from '@tanstack/react-query';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BTN_SM, CARD, INPUT } from './yue2CardUi';
 
 
@@ -91,6 +97,9 @@ interface FormState {
   previewSongId: string;
   gradAccum: number;
   seed: number;
+  warmup: number;
+  lyricsDropout: number;
+  lrEndFrac: number;
   trigger: string;
   triggerPrepend: boolean;
   basePrecision: string;
@@ -103,6 +112,7 @@ interface FormState {
   previewSeconds: number;
   previewSeed: number;
   previewCaption: string;
+  previewLyrics: string;
   previewControl: boolean;
   previewBaseline: boolean;
   previewScaleMlp: number;
@@ -125,6 +135,16 @@ const MM3_METHOD_KEYS: Record<Mm3Method, { label: string; info: string }> = {
   loha: { label: 'loha', info: 'lohaInfo' },
   hra:  { label: 'hra',  info: 'hraInfo' },
 };
+
+/** Per-dataset form edits, so a reload keeps them (as YuE2's card does). */
+const FORM_KEY = 'hs-mm3-form:';
+/** Named presets, MM3's own list; YuE2's live under their own key. */
+const PRESETS_KEY = 'hs-mm3-presets';
+/** Per-run or per-dataset values a preset must not carry. */
+const PRESET_EXCLUDED: ReadonlySet<string> = new Set(['previewSongId', 'trigger', 'regDatasetId']);
+const settingsOf = (f: FormState): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(f).filter(([k]) => !PRESET_EXCLUDED.has(k)));
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; info?: string; meta?: string;
@@ -157,6 +177,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
   const setBatchDraft = useTrainingStore(s => s.setYue2BatchDraft);
   const startMm3Batch = useTrainingStore(s => s.startMm3Batch);
+  // Run on: a batch started here can train on a training worker instead
+  // (pushed there, then copied back by the mirror), as YuE2's does.
+  const client = useQueryClient();
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
+  const setTrainingWorker = useTrainingStore(s => s.setTrainingWorker);
+  const workersQuery = useQuery({ ...trainingQueries.workers(), enabled: !!batchDraft?.length && !trainingWorker });
+  const workers = workersQuery.data ?? [];
+  const [runOn, setRunOn] = useState('');
   // Which codes cache this run trains on. Off = the standard cache, exactly as
   // every run before the launder gate existed.
   const [trainLaunder, setTrainLaunder] = useState(false);
@@ -175,12 +203,20 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   // edits on top. No effect copies one into the other, so there is no window
   // where the form holds stale numbers and no cascading render — and the
   // validated recipe still has exactly one home (mm3Train.ts).
-  const [edits, setEdits] = useState<Partial<FormState>>({});
+  const [edits, setEdits] = useState<Partial<FormState>>(() => readStored<Partial<FormState>>(`${FORM_KEY}${datasetId}`, {}));
+  useEffect(() => { writeStored(`${FORM_KEY}${datasetId}`, edits); }, [datasetId, edits]);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchClearCache, setBatchClearCache] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const datasets = useTrainingStore(s => s.datasets);
+  const jobLog = useTrainingStore(s => s.jobLog);
 
   const jobKind = activeJob?.kind;
   const jobStatus = activeJob?.status;
   const jobRunning = jobStatus === 'queued' || jobStatus === 'running';
   const mine = jobKind === 'mm3-train-lm';
+  // Nothing about the run is editable while it is being started or is going.
+  const locked = busy || (mine && jobRunning);
   // The live run's ladder: the run the job is writing, else the one its
   // previews came from once the job has ended.
   const trainPreviews = useTrainingStore(s => s.trainPreviews);
@@ -249,6 +285,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewSongId: '',
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
+    warmup: status.defaults.warmup ?? 25,
+    lyricsDropout: status.defaults.lyricsDropout ?? 0,
+    lrEndFrac: status.defaults.lrEndFrac ?? 0.005,
     trigger: trigger ?? '',
     triggerPrepend: status.defaults.triggerPrepend !== false,
     // The RECOMMENDED base, not the global default: the default was chosen on a
@@ -277,6 +316,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewSeconds: 40,
     previewSeed: 424242,
     previewCaption: '',
+    previewLyrics: '',
     // Off by default (Rob, 2026-08-25): with a preview at every checkpoint the
     // control and baseline renders would double the pause cost for takes that
     // rarely get listened to. Both remain a checkbox away.
@@ -291,6 +331,27 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     regTopK: status.defaults.regularisation?.topK ?? 64,
   } : null;
   const form: FormState | null = base ? { ...base, ...edits } : null;
+  const presetState = useNamedPresets<FormState>({
+    storageKey: PRESETS_KEY, fileKind: 'hot-step-mm3-preset', excluded: PRESET_EXCLUDED,
+    snapshot: () => (form ? settingsOf(form) : {}) as Partial<FormState>,
+  });
+  // A saved preset is "on" when every setting it stores matches the form.
+  const userPresetActive = (preset: NamedPreset<FormState>) => !!form
+    && Object.entries(preset.settings).every(([k, v]) => same(v, (form as unknown as Record<string, unknown>)[k]));
+  // Only what differs from the defaults goes into edits; per-run values stay as they were.
+  const loadPreset = (preset: NamedPreset<FormState>) => {
+    if (!base) return;
+    setEdits(prev => {
+      const next: Record<string, unknown> = {};
+      for (const k of PRESET_EXCLUDED) if (k in prev) next[k] = (prev as Record<string, unknown>)[k];
+      for (const [k, v] of Object.entries(preset.settings)) {
+        if (!PRESET_EXCLUDED.has(k) && !same(v, (base as unknown as Record<string, unknown>)[k])) next[k] = v;
+      }
+      return next as Partial<FormState>;
+    });
+  };
+  const changedSettings = form && base
+    ? Object.entries(settingsOf(form)).filter(([k, v]) => !same(v, (base as unknown as Record<string, unknown>)[k])) : [];
   // Time left: steps at the run's mean step time plus the checkpoint previews still to come.
   const mm3Eta = jobKind === 'mm3-train-lm' && jobStatus === 'running' && trainStepSeries.length > 0 ? (() => {
     const ms = trainStepSeries.map(p => p.stepMs).filter((v): v is number => !!v && v > 0);
@@ -298,6 +359,33 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       msPerStep: ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null,
       everySteps: form?.previewEverySteps ?? 0, previews: previewsFromRows(trainPreviews) });
   })() : null;
+
+  // Loss-target readings, from the same series the chart draws. Train loss: the trailing mean over
+  // `targetLossEpochs` passes of the songs (approximate: the trainer's own window is the one that stops
+  // the run). Held-out loss: the last evaluation.
+  const stopLossLive = mine && trainTargetLoss > 0;
+  const lossMeans = (() => {
+    const win = Math.max(1, (form?.targetLossEpochs ?? 5) * Math.max(1, status?.codes ?? 1));
+    const out: number[] = []; let sum = 0;
+    trainStepSeries.forEach((p, i) => {
+      sum += p.loss;
+      if (i >= win) sum -= trainStepSeries[i - win].loss;
+      if (i >= win - 1) out.push(sum / win);
+    });
+    return out;
+  })();
+  const evalLosses = trainEvalSeries.map(e => e.loss);
+  const stopMeans = form?.targetLossMetric === 'eval' ? evalLosses : lossMeans;
+  const stopReading = stopMeans.at(-1);
+  const stepsPerReading = form?.targetLossMetric === 'eval' ? Math.max(1, form.evalEvery) : 1;
+  const stepMsList = trainStepSeries.map(p => p.stepMs).filter((v): v is number => !!v && v > 0).slice(-20);
+  const paceMs = stepMsList.length ? stepMsList.reduce((a, b) => a + b, 0) / stepMsList.length : 0;
+  const lastStep = trainStepSeries.at(-1)?.step ?? 0;
+  const descent = lossDescentRate(stopMeans);
+  const targetEtaText = stopLossLive && jobStatus === 'running' && paceMs > 0 ? lossTargetEta({
+    current: stopReading, rate: descent === null ? null : descent / stepsPerReading, target: trainTargetLoss,
+    remaining: Math.max(0, (activeJob?.total ?? 0) - lastStep), paceMs, capMs: mm3Eta?.ms ?? 0,
+  }) : null;
 
   // Peak VRAM for the CURRENT form, not for the defaults — rank is the biggest
   // single term after the base itself, so an estimate pinned to the defaults
@@ -381,9 +469,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       assertRecipeWorker(recipe);
       if (batchDraft?.length) {
         // One recipe for every dataset: rank and base are pinned, not re-recommended per dataset.
-        // The preview song belongs to this dataset, so each run picks its own.
+        // The preview song and the trigger word belong to this dataset, so each run picks its own
+        // (the server falls back to each dataset's custom tag when no trigger is sent).
         const { previewSongId: _song, ...preview } = body.preview ?? {};
-        await startMm3Batch(batchDraft, { ...body, ...(body.preview ? { preview } : {}) });
+        const { trigger: _trigger, ...shared } = body;
+        const batchBody = { ...shared, ...(body.preview ? { preview } : {}) };
+        if (runOn) {
+          await dispatchMm3Batch(runOn, { datasetIds: batchDraft, clearCache: batchClearCache, recipe: batchBody });
+          void trainingWritePlan(client, runOn);
+          setBatchDraft(null);
+          await setTrainingWorker(runOn);
+          return;
+        }
+        await startMm3Batch(batchDraft, batchBody, batchClearCache);
         setPhase('train');
         return;
       }
@@ -482,6 +580,15 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                      stopMode: 'steps' }));
   };
 
+  // Coupled fields reset through their own handlers so a chip never leaves one half behind.
+  const resetSetting = (key: string) => {
+    if (key === 'pissa') resetPissa();
+    else if (key === 'hotPizza') resetHotPizza();
+    else if (['adapterType', 'dora', 'hira', 'loha', 'hra'].includes(key)) resetMethod();
+    else reset(key as keyof FormState);
+  };
+  const resetAllSettings = () => setEdits(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => PRESET_EXCLUDED.has(k))) as Partial<FormState>);
+
   const hasCodes = (status?.codes ?? 0) > 0;
   const hasLaundered = (status?.codesLaundered ?? 0) > 0;
   const trainBlocked = (status?.missingForTrain.length ?? 0) > 0;
@@ -495,21 +602,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         </div>
       )}
 
-      {/* ── LM LoRA ── */}
-      <div className={CARD}>
-        <div className="flex items-center gap-2 mb-2">
-          <Cpu size={15} className="text-amber-500" />
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-            {t('trainingStudio.mm3.trainTitle', 'LM LoRA training')}
-          </h3>
-        </div>
-        <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
-          {t('trainingStudio.mm3.trainBlurb',
-            'Trains the planner LM on this dataset. Checkpoints are written straight to the MiniMax-Music3 '
-            + 'adapter folder, so they appear in the generation panel\'s adapter picker as soon as they are '
-            + 'saved — there is no install step. The engine is paused for the run.')}
-        </p>
+      {!batchDraft?.length && (
+        <TrainingBatchCard disabled={jobRunning} onOpen={() => setBatchOpen(true)}
+          description={t('trainingStudio.mm3.batchCardInfo', 'Choose datasets, then apply the recipe below to each in order: codes, then LoRA training. The queue survives closing the page and server restarts.')} />
+      )}
+      <Yue2AitkBatchWizard open={batchOpen} family="mm3" onClose={() => setBatchOpen(false)} />
 
+      {/* ── LM LoRA ── */}
+      <TrainingRunPanel
+        title={t('trainingStudio.mm3.trainTitle', 'LM LoRA training')}
+        description={t('trainingStudio.mm3.trainBlurb',
+          'Trains the planner LM on this dataset. Checkpoints are written straight to the MiniMax-Music3 '
+          + 'adapter folder, so they appear in the generation panel\'s adapter picker as soon as they are '
+          + 'saved — there is no install step. The engine is paused for the run.')}>
         {trainBlocked ? (
           <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
             <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
@@ -551,34 +656,40 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 />
               </div>
             )}
-            {/* -- Presets (2026-09-07) -----------------------------------
+            {/* -- Recipe (2026-09-07) -------------------------------------
                 Three recipes that tied blind; they trade minutes, not
-                audible quality. The row reflects the fields, so a hand edit
-                shows as Custom rather than misreporting a preset. */}
+                audible quality. The cards reflect the fields, so a hand edit
+                shows as custom rather than misreporting a recipe. Saved
+                presets and the changed-settings chips sit under them, as on
+                YuE2's page. */}
             {presets && (
               <div className="mb-3">
-                <div className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-1">
-                  {t('trainingStudio.mm3.preset', 'Recipe')}
+                <div className="flex items-center gap-2 mb-2">
+                  <ParamLabel label={t('trainingStudio.mm3.preset', 'Recipe')}
+                    className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                    info={t('trainingStudio.mm3.presetInfo', 'Fast, Balanced and Thorough tied in a blind listen; they trade minutes, not audible quality. Each card shows its steps and its time relative to Balanced (steps times crop length). Editing steps, learning rate, crop or history shows custom.')} />
+                  {activePreset === 'custom' && !presetState.presets.some(userPresetActive)
+                    && <span className="text-[11px] text-zinc-500">{t('trainingStudio.mm3.preset.custom', 'custom')}</span>}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {PRESET_ORDER.map(p => (
-                    <button key={p} type="button" onClick={() => applyPreset(p)} disabled={busy}
-                      className={BTN_SM + (activePreset === p
-                        ? ' !border-amber-500 !text-amber-600 dark:!text-amber-400 !bg-amber-500/10' : '')}>
-                      {t(`trainingStudio.mm3.preset.${p}`, p)}
-                    </button>
-                  ))}
-                  {activePreset === 'custom' && (
-                    <span className={BTN_SM + ' !border-amber-500 !text-amber-600 dark:!text-amber-400 !bg-amber-500/10 cursor-default'}>
-                      {t('trainingStudio.mm3.preset.custom', 'Custom')}
-                    </span>
-                  )}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {PRESET_ORDER.filter(p => presets[p]).map(p => {
+                    const q = presets[p];
+                    const bal = presets.balanced;
+                    const ratio = bal ? Number(((q.steps * q.maxFrames) / (bal.steps * bal.maxFrames)).toFixed(1)) : 1;
+                    return <TrainingPresetChoice key={p} selected={activePreset === p} disabled={locked} onClick={() => applyPreset(p)}>
+                      <span className="text-base font-bold">{t(`trainingStudio.mm3.preset.${p}`, p)}</span>
+                      <span className="text-xs text-zinc-500">{q.steps} × {form.gradAccum} {t('trainingStudio.mm3.presetSongs', form.gradAccum === 1 ? 'song' : 'songs')} · {ratio === 1
+                        ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)')
+                        : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: `${ratio}×` })}</span>
+                    </TrainingPresetChoice>;
+                  })}
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-1">
-                  {activePreset === 'custom'
-                    ? t('trainingStudio.mm3.preset.customInfo', 'Steps, learning rate, crop or history differ from every preset.')
-                    : t(`trainingStudio.mm3.preset.${activePreset}Info`, '')}
-                </p>
+                {activePreset !== 'custom' && <p className="text-[11px] text-zinc-500 mt-2">
+                  {t(`trainingStudio.mm3.preset.${activePreset}Info`, '')}
+                </p>}
+                <UserPresetRow state={presetState} isActive={userPresetActive} onLoad={loadPreset} busy={locked}
+                  info={t('trainingStudio.mm3.presetHint', 'A preset captures the training settings (steps, learning rate, crop, rank, optimizer, adapter method, previews), never the dataset, trigger word or preview song. Click a name to load it; the save icon overwrites it with the current settings, the download icon exports it to share. Presets are kept in this browser.')} />
+                <ChangedSettingsRow changed={changedSettings} onReset={resetSetting} onResetAll={resetAllSettings} disabled={locked} />
               </div>
             )}
             {/* -- Stopping strategy ---------------------------------------
@@ -787,6 +898,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 whether the user finds out at step 200 or at step 800 that the
                 run is going the wrong way. */}
             <TrainingPreviewSettings
+              disabled={locked}
               title={t('trainingStudio.mm3.previewTitle', 'Audio previews during training')}
               enabled={form.previewEverySteps > 0 || form.previewEveryMinutes > 0}
               onEnabledChange={enabled => setEdits(previous => ({ ...previous,
@@ -808,26 +920,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               }
             >
               <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
-                <NumField label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
+                <NumField disabled={locked} label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
                   value={form.previewEverySteps} onChange={v => set('previewEverySteps', v)}
                   defaultValue={base.previewEverySteps} onReset={() => reset('previewEverySteps')}
                   step={50} info={t('trainingStudio.mm3.previewStepsHint', '0 = off') as string} />
-                <NumField label={t('trainingStudio.mm3.previewEveryMinutes', 'Or every N minutes')}
+                <NumField disabled={locked} label={t('trainingStudio.mm3.previewEveryMinutes', 'Or every N minutes')}
                   value={form.previewEveryMinutes} onChange={v => set('previewEveryMinutes', v)}
                   defaultValue={base.previewEveryMinutes} onReset={() => reset('previewEveryMinutes')}
                   step={5} info={t('trainingStudio.mm3.previewMinutesHint',
                     'Whichever comes first') as string} />
-                <NumField label={t('trainingStudio.mm3.previewSeconds', 'Length (s)')}
+                <NumField disabled={locked} label={t('trainingStudio.mm3.previewSeconds', 'Length (s)')}
                   value={form.previewSeconds} onChange={v => set('previewSeconds', v)}
                   defaultValue={base.previewSeconds} onReset={() => reset('previewSeconds')}
                   step={4} info={t('trainingStudio.mm3.previewSecondsHint',
                     '24 s costs about 16 s of GPU') as string} />
-                <NumField label={t('trainingStudio.mm3.previewSeed', 'Preview seed')}
+                <NumField disabled={locked} label={t('trainingStudio.mm3.previewSeed', 'Preview seed')}
                   value={form.previewSeed} onChange={v => set('previewSeed', v)}
                   defaultValue={base.previewSeed} onReset={() => reset('previewSeed')}
                   info={t('trainingStudio.mm3.previewSeedHint',
                     'Fixed across the run') as string} />
-                <NumField label={t('trainingStudio.mm3.previewScaleMlp', 'Preview MLP scale')}
+                <NumField disabled={locked} label={t('trainingStudio.mm3.previewScaleMlp', 'Preview MLP scale')}
                   value={form.previewScaleMlp} onChange={v => set('previewScaleMlp', v)}
                   defaultValue={base.previewScaleMlp} onReset={() => reset('previewScaleMlp')}
                   step={0.05} info={t('trainingStudio.mm3.previewScaleMlpHint',
@@ -858,7 +970,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 <StyledSelect
                   accent="amber"
                   value={form.previewSongId}
-                  disabled={!!form.previewCaption.trim()}
+                  disabled={locked || !!form.previewCaption.trim()}
                   onChange={v => set('previewSongId', v)}
                   options={[
                     { value: '', label: t('trainingStudio.mm3.previewSongAuto', 'Auto (held-out, real lyrics preferred)') },
@@ -884,6 +996,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   onReset={form.previewCaption !== base.previewCaption ? () => reset('previewCaption') : undefined}
                 />
                 <textarea
+                  disabled={locked}
                   className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
                   placeholder={t('trainingStudio.mm3.previewCaptionPlaceholder',
                     'Blank = the preview-song pick above, or auto (first held-out song with real '
@@ -892,8 +1005,23 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   onChange={e => set('previewCaption', e.target.value)}
                 />
               </label>
+              <label className="md:col-span-2 flex flex-col gap-1 mt-3">
+                <ParamLabel
+                  label={t('trainingStudio.mm3.previewLyrics', 'Preview lyrics')}
+                  info={t('trainingStudio.mm3.previewLyricsHint',
+                    'Lyrics sung in the preview. Blank uses the lyrics of the picked or auto-chosen song.')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  onReset={form.previewLyrics !== base.previewLyrics ? () => reset('previewLyrics') : undefined}
+                />
+                <textarea
+                  disabled={locked}
+                  className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
+                  value={form.previewLyrics}
+                  onChange={e => set('previewLyrics', e.target.value)}
+                />
+              </label>
               <div className="md:col-span-2 flex flex-col gap-1.5 mt-3">
-                <Toggle accent="amber" checked={form.previewControl}
+                <Toggle accent="amber" disabled={locked} checked={form.previewControl}
                   onChange={v => set('previewControl', v)}
                   defaultValue={base.previewControl} onReset={() => reset('previewControl')}
                   label={t('trainingStudio.mm3.previewControl', 'Also render a neutral control caption')}
@@ -901,7 +1029,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     'An off-genre prompt rendered WITH the adapter. This is the one that catches '
                     + 'the adapter damaging the base planner - on the artist caption a damaged '
                     + 'model and a good one both sound roughly like the artist.')} />
-                <Toggle accent="amber" checked={form.previewBaseline}
+                <Toggle accent="amber" disabled={locked} checked={form.previewBaseline}
                   onChange={v => set('previewBaseline', v)}
                   defaultValue={base.previewBaseline} onReset={() => reset('previewBaseline')}
                   label={t('trainingStudio.mm3.previewBaseline', 'Render a no-adapter reference first')}
@@ -1024,6 +1152,27 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       'The random seed for crop order and initialisation. Changing it gives a different '
                       + 'run outcome for otherwise-identical settings; keeping it fixed makes two runs '
                       + 'comparable.')} />
+                  <NumField label={t('trainingStudio.mm3.warmup', 'Warmup steps')} value={form.warmup}
+                    onChange={v => set('warmup', v)} step={5} min={0}
+                    defaultValue={base.warmup} onReset={() => reset('warmup')}
+                    meta={t('trainingStudio.mm3.warmupMeta', 'default 25')}
+                    info={t('trainingStudio.mm3.warmupInfo',
+                      'Steps over which the learning rate ramps up from zero to its peak before the '
+                      + 'decay begins. Step 1 still runs at a rate of 0.')} />
+                  <NumField label={t('trainingStudio.mm3.lrEndFrac', 'LR end fraction')} value={form.lrEndFrac}
+                    onChange={v => set('lrEndFrac', v)} step={0.001} min={0} max={1}
+                    defaultValue={base.lrEndFrac} onReset={() => reset('lrEndFrac')}
+                    meta={t('trainingStudio.mm3.lrEndFracMeta', 'default 0.005')}
+                    info={t('trainingStudio.mm3.lrEndFracInfo',
+                      'Where the learning-rate decay ends, as a fraction of the peak rate. 1 holds the '
+                      + 'rate flat after warmup; 0 decays to nothing at the last step.')} />
+                  <NumField label={t('trainingStudio.mm3.lyricsDropout', 'Lyric dropout')} value={form.lyricsDropout}
+                    onChange={v => set('lyricsDropout', v)} step={0.05} min={0} max={1}
+                    defaultValue={base.lyricsDropout} onReset={() => reset('lyricsDropout')}
+                    meta={t('trainingStudio.mm3.lyricsDropoutMeta', 'default 0')}
+                    info={t('trainingStudio.mm3.lyricsDropoutInfo',
+                      'Share of steps trained with the lyrics removed and the caption kept, so the adapter '
+                      + 'does not depend on lyrics being present. 0 trains on the lyrics every step.')} />
                 </div>
                 {/* The dataset-wide caption box lived here until 2026-09-09. One caption for
                     every track replaced the per-track .mm3.txt captions the renders use, and
@@ -1436,27 +1585,58 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               </div>
             )}
 
+            {!!batchDraft?.length && <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                {t('trainingStudio.mm3.batchSelected', 'Recipe applies to {{count}} datasets, in order.', { count: batchDraft.length })}
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-400 break-words">
+                {batchDraft.map(id => datasets.find(d => d.id === id)?.name ?? id).join(' · ')}
+              </p>
+              <Toggle accent="amber" className="mt-2" checked={batchClearCache} disabled={busy} onChange={setBatchClearCache}
+                label={t('trainingStudio.yue2.aitkBatch.clearCache', 'Clear out all cached data')}
+                info={t('trainingStudio.mm3.batchClearCacheHint', "Deletes each dataset's MM3 caches (RVQ codes) before it starts, so they are rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each dataset then takes as long as a first-time code export.")} />
+            </div>}
+            {!!batchDraft?.length && !trainingWorker && workers.length > 0 && <div className="mt-4 flex items-center gap-3 flex-wrap">
+              <ParamLabel
+                label={t('trainingStudio.workers.runOn', 'Run on')}
+                className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300"
+                info={t('trainingStudio.workers.runOnInfoMm3', 'A training worker trains the batch on its own GPU. Each dataset\'s audio, .mm3.txt captions and dataset.json are sent to the worker (only files it does not already have), and it joins the worker\'s batch: codes, then training. Switch "Train on" at the top to that worker to follow the run. Each checkpoint and preview is copied back here as it lands, so the run then opens here like one trained on this PC. The recipe is sized for this PC\'s GPU; check it fits the worker\'s.')}
+              />
+              <StyledSelect
+                accent="amber"
+                value={runOn}
+                disabled={busy}
+                onChange={value => setRunOn(String(value))}
+                options={[{ value: '', label: t('trainingStudio.workers.thisPc', 'This PC') }, ...workers.map(w => ({ value: w.name, label: w.online ? w.name : `${w.name} (offline)`, disabled: !w.online }))]}
+                className="w-48"
+              />
+            </div>}
+
             <button
               onClick={() => void startTrain()}
-              disabled={busy || jobRunning}
+              disabled={busy || (jobRunning && !runOn)}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 transition-colors flex items-center gap-2"
             >
-              <Play size={14} />
-              {batchDraft?.length ? t('trainingStudio.mm3.startBatch', 'Start batch') : t('trainingStudio.mm3.start', 'Start training')}
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              {batchDraft?.length
+                ? t('trainingStudio.mm3.startBatch', 'Start batch ({{count}})', { count: batchDraft.length })
+                : busy ? t('trainingStudio.mm3.starting', 'Starting…')
+                  : mine && jobRunning ? (activeJob?.phase === 'preparing'
+                    ? t('trainingStudio.mm3.preparing', 'Preparing…') : t('trainingStudio.mm3.running', 'Training is running'))
+                    : t('trainingStudio.mm3.start', 'Start training')}
             </button>
-            {batchDraft?.length ? <div className="mt-2 flex items-center gap-3 text-xs text-amber-600 dark:text-amber-400">
-              {t('trainingStudio.mm3.batchSelected', 'Recipe applies to {{count}} datasets, in order.', { count: batchDraft.length })}
-              <button type="button" disabled={busy} onClick={() => setBatchDraft(null)}>{t('common.cancel', 'Cancel')}</button>
-            </div> : null}
+            {!!batchDraft?.length && <button type="button" disabled={busy} onClick={() => setBatchDraft(null)}
+              className="mt-2 text-xs text-zinc-500 hover:underline">{t('trainingStudio.yue2.aitkBatch.discard', 'Discard batch')}</button>}
           </>
         )}
-      </div>
+      </TrainingRunPanel>
 
       {/* ── Live run: the shared job machinery, unchanged ── */}
       {mine && activeJob && (
         <div className={CARD}>
           <JobProgress hideEta={jobKind === 'mm3-train-lm'} />
-          {mm3Eta && <div className="mt-1 text-[11px] text-zinc-500"><TrainingEtaLine eta={mm3Eta} /></div>}
+          {targetEtaText ? <div className="mt-1 text-[11px] text-zinc-500">{targetEtaText}</div>
+            : mm3Eta && <div className="mt-1 text-[11px] text-zinc-500"><TrainingEtaLine eta={mm3Eta} /></div>}
           {jobKind === 'mm3-train-lm' && mm3Live && (
             // The run-stats row. MM3 has no epochs, so none of the ACE tiles
             // apply — these are the numbers that actually say what the run is
@@ -1510,12 +1690,21 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <Yue2SplitChart mode="mm3" points={trainStepSeries.map(s => ({ ...s, ep: s.step }))}
                 milestones={trainMilestones}
                 evals={trainEvalSeries.map(e => ({ ep: e.step, loss: e.loss }))}
-                target={trainTargetLoss} vramMb={mm3Live?.usedMb} totalSteps={activeJob.total} />
+                target={trainTargetLoss} vramMb={mm3Live?.usedMb} totalSteps={activeJob.total}
+                options={stopLossLive ? { stopMode: 'loss', targetLoss: trainTargetLoss, targetLossMetric: form?.targetLossMetric, stopReading } : undefined} />
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
+                {descent !== null && stepsPerReading === 1 && <span>{t('trainingStudio.mm3.lossRate', 'loss rate')} {descent.toFixed(5)}/step</span>}
+                {activeJob.startedAt != null && <span>{t('trainingStudio.mm3.elapsed', 'elapsed')} {formatDurationMs(Date.now() - activeJob.startedAt)}</span>}
+              </div>
             </div>
           )}
+          {jobLog.length > 0 && <details className="mt-2" open={showLog} onToggle={event => setShowLog(event.currentTarget.open)}>
+            <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
+            <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLog.slice(-100).map(l => `${new Date(l.ts).toLocaleTimeString()} ${l.level}: ${l.message}`).join('\n')}</pre>
+          </details>}
         </div>
       )}
-      <Mm3RunsPanel key={datasetId} datasetId={datasetId} />
+      <Mm3RunsPanel key={datasetId} datasetId={datasetId} renderOpts={{ seconds: form?.previewSeconds, scaleMlp: form?.previewScaleMlp }} />
     </div>
   );
 };

@@ -42,6 +42,10 @@ export interface Mm3LmAdapterScales {
   scaleEarly: number;
   scaleMid: number;
   scaleLate: number;
+  /** Plan dial, 0 to 1: how much the adapter plans the song. 1 = it plans and
+   *  sings (no change); 0 = the base model plans and the adapter sings. Engine
+   *  `lm_adapter_plan`, runtime mode only. */
+  scalePlan: number;
 }
 
 export const MM3_LM_ADAPTER_DEFAULT_SCALES: Mm3LmAdapterScales = {
@@ -57,6 +61,7 @@ export const MM3_LM_ADAPTER_DEFAULT_SCALES: Mm3LmAdapterScales = {
   scaleEarly: 1.0,
   scaleMid: 1.0,
   scaleLate: 1.0,
+  scalePlan: 1.0,
 };
 
 export function mm3LmAdapterDir(): string {

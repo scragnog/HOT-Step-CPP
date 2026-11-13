@@ -440,6 +440,11 @@ export function upsertPreset(lyricsSetId: number, data: {
   return getPreset(lyricsSetId)!;
 }
 
+/** Unlink a preset's MM3 adapter, leaving every other field as it is. */
+export function clearMm3AdapterPath(lyricsSetId: number): void {
+  getDb().prepare('UPDATE album_presets SET mm3_adapter_path = NULL WHERE lyrics_set_id = ?').run(lyricsSetId);
+}
+
 export function deletePreset(lyricsSetId: number): boolean {
   return getDb().prepare('DELETE FROM album_presets WHERE lyrics_set_id = ?').run(lyricsSetId).changes > 0;
 }

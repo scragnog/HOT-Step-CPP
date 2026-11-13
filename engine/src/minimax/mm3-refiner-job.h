@@ -29,6 +29,7 @@
 // vector of every window. A missing CLAP file answers 501 like any other pack file; nothing
 // falls back to made-up conditioning. HOTSTEP_MM3_REFINE_TEST_STYLE overrides the tower.
 
+#include <cstring>
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>

@@ -289,11 +289,30 @@ for adapters that record no trigger.
 4. Set **Strength**, **Attention** and **MLP** (0 to 2 each). The fold-out **Depth thirds
    (advanced)** has **Early third**, **Middle third** and **Late third** dials; leave them
    at 1.0 for renders you keep, since the late third controls where songs end.
-   **Recommended** resets all six to the adapter's own suggestion.
+   **Recommended** resets all seven, Plan included, to the adapter's own suggestion.
+5. **Plan** (0 to 1, default 1) splits the adapter's two jobs. The planner picks one
+   code per frame for the song's structure and melody, and the voice comes from the
+   codes drawn after it. At 1 the adapter does both, as before. At 0 the base model
+   plans the song and the adapter sings it; in between, the two models' choices are
+   mixed. Below 1 the base model runs beside the adapter on every planning step, so
+   the adapter renders in Runtime mode even when Merge is picked, and planning is slower.
+   The planner also plans at most 2 takes at a time below 1 (4 otherwise), so Variations
+   Per Render and Require Natural Ending get 2 candidates per round instead of 3 or 4.
+   That keeps its memory at what 4 takes need without the dial. Adapters that carry an
+   artist token or a trained prefix ignore Plan, with a line in the engine log.
 
 When the adapter has a trigger, **Add trigger to caption** puts it in the caption at its
 trained position. Leave it on unless you are placing the trigger yourself. If a run
 recorded a trigger it never trained, the panel says so and does not add it.
+
+Adapters often stop songs from ending on their own: the render runs to the 5-minute cap.
+**Adapter Tail Fade** in the Generation dropdown (off by default) keeps the adapter at full
+strength until the lyrics should be done, then steps it down to the base model over 60 s
+so the base can close the song. The start comes from the word count: about 1.85 words a
+second plus 30 s, never later than 4:00. The fade keeps what has already been generated,
+so the timbre holds. In a test on one adapter, 9 of 12 plans ended on their own with the
+fade against 2 of 12 without. It needs lyrics, and it renders the adapter in Runtime mode
+even when Merge is picked, so planning is slower.
 
 An adapter that fails to load fails the job. It never renders the base model silently.
 

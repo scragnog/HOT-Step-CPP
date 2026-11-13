@@ -50,7 +50,6 @@ const stage = (id: string, labelKey: string, label: string): TrainingStageSpec =
 const yue2Key = (n: number) => `trainingStudio.yue2.runAllStageName${n}`;
 
 const PREPARE_LABEL = { key: 'trainingStudio.phase.prepare', fallback: 'Prepare' };
-const CODES_LABEL = { key: 'trainingStudio.mm3.phaseCodes', fallback: 'Codes' };
 
 const ACE_PHASES: readonly TrainingPhase[] = ['dataset', 'preprocess', 'train', 'monitor'];
 const HEARTMULA_PHASES: readonly TrainingPhase[] = ['dataset', 'preprocess', 'train', 'review'];
@@ -66,11 +65,14 @@ export const TRAINING_TARGETS: Record<TrainingTargetId, TrainingTargetSpec> = {
     recipeFields: [{ stage: 'lm', family: 'ace-lm' }, { stage: 'dit', family: 'ace-dit' }],
     previewSource: 'none',
   },
+  // YuE2's tabs, less Optimise; the codes export is the Prepare stage. Refine
+  // is YuE2's KL ladder, so it is not reachable here. Monitor has no tab but
+  // stays reachable: Import multiple opens it to follow its pipeline.
   'minimax-m3': {
     id: 'minimax-m3',
-    phases: ACE_PHASES,
-    reachablePhases: ['dataset', 'preprocess', 'train', 'refine', 'review', 'monitor'],
-    phaseLabels: { preprocess: CODES_LABEL },
+    phases: ['dataset', 'preprocess', 'train', 'review'],
+    reachablePhases: ['dataset', 'preprocess', 'train', 'review', 'monitor'],
+    phaseLabels: { preprocess: PREPARE_LABEL },
     prepareStages: [stage('codes', 'trainingStudio.assets.codes', 'Codes')],
     trainStages: [stage('lm', 'trainingStudio.assets.lmAdapter', 'LM adapter')],
     recipeFields: [{ stage: 'lm', family: 'mm3-lm' }],

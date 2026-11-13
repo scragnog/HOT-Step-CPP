@@ -106,6 +106,74 @@ timbre override or vocal language. Analysis, saved drafts and source separation
 remain available. Separation is for inspection here; mixer changes do not alter
 the full uploaded audio sent to the transform.
 
+## MiniMax-Music3 covers
+
+Load a recording in Cover Studio with MiniMax-Music3 active. Source preparation
+runs automatically after upload, Library send or restoring a draft. The progress
+strip shows metadata/BPM/key, lyrics, source caption and encoding. Dataset sidecars
+supply BPM, key, lyrics and the matching `<stem>.mm3.txt` source caption. Otherwise
+the usual source analysis supplies BPM/key and Music-Flamingo supplies lyrics
+when installed. The facts line identifies the source of the analysis.
+
+The source is always laundered through MM3 before its semantic codes are saved as
+a reference plank. This takes roughly the clip duration and about 14.5 GB of VRAM.
+The rec7 model needs a source longer than about 5.5 seconds.
+Install the missing encoder/rec7 files in Model Manager when prompted. A matching
+saved plank is reused only when the source bytes, launder steps, seed and caption
+match. **Re-encode** always makes a new plank. **Retry** restarts failed preparation.
+
+**Source caption** is read-only until you choose **Edit source caption**. If no
+sidecar caption exists, **Caption with Music-Flamingo** captions the recording
+and re-encodes it with that description. The button explains when Music-Flamingo
+is unavailable and directs you to Model Manager. A blank source caption uses a
+neutral source description for laundering.
+
+Choose a **Target artist**, **Album**, then **Caption source**. Only artists and
+albums with an MM3 adapter assigned in Lyric Studio appear. Caption lookups run
+only for those albums. The nearest-tempo track is selected first when available;
+an album without captioned tracks uses **Custom**. Its caption keeps
+the target genre and arrangement, with BPM, key and scale replaced by the source
+facts. Choose **Custom** to edit the Caption box. An album's saved MM3 LM adapter
+is selected in the top bar. If an album loses its adapter, the selection moves to
+the artist's first eligible album, or clears if none remain.
+
+**Mode**, at the top of the panel, picks how the cover uses the source. These are
+experimental. On the test song every mode still breaks up in the chorus.
+
+| Mode | What it does | Sliders (default) |
+|---|---|---|
+| **Pin** | Holds the source's semantic codes. Sounds closest to the original. | Match (100) |
+| **Follow source** | On each frame the planner picks among the source's best candidate codes. Gives a cover with a different voice and genre over the same melody and chords. | Strength (0.9), Candidates (32), State fix (Off) |
+| **Follow source, depth fix** | Follow source with **State fix** set to Depth. | the same, State fix Depth |
+| **Follow source, stream fix** | Follow source with **State fix** set to Stream 0. | the same, State fix Stream 0 |
+| **Product rule** | The candidates are weighed by both the planner and the source. | Weight (1.0), Candidates (32) |
+| **State blend** | A Follow source cover moved part of the way back toward the source's own render. | Blend (25%), Strength (0.9), Candidates (32) |
+
+Changing mode resets only that mode's sliders. The source preparation, seeds,
+trim, caption and lyrics stay as they are. **Strength** is how often the source
+wins on each frame; values well below 0.9 tend to cut out. **Candidates** is how
+many of the source's codes per frame the planner may choose from. **State fix**
+(Off, Depth, Stream 0, Both) adjusts the planner's state to agree with each chosen
+code before the sound is made. The LM adapter in the top bar works with every mode.
+
+The modes other than Pin need two extra files that encoding now writes beside the
+plank: the source guide and the launder state. The launder state takes about
+3.2 MB per second of source. A plank encoded before cover modes has neither, so
+these modes show a notice and **Generate cover** stays disabled until you
+**Re-encode**. A mode never falls back to Pin.
+
+**Match** (Pin only) ranges from 0 to 100, default 100. At 100 the source semantic codes are
+hard-pinned. Lower values allow more freedom: the semantic bias is
+`round(10^(3 * Match/100))`, shown under the slider. Match 50 gives 32, 33 gives 10,
+and 25 gives 6. Try 20 to 60 when the target artist needs more room.
+
+**Advanced** holds launder steps, default 30, and launder seed, default 42.
+Seed -1 chooses a random value, saved in the plank sidecar. Change these or the
+source caption, then Re-encode to apply them. **Trim to seconds** limits the
+reference in every mode. **Seed**, **Planner seed** and **Generate cover** remain on the panel.
+LM sampling and adapter scales come from the top bar. The saved song facts record
+the mode and its sliders, launder settings, and the semantic bias when Match is below 100.
+
 ## ACE workflow
 
 1. Drop a source track of up to 200 MB into the upload zone (MP3, WAV, FLAC, OGG, M4A, Opus, AAC),
@@ -771,9 +839,8 @@ its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 
-- Cover generation needs ACE-Step 1.5, YuE2 or Stable Audio 3 active.
-  HeartMuLa offers Prepare while MuLaCover rendering awaits engine support.
-  MiniMax-Music3 does not list the studio.
+- Cover generation needs ACE-Step 1.5, YuE2, Stable Audio 3 or MiniMax-Music3
+  active. HeartMuLa offers Prepare while MuLaCover rendering awaits engine support.
 - For ACE-Step and YuE2, splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.

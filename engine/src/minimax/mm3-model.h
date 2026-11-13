@@ -182,14 +182,19 @@ static inline int mm3_cfg_rows(const MM3LmConfig & c) {
 #define MM3_MAX_BATCH_ROWS 8
 
 // Largest K the row budget allows for this checkpoint. 4 normally, 8 at CFG 1.0.
-static inline int mm3_max_takes(const MM3LmConfig & c) {
-    const int r = mm3_cfg_rows(c);
-    return r > 0 ? MM3_MAX_BATCH_ROWS / r : 1;
+// `plan_rows`: the plan dial's base rows double every take's rows, so the
+// budget halves (2 takes with a CFG pair). Measured on a 5090, 300 s cap:
+// 3 takes with base rows want a 14.3 GB KV cache, filled the card and ran
+// ~10x slower (spilling to system RAM); within the budget the dial never
+// needs more VRAM than 4 takes do without it, and stays on MMVQ.
+static inline int mm3_max_takes(const MM3LmConfig & c, bool plan_rows = false) {
+    const int r = mm3_cfg_rows(c) * (plan_rows ? 2 : 1);
+    return r > 0 && r <= MM3_MAX_BATCH_ROWS ? MM3_MAX_BATCH_ROWS / r : 1;
 }
 
 // Clamp a requested take count into what the kernels can actually serve.
-static inline int mm3_clamp_takes(const MM3LmConfig & c, int takes) {
-    const int hi = mm3_max_takes(c);
+static inline int mm3_clamp_takes(const MM3LmConfig & c, int takes, bool plan_rows = false) {
+    const int hi = mm3_max_takes(c, plan_rows);
     if (takes < 1) {
         return 1;
     }

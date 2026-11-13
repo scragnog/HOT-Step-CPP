@@ -77,12 +77,15 @@
 #include "mm3-pipeline.h"
 #include "mm3-tokenizer.h"
 
+#include "audio-io.h"
 #include "yyjson.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
@@ -630,6 +633,15 @@ struct MM3SynthRequest {
     std::vector<int32_t> forced_semantic;  // [I]
     std::vector<int32_t> forced_acoustic;  // [I * 7], flat, iteration-major
 
+    // ── Route B (audio2audio) ──────────────────────────────────────────────
+    // The source as read at parse time, planar stereo [2][a2a_n] at
+    // a2a_rate, already trimmed. Empty = off. mm3-job.h encodes it on the
+    // GPU worker into gen.a2a_src.
+    std::string        a2a_source;
+    std::vector<float> a2a_audio;
+    int64_t            a2a_n    = 0;
+    int                a2a_rate = 0;
+
     // ── Runtime LM LoRA (mm3-lm-adapter.h) ─────────────────────────────────
     // Path to a PEFT LM adapter (SimpleTuner language_model checkpoints).
     // Empty = base model. The group scales mirror the 2026-08-20 ablation
@@ -638,6 +650,19 @@ struct MM3SynthRequest {
     // thirds are advanced dials (halving `late` destabilised termination).
     std::string        lm_adapter;
     MM3LmAdapterScales lm_adapter_scales = {};
+    // Strength along the song (MM3LmAdapterSchedule): lm_adapter_fade_in,
+    // lm_adapter_fade_out, lm_adapter_fade_len, lm_adapter_fade_floor,
+    // lm_adapter_fade_step. All absent = off.
+    MM3LmAdapterSchedule lm_adapter_sched = {};
+    // lm_adapter_plan, 0..1 (default 1): how much the adapter plans the song.
+    // 1 = the adapter plans and sings it (no change). 0 = the base model plans
+    // it and the adapter sings it: each take gets a base CFG pair, the semantic
+    // draw samples base + plan * (adapter - base) logits, and the depth decoder
+    // reads the adapter rows. Runtime mode only (merge has no base weights to
+    // mask back to); ignored with a log line otherwise, and for an adapter that
+    // carries a soft prompt. Doubles the LM rows and KV, so takes clamp to 2
+    // with a CFG pair (mm3_max_takes); in the AR cache key when below 1.
+    float              lm_adapter_plan  = 1.0f;
     // "runtime" (default) = low-rank deltas in-graph, live dials, +28 %/step
     // at r256. "merge" = fold scale·B·A into the resident weights once
     // (mm3-lm-merge.h) — zero per-step cost, scale changes re-merge.
@@ -729,6 +754,19 @@ static bool mm3_req_str(yyjson_val * root, const char * key, std::string * out, 
 //                      a scheduler plugin. Ignored without one.
 //   apg_norm_threshold number in [0, 100], default 2.5
 //   plugin_params      object {"pluginName:key": value}, default {}
+//   a2a_source         string, absolute path to WAV or MP3 — Route B: the
+//                      source's DAV latents steer the flow (mm3-pipeline.h
+//                      MM3A2aWindow). Read here, encoded on the GPU worker.
+//   a2a_strength       number 0..1, default 0 = off: the flow starts at
+//                      t0 = strength from the noised source (SDEdit); 1 =
+//                      the source back. > 0 needs a2a_source.
+//   a2a_hold           number 0..1, default 0 — fraction of the remaining
+//                      steps that re-impose the source (RePaint-style).
+//   a2a_source_seconds number > 0, optional — use only the first N seconds.
+//                      Without forced codes or a saved plan the render
+//                      length is capped to the (trimmed) source.
+//   None of the a2a fields is in the AR cache key: they act on the flow only
+//   (the length cap reaches the key through max_frames, as any cap does).
 //
 //   The five plugin fields are ALL optional and all default to the native
 //   path, which is the one the parity fixtures cover. See mm3-plugins.h.
@@ -1142,6 +1180,33 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 *d.dst = f;
             }
         }
+        struct {
+            const char * key;
+            float *      dst;
+            float        lo, hi;
+        } sched[] = {
+            { "lm_adapter_fade_in",    &out->lm_adapter_sched.in_sec,      0.0f, 360.0f },
+            { "lm_adapter_fade_out",   &out->lm_adapter_sched.out_sec,     0.0f, 360.0f },
+            { "lm_adapter_fade_len",   &out->lm_adapter_sched.out_len_sec, 0.0f, 360.0f },
+            { "lm_adapter_fade_floor", &out->lm_adapter_sched.floor,       0.0f, 1.0f   },
+            { "lm_adapter_fade_step",  &out->lm_adapter_sched.step_sec,    1.0f, 60.0f  },
+            { "lm_adapter_plan",       &out->lm_adapter_plan,              0.0f, 1.0f   },
+        };
+        for (auto & d : sched) {
+            yyjson_val * sv = yyjson_obj_get(root, d.key);
+            if (sv && !yyjson_is_null(sv)) {
+                const float f = yyjson_is_num(sv) ? (float) yyjson_get_num(sv) : NAN;
+                if (!(f >= d.lo && f <= d.hi)) {
+                    if (err) {
+                        char buf[96];
+                        snprintf(buf, sizeof(buf), "\"%s\" must be a number in [%g, %g]", d.key, d.lo, d.hi);
+                        *err = buf;
+                    }
+                    return false;
+                }
+                *d.dst = f;
+            }
+        }
         // The DoRA dial opt-in (mm3_lm_dora_set_scales). Same key ACE reads
         // into g_hotstep_params, so one switch covers both engines; absent or
         // false keeps the legacy render.
@@ -1158,23 +1223,23 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     }
 
     // ── MM3 Plank: AR replay ──
-    // Both arrays or neither. A half-specified replay is a caller bug worth a
-    // 400, not a silent fall back to sampling — the whole point of asking for
-    // replay is that the codes are pinned.
+    // Both arrays, or forced_semantic alone (semantic-only forcing: content pinned,
+    // the depth decoder samples the acoustic codes from the new caption, see
+    // mm3-ar-loop.h). forced_acoustic without forced_semantic is a caller bug.
     {
         yyjson_val * sem_v  = yyjson_obj_get(root, "forced_semantic");
         yyjson_val * ac_v   = yyjson_obj_get(root, "forced_acoustic");
         const bool   has_sem = sem_v && !yyjson_is_null(sem_v);
         const bool   has_ac  = ac_v  && !yyjson_is_null(ac_v);
 
-        if (has_sem != has_ac) {
+        if (has_ac && !has_sem) {
             if (err) {
-                *err = "\"forced_semantic\" and \"forced_acoustic\" must be provided together";
+                *err = "\"forced_acoustic\" needs \"forced_semantic\"";
             }
             return false;
         }
         if (has_sem) {
-            if (!yyjson_is_arr(sem_v) || !yyjson_is_arr(ac_v)) {
+            if (!yyjson_is_arr(sem_v) || (has_ac && !yyjson_is_arr(ac_v))) {
                 if (err) {
                     *err = "\"forced_semantic\" and \"forced_acoustic\" must be arrays of integers";
                 }
@@ -1191,19 +1256,21 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 }
                 out->forced_semantic.push_back((int32_t) yyjson_get_int(item));
             }
-            yyjson_arr_foreach(ac_v, idx, imax, item) {
-                if (!yyjson_is_int(item)) {
-                    if (err) {
-                        *err = "\"forced_acoustic\" must be an array of integers";
+            if (has_ac) {
+                yyjson_arr_foreach(ac_v, idx, imax, item) {
+                    if (!yyjson_is_int(item)) {
+                        if (err) {
+                            *err = "\"forced_acoustic\" must be an array of integers";
+                        }
+                        return false;
                     }
-                    return false;
+                    out->forced_acoustic.push_back((int32_t) yyjson_get_int(item));
                 }
-                out->forced_acoustic.push_back((int32_t) yyjson_get_int(item));
             }
 
             const int64_t NCB      = 7;  // acoustic codebooks per frame
             const int64_t expected = (int64_t) out->forced_semantic.size() * NCB;
-            if ((int64_t) out->forced_acoustic.size() != expected) {
+            if (has_ac && (int64_t) out->forced_acoustic.size() != expected) {
                 if (err) {
                     char buf[160];
                     snprintf(buf, sizeof(buf),
@@ -1238,6 +1305,64 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                        "(the hidden block already holds the plan the codes would rebuild)";
             }
             return false;
+        }
+    }
+
+    // ── Route B: the source's sound in the flow ──
+    double a2a_strength = 0.0, a2a_hold = 0.0, a2a_secs = 0.0;
+    {
+        bool have_strength = false, have_hold = false, have_secs = false;
+        if (!mm3_req_str(root, "a2a_source", &out->a2a_source, &present, err) ||
+            !mm3_req_num(root, "a2a_strength", &a2a_strength, &have_strength, err) ||
+            !mm3_req_num(root, "a2a_hold", &a2a_hold, &have_hold, err) ||
+            !mm3_req_num(root, "a2a_source_seconds", &a2a_secs, &have_secs, err)) {
+            return false;
+        }
+        if (!(a2a_strength >= 0.0 && a2a_strength <= 1.0) || !(a2a_hold >= 0.0 && a2a_hold <= 1.0)) {
+            if (err) *err = "\"a2a_strength\" and \"a2a_hold\" must be 0 to 1";
+            return false;
+        }
+        if (have_secs && !(a2a_secs > 0.0 && std::isfinite(a2a_secs))) {
+            if (err) *err = "\"a2a_source_seconds\" must be greater than 0";
+            return false;
+        }
+        if (a2a_strength > 0.0) {
+            if (out->a2a_source.empty()) {
+                if (err) *err = "\"a2a_strength\" needs \"a2a_source\"";
+                return false;
+            }
+            int     T = 0, sr = 0;
+            float * planar = audio_read(out->a2a_source.c_str(), &T, &sr);
+            if (!planar || T <= 0 || sr <= 0) {
+                free(planar);
+                if (err) *err = "\"a2a_source\": cannot read audio from " + out->a2a_source;
+                return false;
+            }
+            int64_t n = T;
+            if (have_secs) {
+                n = std::min<int64_t>(n, (int64_t) std::llround(a2a_secs * sr));
+            }
+            out->a2a_audio.resize((size_t) (2 * n));
+            for (int ch = 0; ch < 2; ch++) {
+                memcpy(out->a2a_audio.data() + ch * n, planar + (int64_t) ch * T, (size_t) n * sizeof(float));
+            }
+            free(planar);
+            out->a2a_n    = n;
+            out->a2a_rate = sr;
+            // The frames the source covers: F frames need trunc(F * 3.4453125)
+            // latents, the source holds n / 512 at 44.1 kHz, so F = n * 25 / sr.
+            const int64_t src_frames = n * frame_rate / sr;
+            if (src_frames < frame_rate) {
+                if (err) *err = "\"a2a_source\" is shorter than 1 second";
+                return false;
+            }
+            if (out->forced_semantic.empty() && out->forced_frame_hiddens_file.empty() &&
+                out->max_frames > src_frames) {
+                out->max_frames = src_frames;
+                out->duration   = (double) src_frames / (double) frame_rate;
+            }
+        } else {
+            out->a2a_source.clear();  // strength 0 = off, whatever else came along
         }
     }
 
@@ -1344,6 +1469,10 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     // lifetime — a path string must never be dereferenced this early because
     // parse runs on the HTTP thread and load must run on the GPU worker.
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
+    out->gen.lm_adapter_sched  = out->lm_adapter_sched;
+    out->gen.lm_adapter_plan   = out->lm_adapter_plan;
+    out->gen.a2a_strength      = (float) a2a_strength;
+    out->gen.a2a_hold          = (float) a2a_hold;
 
     // Sampling knobs parse LAST, after the finalize above REBUILDS out->gen
     // from scratch (out->gen = MM3GenRequest{}). Parsed any earlier they are
@@ -1366,6 +1495,117 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         if (!mm3_req_num(root, "lm_dry_min_len", &dv, &present, err)) { return false; }
         if (present) { out->gen.lm_dry_min_len = (int) (dv < 1 ? 1 : dv > 200 ? 200 : dv); }
         if (!mm3_req_str(root, "lm_rep_mode", &out->gen.lm_rep_mode, &present, err)) { return false; }
+        // Soft forcing (mm3-ar-loop.h): absent = the hard pin. Checked here as
+        // well as in the loop so the caller gets a 400, not a failed job.
+        if (!mm3_req_num(root, "lm_force_bias", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_force_bias = (float) (dv < 0.0 ? 0.0 : dv > 1000.0 ? 1000.0 : dv); }
+        bool has_free = false;
+        for (const int32_t fs : out->forced_semantic) {
+            if (fs < -1) {
+                if (err) { *err = "\"forced_semantic\" entries must be codes >= 0 or -1 (free)"; }
+                return false;
+            }
+            has_free = has_free || fs == -1;
+        }
+        if ((present || has_free) && !out->forced_acoustic.empty()) {
+            if (err) { *err = "\"lm_force_bias\" and free (-1) frames need semantic-only forcing (no \"forced_acoustic\")"; }
+            return false;
+        }
+    }
+
+    // Source guide (mm3-ar-loop.h, MM3ArOptions::guide). Read here so a bad
+    // file is a 400; the song is as long as the guide.
+    {
+        std::string gpath, gate_path;
+        if (!mm3_req_str(root, "lm_guide_file", &gpath, &present, err)) { return false; }
+        if (!gpath.empty()) {
+            if (!out->forced_semantic.empty() || !out->forced_frame_hiddens_file.empty()) {
+                if (err) { *err = "\"lm_guide_file\" is exclusive with \"forced_semantic\" and \"forced_frame_hiddens_file\""; }
+                return false;
+            }
+            Yue2Guide & g = out->gen.lm_guide;
+            if (!yue2_guide_read(gpath, &g, err)) { return false; }
+            // Trim: keep the first N seconds of the guide (Cover Studio's trim).
+            {
+                double secs = 0.0;
+                if (!mm3_req_num(root, "lm_guide_seconds", &secs, &present, err)) { return false; }
+                const int64_t keep = present && secs > 0.0 ? (int64_t) std::llround(secs * (double) frame_rate) : 0;
+                if (keep > 0 && keep < g.T) {
+                    g.T = keep;
+                    g.ids.resize((size_t) (g.T * g.K));
+                    g.lp.resize((size_t) (g.T * g.K));
+                }
+            }
+            for (const int32_t id : g.ids) {
+                if (id < 0 || id >= 16384) {
+                    if (err) { *err = "\"lm_guide_file\" holds codes outside the MM3 semantic range"; }
+                    return false;
+                }
+            }
+            Yue2GuideParams & p = out->gen.lm_guide_p;
+            double dv = 0.0;
+            if (!mm3_req_num(root, "lm_guide_scale", &dv, &present, err)) { return false; }
+            if (present) { p.scale = (float) std::min(1.0, std::max(0.0, dv)); }
+            if (!mm3_req_num(root, "lm_guide_k", &dv, &present, err)) { return false; }
+            if (present) { p.k = (int) std::max(0.0, std::min(16384.0, dv)); }
+            if (!mm3_req_num(root, "lm_guide_outside", &dv, &present, err)) { return false; }
+            if (present) { p.outside = (float) std::min(0.0, dv); }
+            if (!mm3_req_str(root, "lm_guide_trace_file", &out->gen.lm_guide_trace, &present, err)) { return false; }
+            // Round 9 probes (MM3ArOptions::depth_greedy, state_fix).
+            if (yyjson_val * v = yyjson_obj_get(root, "lm_depth_greedy"); v && !yyjson_is_null(v)) {
+                if (!yyjson_is_bool(v)) { if (err) { *err = "\"lm_depth_greedy\" must be a boolean"; } return false; }
+                out->gen.lm_depth_greedy = yyjson_get_bool(v);
+            }
+            if (!mm3_req_num(root, "lm_state_fix", &dv, &present, err)) { return false; }
+            if (present) {
+                if (dv != 0 && dv != 1 && dv != 2 && dv != 3) { if (err) { *err = "\"lm_state_fix\" must be 0 (off), 1 (depth), 2 (stream 0) or 3 (both)"; } return false; }
+                out->gen.lm_state_fix = (int) dv;
+            }
+            if (!mm3_req_num(root, "lm_guide_product", &dv, &present, err)) { return false; }
+            if (present && dv >= 0.0) { out->gen.lm_guide_product = (float) std::min(4.0, dv); }
+            if (!mm3_req_str(root, "lm_guide_gate_file", &gate_path, &present, err)) { return false; }
+            if (!gate_path.empty()) {
+                // Raw f32, one multiplier per guide frame.
+                FILE * f = hs_fopen(gate_path, "rb");
+                std::vector<float> & gate = out->gen.lm_guide_gate;
+                gate.resize((size_t) g.T);
+                const bool ok = f && fread(gate.data(), sizeof(float), gate.size(), f) == gate.size();
+                if (f) { fclose(f); }
+                if (!ok) {
+                    if (err) { *err = "\"lm_guide_gate_file\" must hold one f32 per guide frame (" + std::to_string((long long) g.T) + ")"; }
+                    return false;
+                }
+            }
+            out->max_frames     = std::min<int64_t>(g.T, 9000);
+            out->duration       = (double) out->max_frames / (double) frame_rate;
+            out->gen.max_frames = out->max_frames;
+        }
+    }
+
+    // State blend (MM3ArOptions::blend): the emitted hiddens move toward a
+    // saved block, typically the source's launder. Read on the worker.
+    {
+        std::string bpath;
+        double      amount = 0.0;
+        bool        have_amount = false;
+        if (!mm3_req_str(root, "lm_blend_file", &bpath, &present, err) ||
+            !mm3_req_num(root, "lm_blend_amount", &amount, &have_amount, err)) {
+            return false;
+        }
+        if (!bpath.empty() && have_amount && amount > 0.0) {
+            if (!out->forced_frame_hiddens_file.empty()) {
+                if (err) { *err = "\"lm_blend_file\" needs a planned render; it cannot blend a \"forced_frame_hiddens_file\" replay"; }
+                return false;
+            }
+            FILE * f = hs_fopen(bpath, "rb");
+            if (!f) {
+                if (err) { *err = "\"lm_blend_file\" not found: " + bpath; }
+                return false;
+            }
+            fclose(f);
+            out->gen.lm_blend_file   = bpath;
+            out->gen.lm_blend_amount = (float) std::min(1.0, amount);
+        }
     }
 
     return true;

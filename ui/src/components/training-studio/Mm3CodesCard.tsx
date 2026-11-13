@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
+import { INPUT } from './yue2CardUi';
 import { JobProgress } from './JobProgress';
 import { useMm3Status } from './useMm3Status';
 import { Yue2StageCard } from './Yue2StageCard';
@@ -33,6 +34,9 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
   // mm3-codes path, byte-identical to before the gate existed. The laundered
   // export writes a SEPARATE sibling cache, so the two coexist.
   const [launder, setLaunder] = useState(false);
+  const [force, setForce] = useState(false);
+  const [only, setOnly] = useState('');
+  const [limit, setLimit] = useState(0);
 
   const kind = activeJob?.kind;
   const jobStatus = activeJob?.status;
@@ -55,7 +59,12 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
 
   const run = async () => {
     setBusy(true);
-    try { await startMm3Codes(launder ? { launder: true } : undefined); } finally { setBusy(false); }
+    try { await startMm3Codes({
+        ...(launder ? { launder: true } : {}),
+        ...(force ? { force: true } : {}),
+        ...(only.trim() ? { only: only.trim() } : {}),
+        ...(limit > 0 ? { limit } : {}),
+      }); } finally { setBusy(false); }
   };
 
   return (
@@ -139,6 +148,39 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                 + 'training form then picks which cache a run uses. Off: the plain export, unchanged from before '
                 + 'this option existed.')}
           />
+        )}
+        {!blocked && (
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                {t('trainingStudio.mm3.codesOnly', 'Name filter')}
+              </span>
+              <input className={INPUT}
+                value={only} onChange={e => setOnly(e.target.value)}
+                title={t('trainingStudio.mm3.codesOnlyHint',
+                  'Only encodes tracks whose name contains this text, case-insensitive. Blank encodes every track.') as string} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                {t('trainingStudio.mm3.codesLimit', 'Source limit')} <span className="normal-case">(0 = {t('trainingStudio.mm3.codesNoLimit', 'no limit')})</span>
+              </span>
+              <input type="number" min={0} step={1}
+                className={INPUT}
+                value={limit} onChange={e => setLimit(Math.max(0, Math.floor(Number(e.target.value)) || 0))}
+                title={t('trainingStudio.mm3.codesLimitHint',
+                  'Caps how many tracks this run encodes, for a quick test before the whole dataset.') as string} />
+            </label>
+            <div className="col-span-2">
+              <Toggle
+                accent="amber"
+                checked={force}
+                onChange={setForce}
+                label={t('trainingStudio.mm3.codesForce', 'Force re-encode')}
+                info={t('trainingStudio.mm3.codesForceHint',
+                  'Clears this cache first (the laundered one when the toggle above is on), so every track is encoded again.')}
+              />
+            </div>
+          </div>
         )}
       </Yue2StageCard>
     </div>

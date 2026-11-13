@@ -1,4 +1,6 @@
 import { z } from 'zod/v4';
+import fs from 'node:fs';
+import path from 'node:path';
 import { parseFile } from 'music-metadata';
 import { config } from '../../config.js';
 import { getDb } from '../../db/database.js';
@@ -25,6 +27,7 @@ import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.
 import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
 import { sheetTranscriberSetting } from '../training/yue2Sheet.js';
 import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
+import { mm3PlankDir, mm3PlankSiblings, readMm3PlankMeta } from '../backends/minimax/plank.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -52,6 +55,45 @@ export function coverScoreDetails(abc: string, factor: number): { bpm: number; k
 function coverTitle(i: CoverRenderInput) {
   return i.artistName ? `${i.title || 'Cover'} (${i.artistName} Cover)` : (i.title || 'Cover');
 }
+/** The plank sidecar's launder record as generation params. A plank without a
+ *  sidecar, or one captured from a render, reports nothing. */
+export function mm3PlankProvenance(plank: string): Record<string, unknown> {
+  const meta = readMm3PlankMeta(plank);
+  if (typeof meta?.laundered !== 'boolean') return {};
+  return { mm3PlankLaundered: meta.laundered,
+    ...(meta.laundered ? {
+      mm3PlankLaunderModels: [meta.rec7, meta.encoder].filter(Boolean).join(', '),
+      ...(meta.launderSteps !== undefined ? { mm3PlankLaunderSteps: meta.launderSteps } : {}),
+      ...(meta.launderSeed !== undefined ? { mm3PlankLaunderSeed: meta.launderSeed } : {}),
+      ...(meta.launderCaption !== undefined ? { mm3PlankLaunderCaption: meta.launderCaption } : {}),
+    } : {}) };
+}
+
+const MM3_STATE_FIX = { off: 0, depth: 1, stream: 2, both: 3 } as const;
+
+/** The guided cover modes (round 9 of the cover probe): the planner picks from
+ *  the plank's guide instead of being pinned to it. Null for Pin. Refuses with
+ *  "Re-encode" when the plank predates the guide or the launder state, rather
+ *  than falling back to Pin. */
+export function mm3CoverModeParams(m: NonNullable<CoverRenderInput['mm3Cover']>): Record<string, unknown> | null {
+  const mode = m.mode ?? 'pin';
+  if (mode === 'pin') return null;
+  if (!m.plank) throw new WorkflowError(400, 'Encode the source first');
+  const sib = mm3PlankSiblings(m.plank);
+  const has = (file: string) => fs.existsSync(path.join(mm3PlankDir(), file));
+  if (!has(sib.guide) || (mode === 'blend' && !has(sib.state))) {
+    throw new WorkflowError(409, 'This source was encoded before cover modes. Re-encode it to use this mode.');
+  }
+  const fix = mode === 'follow-depth' ? 'depth' : mode === 'follow-stream' ? 'stream' : 'off';
+  return {
+    mm3CoverMode: mode, mm3CoverPlank: m.plank,
+    mm3GuidePath: sib.guide, mm3GuideScale: m.strength ?? 0.9, mm3GuideK: m.candidates ?? 32, mm3GuideOutside: -100,
+    mm3GuideSeconds: m.trimSeconds ?? '',
+    ...(mode === 'product' ? { mm3GuideProduct: m.weight ?? 1 } : { mm3GuideStateFix: MM3_STATE_FIX[m.stateFix ?? fix] }),
+    ...(mode === 'blend' ? { mm3BlendPath: sib.state, mm3BlendAmount: (m.blend ?? 25) / 100 } : {}),
+  };
+}
+
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {
   const c = i.controls, e = i.engineParams, s = i.settings;
   const analysis = i.analysis ?? d.analysis;
@@ -109,6 +151,31 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
       sa3Cover: { transform: i.strength ?? c.sa3Transform ?? 0.3,
         adapters: i.adapter ?? c.sa3Adapters ?? '' } };
+  }
+  if (i.expectedBackend === 'minimax-m3') {
+    const m = i.mm3Cover;
+    if (!m || (!m.plank && !m.soundStrength)) throw new WorkflowError(400, 'Turn on Plan (encode or pick a reference) or Sound');
+    // The global bar's MM3 settings (LM knobs, adapter, flow) ride along; the
+    // plank or the source pins the length, so takes, endings and saved plans stand down.
+    const mm3 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('mm3')));
+    const guided = mm3CoverModeParams(m);
+    return { ...shared, ...mm3, backend: 'minimax-m3', expectedBackend: 'minimax-m3', taskType: 'text2music',
+      customMode: true, caption: i.caption, style: i.caption, title: coverTitle(i),
+      lyrics: i.instrumental ? '' : i.lyrics, instrumental: i.instrumental, batchSize: 1,
+      source: 'cover-studio', sourceAudioUrl: url,
+      artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
+      ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
+      mm3PlankPath: guided ? '' : m.plank ?? '', mm3PlankSemanticOnly: m.semanticOnly,
+      ...guided,
+      // Provenance for the song facts: a laundered plank sounds different, and
+      // A/Bs need to know which kind they rendered from.
+      ...(m.plank ? mm3PlankProvenance(m.plank) : {}),
+      // Sound: the source's latents in the flow. Trim covers both when both are on.
+      mm3A2aStrength: m.soundStrength ?? '', mm3A2aHold: m.soundStrength ? m.soundHold ?? 0 : '',
+      mm3A2aSourceSeconds: m.soundStrength && m.plank ? m.trimSeconds ?? '' : '',
+      mm3ForceBias: m.forceBias ?? '', mm3ForcePattern: m.pattern ?? undefined,
+      mm3PlankTrimSeconds: m.trimSeconds ?? undefined, mm3ArSeed: m.arSeed >= 0 ? m.arSeed : '',
+      mm3Takes: 1, mm3HiddensPath: '', mm3SaveHiddens: false };
   }
   if (i.expectedBackend === 'heartmula') {
     if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');

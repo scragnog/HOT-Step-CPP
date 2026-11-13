@@ -289,6 +289,37 @@ export function initDb(): void {
       updated_at   TEXT DEFAULT (datetime('now'))
     );
 
+    -- MM3 ladder ear scores, per checkpoint and per run, kept apart from the
+    -- YuE2 tables: Dataset-Calibrated Training and the rung-score export read
+    -- those unfiltered, and an MM3 verdict must not feed YuE2's calibration.
+    CREATE TABLE IF NOT EXISTS mm3_rung_scores (
+      checkpoint_dir TEXT PRIMARY KEY,
+      dataset_id     TEXT NOT NULL,
+      dataset_slug   TEXT NOT NULL,
+      run            TEXT NOT NULL,
+      step           INTEGER NOT NULL,
+      loss           REAL,
+      likeness       INTEGER,
+      corruption     INTEGER,
+      notes          TEXT NOT NULL DEFAULT '',
+      blind          INTEGER NOT NULL DEFAULT 0,
+      blind_label    TEXT NOT NULL DEFAULT '',
+      created_at     TEXT DEFAULT (datetime('now')),
+      updated_at     TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mm3_rung_scores_run ON mm3_rung_scores(dataset_id, run, step);
+    CREATE TABLE IF NOT EXISTS mm3_album_scores (
+      run          TEXT PRIMARY KEY,
+      dataset_id   TEXT NOT NULL,
+      dataset_slug TEXT NOT NULL,
+      score        INTEGER,
+      instruments  TEXT,
+      vocals       TEXT,
+      notes        TEXT NOT NULL DEFAULT '',
+      created_at   TEXT DEFAULT (datetime('now')),
+      updated_at   TEXT DEFAULT (datetime('now'))
+    );
+
     -- Compare studio: A/B listening sessions, their takes and per-criterion scores.
     CREATE TABLE IF NOT EXISTS compare_sessions (
       id               TEXT PRIMARY KEY,

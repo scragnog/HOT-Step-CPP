@@ -18,18 +18,20 @@
 //     That is a weaker claim than "the recipe it was trained with" and reads as
 //     one.
 
-import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, History, Loader2, PlayCircle, RefreshCw } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, History, Loader2, PlayCircle, RefreshCw, Trash2 } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useReload } from '../../queries/training-runs/hooks';
-import { runQueries } from '../../queries/training-runs/queries';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 
-import { type Mm3RunSummary } from '../../services/trainingApi';
+import { deleteMm3Run, type Mm3RunSummary } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDateTime } from '../../utils/dateUtils';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Mm3CheckpointLadder } from './Mm3CheckpointLadder';
+import { MM3_DELETE_CONFIRM, WorkerMirrorStatus } from './ReviewPanel';
+import { TrainingRunPicker } from './TrainingPreviewPanel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
@@ -51,8 +53,21 @@ function gb(bytes: number): string {
                              : `${Math.round(bytes / 1048576)} MB`;
 }
 
-export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => {
+/** The run folder a pasted resume record names: the folder itself, or the
+ *  folder of its resume-state.bin / .json or hotstep-run.json. */
+export function runNameFromResumePath(p: string): string {
+  const parts = p.trim().replace(/^["']|["']$/g, '').split(/[\\/]+/).filter(Boolean);
+  if (parts.length && /^(resume-state\.(bin|json)|hotstep-run\.json)$/i.test(parts[parts.length - 1])) parts.pop();
+  return parts[parts.length - 1] ?? '';
+}
+
+export const Mm3RunsPanel: React.FC<{
+  datasetId: string;
+  /** The form's preview length and MLP scale, for the ladder's Render. */
+  renderOpts?: { seconds?: number; scaleMlp?: number };
+}> = ({ datasetId, renderOpts }) => {
   const { t } = useTranslation();
+  const client = useQueryClient();
   const resumeMm3TrainLm = useTrainingStore(s => s.resumeMm3TrainLm);
   const activeJob = useActiveTrainingJob();
 
@@ -65,19 +80,39 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
   const [mode, setMode] = useState<'steps' | 'loss'>('steps');
   const [targetLoss, setTargetLoss] = useState(0.4);
   const [busy, setBusy] = useState(false);
-  // Whose checkpoint ladder is open; until the user picks, the newest finished
-  // run with checkpoints, so a reload lands on its ladder.
-  const [ladderPick, setLadderPick] = useState<string | null | undefined>(undefined);
-  const ladderRun = ladderPick !== undefined ? ladderPick
-    : runs?.find(r => !r.running && r.checkpoints.length > 0)?.runName ?? null;
+  const [manualPath, setManualPath] = useState('');
+  const [commandError, setCommandError] = useState('');
+  // Whose checkpoint ladder shows: the run picked here or opened from the
+  // Review page (the store's ladder pick, as YuE2's), else the newest finished
+  // run with checkpoints, so a reload lands on its ladder. The live run's
+  // ladder is the Train card's.
+  const picked = useTrainingStore(s => s.refineLadderRun);
+  const setPicked = useTrainingStore(s => s.setRefineLadderRun);
+  const ladderRuns = (runs ?? []).filter(r => !r.running && r.checkpoints.length > 0);
+  const ladderRun = ladderRuns.find(r => r.runName === picked) ?? ladderRuns[0];
 
   const load = () => query.refetch();
   useReload(runQueries.mm3Runs(datasetId).queryKey, activeJob ? `${activeJob.id}:${activeJob.status}` : undefined);
+  const removeMut = useMutation({
+    mutationFn: (run: string) => deleteMm3Run(datasetId, run),
+    onSuccess: () => void trainingWritePlan(client, null),
+    onError: err => setCommandError(err instanceof Error ? err.message : String(err)),
+  });
+  const remove = (run: Mm3RunSummary) => {
+    if (!window.confirm(t('trainingStudio.mm3.deleteRunConfirm', MM3_DELETE_CONFIRM))) return;
+    setCommandError('');
+    removeMut.mutate(run.runName);
+  };
 
   if (runs !== null && runs.length === 0 && !error) return null;
 
-  const start = async (run: Mm3RunSummary) => {
-    if (!run.resume) return;
+  // Why Continue cannot run, as YuE2's resume list says on a disabled choice.
+  const cannotContinue = (run: Mm3RunSummary): string | null =>
+    !run.resume ? t('trainingStudio.mm3.runsNoStateShort', 'No saved optimizer state, so there is nothing to continue from.')
+      : jobRunning ? t('trainingStudio.mm3.runsJobActive', 'A training job is running; continue this run when it ends.')
+      : null;
+
+  const start = async (run: Pick<Mm3RunSummary, 'runName'>) => {
     setBusy(true);
     try {
       await resumeMm3TrainLm({
@@ -115,8 +150,9 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
           + 'cosine curve rather than continuing it.')}
       </p>
 
-      {error && (
-        <div className="text-xs text-rose-500 mb-2">{error}</div>
+      <div className="mb-2"><WorkerMirrorStatus /></div>
+      {(error || commandError) && (
+        <div className="text-xs text-rose-500 mb-2">{commandError || error}</div>
       )}
       {runs === null && (
         <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -136,6 +172,8 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200 break-all">
                     {run.runName}
+                    {run.origin && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                      title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{run.origin}</span>}
                   </div>
                   <div className="text-[10px] text-zinc-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
                     <span className={run.running ? 'text-amber-500' : o.tone}>
@@ -176,34 +214,33 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                     <div className="text-[10px] text-rose-500 mt-1 break-words">{run.failure}</div>
                   )}
                 </div>
-                {!run.running && run.checkpoints.length > 0 && (
-                  <button
-                    onClick={() => setLadderPick(ladderRun === run.runName ? null : run.runName)}
-                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/10 transition-colors"
-                  >
-                    {ladderRun === run.runName
-                      ? t('trainingStudio.mm3.runsHideLadder', 'Hide checkpoints')
-                      : t('trainingStudio.mm3.runsShowLadder', 'Checkpoints')}
-                  </button>
-                )}
-                {run.resume && !run.running && (
+                {!run.running && (
                   <button
                     onClick={() => setOpen(open === run.runName ? null : run.runName)}
-                    disabled={jobRunning}
+                    disabled={!!cannotContinue(run)}
+                    title={cannotContinue(run) ?? undefined}
                     className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
                   >
                     <PlayCircle size={12} />
                     {t('trainingStudio.mm3.runsContinue', 'Continue')}
                   </button>
                 )}
+                {!run.running && (
+                  <button onClick={() => remove(run)} disabled={removeMut.isPending}
+                    title={t('trainingStudio.refine.deleteRun', 'Delete run') as string}
+                    aria-label={t('trainingStudio.refine.deleteRun', 'Delete run') as string}
+                    className="shrink-0 p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40 transition-colors">
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
 
-              {!run.resume && !run.running && (
+              {!run.running && cannotContinue(run) && (
                 <div className="text-[10px] text-zinc-500 mt-1.5">
-                  {t('trainingStudio.mm3.runsNoState',
+                  {!run.resume ? t('trainingStudio.mm3.runsNoState',
                     'No saved optimizer state in this run, so it cannot be continued — only runs that '
                     + 'paused for a preview, or finished after this feature shipped, have one. Its '
-                    + 'checkpoints are still usable in the adapter picker.')}
+                    + 'checkpoints are still usable in the adapter picker.') : cannotContinue(run)}
                 </div>
               )}
 
@@ -322,13 +359,36 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                   </button>
                 </div>
               )}
-              {ladderRun === run.runName && !run.running && (
-                <Mm3CheckpointLadder datasetId={datasetId} run={run.runName} reloadKey={run.updatedAt} />
-              )}
             </div>
           );
         })}
       </div>
+
+      {/* A run not listed above (a record copied in by hand, another
+          dataset's name): continued the same way, by its folder name. */}
+      <div className="mt-2 flex items-center gap-2">
+        <input className={INPUT} value={manualPath} onChange={e => setManualPath(e.target.value)}
+          placeholder={t('trainingStudio.mm3.resumeManual', 'Or paste a resume record path (optional)')}
+          title={t('trainingStudio.mm3.resumeManualInfo', 'The resume-state.bin of a previous run, or its run folder, to continue it without picking it above. It continues with this many more steps (250 unless a run above was set otherwise) and that run\'s own recipe.') as string} />
+        <button onClick={() => void start({ runName: runNameFromResumePath(manualPath) }).then(() => setManualPath(''))}
+          disabled={busy || jobRunning || !runNameFromResumePath(manualPath)}
+          title={jobRunning ? t('trainingStudio.mm3.runsJobActive', 'A training job is running; continue this run when it ends.') as string : undefined}
+          className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+          <PlayCircle size={12} />
+          {t('trainingStudio.mm3.runsContinue', 'Continue')}
+        </button>
+      </div>
+
+      {ladderRun && (
+        <Mm3CheckpointLadder key={ladderRun.runName} datasetId={datasetId} run={ladderRun.runName} reloadKey={ladderRun.updatedAt} renderOpts={renderOpts}
+          picker={ladderRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
+            <TrainingRunPicker label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
+              info={t('trainingStudio.mm3.ladderRunInfo', 'This dataset has more than one finished run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')}
+              value={ladderRun.runName} onChange={setPicked}
+              options={ladderRuns.map(r => ({ value: r.runName,
+                label: `${new Date(r.startedAt ?? r.updatedAt).toLocaleString()} · ${OUTCOME[r.outcome].label} · ${r.checkpoints.length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin}` : ''}` }))} />
+          </div>} />
+      )}
     </div>
   );
 };

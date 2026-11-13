@@ -95,6 +95,7 @@ async function runPooled(
 }
 
 export interface TrainingJob {
+  result?: TrainingJobSummary['result'];
   id: string;
   datasetId: string;
   kind: TrainingJobKind;
@@ -155,6 +156,7 @@ export function toSummary(job: TrainingJob): TrainingJobSummary {
     createdAt: job.createdAt,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
+    ...(job.result ? { result: job.result } : {}),
   };
 }
 
@@ -1916,6 +1918,73 @@ export function startMm3CodesJob(datasetId: string, opts: unknown): TrainingJob 
     await runMm3CodesJob(j);
   });
   return job;
+}
+
+/** Cover Studio: encode one reference into a plank (mm3TrainRunner). Shares
+ *  the mm3-codes kind and lane; the fixed dataset key runs one at a time. */
+export function startMm3CoverEncodeJob(opts: unknown): TrainingJob {
+  const job = createJob('mm3-codes', 'mm3-cover', [], opts);
+  enqueue(job, async (j) => {
+    const { runMm3CoverEncodeJob } = await import('./mm3TrainRunner.js');
+    await runMm3CoverEncodeJob(j);
+  });
+  return job;
+}
+
+export interface Mm3CoverPrepOptions { sourcePath: string; wantLyrics: boolean; wantCaption: boolean; bpm?: number; key?: string }
+
+type Mm3PrepDependencies = {
+  lyrics: typeof takeLocalLyrics;
+  caption: typeof import('./mossCaption.js').captionWithMoss;
+  suspend: typeof import('../aceEngineProcess.js').suspendEngines;
+  resume: typeof import('../aceEngineProcess.js').resumeEngines;
+};
+
+/** One-card prep, on the same lane as cover encoding. */
+export function startMm3CoverPrepJob(opts: Mm3CoverPrepOptions): TrainingJob {
+  for (const active of jobs.values()) {
+    if (active.datasetId === 'mm3-cover' && (active.status === 'queued' || active.status === 'running')
+      && JSON.stringify(active.opts) === JSON.stringify(opts)) return active;
+  }
+
+  const job = createJob('mm3-codes', 'mm3-cover', [], opts);
+  enqueue(job, j => runMm3CoverPrepJob(j));
+  return job;
+}
+
+export async function runMm3CoverPrepJob(job: TrainingJob, supplied?: Mm3PrepDependencies): Promise<void> {
+  if (isCancelled(job)) return;
+  const opts = job.opts as Mm3CoverPrepOptions;
+  const captioner = await import('./mossCaption.js');
+  const engines = await import('../aceEngineProcess.js');
+  const deps = supplied ?? { lyrics: takeLocalLyrics, caption: captioner.captionWithMoss, suspend: engines.suspendEngines, resume: engines.resumeEngines };
+  job.status = 'running'; job.startedAt = Date.now(); job.phase = 'engine-stop'; emitJob(job);
+  try {
+    if (!await deps.suspend('Paused for MM3 source preparation')) throw new Error('The engine did not shut down. Retry after restarting the app.');
+    job.controller.signal.throwIfAborted();
+    const result: NonNullable<TrainingJob['result']> = {};
+    const onLog = (level: 'info' | 'warn', message: string) => emitLog(job, level, message);
+    if (opts.wantLyrics) {
+      job.phase = 'lyrics'; emitJob(job);
+      result.lyrics = await deps.lyrics(opts.sourcePath, { signal: job.controller.signal, log: onLog });
+    }
+    job.controller.signal.throwIfAborted();
+    if (opts.wantCaption) {
+      job.phase = 'caption'; emitJob(job);
+      result.mm3Caption = (await deps.caption(opts.sourcePath, { bpm: opts.bpm, keyscale: opts.key },
+        { model: 'flamingo', wantMm3: true, signal: job.controller.signal, log: onLog })).mm3;
+      if (!result.mm3Caption?.trim()) throw new Error('Music-Flamingo returned no MM3 caption. Retry.');
+    }
+    job.controller.signal.throwIfAborted();
+    job.result = result;
+  } catch (err) {
+    if (!isCancelled(job)) job.error = err instanceof Error ? err.message : String(err);
+  } finally {
+    job.phase = 'engine-restart'; emitJob(job);
+    try { if (!await deps.resume()) throw new Error('The engine could not restart after source preparation.'); }
+    catch (err) { job.error ||= err instanceof Error ? err.message : String(err); }
+  }
+  if (!isCancelled(job)) finishJob(job, job.error ? 'failed' : 'done', job.error || undefined);
 }
 
 /**

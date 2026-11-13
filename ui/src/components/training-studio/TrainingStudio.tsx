@@ -240,7 +240,7 @@ export const TrainingStudio: React.FC = () => {
         ) : phase === 'refine' ? (
           <RefinePanel />
         ) : phase === 'review' ? (
-          plugin.renderReview ? <TrainPanel target={target} section="review" /> : <ReviewPanel />
+          plugin.renderReview ? <TrainPanel target={target} section="review" /> : <ReviewPanel family={target === 'minimax-m3' ? 'mm3' : 'yue2'} />
         ) : (
           <MonitorPanel />
         )}

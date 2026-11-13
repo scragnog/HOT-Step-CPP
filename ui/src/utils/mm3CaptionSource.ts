@@ -25,6 +25,21 @@
 
 export type Mm3CaptionMode = 'auto' | 'track' | 'custom';
 
+/** Replace source facts while preserving the target's genre and arrangement. */
+export function withSourceAttributes(caption: string, bpm?: number, key?: string, scale?: string): string {
+  const line = caption.match(/^Basic Attributes:[^\r\n]*/m)?.[0];
+  const genre = line?.replace(/^Basic Attributes:\s*/, '')
+    .replace(/\bbpm is [^.]+\.\s*/i, '')
+    .replace(/\bkey is [^,]+, and scale is [^.]+\.\s*/i, '').trim() || '';
+  const root = key?.trim().split(/\s+/)[0];
+  const mode = scale || key?.trim().split(/\s+/).slice(1).join(' ');
+  const replacement = `Basic Attributes: ${[bpm && bpm > 0 ? `bpm is ${Math.round(bpm)}.` : '',
+    root && mode ? `key is ${root}, and scale is ${mode.toLowerCase()}.` : '', genre].filter(Boolean).join(' ')}`;
+  if (line) return caption.replace(line, replacement);
+  if (/^Global Metadata\s*$/m.test(caption)) return caption.replace(/^Global Metadata[^\S\r\n]*(?=\r?$)/m, `Global Metadata\n${replacement}`);
+  return `Global Metadata\n${replacement}\n${caption}`;
+}
+
 /** One album source track that carries an MM3 Structured Caption. */
 export interface Mm3SourceTrack {
   title: string;

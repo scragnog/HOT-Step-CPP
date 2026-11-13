@@ -431,6 +431,10 @@ struct MM3LmTrainArgs {
      *  add per site, and their backward). ~11 % per step. Same function, but
      *  W - s B0 A0 is rounded to BF16 instead of W, so the numerics move. */
     bool        pissa_fold = false;
+    /** `--ckpt-offload on` (opt-in): the per-layer activation checkpoints live
+     *  in pinned host RAM, two GPU slots (lm-ckpt.h). Bit-identical; frees
+     *  (L - 2) x [H, S] f32 of VRAM for ~2 x L x [H, S] f32 of PCIe copies a step. */
+    bool        ckpt_offload = false;
     /** The acoustic loss (mm3-depth-train.h): teacher-forced CE through the
      *  FROZEN depth decoder, gradient into the adapter via last_hidden. This
      *  is the fix for adapters that shift vocal timbre ("chipmunk"/"goblin"):
@@ -2702,6 +2706,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         cc.chunk        = a.ckpt_chunk;
         cc.weights_bf16 = weights_bf16;                 // Lever A
         cc.pissa_fold   = a.pissa_fold;                 // needs the weight stage; lm_ckpt_alloc refuses otherwise
+        cc.ckpt_offload = a.ckpt_offload;
         // lm_ckpt_layer_opts is the ONLY place the segment graphs get their
         // options, so P2 (forward collect), P3 (tail) and P7 (backward) cannot
         // disagree about the attention formulation — which is what D13's

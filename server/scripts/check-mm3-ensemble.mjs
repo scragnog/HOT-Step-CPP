@@ -22,7 +22,9 @@
 // corr 0.9994. It is a tripwire, not a verdict.
 //
 // Usage:
-//   node server/scripts/check-mm3-ensemble.mjs [--url http://127.0.0.1:8085] [--fixtures DIR]
+//   node server/scripts/check-mm3-ensemble.mjs [--url http://127.0.0.1:8085] [--fixtures DIR] [--adapter PATH]
+//
+// --adapter adds the plan-dial checks (section 4) with that MM3 LM adapter.
 //
 // The engine must be warm (POST /mm3/warm) with the LM and depth resident.
 
@@ -234,6 +236,31 @@ console.log('\n[3] one take is unaffected by ensemble support');
   if (after.semantic.join(',') !== solo.semantic.join(','))
     fail('a K=1 render changed after an ensemble render — graph rebuild is not clean');
   else pass('K=1 identical after an intervening K=4 render');
+}
+
+// ── 4. the plan dial (lm_adapter_plan), with --adapter PATH ─────────────────
+// At 1 it must be today's render exactly (no base rows, same draws); a dial
+// below 1 in between must leave that intact; and below 1 the base rows must
+// be live, which the halved take budget shows (3 asked, 2 planned).
+const ADAPTER = arg('--adapter', '');
+if (ADAPTER) {
+  console.log('\n[4] plan dial');
+  const body = { prompt: PROMPT, max_frames: 200, seed: 77, takes: 2, lm_adapter: ADAPTER };
+  const sig = (r) => r.per_take.map((t) => t.semantic.join(',')).join('|');
+  const ref = await plan(body);
+  const one = await plan({ ...body, lm_adapter_plan: 1 });
+  if (sig(one) !== sig(ref)) fail('plan 1.0 differs from an omitted plan dial');
+  else pass('plan 1.0 identical to no plan dial');
+  const zero = await plan({ ...body, takes: 3, lm_adapter_plan: 0 });
+  if (Number(zero.takes) !== 2) fail(`plan 0 planned ${zero.takes} takes of 3; base rows should halve the budget to 2`);
+  else pass('plan 0: 3 takes asked, 2 planned (base rows active)');
+  if (zero.per_take.slice(0, 2).map((t) => t.semantic.join(',')).join('|') === sig(ref))
+    fail('plan 0 drew the same codes as plan 1');
+  else pass('plan 0 draws a different song from plan 1');
+  const after = await plan(body);
+  if (sig(after) !== sig(ref)) fail('a plan-1 render changed after a plan-0 render; the graph rebuild is not clean');
+  else pass('plan 1 identical after an intervening plan-0 render');
+  await plan({ prompt: PROMPT, max_frames: 4, seed: 1, lm_adapter_clear: true });
 }
 
 console.log(failures ? `\n${failures} FAILURE(S)` : '\nall checks passed');

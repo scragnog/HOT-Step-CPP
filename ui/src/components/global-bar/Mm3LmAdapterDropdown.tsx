@@ -51,13 +51,14 @@ const PARAM = {
   early:   'mm3LmAdapterScaleEarly',
   mid:     'mm3LmAdapterScaleMid',
   late:    'mm3LmAdapterScaleLate',
+  plan:    'mm3LmAdapterScalePlan',
   trigger: 'mm3LmAdapterTrigger',
 } as const;
 
 /** Matches MM3_LM_ADAPTER_DEFAULT_SCALES server-side; used only until the
  *  catalogue lands (or if it fails to), so the sliders are never NaN. */
 const FALLBACK_SCALES: Mm3LmAdapterScales = {
-  scale: 1.0, scaleAttn: 1.0, scaleMlp: 1.0, scaleEarly: 1.0, scaleMid: 1.0, scaleLate: 1.0,
+  scale: 1.0, scaleAttn: 1.0, scaleMlp: 1.0, scaleEarly: 1.0, scaleMid: 1.0, scaleLate: 1.0, scalePlan: 1.0,
 };
 
 /** Fetched once per mount; the list only changes when files are installed. */
@@ -83,7 +84,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
     return Number.isFinite(v) ? v : fallback;
   };
 
-  /** Write all six dials at once — used on pick and on reset, so the sliders
+  /** Write all seven dials at once — used on pick and on reset, so the sliders
    *  can never sit at a mix of one adapter's recommendation and another's. */
   const applyScales = useCallback((s: Mm3LmAdapterScales) => {
     setBackendParam(PARAM.scale, s.scale);
@@ -92,6 +93,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
     setBackendParam(PARAM.early, s.scaleEarly);
     setBackendParam(PARAM.mid,   s.scaleMid);
     setBackendParam(PARAM.late,  s.scaleLate);
+    setBackendParam(PARAM.plan,  s.scalePlan ?? 1.0);
   }, [setBackendParam]);
 
   const recommendedFor = useCallback((file: string): Mm3LmAdapterScales => ({
@@ -277,6 +279,16 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             min={0} max={2} step={0.05} showInput
             defaultValue={rec.scaleMlp}
           />
+          <Slider
+            label={t('globalBar.mm3LmPlan', 'Plan')}
+            info={t('globalBar.mm3LmPlanInfo',
+              '1 = the adapter plans the song, 0 = the base model plans it and the adapter sings it, between = a mix. Below 1 the planner runs the base model beside the adapter on every step, so it renders in Runtime mode and planning is slower.')}
+            infoMeta={t('globalBar.mm3LmPlanMeta', 'default 1.0 · range 0-1 · Runtime mode')}
+            value={num(PARAM.plan, defaults.scalePlan ?? 1.0)}
+            onChange={v => setBackendParam(PARAM.plan, v)}
+            min={0} max={1} step={0.05} showInput
+            defaultValue={rec.scalePlan ?? 1.0}
+          />
 
           <div className="flex items-center justify-between gap-2 pt-1">
             <button
@@ -365,7 +377,7 @@ export const Mm3LmAdapterBadge: React.FC = () => {
       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
       <span className="text-[10px] text-emerald-400 font-mono truncate max-w-[120px]" title={selected}>{short}</span>
       <span className="text-[10px] text-zinc-600 flex-shrink-0">
-        a{dial(PARAM.attn, 1.0)}/m{dial(PARAM.mlp, 0.5)}
+        a{dial(PARAM.attn, 1.0)}/m{dial(PARAM.mlp, 0.5)}{Number(params[PARAM.plan] ?? 1) < 1 ? `/p${dial(PARAM.plan, 1.0)}` : ''}
       </span>
     </div>
   );

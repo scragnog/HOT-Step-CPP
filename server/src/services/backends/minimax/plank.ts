@@ -35,8 +35,11 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 
 import { config } from '../../../config.js';
+
+export const MM3_LAUNDER_FALLBACK_CAPTION = 'a full song with vocals and instruments';
 
 export const MM3_PLANK_EXT = '.mm3plank';
 
@@ -50,6 +53,20 @@ export interface Mm3PlankMeta {
   seed: number;
   frames: number;
   sizeBytes: number;
+  /** Source filename, for a plank encoded from a reference (Cover Studio). */
+  source?: string;
+  sourceSizeBytes?: number;
+  sourceSha256?: string;
+  launderRequestedSeed?: number;
+  /** Cover Studio encodes only: true when the codes came from ace-train
+   *  mm3-launder rather than mm3-codes. Absent on planks captured from a render. */
+  laundered?: boolean;
+  launderSteps?: number;
+  launderSeed?: number;
+  launderCaption?: string;
+  /** Model files the launder used (basenames), so a later A/B knows what it hears. */
+  rec7?: string;
+  encoder?: string;
 }
 
 /** Sibling of the audio directory, so planks travel with a data-dir move. */
@@ -82,8 +99,16 @@ export function readMm3PlankMeta(ref: string): Partial<Mm3PlankMeta> | null {
   }
 }
 
+/** A Cover Studio encode also keeps the encoder's source guide (`<id>.guide`)
+ *  and the launder's renderer condition (`<id>.mm3hiddens`) beside the plank,
+ *  for the guided cover modes. Planks encoded before that have neither. */
+export function mm3PlankSiblings(plank: string): { guide: string; state: string } {
+  const base = path.basename(plank).replace(/\.mm3plank$/, '');
+  return { guide: `${base}.guide`, state: `${base}.mm3hiddens` };
+}
+
 /** Saved planks, newest first. Never throws — a missing directory is []. */
-export function listMm3Planks(): Array<{ file: string } & Partial<Mm3PlankMeta>> {
+export function listMm3Planks(): Array<{ file: string; guide: boolean; state: boolean } & Partial<Mm3PlankMeta>> {
   try {
     const dir = mm3PlankDir();
     if (!fs.existsSync(dir)) return [];
@@ -91,7 +116,11 @@ export function listMm3Planks(): Array<{ file: string } & Partial<Mm3PlankMeta>>
       .filter(f => f.endsWith(MM3_PLANK_EXT))
       // A plank with no readable sidecar is still replayable (the codes are in
       // the blob), so surface it with just its filename rather than hiding it.
-      .map(file => ({ file, ...(readMm3PlankMeta(file) ?? {}) }))
+      .map(file => {
+        const sib = mm3PlankSiblings(file);
+        return { file, ...(readMm3PlankMeta(file) ?? {}),
+          guide: fs.existsSync(path.join(dir, sib.guide)), state: fs.existsSync(path.join(dir, sib.state)) };
+      })
       .sort((a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')));
   } catch {
     return [];
@@ -131,4 +160,50 @@ export function readMm3Plank(ref: string): { forced_semantic: number[]; forced_a
     console.error(`[MM3 Plank] Failed to read ${plankPath}: ${err?.message ?? err}`);
     return null;
   }
+}
+
+/** Convert an `ace-train mm3-codes` cache file (int32 [rows, 8], column 0
+ *  semantic, columns 1-7 acoustic, row 0 the warm-up row — the same iteration
+ *  indexing a plank uses) into `<id>.mm3plank` plus its sidecar. Returns the
+ *  plank's file name. Throws on a malformed file. */
+export function writeMm3PlankFromCodes(codesPath: string, id: string,
+  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source' | 'laundered' | 'rec7' | 'encoder' | 'launderSteps' | 'launderSeed' | 'launderCaption' | 'sourceSizeBytes' | 'sourceSha256' | 'launderRequestedSeed'>): string {
+  const raw = fs.readFileSync(codesPath);
+  const rows = raw.length / 32;
+  if (!Number.isInteger(rows) || rows < 2) throw new Error(`${path.basename(codesPath)} is not an [rows, 8] int32 codes file`);
+  const blob = Buffer.alloc(8 + rows * 32);
+  let o = 0;
+  blob.writeInt32LE(rows, o); o += 4;
+  for (let r = 0; r < rows; r++) { blob.writeInt32LE(raw.readInt32LE(r * 32), o); o += 4; }
+  blob.writeInt32LE(rows * 7, o); o += 4;
+  for (let r = 0; r < rows; r++) raw.copy(blob, o + r * 28, r * 32 + 4, r * 32 + 32);
+  const dir = mm3PlankDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = `${id}${MM3_PLANK_EXT}`;
+  fs.writeFileSync(path.join(dir, file), blob);
+  const sidecar: Mm3PlankMeta = {
+    id, created: new Date().toISOString(), seed: 0, frames: rows - 1,
+    duration: Math.round(((rows - 1) / 25) * 100) / 100, sizeBytes: blob.length, ...meta,
+  };
+  fs.writeFileSync(path.join(dir, `${file}.json`), JSON.stringify(sidecar, null, 2));
+  return file;
+}
+
+/** Hash the actual bytes, so renamed/re-uploaded sources can reuse a plank. */
+export async function mm3SourceIdentity(sourcePath: string) {
+  const hash = createHash('sha256');
+  let sourceSizeBytes = 0;
+  for await (const chunk of fs.createReadStream(sourcePath)) {
+    sourceSizeBytes += chunk.length;
+    hash.update(chunk);
+  }
+  return { sourceSizeBytes, sourceSha256: hash.digest('hex') };
+}
+
+export function matchesMm3CoverPlank(meta: Partial<Mm3PlankMeta>, source: { sourceSizeBytes: number; sourceSha256: string },
+  settings: { launderSteps: number; launderSeed: number; launderCaption: string }): boolean {
+  return meta.laundered === true && meta.sourceSizeBytes === source.sourceSizeBytes && meta.sourceSha256 === source.sourceSha256
+    && meta.launderSteps === settings.launderSteps
+    && (meta.launderRequestedSeed ?? meta.launderSeed) === settings.launderSeed
+    && meta.launderCaption === (settings.launderCaption.trim() || MM3_LAUNDER_FALLBACK_CAPTION);
 }

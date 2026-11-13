@@ -90,6 +90,45 @@ struct MM3LmAdapterScales {
     bool operator!=(const MM3LmAdapterScales & o) const { return !(*this == o); }
 };
 
+// Adapter strength along the song, applied by the AR loop between iterations.
+// A LoRA delta is position-blind: trained on whole songs it learns thousands
+// of "emit another frame" lessons and one "stop", and that overwrites the
+// base model's own instinct to open and to close a song. The schedule hands
+// those parts back: the base alone for the first `in_sec`, full strength for
+// the body, then from `out_sec` a ramp to `floor` over `out_len_sec`
+// (0 = a hard handoff). The ramp moves in `step_sec` steps because every
+// change rebuilds the decode graph (weights and KV cache stay). The KV built
+// under one strength stays in the cache under the next; nothing is spliced.
+// All zero = off: the render is bit-identical to a build without it.
+struct MM3LmAdapterSchedule {
+    float in_sec      = 0.0f;
+    float out_sec     = 0.0f;
+    float out_len_sec = 0.0f;
+    float floor       = 0.0f;
+    float step_sec    = 10.0f;
+
+    bool active() const { return in_sec > 0.0f || out_sec > 0.0f; }
+
+    // Multiplier on the global scale at song time t seconds.
+    float at(float t) const {
+        if (t < in_sec) {
+            return 0.0f;
+        }
+        if (out_sec <= 0.0f || t < out_sec) {
+            return 1.0f;
+        }
+        float u = 1.0f;
+        if (out_len_sec > 0.0f) {
+            float e = t - out_sec;
+            if (step_sec > 0.0f) {
+                e = std::floor(e / step_sec) * step_sec;
+            }
+            u = e / out_len_sec < 1.0f ? e / out_len_sec : 1.0f;
+        }
+        return 1.0f - (1.0f - floor) * u;
+    }
+};
+
 // Which component of a module a safetensors key carries. PEFT LoRA files use
 // A/B; LyCORIS LoKr files use w1 plus either a monolithic w2 or the w2_a/w2_b
 // pair, and a scalar alpha.
