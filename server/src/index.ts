@@ -503,6 +503,8 @@ const server = app.listen(config.server.port, config.server.host, () => {
   if (!isLoopbackHost(config.server.host)) {
     console.warn(`[Server] WARNING: bound to ${config.server.host}, reachable from other machines on the network.`);
     console.warn('[Server] Unset SERVER_HOST to keep it local. Browser origins other than this host need CORS_ORIGINS.');
+  } else if (config.workers.acceptToken) {
+    console.warn('[Server] WORKER_TOKEN is set but the server only listens on loopback. Set SERVER_HOST=0.0.0.0 so the controlling PC can reach this worker.');
   }
   console.log(`[Server] ace-server URL: ${config.aceServer.url}`);
   if (DATA_ROOT) console.log(`[Server] Data folder: ${DATA_ROOT}`);

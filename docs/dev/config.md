@@ -242,7 +242,9 @@ checkout back at its own folders; data that already moved stays in the data fold
 
 The server binds `127.0.0.1` and only answers other machines when you opt in:
 
-- `SERVER_HOST=0.0.0.0` (or one LAN/Tailscale IP) to listen beyond loopback.
+- `SERVER_HOST=0.0.0.0` to listen beyond loopback. Do not bind a single LAN or Tailscale IP:
+  the server then stops listening on `127.0.0.1`, which breaks the local DAW plugin and the
+  server's calls to itself. To limit who can connect, use a firewall rule instead.
 - Requests whose `Host` is not loopback, an IP literal, `SERVER_HOST`, a `CORS_ORIGINS` host or
   an `ALLOWED_HOSTS` entry get 403. This blocks DNS rebinding. Reaching the server by IP needs
   nothing extra; a name such as `mybox` or `mybox.tail1234.ts.net` must be in `ALLOWED_HOSTS`.
@@ -377,6 +379,8 @@ Exposed in Settings > Environment > Server and hot-reloaded. Code: `server/src/s
 | `TRAINING_WORKERS` | empty | Workers this machine drives: `Name=http://host:3001`, comma-separated. Enables `/api/workers` and the studio's Train on / Run on controls |
 | `TRAINING_WORKER_TOKEN` | empty | Sent as `x-hotstep-worker-token` on every call to a worker |
 | `WORKER_TOKEN` | empty | Set = this machine is a worker: every `/api` request from a non-loopback address must carry this token (401 otherwise) |
+
+The server binds `127.0.0.1` by default, so a worker must also set `SERVER_HOST=0.0.0.0` or the controller cannot reach it. Set `WORKER_TOKEN` too. The server logs a warning at startup when `WORKER_TOKEN` is set but it is bound to loopback.
 
 A worker keeps pushed datasets under `<TRAINING_DIR>/worker-datasets/<slug>`, with the controller's dataset id and slug. Every machine records the last linked YuE2 pair per slug in `<TRAINING_DIR>/yue2-linked.json`; the controller's pull reads the worker's copy.
 
