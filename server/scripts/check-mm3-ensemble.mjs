@@ -26,6 +26,18 @@
 //
 // --adapter adds the plan-dial checks (section 4) with that MM3 LM adapter.
 //
+// Reference fixtures are optional and are not distributed with the app. To
+// regenerate them, instrument the original bf16 MM3 reference on one prompt:
+// save its conditional/unconditional token IDs as little-endian int32
+// tok_ids_{cond,uncond}.bin; save the conditional then unconditional final LM
+// hidden rows as float32 lm_i0_last_hidden.bin [2,4096]. For decode parity,
+// capture four AR iterations, including the un-emitted iteration 0. Save
+// codes_semantic_all.bin [I] and codes_acoustic_all.bin [I,7] as int32, plus
+// float32 lm_i{1,2,3}_{last_hidden,semantic_logits,depth_hidden}.bin with shapes
+// [2,4096], [2,16384] (semantic span only), and [7,4096]. Capture on that same
+// sampled trajectory, then pass its directory with --fixtures DIR. An engine
+// dump is not an independent reference. Missing sections are reported as skips.
+//
 // The engine must be warm (POST /mm3/warm) with the LM and depth resident.
 
 import fs from 'node:fs';
@@ -47,8 +59,11 @@ const TAKES = [1, 2, 3, 4];
 const MIN_CORR = 0.999;
 
 let failures = 0;
+let skipped = 0;
 const fail = (msg) => { console.log(`  FAIL  ${msg}`); failures++; };
 const pass = (msg) => console.log(`  ok    ${msg}`);
+const skip = (msg) => { console.log(`  SKIP  ${msg}`); skipped++; };
+const missingFixtures = (files) => files.filter((f) => !fs.existsSync(path.join(FIX, f)));
 
 const readI32 = (p) => {
   const b = fs.readFileSync(p);
@@ -60,6 +75,9 @@ const readF32 = (p) => {
 };
 
 function compare(a, b) {
+  if (!a.length || a.length !== b.length || !a.every(Number.isFinite) || !b.every(Number.isFinite)) {
+    throw new Error(`invalid reference comparison: lengths ${a.length}/${b.length}, expected equal finite arrays`);
+  }
   let sa = 0, sb = 0;
   for (let i = 0; i < a.length; i++) { sa += a[i]; sb += b[i]; }
   const ma = sa / a.length, mb = sb / a.length;
@@ -70,6 +88,7 @@ function compare(a, b) {
     const d = a[i] - b[i];
     se += d * d; sr += b[i] * b[i];
   }
+  if (!saa || !sbb || !sr) throw new Error('invalid reference comparison: zero variance or reference energy');
   return { corr: sab / Math.sqrt(saa * sbb), relRmse: Math.sqrt(se / a.length) / Math.sqrt(sr / a.length) };
 }
 
@@ -105,8 +124,9 @@ console.log(`fixtures ${FIX}`);
 // ── 1. the forward, against the reference, at every take count ──────────────
 console.log('\n[1] take 0 forward vs the reference bf16 dump, per take count');
 const refPath = path.join(FIX, 'lm_i0_last_hidden.bin');
-if (!fs.existsSync(refPath)) {
-  console.log(`  SKIP  no fixtures at ${FIX} (pass --fixtures DIR)`);
+const missingForward = missingFixtures(['lm_i0_last_hidden.bin', 'tok_ids_cond.bin', 'tok_ids_uncond.bin']);
+if (missingForward.length) {
+  skip(`reference prefill unavailable: ${missingForward.join(', ')}; see the capture recipe in this script, then pass --fixtures DIR`);
 } else {
   const ref = readF32(refPath);
   const idsCond = readI32(path.join(FIX, 'tok_ids_cond.bin'));
@@ -144,9 +164,11 @@ if (!fs.existsSync(refPath)) {
 // WRONG forward is not.
 console.log('\n[1b] folded decode path vs the reference, via forced replay');
 {
-  const need = ['codes_semantic_all.bin', 'codes_acoustic_all.bin', 'lm_i1_last_hidden.bin'];
-  if (!need.every((f) => fs.existsSync(path.join(FIX, f)))) {
-    console.log('  SKIP  decode fixtures not present');
+  const need = ['codes_semantic_all.bin', 'codes_acoustic_all.bin', 'tok_ids_cond.bin', 'tok_ids_uncond.bin',
+    ...[1, 2, 3].flatMap((it) => ['last_hidden', 'semantic_logits', 'depth_hidden'].map((name) => `lm_i${it}_${name}.bin`))];
+  const missingDecode = missingFixtures(need);
+  if (missingDecode.length) {
+    skip(`reference decode unavailable: ${missingDecode.join(', ')}; see the capture recipe in this script, then pass --fixtures DIR`);
   } else {
     const H_ = H, SV = 16384, NC = 7;
     const semAll = readI32(path.join(FIX, 'codes_semantic_all.bin'));
@@ -187,10 +209,8 @@ console.log('\n[1b] folded decode path vs the reference, via forced replay');
         ];
         for (const [name, got, file] of checks) {
           const fp = path.join(FIX, file);
-          if (!fs.existsSync(fp)) continue;
           const ref = readF32(fp);
-          const n = Math.min(got.length, ref.length);
-          const st = compare(got.subarray(0, n), ref.subarray(0, n));
+          const st = compare(got, ref);
           const line = `iter ${it} ${name}: corr ${st.corr.toFixed(7)} rmse ${st.relRmse.toExponential(3)}`;
           if (st.corr < MIN_CORR) fail(`${line}  (below ${MIN_CORR})`);
           else pass(line);
@@ -240,28 +260,33 @@ console.log('\n[3] one take is unaffected by ensemble support');
 
 // ── 4. the plan dial (lm_adapter_plan), with --adapter PATH ─────────────────
 // At 1 it must be today's render exactly (no base rows, same draws); a dial
-// below 1 in between must leave that intact; and below 1 the base rows must
-// be live, which the halved take budget shows (3 asked, 2 planned).
+// below 1 in between must leave that intact. The 16-row LM budget supports
+// four takes with base rows and CFG, matching the depth decoder's take cap.
 const ADAPTER = arg('--adapter', '');
 if (ADAPTER) {
   console.log('\n[4] plan dial');
-  const body = { prompt: PROMPT, max_frames: 200, seed: 77, takes: 2, lm_adapter: ADAPTER };
+  const body = { prompt: PROMPT, max_frames: 200, seed: 77, takes: 3, lm_adapter: ADAPTER };
   const sig = (r) => r.per_take.map((t) => t.semantic.join(',')).join('|');
   const ref = await plan(body);
   const one = await plan({ ...body, lm_adapter_plan: 1 });
   if (sig(one) !== sig(ref)) fail('plan 1.0 differs from an omitted plan dial');
   else pass('plan 1.0 identical to no plan dial');
-  const zero = await plan({ ...body, takes: 3, lm_adapter_plan: 0 });
-  if (Number(zero.takes) !== 2) fail(`plan 0 planned ${zero.takes} takes of 3; base rows should halve the budget to 2`);
-  else pass('plan 0: 3 takes asked, 2 planned (base rows active)');
-  if (zero.per_take.slice(0, 2).map((t) => t.semantic.join(',')).join('|') === sig(ref))
+  const zero = await plan({ ...body, lm_adapter_plan: 0 });
+  if (Number(zero.takes) !== 3 || zero.per_take.length !== 3) fail(`plan 0 planned ${zero.takes} takes of 3; expected all 3 within the 16-row LM budget`);
+  else pass('plan 0: 3 takes asked, 3 planned (within the 16-row LM budget)');
+  if (sig(zero) === sig(ref))
     fail('plan 0 drew the same codes as plan 1');
   else pass('plan 0 draws a different song from plan 1');
   const after = await plan(body);
   if (sig(after) !== sig(ref)) fail('a plan-1 render changed after a plan-0 render; the graph rebuild is not clean');
   else pass('plan 1 identical after an intervening plan-0 render');
+  const capped = await plan({ ...body, max_frames: 4, takes: 5, lm_adapter_plan: 0 });
+  if (Number(capped.takes) !== 4 || capped.per_take.length !== 4) fail(`plan 0 planned ${capped.takes} takes of 5; expected the 4-take cap`);
+  else pass('plan 0: 5 takes asked, 4 planned (16-row LM and 8-row depth budgets)');
   await plan({ prompt: PROMPT, max_frames: 4, seed: 1, lm_adapter_clear: true });
+} else {
+  skip('plan dial: pass --adapter PATH to a runtime MM3 LM adapter without an artist token or KV prefix');
 }
 
-console.log(failures ? `\n${failures} FAILURE(S)` : '\nall checks passed');
-process.exit(failures ? 1 : 0);
+console.log(failures ? `\n${failures} FAILURE(S); ${skipped} section(s) skipped` : `\nPASS: all available ensemble checks passed; ${skipped} section(s) skipped`);
+process.exitCode = failures ? 1 : 0;
