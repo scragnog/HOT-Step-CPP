@@ -7,8 +7,8 @@
 // 4. Optionally spawns ace-server as a managed child process
 
 import express from 'express';
-import cors from 'cors';
-import { isAllowedOrigin, isLoopbackHost, originRejection, parseCorsOrigins } from './services/security/originPolicy.js';
+import { isLoopbackHost } from './services/security/originPolicy.js';
+import { applySecurityGates } from './services/security/securityGates.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -106,17 +106,12 @@ void startYue2Mirror();
 const app = express();
 
 // Middleware
-// Origin policy: loopback origins, same-origin by IP, and CORS_ORIGINS are allowed. A foreign
-// Origin may not change state or reach the DAW bridge, so a web page cannot drive this server.
-const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
-app.use((req, res, next) => {
-  const status = originRejection(req.method, req.path, req.get('origin'), corsOrigins, req.get('host'));
-  if (status) { res.status(status).json({ error: 'Origin not allowed' }); return; }
-  next();
+// Host allowlist (DNS rebinding), then Origin policy and CORS. See services/security/securityGates.ts.
+applySecurityGates(app, {
+  serverHost: config.server.host,
+  corsOrigins: process.env.CORS_ORIGINS,
+  allowedHosts: process.env.ALLOWED_HOSTS,
 });
-app.use(cors((req, cb) => {
-  cb(null, { origin: isAllowedOrigin(req.headers.origin, corsOrigins, req.headers.host) });
-}));
 // Training on another PC: a worker checks its token first; the controller's
 // proxy goes before the body parsers so proxied bodies stream through.
 app.use('/api', workerTokenGate);

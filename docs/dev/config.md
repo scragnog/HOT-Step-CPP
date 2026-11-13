@@ -232,9 +232,24 @@ checkout back at its own folders; data that already moved stays in the data fold
 | Variable | Default | Settings | Effect |
 |---|---|---|---|
 | `SERVER_PORT` | `3001` | Environment, Restart | Port the Node server listens on. The Vite proxy in `ui/vite.config.ts` is hard-coded to `3001`, so dev mode breaks if you change it |
-| `SERVER_HOST` | `0.0.0.0` | env only | Interface the Node server binds to |
+| `SERVER_HOST` | `127.0.0.1` | env only | Interface the Node server binds to. Loopback by default |
+| `ALLOWED_HOSTS` | empty | env only | Comma list of extra hostnames accepted in the `Host` header (LAN names, Tailscale MagicDNS) |
+| `CORS_ORIGINS` | empty | env only | Comma list of extra browser origins allowed to call the API, for example `http://192.168.1.20:3000` |
 | `ACESTEPCPP_PORT` | `8085` | Environment, Restart | Engine port. Passed as `--port`; the server connects to `http://<host>:<port>` |
 | `ACESTEPCPP_HOST` | `127.0.0.1` | Environment, Restart | Engine bind address, passed as `--host`, and the host the server connects to |
+
+### LAN and Tailscale access (opt-in)
+
+The server binds `127.0.0.1` and only answers other machines when you opt in:
+
+- `SERVER_HOST=0.0.0.0` (or one LAN/Tailscale IP) to listen beyond loopback.
+- Requests whose `Host` is not loopback, an IP literal, `SERVER_HOST`, a `CORS_ORIGINS` host or
+  an `ALLOWED_HOSTS` entry get 403. This blocks DNS rebinding. Reaching the server by IP needs
+  nothing extra; a name such as `mybox` or `mybox.tail1234.ts.net` must be in `ALLOWED_HOSTS`.
+- Browser pages from a non-loopback origin may only read (GET/HEAD) unless the origin is in
+  `CORS_ORIGINS`. A page served by this server and opened by IP counts as same-origin.
+- Vite dev from another machine: `ui/vite.config.ts` proxies with `changeOrigin`, so the server
+  sees the browser's `http://<lan-ip>:3000` Origin. Set `CORS_ORIGINS=http://<lan-ip>:3000`.
 
 `.env.example` also lists `VITE_PORT` and `VITE_HOST`. Nothing reads them: `dev.bat` starts
 Vite with `--port 3000 --host`, and `ui/vite.config.ts` sets port 3000 and host `0.0.0.0`.
