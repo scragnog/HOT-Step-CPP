@@ -65,7 +65,8 @@ export const coverScoreSourceSchema = z.enum(['dataset', 'musicxml', 'sheetsage2
  * kind rather than copying those fields into a generic document update.
  * Readiness is GET /api/yue2/cover/readiness?source=<leadSheetSource>; the
  * existing {source, ready, model, refined, message} response is unchanged.
- * Native remains not installed until the native spawn wrapper is available.
+ * `yourmt3-chordnet` is ready only when ace-midi, its two locally converted GGUFs,
+ * the chord templates and the Beat This! model are present (no download entry).
  * Approved MusicXML/dataset scores can render without invoking readiness.
  * `dataset` stays the stored spelling; generation metadata uses dataset-sidecar. */
 export const coverSourceSchema = coverDraftRefSchema.extend({

@@ -28,6 +28,7 @@ import { readAbcSidecar, writeAbcSidecar } from './training/abcSidecar.js';
 import { hasSoundingScore } from './backends/yue2/scoreHealth.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 import { cachedMp3 } from './audioConvert.js';
+import { nativeMissingMessage } from './leadSheetNative.js';
 import { aceMidiExe, BEAT_MODEL, isModelDownloaded, MUSCRIPTOR_MODELS, type MuscriptorModel } from './muscriptor.js';
 
 export const LEAD_SHEET_SOURCES = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet'] as const;
@@ -97,7 +98,7 @@ export function createYue2CoverService(deps = {
   // Keeps the score it replaces, like saveDetails does for the .txt.
   saveAbc: (matched: CoverDatasetSource, abc: string) => writeAbcSidecar(matched.audioPath, abc, { keepBackups: true, anySounding: true }),
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
-}, midi = muscriptorReadinessDeps) {
+}, midi = muscriptorReadinessDeps, nativeMissing: () => string | null = nativeMissingMessage) {
   /** GET readiness accepts an optional lead-sheet source; omission uses the stored sheet preference. */
   function readiness(requestedSource?: unknown) {
     if (requestedSource !== undefined && !LEAD_SHEET_SOURCES.includes(requestedSource as LeadSheetSource)) {
@@ -106,8 +107,8 @@ export function createYue2CoverService(deps = {
     const source: LeadSheetSource = requestedSource as LeadSheetSource | undefined
       ?? (deps.transcriberSetting().refined ? 'sheetsage2-refined' : 'sheetsage2');
     if (source === 'yourmt3-chordnet') {
-      return { source, ready: false, model: null, refined: false,
-        message: `YourMT3+/ChordNet is not installed yet (${YOURMT3_CHORDNET_MODEL_IDS.join(', ')}).` };
+      const message = nativeMissing();
+      return { source, ready: !message, model: message ? null : YOURMT3_CHORDNET_MODEL_IDS.join('+'), refined: false, message };
     }
     if (source === 'muscriptor') {
       const chosen = midi.modelChoice() ?? MUSCRIPTOR_MODELS.find(model => midi.installed(model)) ?? 'small';

@@ -52,9 +52,9 @@ fs.mkdirSync(midiBaseDir, { recursive: true });
 
 /** Kill ace-midi if it prints nothing for this long (#227: a fixed total
  *  timeout killed long songs that were still making chunk progress). */
-const TRANSCRIBE_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+export const TRANSCRIBE_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 /** Hard cap on one transcription, however steady its progress. */
-const TRANSCRIBE_MAX_MS = 6 * 60 * 60 * 1000;
+export const TRANSCRIBE_MAX_MS = 6 * 60 * 60 * 1000;
 
 /** Fires onTimeout('idle') when touch() is not called for idleMs, or
  *  onTimeout('cap') after capMs total. touch() on each line of output. */
@@ -106,7 +106,7 @@ export function runOnMidiLane(jobId: string, fn: () => Promise<void>): Promise<v
 }
 
 /** Resolve a URL-style audio path to an absolute filesystem path */
-function resolveAudioPath(audioUrl: string): string {
+export function resolveAudioPath(audioUrl: string): string {
   if (audioUrl.startsWith('/references/')) {
     return path.join(config.data.dir, 'references', path.basename(audioUrl));
   }

@@ -32,7 +32,7 @@ Unavailable sources stay selectable; the score panel says what is missing.
 | SheetSage2 | The SheetSage2 model in Model Manager. |
 | SheetSage2-Refined | SheetSage2 and its Refined overlay in Model Manager. |
 | MuScriptor | A MuScriptor transcription model, Beat This! and a build containing `ace-midi`. The readiness message names the chosen model and missing files. |
-| YourMT3+ / ChordNet | Not installed yet. No download entry is offered while model rights and native installation are pending. |
+| YourMT3+ / ChordNet | `yourmt3-F32.gguf` and `chordnet-F32.gguf` in the `muscriptor` folder of your models folder, Beat This! and a build containing `ace-midi`. You convert the two models yourself with `engine/tools/convert-yourmt3.py` and `convert-chordnet.py`. There is no download, because we cannot yet redistribute them. The readiness message names each missing file. |
 
 A new draft uses the picker's choice, or snapshots the **Models** default if
 you have not selected a source. Changing that default later does not change an

@@ -15,7 +15,7 @@ import { sidecarPathFor } from './training/paths.js';
 import { abcSidecarPath, writeAbcSidecar } from './training/abcSidecar.js';
 import { MISSING_REFINED } from './training/yue2Sheet.js';
 
-function fixture(missing = false, defer = false, midi?: Parameters<typeof createYue2CoverService>[1]) {
+function fixture(missing = false, defer = false, midi?: Parameters<typeof createYue2CoverService>[1], nativeMissing?: Parameters<typeof createYue2CoverService>[2]) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-api-'));
   const referenceDir = path.join(root, 'references');
   const libraryDir = path.join(root, 'audio');
@@ -95,7 +95,7 @@ function fixture(missing = false, defer = false, midi?: Parameters<typeof create
       job.status = 'done';
       return 'X:1\nK:C\nC';
     },
-  }, midi);
+  }, midi, nativeMissing);
   return { root, referenceDir, libraryDir, upload, service, setDuration: (n: number) => { duration = n; },
     setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
     failAbcWrites: (fail: boolean) => { failAbc = fail; },
@@ -156,16 +156,17 @@ test('MuScriptor readiness requires the selected model, beat model and executabl
   } finally { f.close(); }
 });
 
-test('YourMT3 and ChordNet readiness names the shared placeholder registry ids', () => {
-  const f = fixture();
+test('YourMT3 and ChordNet readiness follows the missing-file message', () => {
+  let message: string | null = 'YourMT3+/ChordNet is not installed: missing chordnet-F32.gguf (ChordNet).';
+  const f = fixture(false, false, undefined, () => message);
   try {
     const result = f.service.readiness('yourmt3-chordnet');
-    assert.equal(result.source, 'yourmt3-chordnet');
-    assert.equal(result.ready, false);
-    assert.equal(result.model, null);
-    assert.equal(result.refined, false);
-    assert.match(result.message!, /not installed yet/);
-    for (const id of YOURMT3_CHORDNET_MODEL_IDS) assert.ok(result.message!.includes(id));
+    assert.deepEqual([result.source, result.ready, result.model, result.refined, result.message],
+      ['yourmt3-chordnet', false, null, false, message]);
+    message = null;
+    const ready = f.service.readiness('yourmt3-chordnet');
+    assert.equal(ready.ready, true);
+    assert.equal(ready.model, YOURMT3_CHORDNET_MODEL_IDS.join('+'));
   } finally { f.close(); }
 });
 
