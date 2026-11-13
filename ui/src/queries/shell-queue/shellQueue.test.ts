@@ -266,8 +266,10 @@ test('ABC lead sheet: read from the base render, missing or SPA shell is none', 
 test('peaks: concurrent reads share a request, failures are not cached, forget drops the entry', async () => {
   let calls = 0;
   let fail = true;
-  globalThis.fetch = async () => {
+  let cacheMode: RequestCache | undefined;
+  globalThis.fetch = async (_url: RequestInfo | URL, init?: RequestInit) => {
     calls++;
+    cacheMode = init?.cache;
     await tick();
     return fail ? json({ error: 'nope' }, 404) : json({ version: 1, duration: 1, sampleRate: 1, channels: 1, min: [0], max: [1] });
   };
@@ -283,4 +285,7 @@ test('peaks: concurrent reads share a request, failures are not cached, forget d
   assert.equal(peaksCached('/audio/p.wav'), null);
   await fetchPeaks('/audio/p.wav');
   assert.equal(calls, 2, 'the rewritten file is read again');
+  await fetchPeaks('/audio/p.wav');
+  assert.equal(calls, 3, 'every load asks the server, so a pass from anywhere shows');
+  assert.equal(cacheMode, 'no-cache', 'and revalidates past the HTTP cache');
 });

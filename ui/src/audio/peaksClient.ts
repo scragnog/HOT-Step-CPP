@@ -21,16 +21,18 @@ export interface Peaks {
 
 // Query owns the cache (shared key `peaks`, one entry per audio URL), so
 // concurrent calls for a URL share one request and failures are never cached.
-// A file's peaks only change when the file is rewritten under the same URL,
-// which forgetPeaks reports; nothing else makes them stale.
+// Crop, fade and post-process passes rewrite a file under the same URL, so
+// every load asks the server again, past the browser's HTTP cache too. The
+// server keeps its own copy per file version, so an unchanged file is a 304.
+// The cached entry only paints the first frame while that answer is in flight.
 const peaksOptions = (url: string) => queryOptions({
   queryKey: sharedKeys.peaks(url),
   queryFn: async ({ signal }) => {
-    const res = await fetch(`/api/audio/peaks?url=${encodeURIComponent(url)}`, { signal });
+    const res = await fetch(`/api/audio/peaks?url=${encodeURIComponent(url)}`, { signal, cache: 'no-cache' });
     if (!res.ok) throw new ApiError(res.status, `peaks ${res.status} for ${url}`, null);
     return await res.json() as Peaks;
   },
-  staleTime: Infinity,
+  staleTime: 0,
   gcTime: 30 * 60_000,
 });
 
