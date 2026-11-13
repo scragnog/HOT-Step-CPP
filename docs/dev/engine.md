@@ -318,9 +318,12 @@ repository, the model registry or any download.
 `tensors.json`. It then prints one `PARITY` row per point and batch: padded waveform,
 linear spectrogram, pre-encoder and encoder. Each row runs twice: chained from the
 capture's source audio, and fed from that stage's captured input. The gate is below 1e-3
-(`tolerances.json`), and any non-finite value fails. A capture is skipped, with exit 0,
-only when its manifest records an upstream rejection before YourMT3. Anything missing or
-corrupt fails and is named. `--yourmt3-dump <dir>` writes this run's chained and fed
+(`tolerances.json`), and any non-finite value fails. The capture must hold every batch the
+source audio makes, with no gaps, and each batch must have exactly the segments that
+audio gives it. A capture is skipped, with exit 0, only when upstream rejected the input
+before YourMT3 ran. That means the manifest records a rejection, has no YourMT3 timing
+and lists no `mt3.*` entry. The reference rejections (no BPM, no melody) come after
+YourMT3, so those captures are validated. Anything missing or corrupt fails and is named. `--yourmt3-dump <dir>` writes this run's chained and fed
 outputs.
 
 Results on the five reference captures (max abs error, chained / fed; the waveform row

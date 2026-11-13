@@ -2301,13 +2301,28 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
             if (a && b && !strcmp(a, "--audio")) audio = b;
         }
     }
-    int n_batch = 0;
-    while (troot && yyjson_obj_get(troot, ("mt3.b" + std::to_string(n_batch) + ".waveform-padded").c_str())) n_batch++;
-    // Skipped only on a recorded upstream rejection before YourMT3; anything else missing fails.
-    yyjson_val * mroot  = man ? yyjson_doc_get_root(man) : nullptr;
-    const char * status = yyjson_get_str(yyjson_obj_get(mroot, "status"));
-    yyjson_val * skips  = yyjson_obj_get(mroot, "skips");
-    if (man && tns && !n_batch && status && !strcmp(status, "captured-with-upstream-rejection") && yyjson_arr_size(skips) > 0) {
+    // Batches are every index any mt3.b<k>.* key names; all of 0..max must be complete.
+    int  n_batch = 0;
+    bool any_mt3 = false;
+    if (troot) {
+        size_t       i, n;
+        yyjson_val * key, * val;
+        yyjson_obj_foreach(troot, i, n, key, val) {
+            const char * ks = yyjson_get_str(key);
+            if (!ks || strncmp(ks, "mt3.", 4)) continue;
+            any_mt3 = true;
+            if (!strncmp(ks, "mt3.b", 5)) n_batch = std::max(n_batch, atoi(ks + 5) + 1);
+        }
+    }
+    // Skipped only when upstream rejected the input before YourMT3 ran: a
+    // recorded rejection, no YourMT3 timing and no mt3.* entry at all. The
+    // reference rejections (no BPM, no melody) come after YourMT3 and fail here.
+    yyjson_val * mroot   = man ? yyjson_doc_get_root(man) : nullptr;
+    const char * status  = yyjson_get_str(yyjson_obj_get(mroot, "status"));
+    yyjson_val * skips   = yyjson_obj_get(mroot, "skips");
+    const bool   mt3_ran = yyjson_obj_get(yyjson_obj_get(mroot, "timings_seconds"), "yourmt3_load_and_inference") != nullptr;
+    if (man && tns && !any_mt3 && !mt3_ran && status && !strcmp(status, "captured-with-upstream-rejection") &&
+        yyjson_arr_size(skips) > 0) {
         printf("PARITY %-16s upstream rejected it before YourMT3 (%s): skipped\n", cap.c_str(),
                yyjson_get_str(yyjson_arr_get(skips, 0)) ? yyjson_get_str(yyjson_arr_get(skips, 0)) : "?");
         done();
@@ -2339,16 +2354,24 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
     std::vector<float> mono = load_audio_mono(audio, &sr);
     FrontHalf          c;
     front_half(e, mono, sr, c);
+    // The capture must hold every batch of this audio, each with its exact segment count.
+    const int want_batches = (c.n_seg + BATCH - 1) / BATCH;
+    if (n_batch != want_batches) {
+        printf("PARITY %-16s FAIL: capture has %d batch(es), the source audio makes %d (%d segments)\n", cap.c_str(),
+               n_batch, want_batches, c.n_seg);
+        g_parity_fail++;
+    }
     const double NaN = std::nan("");
     const double G   = 1e-3;
     const size_t per[4] = { (size_t) SEG, (size_t) NFRAME * NBIN, (size_t) NFRAME * 128 * 128, (size_t) NFRAME * N_LAT * D_ENC };
     const std::vector<float> * chained[4] = { &c.wav, &c.spec, &c.pre, &c.enc };
     for (int k = 0; k < n_batch; k++) {
-        const int B = (int) (ref[k * 4].size() / SEG);
-        bool shape_ok = B > 0 && (size_t) (k * BATCH + B) <= (size_t) c.n_seg;
-        for (int p = 0; p < 4; p++) shape_ok &= ref[k * 4 + p].size() == B * per[p];
+        const int B = std::min(BATCH, c.n_seg - k * BATCH);
+        bool shape_ok = B > 0;
+        for (int p = 0; p < 4; p++) shape_ok &= ref[k * 4 + p].size() == (size_t) std::max(B, 0) * per[p];
         if (!shape_ok) {
-            printf("PARITY %-16s FAIL: batch %d shapes differ from this run (%d segments chained)\n", cap.c_str(), k, c.n_seg);
+            printf("PARITY %-16s FAIL: batch %d is not the %d segment(s) this audio gives it\n", cap.c_str(), k,
+                   std::max(B, 0));
             g_parity_fail++;
             continue;
         }
