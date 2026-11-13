@@ -208,13 +208,14 @@ Output (`--out`, default `chords.json`):
 seconds, at CQT frame resolution (512 / 22,050 s). No beat snapping happens here: the
 caller rounds to its own grid.
 
-**Admitted input rates.** `--chords` accepts 22,050, 44,100 and 48,000 Hz and exits 2 on
-any other rate; callers resample other sources first. librosa resamples with soxr's HQ
-recipe. Its 2:1 stage is a Kaiser-windowed sinc that the port reproduces to 3e-8, so
-22,050 and 44,100 Hz match exactly. For other ratios soxr runs a cascade with an
-interpolated polyphase stage, which the same sinc only approximates. Reviewer's measured
-figures (2 s of seeded tone or noise; maximum absolute error against librosa) are a
-record, not a pass:
+**Input rates.** Every source rate is accepted; only 22,050 and 44,100 Hz match librosa
+exactly. librosa resamples with soxr's HQ recipe. Its 2:1 stage is a Kaiser-windowed sinc
+that the port reproduces to 3e-8. For other ratios soxr runs a cascade with an
+interpolated polyphase stage, which the same sinc only approximates, and the tool prints
+a `[chordnet] ... approximates librosa` notice. Matching those paths exactly would mean
+shipping soxr (LGPL), which was not taken; a resampling step in the caller would move
+the approximation, not remove it. Reviewer's measured figures (2 s of seeded tone or
+noise; maximum absolute error against librosa) are a record, not a pass:
 
 | Source rate | Signal | Waveform | CQT |
 |---|---|---|---|
@@ -226,9 +227,9 @@ record, not a pass:
 | 48,000 | tone / noise | 1.2e-4 / 1.7e-3 | 1.1e-5 / 1.5e-4 |
 | 96,000 | tone / noise / clipped noise | 1.7e-4 / 5.0e-3 / 1.8e-2 | 1.4e-5 / 3.7e-4 / 1.3e-3 |
 
-The tuning estimate and the frame count matched in every row. 48 kHz is admitted because
-the model reads the CQT, and on the two 48 kHz reference captures the waveform is within
-2.8e-4 and the CQT within 2.6e-5.
+The tuning estimate and the frame count matched in every row. The model reads the CQT,
+not the waveform. On the two 48 kHz reference captures the waveform is within 2.8e-4 and
+the CQT within 2.6e-5, and the chord labels match exactly.
 
 **Weights.** `engine/tools/convert-chordnet.py --weights <dir> --inventory
 tools/lead-sheet-reference/inventory.json --out chordnet-F32.gguf` writes the five

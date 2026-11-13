@@ -1151,15 +1151,16 @@ rates, output schema and parity status: [ace-midi chords](../../docs/dev/engine.
 Usage: ace-midi --chords <audio> --chord-model <gguf> --chord-vocab <tsv> [--out chords.json]
        ace-midi --validate-chords <capture dir> --chord-model <gguf> --chord-vocab <tsv>
 
-  --chords <audio>           WAV or MP3 at 22050, 44100 or 48000 Hz (else exit 2)
+  --chords <audio>           WAV or MP3 at any rate (exact from 22050 and 44100 Hz)
   --chord-model <gguf>       Five-fold f32 GGUF from engine/tools/convert-chordnet.py
   --chord-vocab <tsv>        Chord templates (server/src/data/lead-sheet/chordnet-templates.tsv)
   --out <file>               Segments JSON (default chords.json)
   --validate-chords <dir>    PARITY rows against a tools/lead-sheet-reference capture
 ```
 
-Exit codes: 0 success; 1 unreadable model, templates or capture, or a failed parity row;
-2 a source rate that is not admitted. `GGML_N_THREADS` sets the CPU thread count.
+Exit codes: 0 success (including a capture skipped for a recorded upstream rejection);
+1 unreadable audio, model, templates or capture, or a failed parity row. Other source
+rates print an approximation notice on stderr. `GGML_N_THREADS` sets the CPU thread count.
 
 ## quantize reference
 
