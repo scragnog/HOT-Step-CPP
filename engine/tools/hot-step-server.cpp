@@ -3165,6 +3165,8 @@ static void usage(const char * prog) {
             "  --port <N>              Listen port (default: 8080)\n"
             "  --allow-origin <csv>    Extra browser origins allowed to call the server,\n"
             "                          e.g. http://myhost:3001 (also env ACESTEPCPP_ALLOWED_ORIGINS)\n"
+            "  --allow-host <csv>      Extra hostnames accepted in the Host header, e.g. myhost\n"
+            "                          (case-insensitive, port ignored; also env ACESTEPCPP_ALLOWED_HOSTS)\n"
             "  --max-batch <N>         LM batch limit (default: %d)\n"
             "  --max-seq <N>           KV cache size (default: %d)\n"
             "\n"
@@ -3183,6 +3185,7 @@ int main(int argc, char ** argv) {
 
     const char * host         = "127.0.0.1";
     std::string  allow_origin_csv;
+    std::string  allow_host_csv;
     int          port         = 8080;
     const char * models_dir         = nullptr;
     const char * adapters_dir       = nullptr;
@@ -3224,6 +3227,8 @@ int main(int argc, char ** argv) {
             host = argv[++i];
         } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
             port = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--allow-host") && i + 1 < argc) {
+            allow_host_csv = argv[++i];
         } else if (!strcmp(argv[i], "--allow-origin") && i + 1 < argc) {
             allow_origin_csv = argv[++i];
         } else if (!strcmp(argv[i], "--max-batch") && i + 1 < argc) {
@@ -3463,13 +3468,20 @@ int main(int argc, char ** argv) {
 
     // Host and Origin guard. Refuses requests whose Host header is a
     // non-IP hostname (DNS rebinding) or whose Origin is a web page other
-    // than the local app. Extra origins: --allow-origin or
+    // than the local app. Extra hostnames: --allow-host or
+    // ACESTEPCPP_ALLOWED_HOSTS. Extra origins: --allow-origin or
     // ACESTEPCPP_ALLOWED_ORIGINS (comma separated).
     {
         std::vector<std::string> allowed = origin_guard::parse_csv(allow_origin_csv);
         if (const char * env = getenv("ACESTEPCPP_ALLOWED_ORIGINS")) {
             for (auto & o : origin_guard::parse_csv(env)) {
                 allowed.push_back(o);
+            }
+        }
+        std::vector<std::string> allowed_hosts = origin_guard::parse_csv(allow_host_csv);
+        if (const char * env = getenv("ACESTEPCPP_ALLOWED_HOSTS")) {
+            for (auto & h : origin_guard::parse_csv(env)) {
+                allowed_hosts.push_back(h);
             }
         }
         int node_port = 3001;
@@ -3481,10 +3493,10 @@ int main(int argc, char ** argv) {
         }
         std::vector<int> trusted_ports = { port, node_port, 3000 };
         std::string      cfg_host      = host;
-        svr.set_pre_routing_handler([allowed, trusted_ports, cfg_host](const httplib::Request & req,
+        svr.set_pre_routing_handler([allowed, allowed_hosts, trusted_ports, cfg_host](const httplib::Request & req,
                                                                        httplib::Response &      res) {
             const char * why = nullptr;
-            if (req.has_header("Host") && !origin_guard::host_allowed(req.get_header_value("Host"), cfg_host)) {
+            if (req.has_header("Host") && !origin_guard::host_allowed(req.get_header_value("Host"), cfg_host, allowed_hosts)) {
                 why = "host";
             } else if (req.has_header("Origin") &&
                        !origin_guard::origin_allowed(req.get_header_value("Origin"), trusted_ports, allowed)) {
@@ -3495,7 +3507,8 @@ int main(int argc, char ** argv) {
             }
             res.status = 403;
             res.set_content(std::string("{\"error\":\"forbidden ") + why +
-                                "; allow extra origins with --allow-origin or ACESTEPCPP_ALLOWED_ORIGINS\"}",
+                                "; allow extra hosts with --allow-host or ACESTEPCPP_ALLOWED_HOSTS, extra origins with "
+                                "--allow-origin or ACESTEPCPP_ALLOWED_ORIGINS\"}",
                             "application/json");
             return httplib::Server::HandlerResponse::Handled;
         });

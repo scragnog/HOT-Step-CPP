@@ -10,7 +10,8 @@
 // Rules:
 //   Host header: missing is allowed. Otherwise the hostname (port stripped,
 //   [v6] brackets handled) must be localhost, a 127.x address, ::1, the
-//   configured --host value, or any IP literal. A hostname that is not an
+//   configured --host value, a name from --allow-host /
+//   ACESTEPCPP_ALLOWED_HOSTS, or any IP literal (IPv6 may carry a %zone). A hostname that is not an
 //   IP literal is what DNS rebinding needs, so it is refused.
 //   Origin header: missing is allowed. "null" is refused. Otherwise it must
 //   be http(s)://127.0.0.1|localhost|[::1] on one of the trusted ports
@@ -107,20 +108,39 @@ inline bool is_ipv4_literal(const std::string & s) {
     return parts == 4;
 }
 
+// IPv6 literal, optionally with a zone id: "fe80::1%eth0". The zone may
+// contain letters, digits, '.', '-' and '_'.
 inline bool is_ipv6_literal(const std::string & s) {
-    if (s.find(':') == std::string::npos) {
+    size_t      pct  = s.find('%');
+    std::string addr = s.substr(0, pct);
+    if (addr.find(':') == std::string::npos) {
         return false;
     }
-    for (char c : s) {
-        if (!(std::isxdigit((unsigned char) c) || c == ':' || c == '.' || c == '%')) {
+    for (char c : addr) {
+        if (!(std::isxdigit((unsigned char) c) || c == ':' || c == '.')) {
             return false;
+        }
+    }
+    if (pct != std::string::npos) {
+        std::string zone = s.substr(pct + 1);
+        if (zone.empty()) {
+            return false;
+        }
+        for (char c : zone) {
+            if (!(std::isalnum((unsigned char) c) || c == '.' || c == '-' || c == '_')) {
+                return false;
+            }
         }
     }
     return true;
 }
 
 // True if a request with this Host header may proceed.
-inline bool host_allowed(const std::string & host_header, const std::string & configured_host) {
+// allowed_hosts: extra hostnames from --allow-host / ACESTEPCPP_ALLOWED_HOSTS
+// (lowercased, as returned by parse_csv; a port in an entry is ignored).
+inline bool host_allowed(const std::string &              host_header,
+                         const std::string &              configured_host,
+                         const std::vector<std::string> & allowed_hosts = {}) {
     if (trim(host_header).empty()) {
         return true;
     }
@@ -133,6 +153,11 @@ inline bool host_allowed(const std::string & host_header, const std::string & co
     }
     if (!configured_host.empty() && h == host_name(configured_host)) {
         return true;
+    }
+    for (const auto & a : allowed_hosts) {
+        if (!a.empty() && h == host_name(a)) {
+            return true;
+        }
     }
     return is_ipv4_literal(h) || is_ipv6_literal(h);
 }

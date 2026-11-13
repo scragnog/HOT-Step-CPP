@@ -43,6 +43,17 @@ int main() {
     check(host_allowed("myhost.test:8085", "myhost.test"), true, "host configured myhost.test");
     check(host_allowed("MYHOST.TEST", "myhost.test"), true, "host configured case");
     check(host_allowed("other.test", "myhost.test"), false, "host other.test vs configured");
+    check(host_allowed("[fe80::1%eth0]:8085", cfg), true, "host [fe80::1%eth0]:8085");
+    check(host_allowed("fe80::1%eth0", cfg), true, "host fe80::1%eth0");
+    check(host_allowed("[fe80::1%eth0/x]", cfg), false, "host zone with slash");
+
+    // --allow-host / ACESTEPCPP_ALLOWED_HOSTS
+    const std::vector<std::string> ah = parse_csv("MyHost.test, proxy.lan");
+    check(host_allowed("myhost.test", cfg, ah), true, "allow-host hit");
+    check(host_allowed("MYHOST.TEST:8085", cfg, ah), true, "allow-host case+port");
+    check(host_allowed("proxy.lan:443", cfg, ah), true, "allow-host second entry");
+    check(host_allowed("evil.com", cfg, ah), false, "allow-host miss");
+    check(host_allowed("myhost.test.evil.com", cfg, ah), false, "allow-host suffix miss");
 
     // Origin header
     const std::vector<int>         ports = { 8085, 3001, 3000 };
