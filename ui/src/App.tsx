@@ -94,7 +94,7 @@ import {
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
 import type { CreateIntent } from '../../server/src/contracts/resolution';
-import { addToPlaylist, usePlaylist, type PlaylistItem } from './components/lyric-studio/playlistStore';
+import { addToPlaylist, usePlaylist, DELETE_CONFIRM_KEY, type PlaylistItem } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
@@ -652,7 +652,7 @@ const AppContent: React.FC = () => {
   }, [token, currentTrack?.id, isPlaying, queryClient, removeFromPlaylist]);
 
   const handleSwipeLeft = useCallback((item: PlaylistItem) => {
-    if (localStorage.getItem('hs-playlist-delete-confirm-dismissed') === 'true') {
+    if (localStorage.getItem(DELETE_CONFIRM_KEY) === 'true') {
       void handleDeleteFromPlaylist(item);
     } else {
       setPendingDeleteItem(item);
@@ -667,9 +667,9 @@ const AppContent: React.FC = () => {
   const handleDeleteConfirm = useCallback(() => {
     if (!pendingDeleteItem) return;
     if (deleteConfirmDismissed) {
-      localStorage.setItem('hs-playlist-delete-confirm-dismissed', 'true');
+      localStorage.setItem(DELETE_CONFIRM_KEY, 'true');
     } else {
-      localStorage.removeItem('hs-playlist-delete-confirm-dismissed');
+      localStorage.removeItem(DELETE_CONFIRM_KEY);
     }
     const item = pendingDeleteItem;
     setPendingDeleteItem(null);

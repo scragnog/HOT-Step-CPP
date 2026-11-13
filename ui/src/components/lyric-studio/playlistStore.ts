@@ -164,8 +164,16 @@ function _persistPlaylistNow(): void {
   }
 }
 
+export const DELETE_CONFIRM_KEY = 'hs-playlist-delete-confirm-dismissed';
+
+/** Reset the "don't ask again" flag when the playlist becomes empty. */
+function maybeResetDeleteConfirm(items: PlaylistItem[]): void {
+  if (items.length === 0) localStorage.removeItem(DELETE_CONFIRM_KEY);
+}
+
 function write(items: PlaylistItem[], immediate = false, command?: unknown): void {
   _snapshot = items;
+  maybeResetDeleteConfirm(items);
   if (connected && command) { pending.push(command); void drain(); }
   else if (immediate) _persistPlaylistNow(); else _persistPlaylist();
   announce();
@@ -199,7 +207,6 @@ export function deleteSongFromLibrary(id: string): void {
 }
 
 export function clearPlaylist(): void {
-  localStorage.removeItem('hs-playlist-delete-confirm-dismissed');
   write([], true, { operation: 'clear' });
 }
 
