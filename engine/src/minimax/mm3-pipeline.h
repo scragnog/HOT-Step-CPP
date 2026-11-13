@@ -1666,12 +1666,13 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             }
             return true;
         };
-        // Every take asked for is a song asked for, so rounds go on until that
-        // many have been accepted, not just one: four takes with one ending
-        // used to stop there and drop three. Accepted plans from earlier
-        // rounds wait in the bank (they hold their frame hiddens, up to ~1 GB
-        // each at the cap) and take the first slots once planning stops. A
-        // one-song request (stop_after_first_eos) wants one.
+        // `want` is the most a render keeps. With require_eos the first round
+        // that has an ending stops the planning (see the stop check below), so
+        // fewer may render. A bare length floor (endings off) still re-plans
+        // until `want` have passed: plans accepted in earlier rounds wait in
+        // the bank (they hold their frame hiddens, up to ~1 GB each at the
+        // cap) and take the first slots once planning stops. A one-song
+        // request (stop_after_first_eos) wants one.
         const int                want = aopt.stop_after_first_eos ? 1 : K;
         std::vector<MM3ArResult> bank_ar;
         std::vector<uint64_t>    bank_seed;
@@ -1792,9 +1793,9 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 }
             }
             const int have = (int) (bank_ar.size() + resc.size()) + n_keep;
-            // Natural endings: the first round with an ending wins (Rob's rule,
-            // HOTSTEP-1201). Re-planning to fill the count cost 14 minutes in a
-            // live job and found nothing. A bare length floor still re-plans.
+            // Natural endings: the first round with an ending wins. Re-planning
+            // to fill the count cost 14 minutes in a live job and found
+            // nothing. A bare length floor still re-plans.
             if (have >= want || (have > 0 && (req.require_eos || round + 1 >= rounds_max))) {
                 fprintf(stderr,
                         "[MM3-Pipe] candidates: %d of %d kept in round %d (%zu from earlier rounds, %zu rescued, %d "
