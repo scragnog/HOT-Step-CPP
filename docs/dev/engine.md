@@ -1373,8 +1373,9 @@ Other adapter paths:
   take, and the DTW again on its first `cap - 50 s` columns (decode attention is causal, so no
   second replay); the last line both place within 2 s, plus 25 s. The rescue pass is
   `mm3_ar_plan_takes` with the prefix forced and `forced_continue`, one take, no adapter
-  (merge mode: the merged adapter at minus its scale, `handoff_merged`), so the base builds its
-  own KV. A kept rescue renders its capped plan's windows up to the crossfade (the full-length
+  (merge mode: `MM3GenRequest::handoff_swap` reloads the pristine LM first and merges again
+  before any later round; the delta is never subtracted from quantized weights), so the base
+  builds its own KV. A kept rescue renders its capped plan's windows up to the crossfade (the full-length
   window plan, `MM3TakeRun::NW_stop`) and the base plan in full, then splices them.
 - YuE2 adapters merge at load (`yue2-adapter.h`): AR (composer) and NAR files in
   LoRA, LoKr or DoRA form (`yue2-{ar,nar}-{lora,lokr,dora}-v1`), chosen with

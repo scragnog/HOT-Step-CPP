@@ -571,7 +571,7 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
     add_i("require_eos", req.gen.require_eos ? 1 : 0);
     add_i("eos_rounds", req.gen.require_eos ? req.gen.eos_rounds : 0);
     add_i("first_eos", req.gen.stop_after_first_eos ? 1 : 0);
-    if (req.gen.eos_handoff && req.gen.require_eos) {
+    if (req.gen.eos_handoff && req.gen.require_eos && !req.lm_adapter.empty()) {
         add_i("handoff", 1);  // decides which plan a capped round keeps; absent when off, so old keys stand
     }
     // A length floor decides which round's plan is kept, so two requests that
@@ -1241,10 +1241,34 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
                 req.gen.lm_adapter_merged = req.lm_adapter_sched.active() && mm3_lm_merge_fade_ok(g_mm3_lm_adapter)
                                                 ? g_mm3_lm_adapter
                                                 : nullptr;
-                // The base handoff takes the merged delta back out in-graph on
-                // its rescue pass only, so a render that needs no rescue keeps
-                // merge speed. Same linear-delta condition as the fade.
-                req.gen.handoff_merged = mm3_lm_merge_fade_ok(g_mm3_lm_adapter) ? g_mm3_lm_adapter : nullptr;
+                // Base handoff on a merged LM: the rescue needs the true base,
+                // and the merged delta cannot be taken back out of quantized
+                // weights. So the first rescue reloads the pristine LM (as a
+                // stale merge does above) and a later planning round merges
+                // again. A render that needs no rescue never calls this. The
+                // tag is kept truthful for the next job either way.
+                if (req.gen.eos_handoff && req.gen.require_eos) {
+                    req.gen.handoff_swap = [&req, &job, staged, want_tag](bool to_base, std::string * e) -> bool {
+                        if (to_base) {
+                            fprintf(stderr, "[MM3-Job] %s: base handoff: reloading the pristine LM for the rescue\n",
+                                    job->id.c_str());
+                            mm3_lm_free(&g_mm3_lm);
+                            mm3_free_lm(&g_mm3);
+                            g_mm3.lm_merge_tag.clear();
+                            return mm3_load_parts(&g_mm3, /*lm=*/true, /*depth=*/true, /*rest=*/!staged, e);
+                        }
+                        fprintf(stderr, "[MM3-Job] %s: base handoff: merging the adapter again for the next round\n",
+                                job->id.c_str());
+                        if (!mm3_lm_merge_apply(&g_mm3, g_mm3_lm_adapter, req.gen.lm_adapter_scales,
+                                                req.lm_adapter_merge_gpu, e)) {
+                            mm3_lm_free(&g_mm3_lm);  // part-way merge: the next job reloads pristine
+                            mm3_free_lm(&g_mm3);
+                            return false;
+                        }
+                        g_mm3.lm_merge_tag = want_tag;
+                        return true;
+                    };
+                }
                 // The soft-prompt halves survive the merge. A token is a
                 // conditioning input on k prompt positions and a prefix is n KV
                 // columns; neither is a weight delta, so mm3_lm_merge_apply
@@ -1469,8 +1493,12 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         r.ar.lrc          = g_mm3_ar_cache.lrc;
         r.ar.n_frames     = g_mm3_ar_cache.frames;
         r.ar.eos_hit      = g_mm3_ar_cache.eos_hit;
-    } else if ((req.reuse_ar || req.save_frame_hiddens) && r.frames > 0 && !r.ar.frame_hiddens.empty() &&
-               !r.rescued) {  // a rescued take's audio is a splice its hiddens alone cannot replay
+    } else if (r.rescued && (req.reuse_ar || req.save_frame_hiddens)) {
+        // A rescued take is a splice of two conditioning histories; one hidden
+        // block cannot replay it, so it neither fills the slot nor saves a plan.
+        fprintf(stderr, "[MM3-Job] %s: AR cache not filled and no plan saved - take 0 was rescued by the base "
+                        "handoff (two conditioning histories)\n", job->id.c_str());
+    } else if ((req.reuse_ar || req.save_frame_hiddens) && r.frames > 0 && !r.ar.frame_hiddens.empty()) {
         // `save_frame_hiddens` fills the slot too, and it has to: the save below
         // writes FROM the slot, so gating the fill on `reuse_ar` alone would
         // either write nothing or — worse, and this is the failure mode worth
@@ -1501,7 +1529,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     //
     // A failed save is a WARNING, never a failure: the audio is already rendered
     // and the file was a convenience.
-    if (req.save_frame_hiddens && !req.frame_hiddens_save_path.empty()) {
+    if (req.save_frame_hiddens && !req.frame_hiddens_save_path.empty() && !r.rescued) {
         const int64_t want = g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
                              (int64_t) g_mm3.lm_cfg.embedding_length;
         if (g_mm3_ar_cache.frames <= 0 || (int64_t) g_mm3_ar_cache.hiddens.size() != want) {

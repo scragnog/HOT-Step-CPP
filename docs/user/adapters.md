@@ -345,9 +345,10 @@ up to the switch, joined to the base model's audio with a 1 s crossfade. Natural
 always come first; a rescued take is listed after them, and the generation log names it. A
 take with no steady lyric line, or whose switch would come later than 4:40, is not rescued,
 and a rescue that still reaches the cap is dropped like any capped take. Each rescue costs
-one more plan from the switch onward and one more render of that take. In Merge mode the
-rescue takes the merged adapter back out for its own pass only (plain LoRA and PiSSA; other
-adapter types are not rescued in Merge mode).
+one more plan from the switch onward and one more render of that take. In Merge mode a
+rescue first reloads the unmerged base model, which adds a model load; the adapter is merged
+again only if another planning round follows. A render that needs no rescue keeps its mode and
+costs nothing extra.
 
 An adapter that fails to load fails the job. It never renders the base model silently.
 

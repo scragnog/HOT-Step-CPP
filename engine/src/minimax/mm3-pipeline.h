@@ -901,12 +901,16 @@ struct MM3GenRequest {
      *  take's own render up to the cue, the base plan's render after it, a 1 s
      *  crossfade centred on the cue. Never the base on the cache the adapter
      *  built: that collapsed capped plans into static. `handoff_seed` >= 0
-     *  replaces the continuation seed (tests). `handoff_merged` is the adapter
-     *  of a merged LM, whose delta the rescue pass takes back out in-graph
-     *  (plain LoRA and PiSSA; null in runtime mode). */
-    bool                 eos_handoff    = false;
-    int64_t              handoff_seed   = -1;
-    const MM3LmAdapter * handoff_merged = nullptr;
+     *  replaces the continuation seed (tests). `handoff_swap` is set by the
+     *  job when the adapter is MERGED: (true) reloads the pristine base LM
+     *  before the first rescue, (false) merges the adapter again before any
+     *  later planning round. Subtracting the delta from merged weights is not
+     *  the base on a quantized LM, so it is never done. Null in runtime mode,
+     *  where the base weights are resident and the rescue simply runs without
+     *  the adapter. */
+    bool                                                eos_handoff  = false;
+    int64_t                                             handoff_seed = -1;
+    std::function<bool(bool to_base, std::string * err)> handoff_swap;
     /** Called once, right after planning, with the ORIGINAL take indices
      *  that ended (in order), so the job layer can compact its take list
      *  before the flow stage: streamed chunks and the finished songs then
@@ -1267,12 +1271,13 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     // Base handoff, settled once. The cue comes from the lyric alignment, so it
     // needs the tokenizer and turns the LRC replay on. A soft prompt stands it
     // down for the same reason it stands the plan dial down.
-    const MM3LmAdapter * ho_ad   = req.lm_adapter ? req.lm_adapter : req.handoff_merged;
-    const bool           ho_soft = req.lm_soft && (req.lm_soft->has_artist_token() || req.lm_soft->has_prefix());
-    bool                 handoff = req.eos_handoff && req.require_eos && ho_ad && !ho_soft && !req.cached_hiddens;
+    const bool ho_ad   = req.lm_adapter || req.handoff_swap;
+    const bool ho_soft = req.lm_soft && (req.lm_soft->has_artist_token() || req.lm_soft->has_prefix());
+    bool       handoff = req.eos_handoff && req.require_eos && ho_ad && !ho_soft && !req.cached_hiddens;
+    bool       ho_base = false;  // merged mode: the pristine base is resident (handoff_swap(true) ran)
     if (req.eos_handoff && req.require_eos && !handoff) {
         fprintf(stderr, "[MM3-Pipe] base handoff off: %s\n",
-                !ho_ad    ? "no LM adapter in this render (or a merged one the graph cannot take back out)"
+                !ho_ad    ? "no LM adapter in this render"
                 : ho_soft ? "the adapter carries a soft prompt"
                           : "the plan came from the AR cache");
     }
@@ -1670,6 +1675,14 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         int                      n_capped_all = 0, n_short_all = 0;
         int round = 0;
         for (;; round++) {
+            if (round > 0 && ho_base) {
+                // Merged mode: the rescue left the pristine base resident; this
+                // round plans with the adapter again.
+                if (!req.handoff_swap(false, err)) {
+                    return false;
+                }
+                ho_base = false;
+            }
             if (round > 0) {
                 aopt.seed += (uint64_t) K;
                 for (int t = 0; t < K; t++) {
@@ -1707,7 +1720,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             n_short_all += n_short;
             // Base handoff: round 1 only, capped takes in take order, until the
             // count is met. The base re-reads the prefix up to the cue on its
-            // own cache (runtime: no adapter; merged: the delta taken back out)
+            // own cache (runtime: no adapter; merged: the pristine base reloaded)
             // and plays on from there.
             for (int t = 0; aopt.handoff_cue && t < K && (int) (bank_ar.size() + resc.size()) + n_keep < want; t++) {
                 MM3ArResult & a = ars[(size_t) t];
@@ -1717,6 +1730,12 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 if (bail()) {
                     return false;
                 }
+                if (req.handoff_swap && !ho_base) {
+                    if (!req.handoff_swap(true, err)) {
+                        return false;
+                    }
+                    ho_base = true;
+                }
                 MM3ArOptions ho = aopt;
                 ho.n_takes      = 1;
                 ho.seed = req.handoff_seed >= 0 ? (uint64_t) req.handoff_seed : a.seed ^ 0x9E3779B97F4A7C15ull;
@@ -1725,8 +1744,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 ho.forced_len                = a.handoff_cut + 1;
                 ho.force_bias                = -1.0f;
                 ho.forced_continue           = true;
-                ho.lm_adapter                = req.lm_adapter ? nullptr : req.handoff_merged;
-                ho.lm_adapter_scales.global *= -1.0f;
+                ho.lm_adapter                = nullptr;
                 ho.lm_adapter_sched          = MM3LmAdapterSchedule{};
                 ho.lm_adapter_merged         = nullptr;
                 ho.lm_adapter_plan           = 1.0f;

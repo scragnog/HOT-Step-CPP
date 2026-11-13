@@ -233,8 +233,8 @@ replaced the fade. With `require_eos` and an LM adapter, when round 1 ends fewer
 wanted, its capped takes are rescued in take order until the count is met: cue from the
 take's own lyric timing (`mm3_align_handoff_cue`: last line the full and the cap-50 s
 alignments place within 2 s, plus 25 s; none past cap-20 s), then the base re-reads the
-prefix on a cache it builds itself (`forced_continue`, no adapter; merged: the delta at minus
-its scale) and samples to EOS or the cap. Kept rescues sort after natural endings and render as
+prefix on a cache it builds itself (`forced_continue`, no adapter; merged: the pristine LM is
+reloaded via `handoff_swap` and merged again before a later round, never delta-subtracted) and samples to EOS or the cap. Kept rescues sort after natural endings and render as
 a splice: the capped plan's own windows up to the crossfade, the base plan in full, 1 s linear
 crossfade on the cue. Two traps it was built around: base weights on the adapter's KV collapse
 plans into static (0 of 8 ended, 8 of 8 degraded), and re-rendering the adapter prefix from the
