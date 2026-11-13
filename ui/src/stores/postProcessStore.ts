@@ -18,6 +18,7 @@ import { runSongPostProcessing, revertSongPostProcessing } from '../services/api
 import { queryClient } from '../queries/client';
 import { postProcessStatusOptions } from '../queries/shell-queue/songs';
 import { useGlobalParamsStore } from './globalParamsStore';
+import { forgetPeaks } from '../audio/peaksClient';
 
 export interface PostProcessRun {
   songId: string;
@@ -143,6 +144,9 @@ function startPolling(songId: string, jobId: string): void {
 
     if (status.status === 'succeeded') {
       stopPolling(songId);
+      // Every pass writes the same <base>_mastered.wav URL, so the peaks
+      // cached for an earlier pass would otherwise draw over this one.
+      if (status.masteredAudioUrl) forgetPeaks(status.masteredAudioUrl);
       // Let every list holding this song swap to the processed file.
       window.dispatchEvent(new CustomEvent('song-postprocessed', {
         detail: { songId, masteredAudioUrl: status.masteredAudioUrl },
