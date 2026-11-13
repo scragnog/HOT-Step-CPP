@@ -15,6 +15,7 @@
 // GGML_BACKEND=CPU forces the CPU backend. Exit 0 pass, 1 fail, 2 error.
 #include "minimax/mm3-refiner.h"
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>

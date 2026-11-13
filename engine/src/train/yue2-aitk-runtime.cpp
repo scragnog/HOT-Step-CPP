@@ -14,6 +14,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include "yue2-aitk-embedding-dequant.h"
 #include "yue2-aitk-fixture-replay.h"
 
+#include <cstring>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -571,11 +572,23 @@ static int run_impl(Config config, std::string * error) {
         (config.pause_at > 0 && config.pause_at <= completed)) {
         fail(error, "pause boundary must be after the resumed step and within total steps"); return 1;
     }
+    // TF32 for the F32 GEMMs that remain in bf16 mode (quantized bases, the
+    // companion decoder): the BF16 products already round harder than TF32.
+    // strict-f32 keeps strict FP32. cuBLAS ignores TF32 below sm_80 and other
+    // backends never read the variable. An inherited NVIDIA_TF32_OVERRIDE=0
+    // still wins, which is how an A/B turns it off.
+    if (yue2_aitk_graph::strict_f32()) {
 #ifdef _WIN32
-    if (_putenv_s("NVIDIA_TF32_OVERRIDE", "0") != 0) { fail(error, "cannot set NVIDIA_TF32_OVERRIDE=0"); return 1; }
+        if (_putenv_s("NVIDIA_TF32_OVERRIDE", "0") != 0) { fail(error, "cannot set NVIDIA_TF32_OVERRIDE=0"); return 1; }
 #else
-    if (setenv("NVIDIA_TF32_OVERRIDE", "0", 1) != 0) { fail(error, "cannot set NVIDIA_TF32_OVERRIDE=0"); return 1; }
+        if (setenv("NVIDIA_TF32_OVERRIDE", "0", 1) != 0) { fail(error, "cannot set NVIDIA_TF32_OVERRIDE=0"); return 1; }
 #endif
+    }
+    {
+        const char * o = std::getenv("NVIDIA_TF32_OVERRIDE");
+        std::fprintf(stderr, "[yue2-aitk] F32 GEMMs: %s\n",
+                     o && std::string(o) == "0" ? "strict FP32 (NVIDIA_TF32_OVERRIDE=0)" : "TF32 tensor cores allowed");
+    }
     yue2_aitk_clear_cancel(); yue2_aitk_install_sigint_handler();
     std::error_code ec;
     if (!std::filesystem::create_directory(std::filesystem::u8path(config.output), ec) || ec) { fail(error, "cannot create new training output directory"); return 1; }

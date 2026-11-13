@@ -55,3 +55,16 @@ test('an app-planned score does not read as a plan stage that never ran (#271)',
     'the persisted request carries the planned abc; the flag still wins');
   assert.equal(planStage({ abc_supplied: false, stage_end_reasons }), 'Not run', 'cot off still reads Not run');
 });
+
+
+test('MM3 facts show the launder recipe including a zero seed', () => {
+  const groups = buildFactGroups({ backend: 'minimax-m3', generationParams: {
+    mm3PlankPath: 'source.mm3plank', mm3PlankSemanticOnly: true,
+    mm3PlankLaundered: true, mm3PlankLaunderSteps: 40,
+    mm3PlankLaunderSeed: 0, mm3PlankLaunderCaption: 'acoustic guitar and vocals',
+  } } as unknown as Song);
+  const facts = groups.flatMap(g => g.facts);
+  assert.equal(facts.find(f => f.label === 'Launder steps')?.value, '40');
+  assert.equal(facts.find(f => f.label === 'Launder seed')?.value, '0');
+  assert.equal(facts.find(f => f.label === 'Source caption')?.value, 'acoustic guitar and vocals');
+});

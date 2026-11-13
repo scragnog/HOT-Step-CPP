@@ -116,6 +116,12 @@ export const heartmulaClient = {
     return (await request('/heartmula/select-model', pick)).json();
   },
   async unload(): Promise<void> {
+    // /heartmula/unload waits in the engine's GPU worker queue, behind whatever
+    // runs there (an inline YuE2 render, say), so skip it when nothing is
+    // resident (GH #341). Props answers off the worker; no answer = unload anyway.
+    const props = await request('/heartmula/props', undefined, 3000)
+      .then(res => res.json() as Promise<{ vram?: { resident_bytes?: number } }>).catch(() => null);
+    if (props?.vram?.resident_bytes === 0) return;
     // Older engine builds have no HeartMuLa residency to release.
     try {
       const result = await (await request('/heartmula/unload', {})).json() as { unloaded?: boolean };

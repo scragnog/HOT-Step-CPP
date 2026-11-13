@@ -135,7 +135,7 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
  *  be the approved score, and the lyrics rendered are the ones it exports,
  *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
-  expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula']), engineParams: z.record(z.string(), z.unknown()),
+  expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula', 'minimax-m3']), engineParams: z.record(z.string(), z.unknown()),
   /** MuLaCover uses four explicit fields; caption is never parsed into tags. */
   heartmulaTags: z.object({ topic: z.string().max(512), genre: z.string().max(512),
     instrument: z.string().max(512), mood: z.string().max(512) }).optional(),
@@ -144,6 +144,25 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   seed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
   adapter: z.string().regex(/^[^/\\:,]+:-?(?:\d+(?:\.\d*)?|\.\d+)$/).optional(),
   steps: z.number().int().min(1).max(64).optional(),
+  /** MM3 cover: Plan = the generation request's mm3Plank and force levers (plank
+   *  null = Plan off); Sound = audio to audio from the source (soundStrength null = off). */
+  mm3Cover: z.object({
+    plank: z.string().min(1).nullable(), semanticOnly: z.boolean(),
+    soundStrength: z.number().gt(0).max(1).nullable().optional(), soundHold: z.number().min(0).max(1).optional(),
+    forceBias: z.number().min(0).max(1000).nullable().optional(),
+    pattern: z.object({ prefixSeconds: z.number().positive().optional(), anchorEvery: z.number().int().positive().optional(),
+      pinnedRanges: z.array(z.tuple([z.number().min(0), z.number().positive()])).optional(), invert: z.boolean().optional() }).nullable().optional(),
+    trimSeconds: z.number().positive().nullable(),
+    arSeed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER),
+    /** Cover mode (absent = pin). The guided modes read the plank's guide and,
+     *  for blend, its launder state; see coverWorkflow.ts. */
+    mode: z.enum(['pin', 'follow', 'follow-depth', 'follow-stream', 'product', 'blend']).optional(),
+    strength: z.number().min(0).max(1).optional(),
+    candidates: z.number().int().min(1).max(32).optional(),
+    stateFix: z.enum(['off', 'depth', 'stream', 'both']).optional(),
+    weight: z.number().min(0).max(4).optional(),
+    blend: z.number().min(0).max(100).optional(),
+  }).optional(),
   title: z.string(), artistName: z.string(), targetArtistName: z.string(),
   lyrics: z.string(), caption: z.string(),
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),

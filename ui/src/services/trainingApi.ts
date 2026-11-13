@@ -312,6 +312,12 @@ export interface Mm3CodesRequest {
   /** Cover-launder the codes (rec7 states -> flow render -> champion encode).
    *  Writes to a separate cache; off = the standard export, unchanged. */
   launder?: boolean;
+  /** Clear the dataset's codes cache before the job. */
+  force?: boolean;
+  /** Only tracks whose name contains this text. */
+  only?: string;
+  /** Cap on tracks encoded; 0/absent = all. */
+  limit?: number;
 }
 
 /** Every field optional: omitted means the validated recipe, which lives
@@ -333,6 +339,10 @@ export interface Mm3TrainLmRequest {
   /** Tracks longer than the window: exclude (default) or crop. */
   longTracks?: 'exclude' | 'crop';
   warmup?: number;
+  /** Share of steps trained without lyrics; 0 = never. */
+  lyricsDropout?: number;
+  /** Where the LR decay ends, as a fraction of the peak. */
+  lrEndFrac?: number;
   gradAccum?: number;
   seed?: number;
   maxFrames?: number;
@@ -476,6 +486,8 @@ export interface Mm3RunSummary {
   optionsSource: 'manifest' | 'log' | 'none';
   sizeBytes: number;
   running?: boolean;
+  /** The worker this run was mirrored from; null = trained here. */
+  origin?: string | null;
 }
 
 export interface Mm3ResumeRequest {
@@ -2647,27 +2659,63 @@ export async function listMm3Runs(id: string, reqOpts?: ReadOptions): Promise<{ 
   );
 }
 
-/** One saved MM3 preview take (server mm3Ladder.ts). */
-export type Mm3LadderPreview = TrainingPreview & { audioUrl: string };
+/** One saved MM3 preview take (server mm3Ladder.ts). `pruned`: cleanup
+ *  removed its audio, and `audioUrl` is empty. */
+export type Mm3LadderPreview = TrainingPreview & { audioUrl: string; pruned?: boolean };
+/** An ear score on one MM3 checkpoint (server mm3Review.ts). */
+export interface Mm3RungScore {
+  run: string; step: number; checkpointDir: string; loss: number | null;
+  likeness: number | null; corruption: number | null; notes: string;
+  blind: boolean; blindLabel: string; updatedAt: string;
+}
+export interface Mm3AlbumScore {
+  run: string; score: number | null; instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null;
+  notes: string; updatedAt: string;
+}
 /** An MM3 run's checkpoint ladder: GET /datasets/:id/mm3-previews?run=. */
 export interface Mm3Ladder {
   dataset: { id: string; revision: string };
+  datasetName: string;
   run: string;
   running: boolean;
+  createdAt: number;
+  /** The worker this run was mirrored from; null = trained here. */
+  origin: string | null;
+  /** Marked reviewed without scoring every rung. */
+  reviewComplete: boolean;
   /** The adapter the dataset's album presets use now, or null. */
   inUse: string | null;
   checkpoints: Array<{ step: number; ref: string; loss?: number }>;
   previews: Mm3LadderPreview[];
+  /** Blind letter per checkpoint step. */
+  blindLabels: Record<string, string>;
+  scores: Mm3RungScore[];
+  album: Mm3AlbumScore | null;
 }
+/** Same items as YuE2's: "other runs" is the dataset's other MM3 runs. */
+export type Mm3CleanupPlan = Yue2CleanupPlan;
 
 export function getMm3Ladder(id: string, run: string, reqOpts?: ReadOptions): Promise<Mm3Ladder> {
   return localRequest<Mm3Ladder>(`/datasets/${encodeURIComponent(id)}/mm3-previews?run=${encodeURIComponent(run)}`, undefined, reqOpts);
 }
 
-/** One more take of a saved step (0 = base). Silent: the ladder shows the error. */
-export function renderMm3LadderTake(id: string, run: string, step: number): Promise<{ previews: TrainingPreview[] }> {
+/** One more take of a saved step (0 = base), at the given length and MLP
+ *  scale (absent = the run's own). Silent: the ladder shows the error. */
+export function renderMm3LadderTake(id: string, run: string, step: number,
+  opts: { seconds?: number; scaleMlp?: number } = {}): Promise<{ previews: TrainingPreview[] }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-previews/render`,
-    { method: 'POST', ...jsonBody({ run, step }), timeout: 15 * 60_000, silent: true });
+    { method: 'POST', ...jsonBody({ run, step, ...opts }), timeout: 15 * 60_000, silent: true });
+}
+
+/** Delete an MM3 run folder (and its mirror record). `purge` also unlinks any
+ *  Lyric Studio album using it and drops its scores. Silent: the caller shows the error. */
+export function deleteMm3Run(id: string, run: string, purge = false): Promise<{ run: string; unlinked?: string[] }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-runs/${encodeURIComponent(run)}${purge ? '?purge=1' : ''}`, { method: 'DELETE', silent: true });
+}
+
+/** Mark an MM3 ladder reviewed without scoring every rung. */
+export function setMm3ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-review-complete`, { method: 'POST', ...jsonBody({ run, complete }), silent: true });
 }
 
 /** Continue a previous run: same adapter directory, same recipe, more steps.
@@ -2793,7 +2841,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null; /** Absent = 'yue2' (an older server). */ family?: 'yue2' | 'mm3'; /** MM3: Lyric Studio albums using one of its checkpoints. */ linkedAlbums?: string[] }
 export async function listYue2Review(reqOpts?: ReadOptions): Promise<{ rows: Yue2ReviewRow[] }> {
   return localRequest('/yue2-review', undefined, reqOpts);
 }
@@ -2863,6 +2911,7 @@ export async function scoreYue2Album(id: string, body: { refineRun: string; scor
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body), silent: true });
 }
 export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/yue2-rung-scores/export?format=${format}`;
+export const mm3RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/mm3-rung-scores/export?format=${format}`;
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
@@ -3310,8 +3359,8 @@ export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming:
   return data.batch;
 }
 /** One MM3 recipe (the mm3-train-lm body, minus per-dataset fields) for every dataset, in turn. */
-export async function startMm3Batch(datasetIds: string[], recipe: Mm3TrainLmRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
-  const data = await request<{ batch: Yue2BatchSummary }>('/mm3-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe }) }, reqOpts);
+export async function startMm3Batch(datasetIds: string[], recipe: Mm3TrainLmRequest, reqOpts?: TrainingTarget, clearCache?: boolean): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/mm3-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe, ...(clearCache ? { clearCache } : {}) }) }, reqOpts);
   return data.batch;
 }
 export async function startHeartmulaBatch(datasetIds: string[], recipe: HeartmulaTrainRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
@@ -3353,7 +3402,7 @@ export interface TrainingWorkerStatus {
   job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean;
 }
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
-export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
+export interface WorkerDispatch { worker: string; family?: 'yue2' | 'mm3'; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
 
 async function workersRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
   const { method, body } = initToArgs(init);
@@ -3368,6 +3417,11 @@ export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<Traini
 export async function dispatchYue2Batch(worker: string, input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<WorkerDispatch> {
   // silent: Yue2AitkTrainCard's batch-dispatch error line is the sole notifier.
   return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input), silent: true })).dispatch;
+}
+/** Push each dataset (audio, .mm3.txt captions, manifest) and queue it on the worker's MM3 batch. */
+export async function dispatchMm3Batch(worker: string, input: { datasetIds: string[]; clearCache?: boolean; recipe: Mm3TrainLmRequest }): Promise<WorkerDispatch> {
+  // silent: the store error line under Mm3TrainCard is the sole notifier.
+  return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/mm3-dispatch`, { method: 'POST', ...jsonBody(input), silent: true })).dispatch;
 }
 export async function getWorkerDispatch(worker: string, reqOpts?: ReadOptions): Promise<WorkerDispatch | null> {
   return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, undefined, reqOpts)).dispatch;

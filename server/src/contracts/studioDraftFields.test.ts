@@ -2,6 +2,7 @@
 // contracts/studioDrafts.ts) through the real /api/studio-drafts router.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import express from 'express';
 import { STUDIO_DRAFT_FIELDS, draftFieldType, studioForDraftKey, validDraftField } from './studioDraftFields.js';
@@ -12,7 +13,8 @@ import { createStudioDraftsRouter } from '../routes/studioDrafts.js';
 // (b92bb7fd): "<studio>|<accepted value kinds>" per key. s=string b=boolean
 // n=finite number inf=Infinity null o=object a=array; '-' = no studio.
 const RECORDED: Record<string, string[]> = {
-  'cover|null,o,': ['cover-studio-analysis', 'cover-studio-metadata', 'cover-studio-selectedPreset', 'cover-studio-scoreTempoScale', 'cover-studio-approvedSheet', 'cover-studio-buildLyricsDraft', 'cover-studio-coverGuide'],
+  'cover|null,o,': ['cover-studio-analysis', 'cover-studio-metadata', 'cover-studio-selectedPreset', 'cover-studio-scoreTempoScale', 'cover-studio-approvedSheet', 'cover-studio-buildLyricsDraft', 'cover-studio-coverGuide',
+    'cover-studio-leadSheetSource', 'cover-studio-heartmulaTags', 'cover-studio-mm3Cover'],
   'cover|null,': ['cover-studio-prepareV2'],
   'cover|s,': ['cover-studio-artistCaption', 'cover-studio-coverNoiseMethod', 'cover-studio-coverTimbreOverride', 'cover-studio-coverVocalLanguage',
     'cover-studio-lyrics', 'cover-studio-songArtist', 'cover-studio-songTitle', 'cover-studio-sourceAssetId', 'cover-studio-sourceAudioUrl',
@@ -20,16 +22,16 @@ const RECORDED: Record<string, string[]> = {
     'cover-studio-sourceMode', 'cover-studio-pairMode', 'cover-studio-yue2Ar', 'cover-studio-yue2Nar',
     'cover-studio-coverVoices', 'cover-studio-instrumentalMode', 'cover-studio-coverTempoMode', 'cover-studio-coverLyricSchedule',
     'cover-studio-captionMode', 'cover-studio-sheetAbc', 'cover-studio-sheetAudioUrl',
-    'cover-studio-coveringBand', 'cover-studio-buildSessionId', 'cover-studio-draftName'],
+    'cover-studio-coveringBand', 'cover-studio-buildSessionId', 'cover-studio-draftName', 'cover-studio-sa3Adapter'],
   'cover|n,': ['cover-studio-audioCoverStrength', 'cover-studio-bpmCorrection', 'cover-studio-coverNoiseStrength', 'cover-studio-pitchShift',
     'cover-studio-sepLevel', 'cover-studio-tempoScale', 'cover-studio-coverBpm',
-    'cover-studio-coverKeyShift', 'cover-studio-coverCfgScale'],
+    'cover-studio-coverKeyShift', 'cover-studio-coverCfgScale', 'cover-studio-heartmulaSeed', 'cover-studio-sa3Transform', 'cover-studio-sa3Seed'],
   'cover|n,null,': ['cover-studio-bpmOverride', 'cover-studio-selectedArtistId',
     'cover-studio-selectedYue2ArtistId', 'cover-studio-selectedYue2LyricsSetId'],
   'cover|b,': ['cover-studio-coverInstrumental', 'cover-studio-datasetAnalysis', 'cover-studio-noFsq',
     'cover-studio-advancedMode', 'cover-studio-keepChords', 'cover-studio-buildMode'],
   'cover|a,': ['cover-studio-scoreSections', 'cover-studio-scoreCuts'],
-  'cover|s,null,': ['cover-studio-keyOverride', 'cover-studio-lyricsSource'],
+  'cover|s,null,': ['cover-studio-keyOverride', 'cover-studio-lyricsSource', 'cover-studio-sheetScoreSource', 'cover-studio-chordQuality'],
   '-|': ['cover-studio-nope', 'hs-unknown', 'hs-yue2CaptionSource:ds:a:b', 'lireek-playQueue'],
   'create|s,': ['hs-artist', 'hs-caption', 'hs-draftName', 'hs-keyScale', 'hs-lora-trigger', 'hs-lyrics', 'hs-negative-prompt', 'hs-sourceLatentUrl', 'hs-subject',
     'hs-timeSignature', 'hs-title', 'hs-vocalGender', 'hs-vocalLanguage', 'hs-yue2CaptionDataset'],
@@ -65,6 +67,36 @@ test('every draft key keeps its recorded studio and accepted value kinds', () =>
     assert.equal(studioForDraftKey(key), studio);
     assert.equal(draftFieldType(key), type);
   }
+});
+
+test('every Cover Studio field literal belongs to the cover draft allowlist', () => {
+  const source = readFileSync(new URL('../../../ui/src/components/cover-studio/CoverStudio.tsx', import.meta.url), 'utf8');
+  const keys = [...new Set([...source.matchAll(/['"](cover-studio-[^'"]+)['"]/g)].map(match => match[1]))];
+  assert.ok(keys.includes('cover-studio-mm3Cover'), 'the UI field scan must include MM3 cover settings');
+  // The Drafts fold stores display state locally, outside the mirrored draft.
+  for (const key of keys.filter(key => key !== 'cover-studio-fold-drafts')) {
+    assert.equal(studioForDraftKey(key), 'cover', key);
+  }
+});
+
+test('MM3 cover settings survive draft creation and subsequent saves', async () => {
+  const { call, close } = serve();
+  try {
+    const settings = { plank: '', launderSteps: 30, launderSeed: 42, launderCaption: '', trimSeconds: '',
+      seed: -1, arSeed: -1, match: 100, preparedSourceUrl: '' };
+    const body = (value: unknown) => ({ studio: 'cover', fields: { 'cover-studio-mm3Cover': value } });
+    const created = await call('POST', '/drafts', { body: body(settings) });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const path = `/drafts/${created.body.document.id}`;
+    const changed = { ...settings, match: 75 };
+    const saved = await call('PUT', path, { body: body(changed), expectedRevision: 1 });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.deepEqual((await call('GET', path)).body.document.body.fields['cover-studio-mm3Cover'], changed);
+    assert.equal((await call('PUT', path, { body: body(null), expectedRevision: 2 })).status, 200);
+    for (const invalid of ['settings', true, 1, []]) {
+      assert.equal((await call('POST', '/drafts', { body: body(invalid) })).status, 400);
+    }
+  } finally { await close(); }
 });
 
 function serve() {
@@ -124,6 +156,13 @@ test('drafts: field checks, stale revisions, studio lock, deleted source and sou
     assert.equal((await call('POST', '/drafts', { body: { ...body, fields: { 'hs-caption': 'x' } } })).status, 400);
     assert.equal((await call('POST', '/drafts', { body: { ...body, fields: { 'cover-studio-noFsq': 'yes' } } })).status, 400);
     assert.equal((await call('POST', '/drafts', { body: { ...body, sourceAssetId: 'other' } })).status, 400, 'identity must agree with the fields');
+    // Lead sheet, HeartMuLa and SA3 cover settings, as Cover Studio mirrors them: create, then a second save.
+    const studioFields = { 'cover-studio-leadSheetSource': { abc: 'X:1' }, 'cover-studio-sheetScoreSource': null, 'cover-studio-chordQuality': 'estimated',
+      'cover-studio-heartmulaTags': {}, 'cover-studio-heartmulaSeed': -1, 'cover-studio-sa3Transform': 0.3, 'cover-studio-sa3Seed': -1, 'cover-studio-sa3Adapter': '' };
+    const full = await call('POST', '/drafts', { body: { studio: 'cover', fields: studioFields } });
+    assert.equal(full.status, 201, JSON.stringify(full.body));
+    assert.equal((await call('PUT', `/drafts/${full.body.document.id}`, { body: { studio: 'cover', fields: { ...studioFields, 'cover-studio-sa3Seed': 7 } },
+      expectedRevision: 1 })).status, 200);
     const created = await call('POST', '/drafts', { body });
     assert.equal(created.status, 201);
     const doc = created.body.document;

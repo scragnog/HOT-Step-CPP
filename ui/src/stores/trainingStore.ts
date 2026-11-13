@@ -392,7 +392,7 @@ interface TrainingState {
   /** HeartMuLa: checkpoint the running trainer and stop; the run stays resumable. */
   requestHeartmulaCheckpoint(run: string): Promise<void>;
   /** MiniMax-Music3: audio -> RVQ codes. */
-  startMm3Codes(opts?: { launder?: boolean }): Promise<void>;
+  startMm3Codes(opts?: trainingApi.Mm3CodesRequest): Promise<void>;
   /** MiniMax-Music3: codes + captions -> an LM LoRA. */
   startMm3TrainLm(opts: trainingApi.Mm3TrainLmRequest): Promise<void>;
   /** MiniMax-Music3: carry on training into an existing run directory. Same
@@ -444,7 +444,7 @@ interface TrainingState {
   loadYue2Batches(): Promise<void>;
   startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
   /** MM3: the same server-side queue, one recipe for every ticked dataset. */
-  startMm3Batch(datasetIds: string[], recipe: trainingApi.Mm3TrainLmRequest): Promise<trainingApi.Yue2BatchSummary>;
+  startMm3Batch(datasetIds: string[], recipe: trainingApi.Mm3TrainLmRequest, clearCache?: boolean): Promise<trainingApi.Yue2BatchSummary>;
   pauseYue2Batch(id: string): Promise<void>;
   resumeYue2Batch(id: string): Promise<void>;
   cancelYue2Batch(id: string): Promise<void>;
@@ -903,8 +903,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     catch (err) { if (isCurrent(get, worker, id)) set({ error: errMessage(err) }); }
   },
 
-  startMm3Codes: async (opts?: { launder?: boolean }) => {
-    await startJob(set, get, (id, t) => trainingApi.startMm3Codes(id, opts?.launder ? { launder: true } : {}, t));
+  startMm3Codes: async (opts?: trainingApi.Mm3CodesRequest) => {
+    await startJob(set, get, (id, t) => trainingApi.startMm3Codes(id, opts ?? {}, t));
   },
 
   // MM3 reports STEPS, not epochs, so the epoch series stays empty and the
@@ -1134,9 +1134,9 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
     return batch;
   },
-  startMm3Batch: async (datasetIds, recipe) => {
+  startMm3Batch: async (datasetIds, recipe, clearCache) => {
     const worker = get().trainingWorker;
-    const batch = await writeAndInvalidate(queryClient, () => trainingApi.startMm3Batch(datasetIds, recipe, { worker }),
+    const batch = await writeAndInvalidate(queryClient, () => trainingApi.startMm3Batch(datasetIds, recipe, { worker }, clearCache),
       keysPlan(resourceKey(TD.yue2Batches, { worker })));
     if (get().trainingWorker === worker) {
       set({ yue2BatchDraft: null });

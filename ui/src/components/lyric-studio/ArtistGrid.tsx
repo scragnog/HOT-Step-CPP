@@ -183,7 +183,27 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
               {/* Context menu */}
               {menuOpenId === artist.id && (
                 <div
-                  className="absolute top-10 right-2 z-20 min-w-[160px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1"
+                  ref={(menu) => {
+                    const grid = gridRef.current;
+                    const card = menu?.parentElement;
+                    if (!menu || !grid || !card) return;
+                    const position = () => {
+                      const bounds = grid.getBoundingClientRect();
+                      const cardBounds = card.getBoundingClientRect();
+                      const scale = cardBounds.width / card.offsetWidth;
+                      const width = bounds.width / scale;
+                      menu.style.minWidth = `${Math.min(160, width)}px`;
+                      menu.style.maxWidth = `${width}px`;
+                      const left = (bounds.left - cardBounds.left) / scale;
+                      menu.style.left = `${Math.max(left, Math.min(card.offsetWidth - menu.offsetWidth - 8, left + width - menu.offsetWidth))}px`;
+                    };
+                    position();
+                    const observer = new ResizeObserver(position);
+                    observer.observe(grid);
+                    observer.observe(card);
+                    return () => observer.disconnect();
+                  }}
+                  className="absolute top-10 z-20 min-w-[160px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <button

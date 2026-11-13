@@ -184,6 +184,14 @@ struct LmCkptCfg {
     // instead of W alone.
     bool pissa_fold     = false;
 
+    // --ckpt-offload (opt-in): the per-layer checkpoints C[] live in pinned
+    // host RAM and the GPU keeps two slots, C[l] aliasing slot l & 1. Each is
+    // copied down after the forward writes it and back before its backward
+    // segment reads it. Same bytes into the same graphs, so on or off the
+    // numbers are identical; it trades ~2 x L x [H,S] f32 of PCIe copies per
+    // micro-step for (L - 2) x [H,S] f32 of VRAM.
+    bool ckpt_offload   = false;
+
     // Trainable KV prefix (train/lm-prefix.h). nullptr = off, byte-identical.
     // Every row of the mask sees the whole prefix (pfx_lo = 0, n_prompt = 0):
     // this prefix is conditioning the caption must read, unlike the frozen
@@ -281,6 +289,10 @@ struct LmCkptState {
 
     ggml_context *        ctx_ckpt = nullptr;  // C[0 .. L-1]                     never cleared
     ggml_backend_buffer_t buf_ckpt = nullptr;
+    // --ckpt-offload only: L x [H, s_max] f32 in pinned host memory (the GPU
+    // backend's host buffer type), C[l]'s copy at l * H * s_max floats.
+    ggml_backend_buffer_t buf_ckpt_host = nullptr;
+    float *               ckpt_host     = nullptr;
     ggml_context *        ctx_gh0  = nullptr;  // Gh[0] == t_G                    cleared per micro-step
     ggml_backend_buffer_t buf_gh0  = nullptr;
     ggml_context *        ctx_gh1  = nullptr;  // Gh[1]                           cleared per segment
@@ -343,6 +355,9 @@ static int lm_ckpt_segment_graph_nodes(const LmCkptState & st) {
 }
 
 static void lm_ckpt_free(LmCkptState * st) {
+    if (st->buf_ckpt_host) {
+        ggml_backend_buffer_free(st->buf_ckpt_host);
+    }
     ggml_backend_buffer_t bufs[7] = { st->buf_ckpt, st->buf_gh0, st->buf_gh1, st->buf_misc,
                                       st->buf_embt, st->buf_labc, st->buf_wst };
     for (int i = 0; i < 7; i++) {
@@ -580,7 +595,11 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
     }
 
     st->C.assign((size_t) L, nullptr);
-    for (int l = 0; l < L; l++) {
+    // Offload: two device slots. Every graph reads C[l] and writes at most
+    // C[l + 1], which never share a slot, and a backward segment's C[l] is
+    // reloaded from the host first (lm_ckpt_load), so the aliasing is safe.
+    const int n_dev = st->cfg.ckpt_offload ? std::min(L, 2) : L;
+    for (int l = 0; l < n_dev; l++) {
         st->C[(size_t) l] = ggml_new_tensor_2d(st->ctx_ckpt, GGML_TYPE_F32, H, S);
         char nm[32];
         snprintf(nm, sizeof(nm), "ckpt.%d", l);
@@ -590,6 +609,9 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
         // is what lets lm_ckpt_fill_gacc() hand it a persistent dX buffer.
         ggml_set_param(st->C[(size_t) l]);
         ggml_set_input(st->C[(size_t) l]);
+    }
+    for (int l = n_dev; l < L; l++) {
+        st->C[(size_t) l] = st->C[(size_t) (l & 1)];
     }
 
     st->Gh[0] = ggml_new_tensor_2d(st->ctx_gh0, GGML_TYPE_F32, H, S);
@@ -671,6 +693,22 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
         *err = "checkpoint buffer allocation failed";
         return false;
     }
+    if (st->cfg.ckpt_offload) {
+        // Pinned, so the copies run at full PCIe DMA speed; a backend with no
+        // host buffer type (CPU-only) has nothing to offload to.
+        ggml_backend_dev_t         dev = ggml_backend_get_device(lm->backend);
+        ggml_backend_buffer_type_t hbt = dev ? ggml_backend_dev_host_buffer_type(dev) : nullptr;
+        if (!hbt) {
+            *err = "--ckpt-offload needs a GPU backend with pinned host memory";
+            return false;
+        }
+        st->buf_ckpt_host = ggml_backend_buft_alloc_buffer(hbt, (size_t) L * H * S * sizeof(float));
+        if (!st->buf_ckpt_host) {
+            *err = "--ckpt-offload: cannot allocate pinned host memory for the checkpoints";
+            return false;
+        }
+        st->ckpt_host = (float *) ggml_backend_buffer_get_base(st->buf_ckpt_host);
+    }
     if (!lm_ckpt_alloc_wstage(st, lm, err)) {
         return false;
     }
@@ -717,7 +755,28 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
             L, H, S, (double) L * H * S * 4.0 / 1048576.0, ggml_type_name(st->t_embT->type),
             ggml_nbytes(st->t_embT) / 1048576.0, V, st->cfg.chunk, ggml_nbytes(st->t_labc) / 1048576.0,
             st->fixed_bytes() / 1048576.0);
+    if (st->cfg.ckpt_offload) {
+        fprintf(stderr, "[train-lm] ckpt offload: %d checkpoints in pinned host RAM (%.1f MB), %d on the GPU (%.1f MB)\n",
+                L, (double) L * H * S * 4.0 / 1048576.0, std::min(L, 2), ggml_backend_buffer_get_size(st->buf_ckpt) / 1048576.0);
+    }
     return true;
+}
+
+// --ckpt-offload: C[l]'s first S columns (contiguous, offset 0) to and from
+// its host copy. No-ops when offload is off.
+static void lm_ckpt_save(const LmCkptState & st, int l, int S) {
+    if (st.ckpt_host) {
+        const size_t n = (size_t) st.lm->cfg.hidden_size * S;
+        ggml_backend_tensor_get(st.C[(size_t) l], st.ckpt_host + (size_t) l * st.lm->cfg.hidden_size * st.cfg.s_max, 0,
+                                n * sizeof(float));
+    }
+}
+static void lm_ckpt_load(const LmCkptState & st, int l, int S) {
+    if (st.ckpt_host) {
+        const size_t n = (size_t) st.lm->cfg.hidden_size * S;
+        ggml_backend_tensor_set(st.C[(size_t) l], st.ckpt_host + (size_t) l * st.lm->cfg.hidden_size * st.cfg.s_max, 0,
+                                n * sizeof(float));
+    }
 }
 
 // Host-side [H,V] -> [V,H] scatter at ggml_type_size() granularity, dtype
@@ -1507,6 +1566,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         if (!ok) {
             return false;
         }
+        lm_ckpt_save(st, Lo, S);
     }
 
     // ── P2: forward-collect, l = Lo .. Hi-2 ──────────────────────────────
@@ -1528,6 +1588,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         if (!ok) {
             return false;
         }
+        lm_ckpt_save(st, l + 1, S);
     }
 
     // ── P3: tail forward (layer Hi-1 + final norm) -> t_H ────────────────
@@ -1596,6 +1657,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         // MANDATORY: ggml_acc_or_set accumulates INTO a supplied grad_acc, so
         // the destination must start at zero.
         ggml_backend_buffer_clear(nxt == 0 ? st.buf_gh0 : st.buf_gh1, 0);
+        lm_ckpt_load(st, l, S);
 
         ggml_init_params ip  = { st.arena.size(), st.arena.data(), true };
         ggml_context *   ctx = ggml_init(ip);

@@ -9,6 +9,7 @@
 //
 // The worker's side is trainingWorkers.ts (workerMirrorManifest,
 // workerMirrorFile, deleteWorkerMirrorRun) behind /api/training/worker/yue2-mirror*.
+// The same passes copy MM3 runs too (mirrorMm3Runs, /api/training/worker/mm3-mirror*).
 import fs from 'fs';
 import path from 'path';
 import { createHash, randomUUID } from 'crypto';
@@ -17,11 +18,12 @@ import { pipeline } from 'stream/promises';
 import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import { isInside, trainingBaseDir } from './paths.js';
-import { getWorker, listWorkers, workerFetch, workerJson, type MirrorRun, type WorkerInfo } from './trainingWorkers.js';
+import { getWorker, listWorkers, workerFetch, workerJson, type MirrorFile, type MirrorRun, type Mm3MirrorRun, type WorkerInfo } from './trainingWorkers.js';
+import { mm3AdapterRoot, readMm3Run, readMm3RunManifest } from './mm3Runs.js';
 import { checkpointRecords, deleteYue2AitkRun, findYue2AitkRun, freeYue2RunDirectory, listAllYue2AitkRuns, moveYue2AitkRun, recordYue2AitkRun, withYue2RunLock, yue2RunFinished,
   type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, recordYue2JointPreview } from './yue2JointPreview.js';
-import { readYue2Linked, rebaseYue2JointLinks, refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
+import { pointMm3PresetsAt, readYue2Linked, rebaseYue2JointLinks, refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { noteYue2TrainLog, trainLogArchiveDir, trainLogName } from './datasetProfile.js';
 
 export interface MirrorStatus {
@@ -146,13 +148,13 @@ function sweepPartials(output: string): void {
 
 /** Download one file to a unique .part, hashing as it streams, and rename it
  *  into place only when it matches the worker's x-sha256. One retry. */
-async function fetchVerified(w: WorkerInfo, remoteJobId: string, rel: string, dest: string): Promise<LedgerEntry> {
+async function fetchVerified(w: WorkerInfo, url: string, dest: string): Promise<LedgerEntry> {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   let lastError = '';
   for (let attempt = 1; attempt <= 2; attempt++) {
     const part = `${dest}.part-${randomUUID()}`;
     try {
-      const r = await workerFetch(w, mirrorFileUrl(remoteJobId, rel));
+      const r = await workerFetch(w, url);
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
       const want = r.headers.get('x-sha256');
       const mtimeMs = Number(r.headers.get('x-mtime'));
@@ -219,6 +221,11 @@ async function runPass(w: WorkerInfo, st: WorkerState): Promise<MirrorStatus> {
         if (r === 'active') active = true;
       } catch (err) { errors.push(`${run.folder}: ${errorText(err)}`); }
     }
+    try {
+      const mm3 = await mirrorMm3Runs(w, st, errors);
+      runs += mm3.runs;
+      if (mm3.active) active = true;
+    } catch (err) { errors.push(`MM3: ${errorText(err)}`); }
     s.runs = runs;
   } catch (err) {
     s.online = false;
@@ -291,7 +298,7 @@ async function mirrorRun(w: WorkerInfo, run: MirrorRun, st: WorkerState, errors:
       const dest = path.join(output, ...f.rel.split('/'));
       if (!isInside(output, dest)) continue;
       try {
-        ledger[f.rel] = await fetchVerified(w, run.jobId, f.rel, dest);
+        ledger[f.rel] = await fetchVerified(w, mirrorFileUrl(run.jobId, f.rel), dest);
         writeLedger(output, ledger);
         st.status.pendingFiles--; st.status.pendingBytes -= f.size;
       } catch (err) { errors.push(`${run.folder}/${f.rel}: ${errorText(err)}`); }
@@ -334,6 +341,171 @@ function linkMirroredRun(ds: { slug: string; lyricsSetId?: number }, run: Mirror
   if (!top?.arPath || !top.narPath) return 'done run has no complete checkpoint to link; worker copy kept';
   const r = refreshYue2PresetsForJointCheckpoint(ds, top.arPath, top.narPath);
   return r.linked ? null : `could not link the checkpoint (${r.error || 'unknown'}); worker copy kept`;
+}
+
+// ── MM3 runs ────────────────────────────────────────────────────────────────
+//
+// An MM3 run lands as is at mm3-lm-adapters/<run>, under the same name and
+// dataset id it has on the worker, where every MM3 panel here lists it. No
+// index to write and nothing deleted on the worker: it keeps its copy (and
+// the optimizer state, so a resume happens there).
+
+/** seenLive: a pass caught the run training, so it is new; only those link
+ *  album presets (an older run found on the worker is copied, not linked). */
+type Mm3Record = { worker: string; run: string; discarded?: true; seenLive?: true; linked?: true };
+const mm3RecordsPath = () => path.join(trainingBaseDir, 'mm3-mirror.json');
+const MM3_MIRROR_REL = /^(?:hotstep-run\.json|train-log\.jsonl|train-console\.log|ckpt-\d+\/[A-Za-z0-9][A-Za-z0-9._-]*|previews\/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:wav|json))$/i;
+
+function readMm3Records(): Mm3Record[] {
+  try {
+    const v = JSON.parse(fs.readFileSync(mm3RecordsPath(), 'utf8')) as unknown;
+    return Array.isArray(v) ? v.filter((r): r is Mm3Record => typeof r?.worker === 'string' && typeof r?.run === 'string') : [];
+  } catch { return []; }
+}
+function writeMm3Records(list: Mm3Record[]): void {
+  const file = mm3RecordsPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 1), 'utf8');
+  fs.renameSync(tmp, file);
+}
+/** A tombstone sticks: a pass still holding an older copy of the record must
+ *  not undo a delete made while it ran. */
+function saveMm3Record(rec: Mm3Record): void {
+  const all = readMm3Records();
+  const same = (r: Mm3Record) => r.worker === rec.worker && r.run === rec.run;
+  writeMm3Records([...all.filter(r => !same(r)), all.find(same)?.discarded ? { ...rec, discarded: true } : rec]);
+}
+const mm3Discarded = (worker: string, run: string) => !!readMm3Records().find(r => r.worker === worker && r.run === run)?.discarded;
+
+/** One MM3 run at a time: a mirror pass's work on it, its deletion, a ladder
+ *  render and the cleanup around a checkpoint of it. */
+export function withMm3RunLock<T>(run: string, fn: () => Promise<T>): Promise<T> {
+  return withYue2RunLock(`mm3:${run}`, fn);
+}
+
+/** The worker an MM3 run was mirrored from, or null when it was trained here. */
+export function mm3RunOrigin(run: string): string | null {
+  return readMm3Records().find(r => r.run === run && !r.discarded)?.worker ?? null;
+}
+
+/** Delete an MM3 run folder here for good. Its mirror records are tombstoned
+ *  first, outside the lock, so a pass working on the run sees it before it
+ *  links the run's checkpoint; then, under the run's lock (no pass, render or
+ *  cleanup on it), `guard` re-checks what may have changed while waiting and
+ *  the folder goes. A refused guard puts the records back. The worker keeps
+ *  its copy (MM3 runs are never deleted there). */
+export async function deleteMm3RunFolder(run: string, dir: string, guard?: () => void): Promise<void> {
+  if (path.dirname(path.resolve(dir)) !== path.resolve(mm3AdapterRoot()) || path.basename(dir) !== run)
+    throw new Error(`Refusing to delete outside the MM3 adapters folder: ${dir}`);
+  const before = readMm3Records().filter(r => r.run === run);
+  if (before.some(r => !r.discarded)) writeMm3Records(readMm3Records().map(r => r.run === run ? { ...r, discarded: true as const } : r));
+  let removing = false;
+  try {
+    await withMm3RunLock(run, async () => {
+      guard?.();
+      if (!fs.existsSync(dir)) return;
+      if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to delete a linked run folder: ${dir}`);
+      removing = true;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  } catch (err) {
+    if (!removing) writeMm3Records([...readMm3Records().filter(r => r.run !== run), ...before]);
+    throw err;
+  }
+}
+
+/** The local hotstep-run.json carries this machine's blind ladder letters;
+ *  a newer copy from the worker must not drop them. */
+function keepLocalBlindLabels(file: string, labels: Record<string, string> | undefined): void {
+  if (!labels || !Object.keys(labels).length) return;
+  const m = JSON.parse(fs.readFileSync(file, 'utf8')) as { blindLabels?: Record<string, string> };
+  m.blindLabels = { ...m.blindLabels, ...labels };
+  fs.writeFileSync(file, JSON.stringify(m, null, 2), 'utf8');
+}
+
+async function mirrorMm3Runs(w: WorkerInfo, st: WorkerState, errors: string[]): Promise<{ runs: number; active: boolean }> {
+  const reply = await workerJson<{ runs?: Mm3MirrorRun[] }>(w, '/api/training/worker/mm3-mirror', { signal: AbortSignal.timeout(30_000) });
+  if (!Array.isArray(reply.runs)) throw new Error(`${w.name} has no MM3 mirror route; update it to this version`);
+  let runs = 0, active = false;
+  for (const run of reply.runs) {
+    if (!SAFE_NAME.test(run.run) || /^\.+$/.test(run.run)) { errors.push(`${w.name} sent an unsafe MM3 run name: ${run.run}`); continue; }
+    const ds = repo.getDataset(run.datasetId);
+    if (!ds) continue;
+    const r = await withMm3RunLock(run.run, () => mirrorMm3Run(w, st, errors, run, ds));
+    if (r.counted) runs++;
+    if (r.active) active = true;
+  }
+  return { runs, active };
+}
+
+/** One worker run, under its lock (deleteMm3RunFolder). */
+async function mirrorMm3Run(w: WorkerInfo, st: WorkerState, errors: string[], run: Mm3MirrorRun,
+                            ds: { slug: string; lyricsSetId?: number }): Promise<{ counted: boolean; active: boolean }> {
+  const skip = { counted: false, active: false };
+  let rec = readMm3Records().find(r => r.worker === w.name && r.run === run.run);
+  if (rec?.discarded) return skip;
+  const dir = path.join(mm3AdapterRoot(), run.run);
+  if (!rec) {
+    if (fs.existsSync(dir)) { errors.push(`${run.run}: a run of that name was trained here; not mirrored`); return skip; }
+    rec = { worker: w.name, run: run.run };
+    saveMm3Record(rec);
+    fs.mkdirSync(dir, { recursive: true });
+  } else if (!fs.existsSync(dir)) {
+    // Deleted here: leave it deleted.
+    saveMm3Record({ ...rec, discarded: true });
+    return skip;
+  }
+  if (run.live && !rec.seenLive) { rec = { ...rec, seenLive: true }; saveMm3Record(rec); }
+  sweepPartials(dir);
+  const ledger = readLedger(dir);
+  const failedBefore = errors.length;
+  const files = run.files.filter(f => {
+    if (MM3_MIRROR_REL.test(f.rel)) return true;
+    errors.push(`${run.run}: refused ${f.rel}`); return false;
+  });
+  // Current = the copy here is the worker's version. A file copied before
+  // and missing now was cleaned up here (a ladder cleanup): it stays gone.
+  const copied = (f: MirrorFile) => !!ledger[f.rel];
+  const current = (f: MirrorFile) => ledger[f.rel]?.mtimeMs === f.mtimeMs && ledger[f.rel]?.size === f.size;
+  const todo = files.filter(f => !current(f) && !(copied(f) && localSize(path.join(dir, ...f.rel.split('/'))) < 0))
+    .sort((a, b) => a.size - b.size);
+  st.status.pendingFiles += todo.length;
+  st.status.pendingBytes += todo.reduce((n, f) => n + f.size, 0);
+  for (const f of todo) {
+    // Deleted here while this pass copies it: stop, the delete waits on us.
+    if (mm3Discarded(w.name, run.run)) return { counted: true, active: false };
+    const dest = path.join(dir, ...f.rel.split('/'));
+    if (!isInside(dir, dest)) continue;
+    try {
+      const labels = f.rel === 'hotstep-run.json' ? readMm3RunManifest(dir)?.blindLabels : undefined;
+      ledger[f.rel] = await fetchVerified(w, `/api/training/worker/mm3-mirror-file?run=${encodeURIComponent(run.run)}&rel=${encodeURIComponent(f.rel)}`, dest);
+      if (labels) keepLocalBlindLabels(dest, labels);
+      writeLedger(dir, ledger);
+      st.status.pendingFiles--; st.status.pendingBytes -= f.size;
+    } catch (err) { errors.push(`${run.run}/${f.rel}: ${errorText(err)}`); }
+  }
+  const complete = errors.length === failedBefore;
+  if (run.live || !complete) return { counted: true, active: true };
+  // Re-read: a delete may have tombstoned the run since the top of this.
+  if (rec.seenLive && !rec.linked && !mm3Discarded(w.name, run.run)) {
+    linkMirroredMm3Run(ds, dir);
+    saveMm3Record({ ...rec, linked: true });
+  }
+  return { counted: true, active: false };
+}
+
+/** What the runner does when a run ends here (refreshLinkedMm3Presets): point
+ *  the dataset's album presets at the final checkpoint, unless the run opted
+ *  out. Once per run, after its last file has landed. */
+function linkMirroredMm3Run(ds: { slug: string; lyricsSetId?: number }, dir: string): void {
+  const run = readMm3Run(dir);
+  if (!run || (run.outcome !== 'completed' && run.outcome !== 'target-reached')) return;
+  if (readMm3RunManifest(dir)?.options.updateLinkedPresets === false) return;
+  const last = run.checkpoints[run.checkpoints.length - 1];
+  const weights = last && path.join(last.dir, 'adapter_model.safetensors');
+  if (!weights || !fs.existsSync(weights)) return;
+  pointMm3PresetsAt(ds, path.relative(mm3AdapterRoot(), weights));
 }
 
 let started = false;

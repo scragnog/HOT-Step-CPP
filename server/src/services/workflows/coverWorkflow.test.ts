@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -531,4 +534,64 @@ test('the Melody to Ins choice in engineParams reaches the YuE2 render request',
   assert.equal(effectiveCoverRequest(resting, asset, '/references/source.wav').yue2InstrumentalMode, 'resting');
   const plain = { ...input, expectedBackend: 'yue2' as const, instrumental: true };
   assert.equal(effectiveCoverRequest(plain, asset, '/references/source.wav').yue2InstrumentalMode, undefined);
+});
+
+
+test('MM3 panel request omits retired controls and carries the plank launder settings', t => {
+  const root = fs.mkdtempSync(path.resolve('.test-mm3-cover-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.getter(config.data, 'audioDir', () => path.join(root, 'audio'));
+  fs.mkdirSync(path.join(root, 'mm3-planks'));
+  fs.writeFileSync(path.join(root, 'mm3-planks', 'source.mm3plank.json'), JSON.stringify({
+    laundered: true, launderSteps: 45, launderSeed: 0, launderCaption: 'acoustic guitar and vocals',
+  }));
+  const parsed = coverRenderSchema.parse({ ...input, expectedBackend: 'minimax-m3',
+    mm3Cover: { plank: 'source.mm3plank', semanticOnly: true, trimSeconds: 12, arSeed: -1 } });
+  const request = effectiveCoverRequest(parsed, { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  assert.equal(request.mm3PlankSemanticOnly, true);
+  assert.equal(request.mm3PlankTrimSeconds, 12);
+  assert.equal(request.mm3ForceBias, '');
+  assert.equal(request.mm3ForcePattern, undefined);
+  assert.equal(request.mm3A2aStrength, '');
+  assert.equal(request.mm3PlankLaundered, true);
+  assert.equal(request.mm3PlankLaunderSteps, 45);
+  assert.equal(request.mm3PlankLaunderSeed, 0);
+  assert.equal(request.mm3PlankLaunderCaption, 'acoustic guitar and vocals');
+  // Existing API callers can still use the controls removed from the panel.
+  assert.doesNotThrow(() => coverRenderSchema.parse({ ...parsed, mm3Cover: {
+    ...parsed.mm3Cover, semanticOnly: false, soundStrength: 0.1, soundHold: 0.2,
+    forceBias: 16, pattern: { prefixSeconds: 5 },
+  } }));
+});
+
+test('MM3 cover modes map to guide fields, and a plank without a guide asks for a Re-encode', t => {
+  const root = fs.mkdtempSync(path.resolve('.test-mm3-modes-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.getter(config.data, 'audioDir', () => path.join(root, 'audio'));
+  const planks = path.join(root, 'mm3-planks');
+  fs.mkdirSync(planks);
+  const render = (mm3Cover: Record<string, unknown>) => effectiveCoverRequest(coverRenderSchema.parse({ ...input,
+    expectedBackend: 'minimax-m3', mm3Cover: { plank: 'src.mm3plank', semanticOnly: true, trimSeconds: 20, arSeed: -1, ...mm3Cover } }),
+  { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  // Pin, and drafts saved before modes existed, stay on the plank.
+  assert.equal(render({}).mm3PlankPath, 'src.mm3plank');
+  assert.equal(render({}).mm3GuidePath, undefined);
+  assert.throws(() => render({ mode: 'follow' }), /Re-encode/);
+  fs.writeFileSync(path.join(planks, 'src.guide'), '');
+  const follow = render({ mode: 'follow-depth', strength: 0.9, candidates: 32, stateFix: 'depth' });
+  assert.equal(follow.mm3PlankPath, '');
+  assert.equal(follow.mm3GuidePath, 'src.guide');
+  assert.equal(follow.mm3GuideOutside, -100);
+  assert.equal(follow.mm3GuideStateFix, 1);
+  assert.equal(follow.mm3GuideSeconds, 20);
+  assert.equal(follow.mm3CoverMode, 'follow-depth');
+  const product = render({ mode: 'product', weight: 1, candidates: 8 });
+  assert.equal(product.mm3GuideProduct, 1);
+  assert.equal(product.mm3GuideK, 8);
+  assert.equal(product.mm3GuideStateFix, undefined);
+  assert.throws(() => render({ mode: 'blend' }), /Re-encode/);
+  fs.writeFileSync(path.join(planks, 'src.mm3hiddens'), '');
+  const blend = render({ mode: 'blend', blend: 25, strength: 0.9, candidates: 32 });
+  assert.equal(blend.mm3BlendPath, 'src.mm3hiddens');
+  assert.equal(blend.mm3BlendAmount, 0.25);
 });

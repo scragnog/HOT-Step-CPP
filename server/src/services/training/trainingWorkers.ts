@@ -28,6 +28,8 @@ import { readYue2Linked, refreshYue2PresetsForJointCheckpoint, type Yue2LinkedPa
 import { getAllPresets } from '../../db/lireekDb.js';
 import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainRunner.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
+import { countMm3Captions } from './mm3Train.js';
+import { mm3AdapterRoot, readMm3RunManifest } from './mm3Runs.js';
 import type { TrainingDatasetRow } from './types.js';
 import { deleteYue2AitkRun, jointRunForAdapter, listAllYue2AitkRuns, yue2RunFinished, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
@@ -285,10 +287,71 @@ export async function workerMirrorFile(jobId: string, rel: string): Promise<{ ab
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
   const entry = mirrorFiles(run, listYue2JointPreviews(run.output)).find(f => f.rel === rel);
   if (!entry) throw Object.assign(new Error('Not a mirrored file of this run'), { status: 404 });
-  const abs = path.join(run.output, ...entry.rel.split('/'));
+  return servedFile(path.join(run.output, ...entry.rel.split('/')));
+}
+
+async function servedFile(abs: string): Promise<{ abs: string; size: number; mtimeMs: number; sha256: string }> {
   const st = fs.statSync(abs);
   const mtimeMs = Math.round(st.mtimeMs);
   return { abs, size: st.size, mtimeMs, sha256: await mirrorHash(abs, st.size, mtimeMs) };
+}
+
+// MM3 runs are self-describing folders under mm3-lm-adapters/<run> (their
+// hotstep-run.json names the dataset), so the controller lands each one as
+// is. Only runs of datasets pushed here are offered. The worker keeps its copy.
+
+export interface Mm3MirrorRun { run: string; datasetId: string; live: boolean; files: MirrorFile[] }
+
+const MM3_CKPT = /^ckpt-\d+$/;
+const MM3_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** The manifest, logs, every finished checkpoint and every preview. Never
+ *  resume-state.*: the optimizer state is gigabytes and resuming stays here.
+ *  The engine writes ckpt-N/ in place and its weights' .json sidecar last,
+ *  so a checkpoint is offered once that sidecar exists. */
+function mm3MirrorFiles(dir: string): MirrorFile[] {
+  const out: MirrorFile[] = [];
+  const add = (rel: string) => {
+    try {
+      const st = fs.statSync(path.join(dir, ...rel.split('/')));
+      if (st.isFile()) out.push({ rel, size: st.size, mtimeMs: Math.round(st.mtimeMs) });
+    } catch { /* not there (yet) */ }
+  };
+  const names = (sub: string) => { try { return fs.readdirSync(path.join(dir, sub)).filter(n => MM3_FILE.test(n)); } catch { return []; } };
+  for (const f of ['hotstep-run.json', 'train-log.jsonl', 'train-console.log']) add(f);
+  for (const ck of names('').filter(n => MM3_CKPT.test(n))) {
+    const files = names(ck);
+    if (files.some(n => n === 'adapter_model.safetensors.json' || n === 'lokr_weights.safetensors.json')) for (const n of files) add(`${ck}/${n}`);
+  }
+  for (const n of names('previews')) if (/\.(?:wav|json)$/i.test(n)) add(`previews/${n}`);
+  return out;
+}
+
+function pushedMm3RunDir(run: string): { dir: string; datasetId: string } | null {
+  if (!MM3_FILE.test(run)) return null;
+  const dir = path.join(mm3AdapterRoot(), run);
+  const datasetId = readMm3RunManifest(dir)?.datasetId;
+  const ds = datasetId ? repo.getDataset(datasetId) : undefined;
+  return ds && isInside(workerDatasetsDir(), ds.sourceDir) ? { dir, datasetId: ds.id } : null;
+}
+
+export function workerMm3MirrorManifest(): Mm3MirrorRun[] {
+  let runs: string[] = [];
+  try { runs = fs.readdirSync(mm3AdapterRoot(), { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name); } catch { /* none yet */ }
+  const lane = gpuLaneBusy() || gpuLaneDepth() > 0;
+  return runs.flatMap(run => {
+    const found = pushedMm3RunDir(run);
+    // Live: training, or a preview may still be rendering into it.
+    return found ? [{ run, datasetId: found.datasetId, live: lane || !!queue.activeJobForDataset(found.datasetId), files: mm3MirrorFiles(found.dir) }] : [];
+  });
+}
+
+/** One manifest entry of one MM3 run; `rel` is matched against the list. */
+export async function workerMm3MirrorFile(run: string, rel: string): Promise<{ abs: string; size: number; mtimeMs: number; sha256: string }> {
+  const found = pushedMm3RunDir(run);
+  if (!found) throw Object.assign(new Error('Run not found'), { status: 404 });
+  if (!mm3MirrorFiles(found.dir).some(f => f.rel === rel)) throw Object.assign(new Error('Not a mirrored file of this run'), { status: 404 });
+  return servedFile(path.join(found.dir, ...rel.split('/')));
 }
 
 /** A run that just ended may be about to seed a chained stage: a batch's
@@ -405,11 +468,14 @@ export async function pushDataset(w: WorkerInfo, ds: TrainingDatasetRow): Promis
 
 // Dispatch: caption here → push → queue on the worker's batch, per dataset,
 // so the worker starts training the first while the rest are still captioning.
+// MM3 skips the captioning: its `.mm3.txt` captions are made in the Enhance
+// panel beforehand and travel with the audio.
 
+export type DispatchFamily = 'yue2' | 'mm3';
 export type DispatchItemStatus = 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed';
 export interface DispatchItem { datasetId: string; name: string; status: DispatchItemStatus; error: string | null; sent?: number; bytes?: number }
-export interface DispatchState { worker: string; batchId: string | null; items: DispatchItem[]; running: boolean; startedAt: number }
-export interface DispatchInput { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }
+export interface DispatchState { worker: string; family: DispatchFamily; batchId: string | null; items: DispatchItem[]; running: boolean; startedAt: number }
+export interface DispatchInput { family?: DispatchFamily; datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }
 
 // ponytail: in memory; a restart mid-dispatch loses the queue line (not the
 // worker's batch) and the user dispatches the rest again, which re-sends nothing.
@@ -433,12 +499,15 @@ export function startDispatch(w: WorkerInfo, input: DispatchInput): DispatchStat
     items.push({ datasetId: id, name: ds.name || ds.slug, status: 'pending', error: null });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
+  const family = input.family ?? 'yue2';
   const live = dispatches.get(w.name);
   if (live?.running) {
+    // Joined items take the live dispatch's recipe and batch, so a family mix would train with the wrong one.
+    if (live.family !== family) return { error: `A ${familyName(live.family)} dispatch to ${w.name} is still sending; start this one when it finishes` };
     for (const item of items) if (!live.items.some(i => i.datasetId === item.datasetId && i.status !== 'failed')) live.items.push(item);
     return getDispatch(w.name)!;
   }
-  const state = { worker: w.name, batchId: null, items, running: true, startedAt: Date.now(), input };
+  const state = { worker: w.name, family, batchId: null, items, running: true, startedAt: Date.now(), input };
   dispatches.set(w.name, state);
   void runDispatch(w, state);
   return getDispatch(w.name)!;
@@ -451,7 +520,8 @@ async function runDispatch(w: WorkerInfo, state: DispatchState & { input: Dispat
     try {
       const ds = repo.getDataset(item.datasetId);
       if (!ds) throw new Error('Dataset not found');
-      if (state.input.recipe.autoCaption) { item.status = 'captioning'; await captionHere(ds, state.input.recipe.autoCaption as { provider?: string; model?: string }); }
+      if (state.family === 'mm3') checkMm3Sendable(ds);
+      else if (state.input.recipe.autoCaption) { item.status = 'captioning'; await captionHere(ds, state.input.recipe.autoCaption as { provider?: string; model?: string }); }
       item.status = 'pushing';
       const pushed = await pushDataset(w, ds);
       item.sent = pushed.sent; item.bytes = pushed.bytes;
@@ -482,6 +552,20 @@ async function captionHere(ds: TrainingDatasetRow, want: { provider?: string; mo
   if (left) throw new Error(`${left} track(s) still have no YuE2 caption after ${CAPTION_ATTEMPTS} Gemini passes; not sent to train on the long ACE captions`);
 }
 
+const familyName = (f: string | undefined) => f === 'mm3' ? 'MiniMax-Music3' : f === 'heartmula' ? 'HeartMuLa' : 'YuE2';
+
+/** What the worker's MM3 stages refuse, checked before any audio crosses the
+ *  network: a built manifest at the dataset folder's dataset.json (the push
+ *  sends that folder, nothing outside it) and at least one `.mm3.txt` caption. */
+function checkMm3Sendable(ds: TrainingDatasetRow): void {
+  const manifest = ds.datasetJsonPath;
+  if (!ds.builtAt || !manifest || !fs.existsSync(manifest)) throw new Error('Build the dataset first');
+  // upsertPushedDataset adopts exactly <folder>/dataset.json on the worker.
+  if (path.resolve(manifest) !== path.resolve(ds.sourceDir, 'dataset.json')) throw new Error(`Its manifest is not the dataset folder's dataset.json, so the worker would not find it: ${manifest}`);
+  const c = countMm3Captions(manifest, ds.sourceDir);
+  if (c.total > 0 && c.captioned === 0) throw new Error(`None of its ${c.total} tracks has a MiniMax-Music3 caption; make them in the Enhance panel first`);
+}
+
 async function queueOnWorker(w: WorkerInfo, state: DispatchState & { input: DispatchInput }, datasetId: string): Promise<void> {
   if (state.batchId) {
     const r = await workerFetch(w, `/api/training/yue2-batch/${encodeURIComponent(state.batchId)}/items`, jsonInit('POST', { datasetIds: [datasetId] }));
@@ -489,13 +573,16 @@ async function queueOnWorker(w: WorkerInfo, state: DispatchState & { input: Disp
     // 409: that batch finished before this dataset was ready; start another.
   }
   const { lyricTiming, clearCache, recipe } = state.input;
-  const start = await workerFetch(w, '/api/training/yue2-batch', jsonInit('POST', { datasetIds: [datasetId], lyricTiming, clearCache, recipe: { ...recipe, autoCaption: false } }));
+  const start = state.family === 'mm3'
+    ? await workerFetch(w, '/api/training/mm3-batch', jsonInit('POST', { datasetIds: [datasetId], clearCache, recipe }))
+    : await workerFetch(w, '/api/training/yue2-batch', jsonInit('POST', { datasetIds: [datasetId], lyricTiming, clearCache, recipe: { ...recipe, autoCaption: false } }));
   if (start.ok) { state.batchId = ((await start.json()) as { batch: { id: string } }).batch.id; return; }
   if (start.status !== 409) throw new Error(`${w.name}: ${((await start.json().catch(() => ({}))) as { error?: string }).error || `HTTP ${start.status}`}`);
-  // The worker is already running a batch someone else started: join it.
-  const { batches } = await workerJson<{ batches: Array<{ id: string; status: string }> }>(w, '/api/training/yue2-batch');
+  // The worker is already running a batch someone else started: join it, if it trains the same family.
+  const { batches } = await workerJson<{ batches: Array<{ id: string; status: string; family?: string }> }>(w, '/api/training/yue2-batch');
   const active = batches.find(b => b.status === 'running' || b.status === 'paused');
   if (!active) throw new Error(`${w.name}: batch start refused and no active batch to join`);
+  if ((active.family ?? 'yue2') !== state.family) throw new Error(`${w.name} is running a ${familyName(active.family)} batch; send this once it finishes`);
   await workerJson(w, `/api/training/yue2-batch/${encodeURIComponent(active.id)}/items`, jsonInit('POST', { datasetIds: [datasetId] }));
   state.batchId = active.id;
 }

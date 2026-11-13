@@ -393,6 +393,14 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
+/** The shared MM3 recipe minus `trigger`, which belongs to each dataset: without it the train route
+ *  uses the dataset's own custom tag. A batch that carried it trained every album on the first album's
+ *  trigger (HOTSTEP-1092), so it is dropped here, where every batch passes, whatever the client sent. */
+export function mm3BatchTrainBody(recipe: Record<string, unknown>): Record<string, unknown> {
+  const { trigger: _trigger, ...shared } = recipe;
+  return shared;
+}
+
 /** True when every manifest row has its `<id>.codes` file (the trainer silently skips a row without one).
  *  An unreadable or empty manifest is "not complete", so the codes stage runs and reports the real error. */
 export function mm3CodesComplete(manifest: string | null | undefined, codesInner: string): boolean {
@@ -569,7 +577,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     // is pinned, not re-recommended per dataset.
     if (stage === 'codes') return mm3CodesComplete(ds.datasetJsonPath, path.join(mm3CodesDir(ds.slug, launder), 'codes')) ? null : { launder };
     if (stage !== 'train') throw new Error(`Unsupported MM3 batch stage: ${stage}`);
-    return state.recipe;
+    return mm3BatchTrainBody(state.recipe);
   }
   if (stage === 'train' && result.resumeJobId) {
     const resumed = resumeTrainingBody(state, item, result.resumeJobId);

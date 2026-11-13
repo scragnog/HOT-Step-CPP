@@ -118,6 +118,7 @@
 #include "mm3-model.h"
 #include "mm3-sample.h"
 #include "mm3-tokenizer.h"
+#include "../yue2/yue2-guide.h"
 
 #include <algorithm>
 #include <chrono>
@@ -218,6 +219,43 @@ struct MM3ArOptions {
     const int32_t * forced_semantic = nullptr;  // [forced_len]
     const int32_t * forced_acoustic = nullptr;  // [forced_len, NC]
     int64_t         forced_len      = 0;
+    // Soft forcing (semantic-only). < 0 = the hard pin. >= 0: the forced code
+    // gets this added to its CFG-guided logit (before temperature) and the
+    // normal sampler draws; 0 = free, large = the pin. A -1 entry in
+    // forced_semantic is a free iteration under either mode. EOS stays masked
+    // inside the forced span, so the length is still the forced length.
+    float           force_bias      = -1.0f;
+
+    // Source guide (HOTSTEP-1090): YuE2's Follow-source mix on the semantic
+    // draw. The guide holds the RVQ encoder's top-K codes per frame and their
+    // log-softmax (`ace-train mm3-codes --guide-k`, Y2GD layout). Each guided
+    // iteration mixes p = (1 - s) p_LM + s p_enc over the candidates
+    // (yue2_guide_apply), so the LM picks among the source's near-synonyms
+    // instead of being pinned to the argmax. Guide frame j is emitted frame j;
+    // iteration 0 reads frame 0, the same warm-up duplicate as `.codes` row 0.
+    // Length = guide->T frames, EOS masked. Exclusive with forced_semantic.
+    const Yue2Guide * guide      = nullptr;
+    Yue2GuideParams   guide_p;               // scale, k, outside; the rest unused
+    const float *     guide_gate = nullptr;  // [guide->T] multiplies scale; null = 1
+    std::string       guide_trace;           // per-frame JSON for take 0; empty = none
+    // Probes on guided frames only (HOTSTEP-1090 round 9), both off by default.
+    // depth_greedy: the depth decoder takes argmax acoustic codes, like the
+    // launder, instead of sampling them.
+    // state_fix: bit 1 = the depth decoder's input, bit 2 = emitted stream 0.
+    // After the draw of code c, the conditional hidden row is stepped along
+    // d(ln p(c))/dh through the head until c is in its top 10 (mm3_state_fix).
+    // The LM's feedback and KV cache never see the moved row.
+    bool              depth_greedy = false;
+    int               state_fix    = 0;
+    // guide_product >= 0 replaces the probability mix with a product rule on the
+    // candidates only: a * ln p_enc + ln p_LM. < 0 = off (the mix).
+    float             guide_product = -1.0f;
+    // State blend: [blend_frames, NC+1, H], the emitted hiddens of frame f move
+    // blend_amount of the way toward frame f of this block (frames past its end
+    // are left alone). Null = off. Needs collect_hiddens.
+    const float *     blend        = nullptr;
+    int64_t           blend_frames = 0;
+    float             blend_amount = 0.0f;
 
     int64_t dump_iters      = 0;
     bool    collect_hiddens = true;
@@ -282,6 +320,17 @@ struct MM3ArOptions {
     // (adapter, scales) actually changed.
     const MM3LmAdapter * lm_adapter = nullptr;
     MM3LmAdapterScales   lm_adapter_scales = {};
+    // Strength along the song (MM3LmAdapterSchedule), a multiplier on
+    // lm_adapter_scales.global. Needs a runtime adapter: merge mode has baked
+    // the delta into the weights, so there is nothing to turn down.
+    MM3LmAdapterSchedule lm_adapter_sched = {};
+    // Plan dial, 0..1: how much the adapter plans the song. Below 1 every take
+    // gets a base pair (same prompt, delta masked off), guidance runs per
+    // model, the semantic draw samples base + plan * (adapter - base), and the
+    // drawn code feeds all four rows. The depth decoder still reads the
+    // adapter rows, so the adapter sings whatever is planned. 1 (or no runtime
+    // adapter) = no base rows: today's graph and today's RNG draws.
+    float                lm_adapter_plan  = 1.0f;
 
     // The adapter whose SOFT-PROMPT halves (artist token, trained KV prefix)
     // apply. Usually the same object as lm_adapter, and deliberately a separate
@@ -296,6 +345,16 @@ struct MM3ArOptions {
 #define MM3_ERR_CANCELLED "cancelled"
 
 static MM3LmGraph g_mm3_lm;
+
+// Whether the plan dial actually adds base rows: it needs a runtime delta to
+// mask (merge mode has none), and stands down for a soft prompt.
+// ponytail: a soft prompt (artist token, KV prefix) would need a per-row
+// attention mask to keep off the base rows; no MM3 adapter ships one yet, so
+// the dial is ignored for them. Add the mask when one does.
+static bool mm3_plan_rows_on(float plan, const MM3LmAdapter * ad, const MM3LmAdapter * soft) {
+    const bool has_soft = soft && (soft->has_artist_token() || soft->has_prefix());
+    return plan < 1.0f && ad && !has_soft;
+}
 
 // ── Runtime LM adapter cache ────────────────────────────────────────────────
 //
@@ -317,6 +376,118 @@ static void mm3_lm_adapter_drop() {
         mm3_lm_adapter_free(g_mm3_lm_adapter);
         g_mm3_lm_adapter = nullptr;
     }
+}
+
+// ── State fix (MM3ArOptions::state_fix) ─────────────────────────────────────
+// Host copy of the head's semantic rows as stored (possibly quantized), so a
+// row costs one dequantize instead of a device round trip. ~71 MB at q8_0.
+// The hidden row is post-norm and the head has no bias, so logits = W h.
+struct MM3HeadRows {
+    const ggml_tensor *  t = nullptr;
+    std::vector<uint8_t> raw;
+    size_t               nb1 = 0;
+    int64_t              H   = 0;
+};
+static MM3HeadRows g_mm3_head_rows;
+
+static bool mm3_head_rows_load(const MM3Model & m, std::string * err) {
+    const ggml_tensor * w = m.lm.output;
+    if (g_mm3_head_rows.t == w) {
+        return true;
+    }
+    if (!w || (w->type != GGML_TYPE_F32 && !ggml_get_type_traits(w->type)->to_float)) {
+        if (err) *err = "state fix: the LM head type cannot be read on the host";
+        return false;
+    }
+    const int64_t OFF = (int64_t) m.lm_cfg.semantic_vocab_offset, SV = (int64_t) m.lm_cfg.semantic_vocab_size;
+    g_mm3_head_rows.raw.resize((size_t) SV * w->nb[1]);
+    ggml_backend_tensor_get(w, g_mm3_head_rows.raw.data(), (size_t) OFF * w->nb[1], (size_t) SV * w->nb[1]);
+    g_mm3_head_rows.t   = w;
+    g_mm3_head_rows.nb1 = w->nb[1];
+    g_mm3_head_rows.H   = w->ne[0];
+    return true;
+}
+
+static void mm3_head_row(int64_t code, float * dst) {
+    const MM3HeadRows & r = g_mm3_head_rows;
+    const uint8_t *     p = r.raw.data() + (size_t) code * r.nb1;
+    if (r.t->type == GGML_TYPE_F32) {
+        memcpy(dst, p, (size_t) r.H * sizeof(float));
+    } else {
+        ggml_get_type_traits(r.t->type)->to_float(p, dst, r.H);
+    }
+}
+
+// Move the conditional hidden row h [H] until semantic code c is in the top
+// `rank` of its own logits. Works over S = the row's top 50 plus c, the codes
+// that carry the mass. Logits are linear in h, so each step is exact along its
+// direction d = W[c] - sum_{j in S} p_j W[j] (the gradient of ln p(c) on S),
+// sized to land c just above the current rank-th competitor. Returns the steps
+// used (0 = already there) or -1 when the cap ran out; *rel_dh = |dh| / |h|.
+static int mm3_state_fix(float * h, int64_t H, const float * sem_logits, int64_t SV, int32_t c, int rank,
+                         int max_steps, float * rel_dh) {
+    static std::vector<int32_t> S;
+    static std::vector<float>   W, l, d, r, tmp;
+    S.resize((size_t) SV);
+    for (int64_t j = 0; j < SV; j++) S[(size_t) j] = (int32_t) j;
+    const int64_t top = std::min<int64_t>(50, SV);
+    std::nth_element(S.begin(), S.begin() + top, S.end(),
+                     [&](int32_t a, int32_t b) { return sem_logits[a] > sem_logits[b]; });
+    S.resize((size_t) top);
+    if (std::find(S.begin(), S.end(), c) == S.end()) S.push_back(c);
+    const size_t n  = S.size();
+    const size_t ci = (size_t) (std::find(S.begin(), S.end(), c) - S.begin());
+    W.resize(n * (size_t) H);
+    l.resize(n);
+    r.resize(n);
+    d.resize((size_t) H);
+    for (size_t j = 0; j < n; j++) {
+        mm3_head_row(S[j], W.data() + j * (size_t) H);
+        l[j] = sem_logits[S[j]];
+    }
+    double h2 = 0.0, dh2 = 0.0;
+    for (int64_t i = 0; i < H; i++) h2 += (double) h[i] * h[i];
+    std::vector<float> dh((size_t) H, 0.0f);
+    int                steps = 0;
+    for (;; steps++) {
+        // The rank-th best competitor, and whether c already beats it.
+        tmp.clear();
+        size_t thr_j = 0;
+        for (size_t j = 0; j < n; j++) if (j != ci) tmp.push_back(l[j]);
+        const size_t k = std::min<size_t>((size_t) rank, tmp.size()) - 1;
+        std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t) k, tmp.end(), std::greater<float>());
+        const float thr = tmp[k];
+        for (size_t j = 0; j < n; j++) if (j != ci && l[j] == thr) { thr_j = j; break; }
+        if (l[ci] >= thr) break;
+        if (steps >= max_steps) { steps = -1; break; }
+        float mx = -INFINITY;
+        for (size_t j = 0; j < n; j++) mx = std::max(mx, l[j]);
+        double z = 0.0;
+        for (size_t j = 0; j < n; j++) z += std::exp((double) (l[j] - mx));
+        for (int64_t i = 0; i < H; i++) d[(size_t) i] = W[ci * (size_t) H + (size_t) i];
+        for (size_t j = 0; j < n; j++) {
+            const float pj = (float) (std::exp((double) (l[j] - mx)) / z);
+            const float * wj = W.data() + j * (size_t) H;
+            for (int64_t i = 0; i < H; i++) d[(size_t) i] -= pj * wj[i];
+        }
+        for (size_t j = 0; j < n; j++) {
+            const float * wj = W.data() + j * (size_t) H;
+            double        s  = 0.0;
+            for (int64_t i = 0; i < H; i++) s += (double) wj[i] * d[(size_t) i];
+            r[j] = (float) s;
+        }
+        const float rel = r[ci] - r[thr_j];
+        if (!(rel > 1e-6f)) { steps = -1; break; }
+        const float eta = (thr - l[ci] + 0.25f) / rel;
+        for (int64_t i = 0; i < H; i++) {
+            h[i] += eta * d[(size_t) i];
+            dh[(size_t) i] += eta * d[(size_t) i];
+        }
+        for (size_t j = 0; j < n; j++) l[j] += eta * r[j];
+    }
+    for (int64_t i = 0; i < H; i++) dh2 += (double) dh[(size_t) i] * dh[(size_t) i];
+    *rel_dh = h2 > 0.0 ? (float) std::sqrt(dh2 / h2) : 0.0f;
+    return steps;
 }
 
 // Plan K songs at once. `cond_ids` / `uncond_ids` are the two prefill rows,
@@ -354,10 +525,12 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Ensemble takes, clamped to what ggml's matrix-vector kernels can serve
     // (mm3-model.h). Clamping rather than failing: a caller asking for 8 takes
     // on a CFG-pair checkpoint gets 4 and a log line, not an error.
-    const int           K = mm3_clamp_takes(c, opt.n_takes);
+    const float         plan     = opt.lm_adapter_plan;
+    const bool          plan_mix = mm3_plan_rows_on(plan, opt.lm_adapter, opt.lm_soft);
+    const int           K        = mm3_clamp_takes(c, opt.n_takes, plan_mix);
     if (K != opt.n_takes && opt.n_takes > 1) {
-        fprintf(stderr, "[MM3-AR] %d takes requested; the row budget allows %d — rendering %d\n", opt.n_takes,
-                mm3_max_takes(c), K);
+        fprintf(stderr, "[MM3-AR] %d takes requested; the row budget allows %d%s — rendering %d\n", opt.n_takes,
+                mm3_max_takes(c, plan_mix), plan_mix ? " with the plan dial's base rows" : "", K);
     }
 
     if (n_prompt <= 0) {
@@ -441,6 +614,71 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             return false;
         }
     }
+    const bool guided = opt.guide != nullptr;
+    if (guided) {
+        if (forced) {
+            if (err) {
+                *err = "the source guide and forced_semantic are mutually exclusive";
+            }
+            return false;
+        }
+        if (opt.guide->T <= 0 || opt.guide->K <= 0 ||
+            opt.guide->ids.size() != (size_t) (opt.guide->T * opt.guide->K)) {
+            if (err) {
+                *err = "the source guide is empty or malformed";
+            }
+            return false;
+        }
+        max_frames = std::min(max_frames, opt.guide->T);
+        if (opt.state_fix && !mm3_head_rows_load(m, err)) {
+            return false;
+        }
+    } else if (opt.state_fix || opt.depth_greedy) {
+        if (err) {
+            *err = "state_fix and depth_greedy act on guided frames and need a source guide";
+        }
+        return false;
+    }
+    std::vector<float> sf_rel;
+    std::vector<int>   sf_steps;
+    // Soft or free frames resample the semantic code, so a pinned acoustic
+    // replay for that frame would describe a code that was not drawn.
+    bool soft_force = forced && opt.force_bias >= 0.0f;
+    for (int64_t i = 0; forced && i < opt.forced_len; i++) {
+        const int32_t fs = opt.forced_semantic[i];
+        if (fs < -1 || (int64_t) fs >= SV) {
+            if (err) {
+                *err = "forced semantic code " + std::to_string(fs) + " at iteration " + std::to_string((long long) i) +
+                       " is outside [0, " + std::to_string((long long) SV) + ") and is not -1 (free)";
+            }
+            return false;
+        }
+        soft_force = soft_force || fs == -1;
+    }
+    if (soft_force && forced_ac_given) {
+        if (err) {
+            *err = "lm_force_bias and free (-1) frames need semantic-only forcing (no forced_acoustic)";
+        }
+        return false;
+    }
+    // Logit scale under soft forcing, take 0, logged once at the end: the
+    // guided top-1 minus top-2 margin, the gap from top-1 down to the forced
+    // code, and how often the draw agreed with the source.
+    // fb_in50: forced frames whose source code survived the conditional
+    // top-k (the LM's own candidates), read before the bias re-admits it.
+    std::vector<float> fb_margin, fb_gap;
+    int64_t            fb_agree = 0, fb_biased = 0, fb_forced = 0, fb_in50 = 0;
+    // Guide trace, take 0, one entry per guided iteration:
+    //   gap       LM top-1 minus the guide's top-1, CFG'd logits before any filter
+    //   mass      LM probability on the candidates, inside its own top-k
+    //   overlap   1 when any candidate survived the LM's top-k
+    //   rank      the drawn code's place in the candidate list, -1 = outside
+    //   surprise  -ln p of the drawn code under the LM's full CFG'd row (nats)
+    //   scale     the mix scale actually used (gate applied)
+    std::vector<float>   gd_gap, gd_mass, gd_surprise, gd_scale;
+    std::vector<int32_t> gd_overlap, gd_rank;
+    std::vector<float>   gd_pre;
+    int64_t              gd_fallback = 0;  // frames where the LM's top-k dropped every candidate
 
     // KV budget: prompt + one iteration per emitted frame + the un-emitted first
     // one, plus slack so the last decode step never sits exactly on the boundary.
@@ -477,10 +715,22 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         mm3_lm_free_slot(&g_mm3_lm.decode);
         mm3_lm_free_slot(&g_mm3_lm.replay);
     }
+    // Plan dial (mm3_plan_rows_on, settled above with K).
+    if (plan < 1.0f && !plan_mix) {
+        fprintf(stderr, "[MM3-AR] plan dial %.2f ignored: %s\n", (double) plan,
+                !opt.lm_adapter ? "no runtime LM adapter (none loaded, or merge mode)"
+                                : "the adapter carries a soft prompt (artist token or KV prefix)");
+    }
+    // Rows of the adapter half; the base half starts here.
+    const size_t KP = (size_t) K * (size_t) P;
     // Both graph sets bake rows() into their shapes, so K has to be settled
     // before either is prepared. Kept in lockstep on purpose: the depth decoder
     // reads the LM's hidden rows straight out of the same buffer.
-    mm3_lm_set_takes(&g_mm3_lm, K);
+    mm3_lm_set_takes(&g_mm3_lm, K, plan_mix);
+    if (plan_mix) {
+        fprintf(stderr, "[MM3-AR] plan dial %.2f: base rows active (%d take%s, %zu adapter + %zu base LM rows)\n",
+                (double) plan, K, K == 1 ? "" : "s", KP, KP);
+    }
     mm3_depth_set_takes(&g_mm3_depth, K);
     // BEFORE prepare: a trained prefix occupies real KV columns, so the cache
     // has to be sized with them in it (mm3_lm_prepare adds them to the ask).
@@ -565,6 +815,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Cut to the batch ceiling rather than to what this run uses: the readback
     // helpers size their transfers from the graph, so a ceiling-sized buffer
     // can never be the thing that overruns.
+    // The plan dial's base rows fit too: mm3_max_takes halves K for them.
     std::vector<float> hidden((size_t) (H * MM3_MAX_BATCH_ROWS));
     std::vector<float> logits((size_t) (hn * MM3_MAX_BATCH_ROWS));
     std::vector<float> feedback((size_t) H);
@@ -583,18 +834,45 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // no second row to give them, so mirror the conditional one into place and
     // keep them meaningful. Only ever needed at K == 1, which is the only K
     // those surfaces are reachable at.
+    // Not with base rows: row 1 is then the base model's conditional row.
     const auto mirror_uncond = [&]() {
-        if (P > 1 || K != 1) {
+        if (P > 1 || K != 1 || plan_mix) {
             return;
         }
         memcpy(hidden.data() + H, hidden.data(), (size_t) H * sizeof(float));
         memcpy(logits.data() + hn, logits.data(), (size_t) hn * sizeof(float));
     };
 
+    // The adapter strength schedule. Takes decode in lockstep, so one shared
+    // multiplier per iteration is exact for every take. Iteration `it` is
+    // song time it / 25 s; the decode at the end of iteration it makes the
+    // logits iteration it + 1 samples from, so that is the time it is set for.
+    const bool sched_on = opt.lm_adapter && opt.lm_adapter_sched.active();
+    if (opt.lm_adapter_sched.active() && !opt.lm_adapter) {
+        fprintf(stderr, "[MM3-AR] adapter schedule ignored: no runtime LM adapter (none loaded, or merge mode)\n");
+    }
+    float      sched_cur   = -1.0f;
+    const auto sched_apply = [&](int64_t it) {
+        const float mult = opt.lm_adapter_sched.at((float) it / 25.0f);
+        if (mult == sched_cur) {
+            return;
+        }
+        sched_cur             = mult;
+        MM3LmAdapterScales sc = opt.lm_adapter_scales;
+        sc.global *= mult;
+        // Zero is the base itself: no delta in the graph, and no delta cost.
+        mm3_lm_set_adapter(&g_mm3_lm, mult > 0.0f ? opt.lm_adapter : nullptr, sc);
+        fprintf(stderr, "[MM3-AR] adapter schedule: x%.2f from %.1f s\n", mult, (double) it / 25.0);
+    };
+
     const auto t_start = std::chrono::steady_clock::now();
     {
         const auto t0 = std::chrono::steady_clock::now();
-        mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        if (sched_on) {
+            sched_apply(0);
+        } else {
+            mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        }
         if (!mm3_lm_prefill(m, &g_mm3_lm, cond_ids, uncond_ids, n_prompt, hidden.data(), logits.data(), err)) {
             return false;
         }
@@ -641,6 +919,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     std::vector<char>          active((size_t) K, 1);
     int                       first_eos_take = -1;
     std::vector<MM3DepthFrame> frames((size_t) K);
+    std::vector<float>              depth_in;              // state fix: the depth decoder's copy of `hidden`
+    std::vector<std::vector<float>> fixed((size_t) K);     // state fix: each take's moved conditional row
+    std::vector<char>               fixed_ok((size_t) K, 0);
 
     for (int t = 0; t < K; t++) {
         outs[t].semantic_all.reserve((size_t) (max_frames + 1));
@@ -658,7 +939,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             break;
         }
         // Under forced_continue the iterations past the forced frames sample freely.
-        const bool forced_it = forced && it < opt.forced_len;
+        const bool    forced_it = forced && it < opt.forced_len;
+        const int32_t fs_it     = forced_it ? opt.forced_semantic[it] : -1;
+        // Biased or free: sampled normally (rep penalty, knobs) with EOS masked.
+        const bool    soft_it   = forced_it && (opt.force_bias >= 0.0f || fs_it < 0);
+        // Guide frame: iteration 0 is un-emitted and reads frame 0, like the
+        // warm-up row of a .codes file; iteration it >= 1 emits frame it - 1.
+        const int64_t gf        = it > 0 ? it - 1 : 0;
+        const bool    guide_it  = guided && gf < opt.guide->T;
         const auto t_host0 = std::chrono::steady_clock::now();
 
         // ── sample this iteration's semantic code, once per take ──
@@ -689,6 +977,30 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 cand_cond[(size_t) (j + 1)] = fix(lrow_c[OFF - hlo + j]);
                 cand_unc[(size_t) (j + 1)]  = fix(lrow_u[OFF - hlo + j]);
             }
+            // Plan dial: mix each row with the base model's, base + plan *
+            // (adapter - base). Guidance is linear, so mixing cond and uncond
+            // here IS mixing the two guided rows, and the conditional top-k
+            // below then ranks by the mixed conditional row: the base's own
+            // filter at 0, the adapter's at 1. -inf on either side stays -inf.
+            if (plan_mix) {
+                const float * brow_c = logits.data() + (row_c(t) + KP) * (size_t) hn;
+                const float * brow_u = logits.data() + (row_u(t) + KP) * (size_t) hn;
+                // At 0 the base row is the answer outright: the adapter has no
+                // vote, so an adapter -inf (or a clamped NaN) cannot mask a code
+                // the base allows.
+                const auto    mix    = [&](float a, float b) -> float {
+                    if (plan == 0.0f) {
+                        return b;
+                    }
+                    return (std::isinf(a) || std::isinf(b)) ? -INFINITY : b + plan * (a - b);
+                };
+                cand_cond[0] = mix(cand_cond[0], fix(brow_c[EOS - hlo]));
+                cand_unc[0]  = mix(cand_unc[0], fix(brow_u[EOS - hlo]));
+                for (int64_t j = 0; j < SV; j++) {
+                    cand_cond[(size_t) (j + 1)] = mix(cand_cond[(size_t) (j + 1)], fix(brow_c[OFF - hlo + j]));
+                    cand_unc[(size_t) (j + 1)]  = mix(cand_unc[(size_t) (j + 1)], fix(brow_u[OFF - hlo + j]));
+                }
+            }
 
             if (it == 0) {
                 // Before CFG, before top-k, before the draw: the raw conditional
@@ -712,6 +1024,11 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             for (int64_t i = 0; i < NCAND; i++) {
                 const float u           = cand_unc[(size_t) i];
                 cand_guided[(size_t) i] = u + (cand_cond[(size_t) i] - u) * CFG;
+            }
+            // Read before the conditional top-k below can mask it out.
+            const float fs_guided = soft_it && fs_it >= 0 ? cand_guided[(size_t) (1 + fs_it)] : 0.0f;
+            if (guide_it) {
+                gd_pre = cand_guided;  // per take: the fallback below reads it too
             }
             {
                 int64_t k = TOPK < NCAND ? (int64_t) TOPK : NCAND;
@@ -796,27 +1113,133 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
             }
 
+            // ── soft forcing: pull toward the source code, never end early ──
+            if (soft_it) {
+                if (t == 0) {
+                    float top1 = -INFINITY, top2 = -INFINITY;
+                    for (int64_t i = 1; i < NCAND; i++) {
+                        const float g = cand_guided[(size_t) i];
+                        if (g > top1) {
+                            top2 = top1;
+                            top1 = g;
+                        } else if (g > top2) {
+                            top2 = g;
+                        }
+                    }
+                    if (std::isfinite(top2)) {
+                        fb_margin.push_back(top1 - top2);
+                    }
+                    if (fs_it >= 0 && std::isfinite(fs_guided)) {
+                        fb_gap.push_back(top1 - fs_guided);
+                    }
+                    if (fs_it >= 0) {
+                        fb_forced++;
+                        fb_in50 += std::isfinite(cand_guided[(size_t) (1 + fs_it)]) ? 1 : 0;
+                    }
+                }
+                // A positive bias re-admits the source code if the conditional
+                // top-k dropped it; at 0 the frame is left exactly free.
+                if (fs_it >= 0 && opt.force_bias > 0.0f) {
+                    cand_guided[(size_t) (1 + fs_it)] = fs_guided + opt.force_bias;
+                }
+                cand_guided[0] = -INFINITY;
+            }
+
+            // ── source guide: let the LM choose among the encoder's candidates ──
+            // On the row the conditional top-k has already filtered; the mix
+            // re-admits any candidate that filter dropped.
+            int64_t         guide_pick = -1;
+            const int32_t * gids       = nullptr;
+            int64_t         gk         = 0;
+            if (guide_it) {
+                const Yue2Guide & g = *opt.guide;
+                gk                  = opt.guide_p.k > 0 ? std::min<int64_t>(opt.guide_p.k, g.K) : g.K;
+                gids                = g.ids.data() + (size_t) (gf * g.K);
+                Yue2GuideParams gp  = opt.guide_p;
+                if (opt.guide_gate) {
+                    gp.scale *= opt.guide_gate[gf];
+                }
+                if (t == 0) {
+                    double mx = -INFINITY;
+                    for (int64_t i = 0; i < NCAND; i++) {
+                        mx = std::max(mx, (double) cand_guided[(size_t) i]);
+                    }
+                    double z = 0.0, zc = 0.0;
+                    for (int64_t i = 0; i < NCAND; i++) {
+                        if (std::isfinite(cand_guided[(size_t) i])) {
+                            z += std::exp((double) cand_guided[(size_t) i] - mx);
+                        }
+                    }
+                    bool ov = false;
+                    for (int64_t j = 0; j < gk; j++) {
+                        const float x = cand_guided[(size_t) (1 + gids[j])];
+                        if (std::isfinite(x)) {
+                            zc += std::exp((double) x - mx);
+                            ov = true;
+                        }
+                    }
+                    float top1 = -INFINITY;
+                    for (int64_t i = 1; i < NCAND; i++) {
+                        top1 = std::max(top1, gd_pre[(size_t) i]);
+                    }
+                    gd_mass.push_back(z > 0.0 ? (float) (zc / z) : 0.0f);
+                    gd_overlap.push_back(ov ? 1 : 0);
+                    gd_gap.push_back(std::min(100.0f, top1 - gd_pre[(size_t) (1 + gids[0])]));
+                    gd_scale.push_back(gp.scale);
+                }
+                if (opt.guide_product >= 0.0f) {
+                    // Product rule (probe): candidates only, a * ln p_enc + ln p_LM,
+                    // the LM's side from its CFG'd logits before the top-k filter.
+                    const float * glp = g.lp.data() + (size_t) (gf * g.K);
+                    std::fill(cand_guided.begin(), cand_guided.end(), -INFINITY);
+                    for (int64_t j = 0; j < gk; j++) {
+                        const size_t v = (size_t) (1 + gids[j]);
+                        cand_guided[v] = opt.guide_product * glp[j] + gd_pre[v];
+                    }
+                } else {
+                    yue2_guide_apply(cand_guided.data(), NCAND, 0, 1, NCAND, 0, g, gp, gf);
+                }
+                // One survivor (scale 1, k 1) is taken without a draw, so the
+                // shared RNG stays where the hard pin leaves it and the depth
+                // decoder samples the same acoustic codes: the parity gate.
+                int64_t n_fin = 0;
+                for (int64_t i = 0; i < NCAND && n_fin < 2; i++) {
+                    if (std::isfinite(cand_guided[(size_t) i])) {
+                        n_fin++;
+                        guide_pick = i;
+                    }
+                }
+                if (n_fin != 1) {
+                    guide_pick = -1;
+                }
+                // Scale 0 with candidates only leaves the LM's own logits on the
+                // candidates, so when its top-k dropped all of them nothing is
+                // left and the sampler would fall back to EOS. Re-admit them at
+                // their CFG'd logits from before that filter: the LM still picks
+                // its favourite among the source's candidates.
+                if (n_fin == 0) {
+                    for (int64_t j = 0; j < gk; j++) {
+                        cand_guided[(size_t) (1 + gids[j])] = gd_pre[(size_t) (1 + gids[j])];
+                    }
+                    if (t == 0) {
+                        gd_fallback++;
+                    }
+                }
+            }
+
             // ── repetition penalty on the guided candidates (knobs at
             // defaults: no-op). History = this take's emitted codes. ──
-            if (!forced_it && opt.knobs.rep_penalty > 1.0f) {
+            if ((!forced_it || soft_it) && opt.knobs.rep_penalty > 1.0f) {
                 mm3_apply_rep_penalty(cand_guided.data(), NCAND, outs[t].semantic_all.data(),
                                       (int64_t) outs[t].semantic_all.size(), opt.knobs);
             }
 
             // ── sample (or replay) ──
-            if (forced_it) {
-                const int32_t fs = opt.forced_semantic[it];
-                if (fs < 0 || (int64_t) fs >= SV) {
-                    if (err) {
-                        *err = "forced semantic code " + std::to_string(fs) + " at iteration " +
-                               std::to_string((long long) it) + " is outside [0, " + std::to_string((long long) SV) +
-                               ")";
-                    }
-                    return false;
-                }
-                sem_code[(size_t) t] = fs;
+            if (forced_it && !soft_it) {
+                sem_code[(size_t) t] = fs_it;  // range-checked at entry
             } else {
-                const int64_t idx = opt.knobs.any_active()
+                const int64_t idx = guide_pick >= 0 ? guide_pick
+                                    : opt.knobs.any_active()
                                         ? mm3_sample_knobbed(cand_guided.data(), NCAND, TOPK, opt.knobs,
                                                              rngs[(size_t) t], &samp_scratch)
                                         : mm3_sample_top_k(cand_guided.data(), NCAND, TOPK, rngs[(size_t) t],
@@ -832,6 +1255,26 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     continue;
                 }
                 sem_code[(size_t) t] = (int32_t) (idx - 1);
+                if (soft_it && fs_it >= 0 && t == 0) {
+                    fb_biased++;
+                    fb_agree += sem_code[0] == fs_it ? 1 : 0;
+                }
+                if (guide_it && t == 0) {
+                    int32_t rank = -1;
+                    for (int64_t j = 0; j < gk && rank < 0; j++) {
+                        rank = gids[j] == sem_code[0] ? (int32_t) j : -1;
+                    }
+                    double mx = -INFINITY, z = 0.0;
+                    for (const float x : gd_pre) {
+                        mx = std::max(mx, (double) x);
+                    }
+                    for (const float x : gd_pre) {
+                        z += std::isfinite(x) ? std::exp((double) x - mx) : 0.0;
+                    }
+                    const double lp = (double) gd_pre[(size_t) idx] - mx - std::log(z);
+                    gd_rank.push_back(rank);
+                    gd_surprise.push_back((float) std::min(100.0, -lp));
+                }
             }
         }
         out->host_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_host0).count();
@@ -867,13 +1310,45 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             }
         }
 
+        // ── state fix (probe): make the conditional state agree with the
+        // drawn code, for the depth decoder and/or emitted stream 0 only.
+        // The unconditional row is left alone. ──
+        const float * depth_rows = hidden.data();
+        std::fill(fixed_ok.begin(), fixed_ok.end(), (char) 0);
+        if (guide_it && opt.state_fix) {
+            if (opt.state_fix & 1) {
+                depth_in = hidden;
+                depth_rows = depth_in.data();
+            }
+            for (int t = 0; t < K; t++) {
+                if (!active[t]) {
+                    continue;
+                }
+                std::vector<float> & fr = fixed[(size_t) t];
+                const float *        hc = hidden.data() + row_c(t) * (size_t) H;
+                fr.assign(hc, hc + H);
+                float     rel = 0.0f;
+                const int st  = mm3_state_fix(fr.data(), H, logits.data() + row_c(t) * (size_t) hn + (OFF - hlo), SV,
+                                              sem_code[(size_t) t], 10, 8, &rel);
+                if (opt.state_fix & 1) {
+                    memcpy(depth_in.data() + row_c(t) * (size_t) H, fr.data(), (size_t) H * sizeof(float));
+                }
+                fixed_ok[(size_t) t] = (opt.state_fix & 2) ? 1 : 0;
+                if (t == 0) {
+                    sf_rel.push_back(rel);
+                    sf_steps.push_back(st);
+                }
+            }
+        }
+
         // ── depth decoder: the seven acoustic codes and their hidden states ──
         // Semantic-only forcing keeps the RNG alive so the depth decoder samples
         // the acoustic codebooks; full forcing passes null and replays them.
         const bool      forced_ac_it = forced_ac_given && it < opt.forced_len;
         const int32_t * forced_ac = forced_ac_it ? opt.forced_acoustic + it * NC : nullptr;
-        if (!mm3_depth_decode_takes(m, hidden.data(), sem_code.data(), forced_ac, frames.data(), err,
-                                    forced_ac_it ? nullptr : rngs.data(), TOPK)) {
+        const bool      greedy_it = forced_ac_it || (opt.depth_greedy && guide_it);
+        if (!mm3_depth_decode_takes(m, depth_rows, sem_code.data(), forced_ac, frames.data(), err,
+                                    greedy_it ? nullptr : rngs.data(), TOPK)) {
             return false;
         }
         out->depth_ms += frames[0].ms;
@@ -903,10 +1378,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         if (dumping) {
             // Single-take path only (guarded at entry), so the [2, H] / [2, SV]
             // shapes these carry are still literally true.
-            const float * lrow_c = logits.data();
-            const float * lrow_u = logits.data() + hn;
+            // Through row_c/row_u: at P == 1 with base rows, row 1 is the base.
+            const float * lrow_c = logits.data() + row_c(0) * (size_t) hn;
+            const float * lrow_u = logits.data() + row_u(0) * (size_t) hn;
             MM3ArDump     d;
-            d.last_hidden.assign(hidden.begin(), hidden.begin() + 2 * H);
+            d.last_hidden.assign(hidden.begin() + (ptrdiff_t) (row_c(0) * (size_t) H),
+                                 hidden.begin() + (ptrdiff_t) ((row_c(0) + 1) * (size_t) H));
+            d.last_hidden.insert(d.last_hidden.end(), hidden.begin() + (ptrdiff_t) (row_u(0) * (size_t) H),
+                                 hidden.begin() + (ptrdiff_t) ((row_u(0) + 1) * (size_t) H));
             d.sem_logits.resize((size_t) (2 * SV));
             memcpy(d.sem_logits.data(), lrow_c + (OFF - hlo), (size_t) SV * sizeof(float));
             memcpy(d.sem_logits.data() + SV, lrow_u + (OFF - hlo), (size_t) SV * sizeof(float));
@@ -923,10 +1402,24 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     continue;
                 }
                 if (opt.collect_hiddens) {
-                    const float * hc = hidden.data() + row_c(t) * (size_t) H;
+                    const float * hc = fixed_ok[(size_t) t] ? fixed[(size_t) t].data()
+                                                            : hidden.data() + row_c(t) * (size_t) H;
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), hc, hc + H);
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), frames[(size_t) t].hiddens.begin(),
                                                  frames[(size_t) t].hiddens.end());
+                    // State blend: every stream of this frame moves toward the
+                    // matching frame of another block (a launder's). Output
+                    // only; the LM and its feedback never see it.
+                    const int64_t f = outs[t].n_frames;
+                    if (opt.blend && f < opt.blend_frames) {
+                        const int64_t FH = (NC + 1) * H;
+                        float *       dst = outs[t].frame_hiddens.data() + (size_t) (f * FH);
+                        const float * src = opt.blend + (size_t) (f * FH);
+                        const float   a   = opt.blend_amount;
+                        for (int64_t i = 0; i < FH; i++) {
+                            dst[i] += a * (src[i] - dst[i]);
+                        }
+                    }
                 }
                 outs[t].n_frames++;
                 frames_done[(size_t) t] = outs[t].n_frames;
@@ -983,6 +1476,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 ac_rows[(size_t) (t * NC + i)] = frames[(size_t) t].codes[i] + (int32_t) (i * AV);
             }
         }
+        if (sched_on) {
+            sched_apply(it + 1);
+        }
         {
             const auto t0 = std::chrono::steady_clock::now();
             if (!mm3_lm_decode(m, &g_mm3_lm, sem_tok.data(), ac_rows.data(), hidden.data(), logits.data(),
@@ -1032,6 +1528,109 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         std::chrono::steady_clock::now() - t_start).count();
     for (int t = 0; t < K; t++) {
         outs[t].total_ms = total_ms;
+    }
+    if (soft_force) {
+        auto median = [](std::vector<float> & v) -> float {
+            if (v.empty()) {
+                return NAN;
+            }
+            std::nth_element(v.begin(), v.begin() + (ptrdiff_t) (v.size() / 2), v.end());
+            return v[v.size() / 2];
+        };
+        const float gap_med = median(fb_gap);
+        float       gap_p90 = NAN;
+        if (!fb_gap.empty()) {
+            const size_t i = (size_t) (0.9 * (double) (fb_gap.size() - 1));
+            std::nth_element(fb_gap.begin(), fb_gap.begin() + (ptrdiff_t) i, fb_gap.end());
+            gap_p90 = fb_gap[i];
+        }
+        fprintf(stderr,
+                "[MM3-AR] Soft forcing: bias %.2f, %lld biased frames, %lld free; agree %.1f%%; "
+                "median guided top-1 margin %.2f, median top-1 minus source %.2f, p90 %.2f; source in top-%d %.1f%%\n",
+                opt.force_bias, (long long) fb_biased, (long long) (fb_margin.size() - (size_t) fb_biased),
+                fb_biased ? 100.0 * (double) fb_agree / (double) fb_biased : 0.0, median(fb_margin), gap_med, gap_p90,
+                TOPK, fb_forced ? 100.0 * (double) fb_in50 / (double) fb_forced : 0.0);
+    }
+    if (!sf_rel.empty()) {
+        std::vector<float> rs = sf_rel;
+        std::sort(rs.begin(), rs.end());
+        size_t ok = 0, moved = 0, big = 0;
+        double st = 0.0;
+        for (size_t i = 0; i < sf_steps.size(); i++) {
+            ok += sf_steps[i] >= 0 ? 1 : 0;
+            moved += sf_steps[i] > 0 ? 1 : 0;
+            st += sf_steps[i] > 0 ? sf_steps[i] : 0;
+            big += sf_rel[i] > 0.3f ? 1 : 0;
+        }
+        fprintf(stderr,
+                "[MM3-AR] State fix (%s%s%s): %zu frames, %.1f%% moved, %.1f%% reached top-10, mean steps %.2f; "
+                "|dh|/|h| median %.3f p90 %.3f max %.3f; above 0.3 on %.1f%%%s\n",
+                opt.state_fix & 1 ? "depth" : "", opt.state_fix == 3 ? "+" : "", opt.state_fix & 2 ? "stream0" : "",
+                rs.size(), 100.0 * (double) moved / (double) rs.size(), 100.0 * (double) ok / (double) rs.size(),
+                moved ? st / (double) moved : 0.0, (double) rs[rs.size() / 2], (double) rs[(size_t) (0.9 * (double) (rs.size() - 1))],
+                (double) rs.back(), 100.0 * (double) big / (double) rs.size(), opt.depth_greedy ? ", depth greedy" : "");
+    } else if (opt.depth_greedy && guided) {
+        fprintf(stderr, "[MM3-AR] Depth decoder greedy on guided frames\n");
+    }
+    if (guided && !gd_rank.empty()) {
+        const size_t n   = gd_rank.size();
+        size_t       a1 = 0, ak = 0, ov = 0;
+        double       ms = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            a1 += gd_rank[i] == 0 ? 1 : 0;
+            ak += gd_rank[i] >= 0 ? 1 : 0;
+            ov += gd_overlap[i] ? 1 : 0;
+            ms += (double) gd_mass[i];
+        }
+        std::vector<float> gs = gd_gap;
+        std::nth_element(gs.begin(), gs.begin() + (ptrdiff_t) (gs.size() / 2), gs.end());
+        fprintf(stderr,
+                "[MM3-AR] Guide: scale %.2f%s k %lld outside %.1f, %zu frames; agree top-1 %.1f%%, any candidate "
+                "%.1f%%; LM top-%d overlaps candidates %.1f%%; mean LM mass on candidates %.3f; median gap %.2f\n",
+                (double) opt.guide_p.scale, opt.guide_gate ? " (gated)" : "",
+                (long long) (opt.guide_p.k > 0 ? std::min<int64_t>(opt.guide_p.k, opt.guide->K) : opt.guide->K),
+                (double) opt.guide_p.outside, n, 100.0 * (double) a1 / (double) n, 100.0 * (double) ak / (double) n,
+                TOPK, 100.0 * (double) ov / (double) n, ms / (double) n, (double) gs[gs.size() / 2]);
+        if (opt.guide_product >= 0.0f) {
+            fprintf(stderr, "[MM3-AR] Guide rule: product, a %.2f (scale and outside unused)\n",
+                    (double) opt.guide_product);
+        }
+        if (gd_fallback) {
+            fprintf(stderr, "[MM3-AR] Guide fallback: the LM's top-%d held no candidate on %lld frames (%.1f%%); "
+                            "re-admitted at their unfiltered logits\n",
+                    TOPK, (long long) gd_fallback, 100.0 * (double) gd_fallback / (double) n);
+        }
+        if (!opt.guide_trace.empty()) {
+            FILE * f = hs_fopen(opt.guide_trace, "wb");
+            if (!f) {
+                fprintf(stderr, "[MM3-AR] cannot write guide trace %s\n", opt.guide_trace.c_str());
+            } else {
+                const auto arr_f = [&](const char * name, const std::vector<float> & v, bool last) {
+                    fprintf(f, "\"%s\":[", name);
+                    for (size_t i = 0; i < v.size(); i++) {
+                        fprintf(f, i ? ",%.4g" : "%.4g", (double) v[i]);
+                    }
+                    fprintf(f, last ? "]" : "],");
+                };
+                const auto arr_i = [&](const char * name, const std::vector<int32_t> & v) {
+                    fprintf(f, "\"%s\":[", name);
+                    for (size_t i = 0; i < v.size(); i++) {
+                        fprintf(f, i ? ",%d" : "%d", v[i]);
+                    }
+                    fprintf(f, "],");
+                };
+                // Entry 0 is the un-emitted iteration; entry j >= 1 is frame j - 1.
+                fprintf(f, "{\"fps\":25,\"first_entry\":\"warm-up\",\"top_k\":%d,", TOPK);
+                arr_i("rank", gd_rank);
+                arr_i("overlap", gd_overlap);
+                arr_f("gap", gd_gap, false);
+                arr_f("mass", gd_mass, false);
+                arr_f("surprise", gd_surprise, false);
+                arr_f("scale", gd_scale, true);
+                fprintf(f, "}\n");
+                fclose(f);
+            }
+        }
     }
 
     // A take with no frames is a failed render, not a short one — and because
@@ -1086,6 +1685,12 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // kv_pos, which is why it can only run here, after the batched decode is
     // finished with the cache.
     if (opt.want_lrc && opt.tok != nullptr && !g_mm3_lm.align_capture && !align_dump && lyr0 >= 0 && lyr1 > lyr0) {
+        // The replay runs the whole plan under ONE adapter setting. A schedule
+        // left the graph at its tail strength; align under the body's instead,
+        // which is where the lyrics are. The tail's timestamps are approximate.
+        if (sched_on) {
+            mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        }
         for (int t = 0; t < K; t++) {
             MM3ArResult * o = &outs[t];
             // Selection is already known, before any alignment work.
@@ -1200,10 +1805,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     const int64_t candidates_per_row = SV + 1;
     const int64_t row_equivalents    = out->n_iterations * (int64_t) K * (int64_t) P;
     const int64_t budget             = candidates_per_row * row_equivalents;
+    // The plan dial's base rows are counted by fix() too, so the PERCENTAGE is
+    // over all of them; the fatal threshold below stays one dead row per take
+    // per step, because a dead row on either side poisons the mixed row.
+    const int64_t counted = budget * (plan_mix ? 2 : 1);
     if (out->nonfinite_logits) {
         fprintf(stderr, "[MM3-AR] WARNING: %lld non-finite candidate logits were clamped to -inf (%.1f%% of %lld)\n",
-                (long long) out->nonfinite_logits, budget ? 100.0 * (double) out->nonfinite_logits / (double) budget : 0.0,
-                (long long) budget);
+                (long long) out->nonfinite_logits, counted ? 100.0 * (double) out->nonfinite_logits / (double) counted : 0.0,
+                (long long) counted);
     }
     if (budget > 0 && out->nonfinite_logits * (int64_t) P >= budget) {
         char buf[352];

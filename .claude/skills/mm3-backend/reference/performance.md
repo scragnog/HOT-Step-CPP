@@ -305,9 +305,36 @@ correcting after the vocoder. Analysis scripts + A/B renders:
 
 Capture the AR stage's output codes on one render, replay them on later ones.
 Opt in per request: `get_ar_codes: true` captures; `forced_semantic` +
-`forced_acoustic` replay. The blob comes back from `GET /mm3/job?id=<id>&ar=1`
+`forced_acoustic` replay. `forced_semantic` alone pins content and lets the
+depth decoder sample the acoustic codes from the new caption (cover probe,
+HOTSTEP-1048). Two softer forms, semantic-only (HOTSTEP-1051): a `-1` entry
+is a free frame (sampled, EOS masked inside the span), and `lm_force_bias`
+adds a bias to the forced code's CFG-guided logit, before temperature, and
+samples instead of pinning. The engine log prints the logit scale per run
+(`[MM3-AR] Soft forcing:`). Measured with an LM adapter: the top-1/top-2 margin
+is about 1 logit, but the source code sits about 6 below the top pick while the
+LM tracks and about 30 below once it has lost the source. So the response is a
+cliff, not a slope: bias 12 or less matched the source on under 3% of frames,
+16 on 46%, 20 on 93%, 24 or more on 99%. The free and soft paths draw the
+semantic code from the same RNG the depth decoder uses, so even 100% agreement
+is a different acoustic take from the hard pin. The blob comes back from `GET /mm3/job?id=<id>&ar=1`
 as little-endian i32 — `[n_sem][sem…][n_ac][ac…]` — and is stored as
 `<uuid>.mm3plank` beside a `.mm3plank.json` sidecar in `<data>/mm3-planks/`.
+
+**Route B: the source's sound in the flow (HOTSTEP-1056).** The Plank steers the
+plan; `a2a_source` + `a2a_strength` steer the sound. The job DAV-encodes the source
+once through the refiner's encoder (`mm3_a2a_encode` in `mm3-job.h`, ModelStore
+`mm3-enc-f16`, released before the MM3 stack loads). Window k reads source columns
+from `round(k * hop * 3.4453125)`; `mm3_flow_sample_chunk` starts at the first
+scheduled t >= strength from the noised source and skips the steps before it, so
+strength 0.5 costs half the flow forwards. `a2a_hold` re-imposes the source over
+`[overlap, L)` for that fraction of the remaining steps. A window the source ends
+inside runs the full schedule with the source imposed on its covered columns
+(inpainting the rest), and later windows render normally. Strength 1 returns the
+source at 0.93 to 0.998 per-segment correlation. The stitch advances 345 latents
+per window against 344.53 true, so the output drifts one column (512 samples)
+about every two windows against the source; that drift predates Route B. Absent
+fields keep the old path bit-identical.
 
 **Read this before building on it: replay is NOT a speedup.** The AR loop still
 executes every per-frame forward pass, so the planning progress bar still runs

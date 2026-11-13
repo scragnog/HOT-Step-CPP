@@ -104,6 +104,9 @@ echo -e "${CYAN}[2/5] Pre-flight checks...${NC}"
 OLD_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 OLD_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
 
+# npm install can rewrite these generated lockfiles across npm versions.
+git checkout -- server/package-lock.json ui/package-lock.json
+
 # Check for uncommitted changes to TRACKED files only.
 #
 #   --ignore-submodules=dirty: engine/ggml used to carry HOT-Step's ggml

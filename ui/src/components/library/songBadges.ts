@@ -2,7 +2,7 @@ import type { Song } from '../../types';
 import { songBackend } from '../details/songFacts';
 
 export interface SongBadge {
-  label: 'ar' | 'vae' | 'cfg' | 'solver' | 'quant' | 'scale';
+  label: 'ar' | 'vae' | 'cfg' | 'solver' | 'quant' | 'scale' | 'bias' | 'sound';
   value: string;
 }
 
@@ -39,6 +39,8 @@ export function buildSongBadges(song: Song): SongBadge[] {
     case 'minimax-m3':
       add('cfg', gp.mm3?.cfg_flow ?? gp.mm3Request?.cfg_flow);
       if (gp.mm3LmAdapter) add('scale', gp.mm3LmAdapterScale);
+      if (gp.mm3PlankPath && gp.mm3PlankSemanticOnly) add('bias', gp.mm3ForceBias === '' ? 'pin' : gp.mm3ForceBias);
+      if (Number(gp.mm3A2aStrength) > 0) add('sound', gp.mm3A2aStrength);
       quant(gp.mm3Request?.model);
       break;
     case 'sa3':

@@ -227,6 +227,7 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 Re-style a recording with ACE-Step's audio-conditioned cover or YuE2's reviewed
 lead-sheet workflow, reusing dataset metadata and scores when available.
 Stable Audio 3 audio transform with caption, Transform strength, seed and an optional DoRA adapter; instrumental output from the full source.
+MiniMax-Music3 covers show target artists and albums with assigned MM3 adapters, with track captions or a Custom caption.
 
 HeartMuLa's MuLaCover mode shares Prepare and saves four style tag fields and
 a seed. Rendering and its separate CC BY-NC model pack are pending.
@@ -243,6 +244,7 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Target artist (ACE-Step) | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
 | Structure Fidelity (ACE-Step) | Controls how closely the output follows the source arrangement. |
 | Source Preservation and noise method (ACE-Step) | Starts from source audio with Classic or Full Denoise noise methods. |
+| MiniMax-Music3 cover | Launders the source into a reusable plank with steps, seed and source caption controls, then covers its semantic codes under a target caption. Launder settings appear in song facts. |
 | NoFSQ mode (ACE-Step) | Skips FSQ quantisation in the cover path. |
 | Tempo and pitch (ACE-Step) | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
 | Timbre reference (ACE-Step) | A second reference track for the DiT's timbre conditioning. |
@@ -383,13 +385,13 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes, at a BF16 training precision about 2.6x faster than FP32 by default. |
 | HeartMuLa adapters | A native backbone LoRA trained on the 3B model, with HeartCodec preparation, recipe presets, a default 30-epoch budget capped at 480 updates, a durable multi-dataset queue, Prepare-then-Train chains, scoped cache reset and checkpoint Review. Needs a CUDA build and about 12 GB of VRAM. [Details](docs/user/training/heartmula.md) |
 | HeartMuLa checkpoint previews | Training pauses every N steps, renders a full song from the saved checkpoint, with the tags and lyrics taken from the dataset, then resumes; the base model and the final adapter are rendered too. [Details](docs/user/training/heartmula.md#checkpoint-previews) |
-| MiniMax-Music3 checkpoint previews | Render previews during training pauses the trainer at checkpoints to render samples beside the base model, then resumes it. The previews sit in the same checkpoint ladder as YuE2's, kept after a reload, with Render more and Use this checkpoint, which sets the LM adapter and the dataset's album presets to that step. [Details](docs/user/training/minimax-music3.md#picking-a-checkpoint) |
+| MiniMax-Music3 checkpoint previews | Render previews during training pauses the trainer at checkpoints to render samples beside the base model, then resumes it. The previews sit in the same checkpoint ladder as YuE2's, kept after a reload, with YuE2's blind rungs, rung and album scores, Render more, and Use this checkpoint, which records the dataset's pick, sets the LM adapter and any existing album presets to that step, and offers cleanup even without an album preset. [Details](docs/user/training/minimax-music3.md#picking-a-checkpoint) |
 | YuE2 adapters | Five-stage chain with Perform all stages, Joint Training of the AR and NAR pair as LoKr (the default), LoRA or DoRA with Prodigy, AdamW or Muon, checkpoint losses averaged over the last 20 logged steps, a visible live loss graph, and Review entries for unscored runs even without previews. |
 | YuE2 run review | Train keeps completed charts without replaying them again; finished and approved runs leave "Scored or finished". Delete run confirms removal of the joint run folder, checkpoints, previews and MP3 cache; archived logs and checkpoints saved outside that folder stay. Live runs cannot be deleted. Ladder playback uses cached MP3, with WAV fallback. [Details](docs/user/studios/training-studio.md) |
 | YuE2 training GPU | Choose an NVIDIA card per Joint Training job, or use the GPU selected in Settings. [Details](docs/user/training/yue2.md#recommended-settings) |
 | YuE2 held-out planner gate | Optional in Joint Training: hold a few songs out, score the planner on them as it trains, and freeze it when that loss stops improving so the decoder can train on. The card shows the held-out songs before Start. Off by default; the settings are starting points, not validated ones. [Details](docs/user/training/yue2.md#recommended-settings) |
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
-| Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
+| Training on another PC | Send YuE2 or MiniMax-Music3 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. Details: [YuE2](docs/user/training/yue2.md#training-on-another-pc), [MiniMax-Music3](docs/user/training/minimax-music3.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
 | Stable Audio 3 training | Independent SA3 Medium DoRA-rows target with SuperSep level 5 vocal stripping, saved-run resume, adapter picker and checkpoint previews rendered during training (the YuE2 preview view), a four-chip dataset card and fixed-seed SA3 auditions regardless of the selected backend. [Details](docs/user/training/sa3.md) |
 | YuE2 checkpoint previews | Adjustable music adapter scale, default 0.6, with sound adapter strength fixed at 1.0 for training and manual previews. [Details](docs/user/training/yue2.md#recommended-settings) |

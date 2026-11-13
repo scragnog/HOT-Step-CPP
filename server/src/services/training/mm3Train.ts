@@ -11,7 +11,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { config } from '../../config.js';
+import { config, getFFmpegPath } from '../../config.js';
 import { datasetDir } from './paths.js';
 import type { Mm3PreviewOptions } from './types.js';
 
@@ -108,6 +108,28 @@ export function missingMm3TrainModels(need: 'codes' | 'train' | 'launder',
        [m.depth, 'mm3-depth-f16.gguf']]
     : [[m.lm, path.basename(m.lm)], [m.depth, 'mm3-depth-f16.gguf']];
   return wanted.filter(([p]) => !p || !fs.existsSync(p)).map(([, label]) => label);
+}
+
+/** How many manifest rows have a `<stem>.mm3.txt` beside their audio. Mirrors
+ *  the trainer's own rule (mm3-lm-train-run.h): stem = filename minus its last
+ *  extension, caption = `<captionsDir>/<stem>.mm3.txt`. Never throws. */
+export function countMm3Captions(manifest: string, captionsDir: string): { total: number; captioned: number } {
+  let rows: unknown[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
+    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
+  } catch {
+    return { total: 0, captioned: 0 };
+  }
+  let total = 0, captioned = 0;
+  for (const raw of rows) {
+    const filename = (raw as { filename?: unknown })?.filename;
+    if (typeof filename !== 'string' || !filename) continue;
+    total++;
+    const stem = filename.replace(/\.[^.]*$/, '');
+    if (fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) captioned++;
+  }
+  return { total, captioned };
 }
 
 // ── Base catalogue ──────────────────────────────────────────────────────────
@@ -434,6 +456,31 @@ export interface Mm3Recommendation {
 function rankLadder(): number[] {
   const capped = MM3_RANK_LADDER_FULL.filter(r => r <= MM3_LM_DEFAULTS.rank);
   return capped.length ? capped : [MM3_LM_DEFAULTS.rank];
+}
+
+/** MM3's LM: 36 layers of 4096. What --ckpt-offload moves off the card is
+ *  all but two of its [H, S] f32 checkpoints (engine train/lm-ckpt.h). */
+const MM3_LM_LAYERS = 36;
+const MM3_LM_HIDDEN = 4096;
+
+export interface Mm3OffloadPlan { offload: boolean; peakMb: number; budgetMb: number; offloadedMb: number }
+
+/** Whether a run needs --ckpt-offload to stay on the card, from the same model
+ *  as the VRAM estimate. `frames` is the longest window the run trains (the
+ *  engine sizes its buffers to the longest track it keeps). The budget leaves
+ *  the recommender's headroom. Unknown card (0) or base: no offload. */
+export function mm3CkptOffloadPlan(o: {
+  basePrecision: string; rank: number; frames: number; optimizer: 'muon' | 'adamw' | 'prodigy';
+  attn: 'exact' | 'flash'; prefixFrames: number; trainPrecision: string;
+}, gpuTotalMb: number, bases: Array<Pick<Mm3BaseInfo, 'id' | 'bytes' | 'extraMb'>> = availableMm3Bases()): Mm3OffloadPlan {
+  const S = MM3_VRAM_MODEL.promptTokens + Math.max(0, o.frames);
+  const offloadedMb = Math.round((MM3_LM_LAYERS - 2) * MM3_LM_HIDDEN * S * 4 / 1048576);
+  const base = bases.find(b => b.id === o.basePrecision);
+  if (!base || !(gpuTotalMb > 0)) return { offload: false, peakMb: 0, budgetMb: 0, offloadedMb };
+  const stageMb = o.trainPrecision !== 'full' && o.basePrecision !== 'bf16' ? MM3_VRAM_MODEL.bf16StageMb : 0;
+  const peakMb = estimateMm3PeakMb(base.bytes, o.rank, o.frames, base.extraMb, o.optimizer, o.prefixFrames, o.attn) + stageMb;
+  const budgetMb = gpuTotalMb - Math.min(1536, Math.round(gpuTotalMb * 0.08));
+  return { offload: peakMb > budgetMb, peakMb, budgetMb, offloadedMb };
 }
 
 export function recommendMm3Config(gpuTotalMb: number,
@@ -1110,6 +1157,38 @@ export interface Mm3CodesArgs {
    *  (deftones A/B, 2026-08-31). Off = plain mm3-codes, byte-identical to the
    *  pipeline before this option existed. */
   launder?: boolean;
+  launderSteps?: number;
+  launderSeed?: number;
+  /** Also write <id>.guide: the encoder's top N codes per frame (cover modes). */
+  guideK?: number;
+  /** Launder only: also write the renderer condition as <dir>/<id>.mm3hiddens. */
+  keepHiddens?: string;
+  /** Re-encode from scratch: the cache (and the prior capture beside it) is cleared before the job. */
+  force?: boolean;
+  /** Only tracks whose name contains this text (case-insensitive). */
+  only?: string;
+  /** Cap on how many tracks this run encodes; 0 or absent = all. */
+  limit?: number;
+}
+
+/** Clear the cache when forced and return the manifest the job should read. `mm3-codes` takes neither
+ *  a filter nor a limit, so a filtered run reads a subset manifest written beside the full one, which
+ *  stays untouched. Throws when the filter matches nothing. */
+export function prepareMm3CodesInput(a: Mm3CodesArgs): string {
+  if (a.force) fs.rmSync(a.outDir, { recursive: true, force: true });
+  const only = a.only?.trim().toLowerCase() ?? '';
+  const limit = a.limit && a.limit > 0 ? Math.floor(a.limit) : 0;
+  if (!only && !limit) return a.datasetJson;
+  const manifest = JSON.parse(fs.readFileSync(a.datasetJson, 'utf-8'));
+  let samples: any[] = Array.isArray(manifest.samples) ? manifest.samples : [];
+  if (only) {
+    samples = samples.filter(s => String(s.filename || path.basename(String(s.audio_path || ''))).toLowerCase().includes(only));
+  }
+  if (limit) samples = samples.slice(0, limit);
+  if (!samples.length) throw new Error(`No tracks match the name filter "${a.only}".`);
+  const subset = path.join(path.dirname(a.datasetJson), 'dataset.mm3-codes-subset.json');
+  fs.writeFileSync(subset, JSON.stringify({ ...manifest, samples }));
+  return subset;
 }
 
 export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
@@ -1123,6 +1202,8 @@ export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
         '--rec7', m.rec7,
         '--models', mm3ModelDir(),
         '--out', a.outDir,
+        '--steps', String(a.launderSteps ?? 30),
+        '--seed', String(a.launderSeed ?? 42),
       ]
     : [
         'mm3-codes', '--jsonl',
@@ -1136,6 +1217,12 @@ export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
   const cap = a.launder ? 359 : Infinity;
   const md = a.maxDuration && a.maxDuration > 0 ? Math.min(Math.round(a.maxDuration), cap) : (a.launder ? 359 : 0);
   if (md > 0) args.push('--max-duration', String(md));
+  // Without it the engine runs whatever "ffmpeg" is on PATH, and a PC with no
+  // system ffmpeg fails every track ("ffmpeg exit 1").
+  const ffmpeg = getFFmpegPath();
+  if (ffmpeg) args.push('--ffmpeg', ffmpeg);
+  if (a.guideK && a.guideK > 0) args.push('--guide-k', String(Math.round(a.guideK)));
+  if (a.launder && a.keepHiddens) args.push('--keep-hiddens', a.keepHiddens);
   return args;
 }
 
@@ -1219,6 +1306,9 @@ export interface ResolvedMm3TrainLmOptions {
   /** See MM3_LM_DEFAULTS.pissaCache / pissaFrozenF16. */
   pissaCache: boolean;
   pissaFrozenF16: boolean;
+  /** --ckpt-offload on: activation checkpoints in host RAM. Set by the route
+   *  from mm3CkptOffloadPlan when the run would not fit the card. */
+  ckptOffload?: boolean;
   hra: boolean;
   loraPlusRatio: number;
   /** Soft prompt. '' = no token. See MM3_LM_DEFAULTS.artistToken. */
@@ -1284,19 +1374,25 @@ export function isMm3TrainPrecision(v: unknown): v is Mm3TrainPrecision {
  *  f16 and worse for inference, so it has no other reason to be picked.
  *  'fastest' only upgrades flash to flash-bf16; when attention resolved to
  *  exact (switched off, or a build with no fused kernel) it trains as 'fast'
- *  rather than turning flash on behind the user's back. */
+ *  rather than turning flash on behind the user's back.
+ *  'fast' and 'fastest' also pass --tf32 on: their big GEMMs already round to
+ *  BF16 (8-bit mantissa), so TF32's 11 bits on the leftover F32 GEMMs costs
+ *  nothing they have not accepted. 1.09x on a 4090, +1.4 % on a 5090. The flag
+ *  only skips NVIDIA_TF32_OVERRIDE=0; cuBLAS ignores TF32 math below sm_80 and
+ *  other backends never read it. 'full' keeps strict FP32. */
 export function mm3PrecisionFlags(precision: Mm3TrainPrecision | undefined, basePrecision: Mm3BasePrecision,
-                                  attnBackend: 'exact' | 'flash'): { weights: string; attn: string | null } {
+                                  attnBackend: 'exact' | 'flash'): { weights: string; attn: string | null; tf32: boolean } {
   const p = precision ?? 'full';
   return {
     weights: basePrecision === 'bf16' || p !== 'full' ? 'bf16' : 'f32-window',
     attn: attnBackend === 'exact' ? null : p === 'fastest' ? 'flash-bf16' : attnBackend,
+    tf32: p !== 'full',
   };
 }
 
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   const m = resolveMm3TrainModels(o.basePrecision);
-  const { weights, attn } = mm3PrecisionFlags(o.trainPrecision, o.basePrecision, o.attnBackend ?? 'exact');
+  const { weights, attn, tf32 } = mm3PrecisionFlags(o.trainPrecision, o.basePrecision, o.attnBackend ?? 'exact');
   const args = [
     'mm3-lm-train', '--jsonl',
     '--lm', m.lm,
@@ -1388,12 +1484,14 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // collision (engine exit) before this ever runs — see attnBackendResolved
   // in routes/training.ts.
   if (attn) args.push('--attn', attn);
+  if (tf32) args.push('--tf32', 'on');
   // Whole-song recipe (2026-09-11): tracks that do not fit the window are left
   // out rather than trained in pieces. Emitted only for 'exclude' so an older
   // engine never sees the flag for the 'crop' behaviour it already has.
   // 'excise' keeps the flag too: the retarget pass shortens what it can, and whatever it refused must still be
   // left out rather than silently falling back to crops.
   if ((o.longTracks ?? 'exclude') !== 'crop') args.push('--drop-over-frames', String(o.maxFrames));
+  if (o.ckptOffload) args.push('--ckpt-offload', 'on');
   // Soft prompt. Uses the SAME flag names the parser already accepts
   // (--artist-token/-k/-lr) — this is not a new engine surface, just a
   // previously-unwired one.

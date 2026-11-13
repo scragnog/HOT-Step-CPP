@@ -146,51 +146,54 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
             return (
               <div
                 key={album.id}
-                className={`group relative aspect-square rounded-2xl overflow-hidden cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:shadow-indigo-500/10 ls2-card-in ls2-stagger-${Math.min(idx + 1, 11)}`}
+                className={`group relative aspect-square rounded-2xl cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:shadow-2xl hover:shadow-indigo-500/10 ls2-card-in ls2-stagger-${Math.min(idx + 1, 11)} ${menuOpenId === album.id ? 'z-30' : ''}`}
                 onClick={() => onSelectAlbum(album)}
               >
-                {(() => {
-                  const dAlbumName = disguiseAlbum(album.album || '');
-                  const dUrl = disguiseImageUrl(album.image_url, album.album || String(album.id));
-                  return dUrl && !imageErrors.has(album.id) ? (
-                  <img
-                    src={dUrl}
-                    alt={dAlbumName || 'Album'}
-                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                    onError={() => setImageErrors(prev => new Set(prev).add(album.id))}
-                  />
-                ) : (
-                  <>
-                    <div
-                      className="absolute inset-0"
-                      style={{ background: gradient(dAlbumName || String(album.id)) }}
+                <div className="absolute inset-0 rounded-2xl overflow-hidden">
+                  {(() => {
+                    const dAlbumName = disguiseAlbum(album.album || '');
+                    const dUrl = disguiseImageUrl(album.image_url, album.album || String(album.id));
+                    return dUrl && !imageErrors.has(album.id) ? (
+                    <img
+                      src={dUrl}
+                      alt={dAlbumName || 'Album'}
+                      className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                      onError={() => setImageErrors(prev => new Set(prev).add(album.id))}
                     />
-                    {/* Decorative vinyl record */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60%] h-[60%] rounded-full border border-zinc-200 dark:border-white/5 opacity-20">
-                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30%] h-[30%] rounded-full border border-zinc-300 dark:border-white/10" />
+                  ) : (
+                    <>
+                      <div
+                        className="absolute inset-0"
+                        style={{ background: gradient(dAlbumName || String(album.id)) }}
+                      />
+                      {/* Decorative vinyl record */}
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60%] h-[60%] rounded-full border border-zinc-200 dark:border-white/5 opacity-20">
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30%] h-[30%] rounded-full border border-zinc-300 dark:border-white/10" />
+                      </div>
+                    </>
+                  );
+                  })()}
+
+                  {/* Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+
+                  {/* Content */}
+                  <div className="absolute inset-x-0 bottom-0 p-4">
+                    <h3 className="text-sm font-bold text-white truncate mb-2 drop-shadow-lg">
+                      {disguiseAlbum(album.album || '') || 'Top Songs'}
+                    </h3>
+                    <div className="flex items-center gap-3 text-xs text-zinc-700 dark:text-zinc-300/70">
+                      <span className="flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        {songCount} songs
+                      </span>
                     </div>
-                  </>
-                );
-                })()}
-
-                {/* Overlay */}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-
-                {/* Content */}
-                <div className="absolute inset-x-0 bottom-0 p-4">
-                  <h3 className="text-sm font-bold text-white truncate mb-2 drop-shadow-lg">
-                    {disguiseAlbum(album.album || '') || 'Top Songs'}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs text-zinc-700 dark:text-zinc-300/70">
-                    <span className="flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      {songCount} songs
-                    </span>
                   </div>
-                </div>
 
-                {/* Hover ring */}
-                <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 group-hover:ring-indigo-500/40 transition-all duration-300" />
+                  {/* Hover ring */}
+                  <div className="absolute inset-0 rounded-2xl ring-1 ring-white/10 group-hover:ring-indigo-500/40 transition-all duration-300" />
+
+                </div>
 
                 {/* Context menu button */}
                 <button
@@ -206,7 +209,27 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                 {/* Context menu */}
                 {menuOpenId === album.id && (
                   <div
-                    className="absolute top-10 right-2 z-20 min-w-[160px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1"
+                    ref={(menu) => {
+                      const grid = gridRef.current;
+                      const card = menu?.parentElement;
+                      if (!menu || !grid || !card) return;
+                      const position = () => {
+                        const bounds = grid.getBoundingClientRect();
+                        const cardBounds = card.getBoundingClientRect();
+                        const scale = cardBounds.width / card.offsetWidth;
+                        const width = bounds.width / scale;
+                        menu.style.minWidth = `${Math.min(160, width)}px`;
+                        menu.style.maxWidth = `${width}px`;
+                        const left = (bounds.left - cardBounds.left) / scale;
+                        menu.style.left = `${Math.max(left, Math.min(card.offsetWidth - menu.offsetWidth - 8, left + width - menu.offsetWidth))}px`;
+                      };
+                      position();
+                      const observer = new ResizeObserver(position);
+                      observer.observe(grid);
+                      observer.observe(card);
+                      return () => observer.disconnect();
+                    }}
+                    className="absolute top-10 z-20 min-w-[160px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {onRefreshImage && (
@@ -245,7 +268,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
             );
           })}
 
-          {/* Add new album card — dropdown */}
+          {/* Add new album card â€” dropdown */}
           <div
             className="relative aspect-square rounded-2xl border-2 border-dashed border-zinc-300 dark:border-white/10 hover:border-pink-500/30 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:bg-white/[0.02] group"
             onClick={() => setAddMenuOpen(!addMenuOpen)}

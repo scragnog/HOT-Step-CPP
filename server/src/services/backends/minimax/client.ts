@@ -250,6 +250,15 @@ export interface Mm3SynthRequest {
    *  a flow-stage A/B comparison valid. */
   forced_semantic?: number[];  // [I], entry 0 is the un-emitted iteration
   forced_acoustic?: number[];  // [I * 7], flat, iteration-major
+  /** Audio to audio: the source's DAV latents steer the flow (engine
+   *  mm3-pipeline.h MM3A2aWindow). Absolute WAV/MP3 path; strength 0..1 is
+   *  where the flow starts (1 = the source back), hold 0..1 the fraction of the
+   *  remaining steps that re-impose it. Without forced codes the engine caps
+   *  the length to the source. */
+  a2a_source?: string;
+  a2a_strength?: number;
+  a2a_hold?: number;
+  a2a_source_seconds?: number;
 
   // ── AR cache (engine: minimax/mm3-ar-cache.h) ─────────────────────────────
   /** Reuse the previous render's AR (planner) output when every AR-affecting

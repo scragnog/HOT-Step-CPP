@@ -9,6 +9,7 @@
 // only 2D matrices keep their stored F16.
 #include "heartmula/codec-flow.h"
 
+#include <cstring>
 #include <complex>
 #include <numeric>
 

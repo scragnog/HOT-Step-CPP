@@ -509,10 +509,17 @@ export function mm3PresetFollows(preset: { lyrics_set_id?: unknown; mm3_adapter_
  * `ref` (see mm3PresetFollows for which). Called when a run finishes, with its
  * final checkpoint (2026-09-11, Rob: "just like AS1.5 training does"), and by
  * "Use this checkpoint" on the ladder with the chosen one. Idempotent; picking
- * another checkpoint moves the same presets again. Returns the number
- * updated; never throws (called from a job's success path).
+ * another checkpoint moves the same presets again. Records the dataset's
+ * selection first, even without presets, using YuE2's atomic JSON pattern.
+ * Returns the number of presets updated; throws if the link cannot be saved.
  */
 export function pointMm3PresetsAt(ds: { slug: string; lyricsSetId?: number }, ref: string): number {
+  // As with YuE2, a successful link must survive without any album presets.
+  const slug = ds.slug.toLowerCase();
+  if (!slug) throw new Error('Dataset has no slug');
+  const all = readMm3Linked();
+  all[slug] = { ref, at: new Date().toISOString() };
+  writeMm3Linked(all);
   let updated = 0;
   try {
     for (const preset of getAllPresets()) {
@@ -527,6 +534,33 @@ export function pointMm3PresetsAt(ds: { slug: string; lyricsSetId?: number }, re
     console.warn(`[Training] MM3 preset update failed: ${err?.message ?? err}`);
   }
   return updated;
+}
+
+/** MM3 counterpart of yue2-linked.json, keyed by dataset slug. */
+export interface Mm3LinkedCheckpoint { ref: string; at: string }
+const mm3LinkedFile = () => path.join(config.training.dir, 'mm3-linked.json');
+export function readMm3Linked(): Record<string, Mm3LinkedCheckpoint> {
+  try { return JSON.parse(fs.readFileSync(mm3LinkedFile(), 'utf-8')); }
+  catch (err: any) { if (err.code === 'ENOENT') return {}; throw err; }
+}
+function writeMm3Linked(all: Record<string, Mm3LinkedCheckpoint>): void {
+  fs.mkdirSync(path.dirname(mm3LinkedFile()), { recursive: true });
+  const tmp = `${mm3LinkedFile()}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(all, null, 2), 'utf-8');
+    fs.renameSync(tmp, mm3LinkedFile());
+  } finally { fs.rmSync(tmp, { force: true }); }
+}
+export function clearMm3LinkedRun(runName: string): void {
+  const all = readMm3Linked();
+  for (const [slug, pick] of Object.entries(all)) {
+    if (mm3RunOf(pick.ref) === runName.toLowerCase()) delete all[slug];
+  }
+  writeMm3Linked(all);
+}
+/** Older installations retain their preset selection until the next pick. */
+export function mm3LinkedRefFor(ds: { slug: string; lyricsSetId?: number }): string | null {
+  return readMm3Linked()[ds.slug.toLowerCase()]?.ref ?? mm3PresetRefFor(ds);
 }
 
 /** The MM3 adapter the dataset's album presets use now: the direct preset's

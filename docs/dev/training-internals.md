@@ -138,8 +138,14 @@ uses the preview prompt the run recorded in `hotstep-run.json`
 (`previewPlan`), so a caption edit or a cleared codes cache does not change
 or break it; a run from before that resolves it once and records it. "Use this
 checkpoint" is the `mm3/select` operation (`services/training/mm3Ladder.ts`),
-which points the dataset's album presets at the step (`pointMm3PresetsAt`, the
-same rule a finished run uses) and sets the global LM adapter. `previewSource`
+which records the dataset slug's chosen reference in `<training>/mm3-linked.json`
+using YuE2's atomic JSON pattern, updates any existing album presets
+(`pointMm3PresetsAt`, the same function the local runner and worker mirror use
+at run end), and sets the global LM adapter. Like YuE2, a linked album without
+a preset row gets a durable record but no new preset row. The record drives
+`inUse`, cleanup eligibility and run deletion; presets are also checked
+independently so cleanup never removes a checkpoint they use. Older datasets
+fall back to their existing preset reference until their next pick. `previewSource`
 records where each target's previews come from: `yue2-ladder`, `mm3-ladder`,
 `sa3-previews` or `none`. ACE is
 `none`: it has no checkpoint exports or renderer, so it keeps Audition. SA3
@@ -285,6 +291,11 @@ step went from 4.24 to 3.31 s on an RTX 5090 (4.30 to 3.38 s with the companion)
 `joint` line in `train.jsonl` records `gemm` plus how many GEMMs took each path
 (`gemm_bf16`, `gemm_f32`). The casts need the HOT-ggml `bf16-mul-mat-grad` change.
 `yue2-train-gemm-precision-test` checks both paths against each other at YuE2 shapes.
+Since 2026-11-08 bf16 mode no longer sets `NVIDIA_TF32_OVERRIDE=0`, so the F32 GEMMs
+that remain (quantized bases, the companion decoder) run on TF32 tensor cores on sm_80+:
+2008 to 1880 ms a step on an RTX 5090 over 20 steps, loss within 0.025 %. strict-f32
+still sets it, and an inherited `NVIDIA_TF32_OVERRIDE=0` turns TF32 off for an A/B. The
+start-up log says which is in force (`[yue2-aitk] F32 GEMMs: ...`).
 
 `YUE2_AITK_HOST_PROFILE=1` adds one `{"stage":"host_profile","step":N,"ms":{...}}` line per
 step on stderr: host wall time per trainer phase (block executor phases, constants, gradient
@@ -730,6 +741,37 @@ boot before the server listens. It is idempotent.
 `startYue2Mirror()` awaits it before the first pass, so no pass writes into a folder about
 to move. The first mirror pass then fills in the rung weights the worker still holds.
 
+#### MM3 on a worker
+
+`POST /api/workers/:name/mm3-dispatch` (body `{ datasetIds, clearCache, recipe }`, the
+`mm3-batch` body) runs the same dispatch as `yue2-dispatch` with `family: 'mm3'`: no
+captioning, a check that the dataset is built with its manifest at
+`<sourceDir>/dataset.json` (the only path `upsertPushedDataset` adopts on the worker) and
+has at least one `.mm3.txt`, then the push, then `POST /api/training/mm3-batch` on the
+worker. A dispatch or a worker batch of the other family is never joined. The pushed
+manifest keeps this machine's absolute `audio_path`s; `pm_resolve_audio` in
+`preprocess-io.h` falls back to the file beside the manifest.
+
+MM3 runs need no index: a run is its folder, attributed by `hotstep-run.json`. The worker
+offers `GET /api/training/worker/mm3-mirror` (`workerMm3MirrorManifest`: runs of datasets
+whose `sourceDir` is under `worker-datasets/`, with `live` while a job for the dataset or
+the GPU lane is busy) and `mm3-mirror-file?run=&rel=` (same headers as
+`yue2-mirror-file`). Files offered: `hotstep-run.json`, `train-log.jsonl`,
+`train-console.log`, every file of a `ckpt-N/` once its weights' `.json` sidecar exists
+(the engine writes the folder in place and the sidecar last) and `previews/*.wav|json`.
+Never `resume-state.*`.
+
+`mirrorMm3Runs` in `yue2Mirror.ts` runs inside each pass and lands a run at
+`mm3-lm-adapters/<run>` with the same `.mirror.json` ledger. A file is fetched again when
+the worker's size or mtime moves past the ledger's; a file in the ledger but gone from
+disk was cleaned up here and stays gone. A fetched `hotstep-run.json` keeps the local
+`blindLabels`. `<training dir>/mm3-mirror.json` records each `{ worker, run }`: a recorded
+run whose folder is gone is marked `discarded` and never copied again, and a run name that
+already exists here without a record is refused. Once a run seen `live` by a pass is no
+longer live and fully copied, `linkMirroredMm3Run` points the dataset's album presets at
+its last checkpoint (`pointMm3PresetsAt`, as `refreshLinkedMm3Presets` does locally),
+once. Nothing is deleted on the worker.
+
 ## YuE2 NAR audio-domain loss
 
 `yue2-nar-train` gained two flags on 2026-10-17. `--companion` merges the
@@ -901,7 +943,9 @@ the field resumes as `full`. `recommendMm3Config` adds the BF16 weight stage
 (`MM3_VRAM_MODEL.bf16StageMb`) for the default precision on a non-BF16 base. The mapping is
 in `buildMm3TrainLmArgs`; the run manifest records the field, so a preview
 relaunch and the resume route keep it, and the resume route accepts it as an
-override. `--tf32 on` stays command-line only.
+override. Since 2026-11-08 `fast` and `fastest` also pass `--tf32 on` (their
+big GEMMs already round to BF16, so TF32 on the leftover F32 GEMMs is the
+smaller rounding; 1.09x on a 4090) and `full` keeps strict FP32.
 
 ### Step cost after the BF16 levers (2026-11-06)
 

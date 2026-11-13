@@ -45,7 +45,10 @@ import { config, PORTABLE_MODE, PROJECT_ROOT } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
-import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
+import { engineFormatPath } from '../../audioConvert.js';
+import { resolveSourceAudioPath } from '../../generation/sourceAudio.js';
+import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank, resolveMm3PlankPath } from './plank.js';
+import { applyMm3ForcePattern, parseMm3ForcePattern, trimMm3Codes } from './coverPattern.js';
 import {
   MM3_HIDDENS_EXT, ensureMm3HiddensDir, resolveMm3HiddensPath, sanitiseMm3HiddensName,
 } from './hiddens.js';
@@ -94,6 +97,23 @@ const MM3_MAX_DURATION_SEC = 300;
 const MM3_ENDING_TAKES  = 3;
 const MM3_ENDING_ROUNDS = 4;
 
+// ── Adapter tail fade (mm3AdapterTailFade) ───────────────────────────────────
+//
+// An LM adapter suppresses the base model's ending, so the fade hands the tail
+// back: full strength until the lyrics should be sung, then a 60 s ramp to the
+// base. The start is the base model's own pace (it sang a 336-word sheet by
+// ~183 s, 1.85 words/s) plus 30 s. Starting while lyrics remain does not work:
+// the base inherits half a song and runs to the cap (HOTSTEP-1068: 9/12 natural
+// endings with this rule against 2/12 without; 0-2/12 fading at 150 s).
+// Clamped so the base always gets a minute before the 300 s cap.
+const MM3_BASE_WORDS_PER_SEC = 1.85;
+const MM3_TAIL_FADE_LEN_SEC = 60;
+export function mm3TailFadeStartSec(lyrics: string): number | null {
+  const words = mm3SungWords(lyrics);
+  if (words === 0) return null;
+  return Math.round(Math.min(MM3_MAX_DURATION_SEC - MM3_TAIL_FADE_LEN_SEC, Math.max(60, words / MM3_BASE_WORDS_PER_SEC + 30)));
+}
+
 // ── Minimum length (mm3MinLength) ────────────────────────────────────────────
 //
 // A plan that reaches EOS after two seconds has ended, correctly, on a song the
@@ -120,14 +140,18 @@ const MM3_MIN_FLOOR_SEC = 15;
  *  round on arithmetic rather than on quality. */
 const MM3_MIN_CEILING_SHARE = 0.5;
 
-/** Shortest plausible length for these lyrics, in seconds. */
-function mm3MinDurationSec(lyrics: string): number {
-  const words = (lyrics || '')
-    // Section markers ([Verse], [Chorus]) are not sung.
+/** Words that get sung: section markers ([Verse], [Chorus]) are not. */
+function mm3SungWords(lyrics: string): number {
+  return (lyrics || '')
     .replace(/\[[^\]]*\]/g, ' ')
     .split(/\s+/)
     .filter(w => /[\p{L}\p{N}]/u.test(w))
     .length;
+}
+
+/** Shortest plausible length for these lyrics, in seconds. */
+function mm3MinDurationSec(lyrics: string): number {
+  const words = mm3SungWords(lyrics);
   const sung = words > 0 ? words / MM3_MAX_WORDS_PER_SEC : 0;
   return Math.min(
     Math.max(MM3_MIN_FLOOR_SEC, Math.ceil(sung)),
@@ -481,8 +505,39 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // nothing for a control the user has never touched (see the mm3ReuseAr note
   // below). An absent value therefore has to resolve to the declared default or
   // the toggle would lie about its own state.
-  const requireEnding = params.mm3RequireEnding !== false;
-  const askedTakes = Number(params.mm3Takes) > 1
+  // A plank replay is a single-take path in the engine (mm3-ar-loop.h), and
+  // EOS is masked across the forced span, so endings, takes and the length
+  // floor all stand down while one is loaded. Read once, here, so the plank
+  // block below and these switches agree on whether it loaded.
+  const plankCodes = params.mm3PlankPath ? readMm3Plank(String(params.mm3PlankPath)) : null;
+  // Audio to audio (engine Route B): the source's DAV latents steer the flow.
+  // On when a strength above 0 arrives with a source. Without a plank the
+  // engine caps the length to the source, so endings and the length floor
+  // stand down here as they do for a plank.
+  const a2aStrength = Math.min(1, Number(params.mm3A2aStrength));
+  let a2aSource = '';
+  if (a2aStrength > 0 && params.sourceAudioUrl) {
+    const src = resolveSourceAudioPath(String(params.sourceAudioUrl));
+    if (!fs.existsSync(src)) throw new Error(`Source audio file is missing (${path.basename(src)}); re-upload the track.`);
+    a2aSource = engineFormatPath(src);
+  }
+  const a2aHold = Math.min(1, Math.max(0, Number(params.mm3A2aHold) || 0));
+  const a2aSeconds = Number(params.mm3A2aSourceSeconds) > 0 ? Number(params.mm3A2aSourceSeconds) : 0;
+  if (a2aSource) {
+    notes.push(`audio to audio: source sound at strength ${a2aStrength}${a2aHold > 0 ? `, hold ${a2aHold}` : ''}`
+      + (a2aSeconds ? `, first ${a2aSeconds} s` : '') + (plankCodes ? '' : ' (length follows the source)'));
+  }
+  // Source guide (engine lm_guide_file, API only): the LM picks among the
+  // encoder's top-K codes per frame. Files live in the plank folder, and the
+  // song is as long as the guide, so endings, takes and the length floor stand
+  // down as they do for a plank. A plank wins: the engine takes one or the other.
+  const guidePath = params.mm3GuidePath && !plankCodes ? resolveMm3PlankPath(String(params.mm3GuidePath)) : null;
+  if (params.mm3GuidePath && !guidePath) {
+    notes.push(plankCodes ? 'Source guide ignored: a plank is loaded and the engine takes one or the other'
+      : `Source guide ignored: ${params.mm3GuidePath} is not inside the plank folder`);
+  }
+  const requireEnding = !plankCodes && !guidePath && !a2aSource && params.mm3RequireEnding !== false;
+  const askedTakes = !plankCodes && !guidePath && Number(params.mm3Takes) > 1
     ? Math.min(MM3_MAX_TAKES, Math.max(1, Math.round(Number(params.mm3Takes))))
     : 1;
   // Variations and natural endings want the same batched AR pass, so they share
@@ -506,7 +561,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Rides the ending machinery: a plan under the floor is dropped and re-planned
   // exactly like one that never ended, because the remedy is the same. Works
   // with endings off too — the engine then accepts any plan that is long enough.
-  const minLengthOn = params.mm3MinLength !== false;
+  const minLengthOn = !plankCodes && !guidePath && !a2aSource && params.mm3MinLength !== false;
   const minDurationSec = minLengthOn ? mm3MinDurationSec(lyrics) : 0;
   const minFrames = minDurationSec > 0 ? Math.round(minDurationSec * MM3_FPS) : 0;
   if (minFrames > 0) {
@@ -613,26 +668,79 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         min_frames: minFrames,
         ...(requireEnding ? {} : { eos_rounds: MM3_ENDING_ROUNDS }),
       } : {}),
+      ...(a2aSource ? {
+        a2a_source: a2aSource,
+        a2a_strength: a2aStrength,
+        ...(a2aHold > 0 ? { a2a_hold: a2aHold } : {}),
+        ...(a2aSeconds ? { a2a_source_seconds: a2aSeconds } : {}),
+      } : {}),
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.
       ...(params.mm3PlankPath ? (() => {
-        const codes = readMm3Plank(String(params.mm3PlankPath));
-        if (!codes) {
+        if (!plankCodes) {
           notes.push(`AR plank not found or unreadable (${params.mm3PlankPath}) — running a normal AR pass`);
           return {};
         }
+        // Cover Studio levers (coverPattern.ts). Trim first, then the pattern,
+        // so pattern seconds count from the start of what is kept.
+        let sem = plankCodes.forced_semantic, ac = plankCodes.forced_acoustic;
+        const trim = Number(params.mm3PlankTrimSeconds);
+        if (Number.isFinite(trim) && trim > 0) ({ sem, ac } = trimMm3Codes(sem, ac, trim));
+        const semanticOnly = params.mm3PlankSemanticOnly === true;
+        const pattern = parseMm3ForcePattern(params.mm3ForcePattern);
+        const biasRaw = String(params.mm3ForceBias ?? '').trim();
+        const bias = biasRaw === '' ? NaN : Number(biasRaw);
+        const biasSet = Number.isFinite(bias) && bias >= 0;
+        // The engine 400s on either with forced_acoustic; drop them with a note
+        // rather than fail the render.
+        if (!semanticOnly && (pattern || biasSet)) {
+          notes.push('Force bias and free-frame patterns need semantic-only forcing — ignored for this full replay');
+        }
+        if (semanticOnly && pattern) sem = applyMm3ForcePattern(sem, pattern);
         // Entry 0 is the un-emitted iteration, so I codes render I-1 frames.
         // The engine derives max_frames/duration from the array itself
         // (mm3-request.h), so nothing needs overriding here.
         notes.push(
           `AR replay from ${path.basename(String(params.mm3PlankPath))} `
-          + `(${codes.forced_semantic.length - 1} frames — codes pinned, AR compute still runs)`,
+          + `(${sem.length - 1} frames — codes pinned, AR compute still runs`
+          + (semanticOnly ? `; semantic only${biasSet ? `, force bias ${bias}` : ', hard pin'}`
+              + (pattern ? `, ${sem.filter(c => c === -1).length} free frames` : '') : '')
+          + ')',
         );
+        return semanticOnly
+          ? { forced_semantic: sem, ...(biasSet ? { lm_force_bias: bias } : {}) }
+          : { forced_semantic: sem, forced_acoustic: ac };
+      })() : {}),
+      ...(guidePath ? (() => {
+        const num = (v: unknown) => (String(v ?? '').trim() === '' ? NaN : Number(v));
+        const scale = num(params.mm3GuideScale), k = num(params.mm3GuideK), outside = num(params.mm3GuideOutside);
+        const gate = params.mm3GuideGatePath ? resolveMm3PlankPath(String(params.mm3GuideGatePath)) : null;
+        const fix = num(params.mm3GuideStateFix), product = num(params.mm3GuideProduct), seconds = num(params.mm3GuideSeconds);
+        notes.push(`source guide ${path.basename(guidePath)}`
+          + (Number.isFinite(scale) ? `, scale ${scale}` : '') + (Number.isFinite(k) ? `, ${k} candidates` : '')
+          + (gate ? ', vocal gate' : '') + (fix > 0 ? `, state fix ${fix}` : '')
+          + (product >= 0 ? `, product rule ${product}` : '') + (seconds > 0 ? `, first ${seconds} s` : '')
+          + (params.mm3HiddensPath ? '; saved plan ignored' : ''));
         return {
-          forced_semantic: codes.forced_semantic,
-          forced_acoustic: codes.forced_acoustic,
+          lm_guide_file: guidePath,
+          ...(Number.isFinite(scale) ? { lm_guide_scale: scale } : {}),
+          ...(Number.isFinite(k) ? { lm_guide_k: k } : {}),
+          ...(Number.isFinite(outside) ? { lm_guide_outside: outside } : {}),
+          ...(gate ? { lm_guide_gate_file: gate } : {}),
+          ...([1, 2, 3].includes(fix) ? { lm_state_fix: fix } : {}),
+          ...(product >= 0 ? { lm_guide_product: Math.min(4, product) } : {}),
+          ...(seconds > 0 ? { lm_guide_seconds: seconds } : {}),
         };
       })() : {}),
+      // State blend (engine lm_blend_*): the planner's hiddens move toward a
+      // saved block, for a cover its launder's, before the flow. Plank folder only.
+      ...(() => {
+        const amount = Number(params.mm3BlendAmount);
+        const blend = params.mm3BlendPath && amount > 0 ? resolveMm3PlankPath(String(params.mm3BlendPath)) : null;
+        if (!blend) return {};
+        notes.push(`state blend ${Math.round(Math.min(1, amount) * 100)}% toward ${path.basename(blend)}`);
+        return { lm_blend_file: blend, lm_blend_amount: Math.min(1, amount) };
+      })(),
       // ── Saved plans (engine mm3-hiddens-file.h) ──
       //
       // Replay. Unlike the plank above this IS a speedup — the hiddens are what
@@ -645,7 +753,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // A plank and a plan together is a 400 from the engine, so the plank wins
       // here and says so — the two pin the same thing and the engine would
       // otherwise reject the whole render over a UI state the user can reach.
-      ...(params.mm3HiddensPath && !params.mm3PlankPath ? (() => {
+      ...(params.mm3HiddensPath && !params.mm3PlankPath && !guidePath ? (() => {
         const resolved = resolveMm3HiddensPath(String(params.mm3HiddensPath));
         if (!resolved || !fs.existsSync(resolved)) {
           notes.push(`Saved plan not found (${params.mm3HiddensPath}) — planning fresh`);
@@ -695,7 +803,48 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         // Application mode: "runtime" (default; low-rank deltas in-graph, live
         // dials, ~+28%/step at r256) or "merge" (folded into the resident
         // weights once — zero per-step cost; scale changes re-merge).
-        const mode = params.mm3LmAdapterMode === 'merge' ? 'merge' : 'runtime';
+        // Strength along the song (engine MM3LmAdapterSchedule): the base for
+        // the first N s, full strength for the body, then a ramp back to the
+        // base (or a floor) for the ending. Off unless a fade is set. It needs
+        // the deltas in the graph, so it wins over merge mode.
+        const fadeNum = (key: string, max: number): number | undefined => {
+          const v = Number((params as Record<string, unknown>)[key]);
+          return Number.isFinite(v) && v >= 0 && v <= max ? v : undefined;
+        };
+        const fade = {
+          lm_adapter_fade_in: fadeNum('mm3LmAdapterFadeIn', 360),
+          lm_adapter_fade_out: fadeNum('mm3LmAdapterFadeOut', 360),
+          lm_adapter_fade_len: fadeNum('mm3LmAdapterFadeLen', 360),
+          lm_adapter_fade_floor: fadeNum('mm3LmAdapterFadeFloor', 1),
+        };
+        // The Generation toggle derives the fade from the lyrics; explicit fade
+        // params (scripts, A/B arms) win over it.
+        if (params.mm3AdapterTailFade === true && fade.lm_adapter_fade_out === undefined) {
+          const start = mm3TailFadeStartSec(lyrics);
+          if (start === null) {
+            notes.push('Adapter tail fade skipped: no sung lyrics to time it from');
+          } else {
+            fade.lm_adapter_fade_out = start;
+            fade.lm_adapter_fade_len ??= MM3_TAIL_FADE_LEN_SEC;
+            notes.push(`Adapter tail fade: full strength to ${start}s, then down to the base model by ${start + MM3_TAIL_FADE_LEN_SEC}s`);
+          }
+        }
+        const fadeOn = (fade.lm_adapter_fade_in ?? 0) > 0 || (fade.lm_adapter_fade_out ?? 0) > 0;
+        if (fadeOn && params.mm3LmAdapterMode === 'merge') {
+          notes.push('LM adapter fade set: rendering in runtime mode, since a merged adapter cannot change strength mid-song');
+        }
+        // Plan dial (engine lm_adapter_plan): below 1 the engine adds base rows
+        // with the adapter delta masked off, which a merged LM has no base
+        // weights for. Sent only when it does something.
+        const planRaw = Number((params as Record<string, unknown>).mm3LmAdapterScalePlan);
+        const plan = Number.isFinite(planRaw) && planRaw >= 0 && planRaw < 1 ? planRaw : undefined;
+        if (plan !== undefined && params.mm3LmAdapterMode === 'merge') {
+          notes.push('LM adapter plan dial below 1: rendering in runtime mode, since a merged adapter has no base weights to plan with');
+        }
+        // The base rows double the planner's batch, so the engine plans at most
+        // 2 takes (engine mm3_max_takes); a 3- or 4-candidate ask gets 2.
+        if (plan !== undefined) notes.push(`LM adapter plan dial: ${plan} (at most 2 takes per planning round)`);
+        const mode = params.mm3LmAdapterMode === 'merge' && !fadeOn && plan === undefined ? 'merge' : 'runtime';
         notes.push(`LM adapter: ${path.basename(resolved)} (${mode})`);
         const mergeGpu = params.mm3LmMergeGpu !== false;
         if (mode === 'merge') notes.push(`LM adapter merging: ${mergeGpu ? 'GPU preferred' : 'CPU-assisted'}`);
@@ -709,6 +858,8 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           lm_adapter_scale_early: dial('mm3LmAdapterScaleEarly', d.scaleEarly),
           lm_adapter_scale_mid: dial('mm3LmAdapterScaleMid', d.scaleMid),
           lm_adapter_scale_late: dial('mm3LmAdapterScaleLate', d.scaleLate),
+          ...(fadeOn ? fade : {}),
+          ...(plan !== undefined ? { lm_adapter_plan: plan } : {}),
         };
       })() : {}),
     },

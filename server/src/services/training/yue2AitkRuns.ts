@@ -694,12 +694,22 @@ function blindLetter(index: number): string {
 
 /** Assign new checkpoints together so directory order and reloads cannot move a label. */
 function assignBlindLabels(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]): boolean {
-  const labels = run.blindLabels ?? {};
-  const missing = checkpoints.filter(c => !labels[c.step]);
-  if (!missing.length) return false;
+  const labels = withBlindLabels(run.jobId, run.blindLabels, checkpoints.map(c => c.step));
+  if (!labels) return false;
+  run.blindLabels = labels;
+  return true;
+}
+
+/** Blind letters for `steps`, keeping every label already given: the labels
+ *  with the new steps added, or null when none was missing. Hashed on `runKey`
+ *  so the letters do not follow step order. Shared with MM3 runs. */
+export function withBlindLabels(runKey: string, prior: Record<string, string> | undefined, steps: number[]): Record<string, string> | null {
+  const labels = { ...(prior ?? {}) };
+  const missing = steps.filter(step => !labels[step]).map(step => ({ step }));
+  if (!missing.length) return null;
   const firstAssignment = Object.keys(labels).length === 0;
   missing.sort((a, b) => {
-    const hash = (step: number) => createHash('sha256').update(`${run.jobId}:${step}`).digest('hex');
+    const hash = (step: number) => createHash('sha256').update(`${runKey}:${step}`).digest('hex');
     return hash(a.step).localeCompare(hash(b.step));
   });
   const used = new Set(Object.values(labels));
@@ -718,8 +728,7 @@ function assignBlindLabels(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpoi
       labels[byStep[byStep.length - 1].step] = first;
     }
   }
-  run.blindLabels = labels;
-  return true;
+  return labels;
 }
 
 /** A base-matched (2026-09-27) or fixed-recipe run has no KL rungs: its

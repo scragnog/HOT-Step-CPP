@@ -379,7 +379,12 @@ async function capabilities(): Promise<BackendCapabilities> {
       // minimax/mm3-align.h). Line-level, ~1 s — the granularity ACE ships.
       lyricTimestamps: true,
       forcedAlignment: false,
-      cover: false,
+      // Cover Studio replays an encoded reference as a plank (code forcing),
+      // not an audio-to-audio transform.
+      cover: true,
+      coverCodeForcing: true,
+      // ...and can blend the source's DAV latents into the flow (a2a_strength).
+      coverLatentBlend: true,
       repaint: false,
       lego: false,
       extract: false,
@@ -620,6 +625,17 @@ async function capabilities(): Promise<BackendCapabilities> {
             + 'at a deliberately generous 4 words/sec, so only renders that are '
             + 'clearly too short are caught. Turn off for deliberately tiny renders.',
         default: true,
+      },
+      {
+        key: 'mm3AdapterTailFade',
+        type: 'toggle',
+        label: 'Adapter Tail Fade',
+        hint: 'With an LM adapter loaded: keeps the adapter at full strength until '
+            + 'the lyrics should be sung, then steps it down to the base model over '
+            + '60 s so the song can end on its own. The start comes from the word '
+            + 'count. Renders the adapter in runtime mode (slower planning than merge). '
+            + 'No effect without an adapter or without lyrics.',
+        default: false,
       },
       {
         key: 'mm3LmTemperature',

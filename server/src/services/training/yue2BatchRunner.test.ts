@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { mm3CodesComplete, pickedCheckpointError, skipNarFurther } from './yue2BatchRunner.js';
+import { mm3BatchTrainBody, mm3CodesComplete, pickedCheckpointError, skipNarFurther } from './yue2BatchRunner.js';
 import type { Yue2AitkRunRecord } from './yue2AitkRuns.js';
 
 function run(over: Partial<Yue2AitkRunRecord>): Pick<Yue2AitkRunRecord, 'options'> {
@@ -55,4 +55,10 @@ test('MM3 codes are complete only when every current manifest id has its file', 
     assert.equal(mm3CodesComplete(manifest, inner), true);
     assert.equal(mm3CodesComplete(path.join(dir, 'missing.json'), inner), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an MM3 batch never sends the first dataset trigger to every run', () => {
+  const recipe = { steps: 900, trigger: 'first_album', preview: { seconds: 40 } };
+  assert.deepEqual(mm3BatchTrainBody(recipe), { steps: 900, preview: { seconds: 40 } });
+  assert.equal(recipe.trigger, 'first_album');   // the stored batch recipe is left alone
 });

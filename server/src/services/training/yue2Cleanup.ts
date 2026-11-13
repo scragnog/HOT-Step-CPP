@@ -23,7 +23,7 @@ export interface Yue2CleanupPlan {
 }
 export interface Yue2CleanupChoice { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean }
 
-function dirBytes(p: string): number {
+export function dirBytes(p: string): number {
   let total = 0;
   try {
     for (const e of fs.readdirSync(p, { withFileTypes: true })) {
