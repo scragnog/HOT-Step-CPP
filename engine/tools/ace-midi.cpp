@@ -33,7 +33,8 @@
 #include "safetensors.h"
 #include "chordnet/inference.h"
 #include "train/yue2-aitk-sha256.h"
-#include "yourmt3/encoder.h"
+#include "chordnet/tempo.h"
+#include "yourmt3/inference.h"
 #include "yyjson.h"
 
 // ---------------------------------------------------------------------------
@@ -1804,13 +1805,15 @@ struct AbcOpts {
     std::string out;               // YuE2 ABC lead sheet path; empty = none
     int         ins_program = -1;  // the Ins voice's instrument; -1 = busiest melodic one
     bool        melody_only = false;
+    int                           vocal_program = ABC_VOICE_PROGRAM;  // the Vocal voice's program
+    const std::vector<AbcChord> * chords        = nullptr;            // chord segments in place of the estimate
 };
 
 // The transcription as a YuE2 lead sheet on the same grid as the MIDI (midi-abc.h)
 static void write_abc(const std::vector<MidiNote> & notes, const GridOut & go, double duration, const AbcOpts & ao) {
     std::vector<AbcNote> an;
     for (auto & n : notes) an.push_back({ n.onset, n.offset, n.pitch, n.program, n.is_drum });
-    AbcResult r = midi_to_yue2_abc(an, go.grid, duration, ao.ins_program, ao.melody_only);
+    AbcResult r = midi_to_yue2_abc(an, go.grid, duration, ao.ins_program, ao.melody_only, ao.vocal_program, ao.chords);
     if (r.ok) write_file(ao.out, r.abc.data(), r.abc.size());
     fprintf(stderr, "[ace-midi] abc: %s (vocal %d notes, ins %s %d notes, key %s, %d chords%s%s)\n",
             r.ok ? "ok" : r.error.c_str(), r.vocal_notes, r.ins_program < 0 ? "none" : instrument_name(r.ins_program).c_str(), r.ins_notes,
@@ -2278,6 +2281,101 @@ static std::vector<float> capture_tensor(const std::string & dir, yyjson_val * t
     return v;
 }
 
+// Notes as the capture writes them (asdict(Note)); false if unreadable.
+static bool read_capture_notes(const std::string & path, std::vector<yourmt3::Note> & out) {
+    yyjson_doc * doc = yyjson_read_file(path.c_str(), 0, nullptr, nullptr);
+    yyjson_val * arr = doc ? yyjson_doc_get_root(doc) : nullptr;
+    out.clear();
+    bool ok = yyjson_is_arr(arr);
+    size_t       i, n;
+    yyjson_val * v;
+    if (ok) yyjson_arr_foreach(arr, i, n, v) {
+        yyjson_val * f[6] = { yyjson_obj_get(v, "is_drum"), yyjson_obj_get(v, "program"), yyjson_obj_get(v, "onset"),
+                              yyjson_obj_get(v, "offset"), yyjson_obj_get(v, "pitch"), yyjson_obj_get(v, "velocity") };
+        if (!yyjson_is_bool(f[0]) || !yyjson_is_int(f[1]) || !yyjson_is_num(f[2]) || !yyjson_is_num(f[3]) ||
+            !yyjson_is_int(f[4]) || !yyjson_is_int(f[5])) { ok = false; break; }
+        out.push_back({ yyjson_get_bool(f[0]), (int) yyjson_get_int(f[1]), yyjson_get_num(f[2]), yyjson_get_num(f[3]),
+                        (int) yyjson_get_int(f[4]), (int) yyjson_get_int(f[5]) });
+    }
+    yyjson_doc_free(doc);
+    return ok;
+}
+
+static std::string note_text(const yourmt3::Note & n) {
+    char b[128];
+    snprintf(b, sizeof b, "%s prg %d pitch %d %.6f-%.6f", n.is_drum ? "drum" : "note", n.program, n.pitch, n.onset, n.offset);
+    return b;
+}
+
+// Notes as a multiset: discrete fields exact, times within 1e-6 s. Returns the
+// notes on one side only, plus one if the matched lists come in another order;
+// *max_t is the largest time error over the matched notes.
+static int notes_mismatch(const std::vector<yourmt3::Note> & a, const std::vector<yourmt3::Note> & r, double * max_t,
+                          std::string * detail) {
+    auto same = [](const yourmt3::Note & x, const yourmt3::Note & y) {
+        return x.is_drum == y.is_drum && x.program == y.program && x.pitch == y.pitch && x.velocity == y.velocity &&
+               std::fabs(x.onset - y.onset) < 1e-6 && std::fabs(x.offset - y.offset) < 1e-6;
+    };
+    std::vector<int> match(a.size(), -1);
+    std::vector<bool> used(r.size(), false);
+    int bad = 0;
+    *max_t  = 0;
+    std::string only_a, only_r;
+    for (size_t i = 0; i < a.size(); i++) {
+        size_t j = 0;
+        while (j < r.size() && (used[j] || !same(a[i], r[j]))) j++;
+        if (j < r.size()) {
+            used[j]  = true;
+            match[i] = (int) j;
+            *max_t   = std::max({ *max_t, std::fabs(a[i].onset - r[j].onset), std::fabs(a[i].offset - r[j].offset) });
+        } else {
+            bad++;
+            only_a += "\n      + " + note_text(a[i]);
+        }
+    }
+    for (size_t j = 0; j < r.size(); j++)
+        if (!used[j]) { bad++; only_r += "\n      - " + note_text(r[j]); }
+    int last = -1;
+    bool ordered = true;
+    for (int m : match)
+        if (m >= 0) { ordered &= m > last; last = m; }
+    if (!ordered) { bad++; only_a += "\n      matched notes in another order"; }
+    if (detail) *detail = only_a + only_r;
+    return bad;
+}
+
+// One exact row: mismatches out of the total, chained and fed (-1 = not run).
+static void exact_row(const std::string & cap, const std::string & point, int ch_bad, int ch_n, int fed_bad, int fed_n,
+                      const std::string & note = "") {
+    const bool ok = ch_bad <= 0 && fed_bad <= 0;  // -1: not run
+    if (!ok) g_parity_fail++;
+    char c[48], f[48];
+    if (ch_bad < 0) snprintf(c, sizeof c, "-");
+    else snprintf(c, sizeof c, "%d/%d", ch_bad, ch_n);
+    if (fed_bad < 0) snprintf(f, sizeof f, "-");
+    else snprintf(f, sizeof f, "%d/%d", fed_bad, fed_n);
+    printf("PARITY %-16s %-20s chained=%s fed=%s differ, exact %s%s%s\n", cap.c_str(), point.c_str(), c, f, ok ? "PASS" : "FAIL",
+           note.empty() ? "" : " ", note.c_str());
+}
+
+// A stream up to and including its first EOS after the prefill token: the
+// PAD after it only fills the batch to its longest stream.
+static std::vector<int> stream_body(const std::vector<int> & t) {
+    for (size_t i = 1; i < t.size(); i++)
+        if (t[i] == yourmt3::EOS) return std::vector<int>(t.begin(), t.begin() + i + 1);
+    return t;
+}
+
+static std::string tokens_json(const std::vector<std::vector<int>> & t) {
+    std::string j = "[";
+    for (size_t s = 0; s < t.size(); s++) {
+        j += s ? ",[" : "[";
+        for (size_t i = 0; i < t[s].size(); i++) j += (i ? "," : "") + std::to_string(t[s][i]);
+        j += "]";
+    }
+    return j + "]\n";
+}
+
 // dump (optional): this run's chained and fed outputs per batch, for offline checks.
 static int run_validate_yourmt3(const std::string & model, std::string dir, const std::string & dump) {
     using namespace yourmt3;
@@ -2286,11 +2384,11 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
     yyjson_doc *      man = yyjson_read_file((dir + "/manifest.json").c_str(), 0, nullptr, nullptr);
     yyjson_doc *      run = yyjson_read_file((dir + "/run.json").c_str(), 0, nullptr, nullptr);
     yyjson_doc *      tns = yyjson_read_file((dir + "/tensors.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc *      tkd = yyjson_read_file((dir + "/tokens-by-batch-channel.json").c_str(), 0, nullptr, nullptr);
+    yyjson_doc *      voc = yyjson_read_file((dir + "/event-vocabulary.json").c_str(), 0, nullptr, nullptr);
     yyjson_val *      troot = tns ? yyjson_doc_get_root(tns) : nullptr;
     auto              done  = [&]() {
-        yyjson_doc_free(man);
-        yyjson_doc_free(run);
-        yyjson_doc_free(tns);
+        for (yyjson_doc * d : { man, run, tns, tkd, voc }) yyjson_doc_free(d);
     };
     std::string audio;
     if (run) {
@@ -2317,14 +2415,14 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
     // Skipped only when upstream rejected the input before YourMT3 ran: a
     // recorded rejection, no YourMT3 timing and no mt3.* entry at all. The
     // reference rejections (no BPM, no melody) come after YourMT3 and fail here.
-    yyjson_val * mroot   = man ? yyjson_doc_get_root(man) : nullptr;
-    const char * status  = yyjson_get_str(yyjson_obj_get(mroot, "status"));
-    yyjson_val * skips   = yyjson_obj_get(mroot, "skips");
-    const bool   mt3_ran = yyjson_obj_get(yyjson_obj_get(mroot, "timings_seconds"), "yourmt3_load_and_inference") != nullptr;
-    if (man && tns && !any_mt3 && !mt3_ran && status && !strcmp(status, "captured-with-upstream-rejection") &&
-        yyjson_arr_size(skips) > 0) {
-        printf("PARITY %-16s upstream rejected it before YourMT3 (%s): skipped\n", cap.c_str(),
-               yyjson_get_str(yyjson_arr_get(skips, 0)) ? yyjson_get_str(yyjson_arr_get(skips, 0)) : "?");
+    yyjson_val * mroot    = man ? yyjson_doc_get_root(man) : nullptr;
+    const char * status   = yyjson_get_str(yyjson_obj_get(mroot, "status"));
+    yyjson_val * skips    = yyjson_obj_get(mroot, "skips");
+    const bool   rejected = status && !strcmp(status, "captured-with-upstream-rejection") && yyjson_arr_size(skips) > 0;
+    const char * reason   = rejected && yyjson_get_str(yyjson_arr_get(skips, 0)) ? yyjson_get_str(yyjson_arr_get(skips, 0)) : "?";
+    const bool   mt3_ran  = yyjson_obj_get(yyjson_obj_get(mroot, "timings_seconds"), "yourmt3_load_and_inference") != nullptr;
+    if (man && tns && !any_mt3 && !mt3_ran && rejected) {
+        printf("PARITY %-16s upstream rejected it before YourMT3 (%s): skipped\n", cap.c_str(), reason);
         done();
         return 0;
     }
@@ -2333,11 +2431,55 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
     if (!tns) missing += " tensors.json";
     if (!n_batch) missing += " mt3.b0.* tensors";
     if (audio.empty()) missing += " run.json --audio";
-    static const char * POINT[4] = { "waveform-padded", "linear-spectrogram", "pre-encoder", "encoder" };
-    std::vector<std::vector<float>> ref((size_t) n_batch * 4);
+    if (!tkd || !yyjson_is_arr(yyjson_doc_get_root(tkd))) missing += " tokens-by-batch-channel.json";
+    if (!voc || yyjson_arr_size(yyjson_doc_get_root(voc)) != (size_t) VOCAB) missing += " event-vocabulary.json";
+    constexpr int       NP       = 7;
+    static const char * POINT[NP] = { "waveform-padded", "linear-spectrogram", "pre-encoder", "encoder",
+                                      "pre-decoder",     "prefill.logits",     "cached-step.logits" };
+    std::vector<std::vector<float>> ref((size_t) n_batch * NP);
     for (int k = 0; k < n_batch; k++)
-        for (int p = 0; p < 4; p++)
-            ref[k * 4 + p] = capture_tensor(dir, troot, "mt3.b" + std::to_string(k) + "." + POINT[p], &missing);
+        for (int p = 0; p < NP; p++)
+            ref[k * NP + p] = capture_tensor(dir, troot, "mt3.b" + std::to_string(k) + "." + POINT[p], &missing);
+    // Captured token streams, [batch][segment][channel][len] -> [segment * 13 + channel]
+    std::vector<std::vector<int>> ref_tok;
+    std::vector<int>              batch_len;
+    if (tkd) {
+        yyjson_val * root = yyjson_doc_get_root(tkd);
+        if ((int) yyjson_arr_size(root) != n_batch) missing += " tokens-by-batch-channel.json (batch count)";
+        for (size_t b = 0; b < yyjson_arr_size(root); b++) {
+            yyjson_val * bt  = yyjson_arr_get(root, b);
+            size_t       len = 0;
+            for (size_t s = 0; s < yyjson_arr_size(bt); s++) {
+                yyjson_val * sg = yyjson_arr_get(bt, s);
+                if (yyjson_arr_size(sg) != (size_t) N_CH) missing += " tokens-by-batch-channel.json (channels)";
+                for (size_t ch = 0; ch < yyjson_arr_size(sg); ch++) {
+                    yyjson_val *     st = yyjson_arr_get(sg, ch);
+                    std::vector<int> v;
+                    for (size_t i = 0; i < yyjson_arr_size(st); i++) v.push_back((int) yyjson_get_int(yyjson_arr_get(st, i)));
+                    len = v.size();
+                    ref_tok.push_back(std::move(v));
+                }
+            }
+            batch_len.push_back((int) len);
+        }
+    }
+    // Later points: absent only when the manifest records a later rejection.
+    struct NotesPoint { const char * file, * row; std::vector<Note> ref; bool have = false; };
+    NotesPoint np[3] = { { "merged-notes-seconds.json", "notes.merged" },
+                         { "vocal-program-100-seconds.json", "notes.vocal-100" },
+                         { "drums-seconds.json", "notes.drums" } };
+    std::vector<std::string> skipped;
+    for (auto & p : np) {
+        const std::string path = dir + "/" + p.file;
+        FILE *            fp   = fopen(path.c_str(), "rb");
+        if (fp) fclose(fp);
+        p.have = fp && read_capture_notes(path, p.ref);
+        if (!fp && rejected) skipped.push_back(std::string(p.row) + " (" + reason + ")");
+        else if (!p.have) missing += std::string(" ") + p.file;
+    }
+    yyjson_val * bpm_v = yyjson_obj_get(mroot, "librosa_bpm");
+    if (!bpm_v && rejected) skipped.push_back(std::string("bpm (") + reason + ")");
+    else if (man && !yyjson_is_num(bpm_v)) missing += " manifest.json librosa_bpm";
     if (!missing.empty()) {
         printf("PARITY %-16s FAIL: capture incomplete or unreadable:%s\n", cap.c_str(), missing.c_str());
         done();
@@ -2349,6 +2491,7 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
         done();
         return 1;
     }
+    Decoder d;
     // chained: the source audio through every stage
     int                sr   = 0;
     std::vector<float> mono = load_audio_mono(audio, &sr);
@@ -2356,49 +2499,257 @@ static int run_validate_yourmt3(const std::string & model, std::string dir, cons
     front_half(e, mono, sr, c);
     // The capture must hold every batch of this audio, each with its exact segment count.
     const int want_batches = (c.n_seg + BATCH - 1) / BATCH;
-    if (n_batch != want_batches) {
-        printf("PARITY %-16s FAIL: capture has %d batch(es), the source audio makes %d (%d segments)\n", cap.c_str(),
-               n_batch, want_batches, c.n_seg);
+    if (n_batch != want_batches || ref_tok.size() != (size_t) c.n_seg * N_CH) {
+        printf("PARITY %-16s FAIL: capture has %d batch(es) and %zu streams, the source audio makes %d (%d segments)\n",
+               cap.c_str(), n_batch, ref_tok.size(), want_batches, c.n_seg);
         g_parity_fail++;
     }
     const double NaN = std::nan("");
     const double G   = 1e-3;
-    const size_t per[4] = { (size_t) SEG, (size_t) NFRAME * NBIN, (size_t) NFRAME * 128 * 128, (size_t) NFRAME * N_LAT * D_ENC };
+    const size_t per[NP] = { (size_t) SEG, (size_t) NFRAME * NBIN, (size_t) NFRAME * 128 * 128, (size_t) NFRAME * N_LAT * D_ENC,
+                             (size_t) N_CH * NFRAME * D_DEC, (size_t) N_CH * VOCAB, (size_t) N_CH * VOCAB };
     const std::vector<float> * chained[4] = { &c.wav, &c.spec, &c.pre, &c.enc };
+    std::vector<std::vector<int>> ch_tok, fed_tok;
+    double ms_dec = 0;
+    int    steps  = 0;
     for (int k = 0; k < n_batch; k++) {
         const int B = std::min(BATCH, c.n_seg - k * BATCH);
         bool shape_ok = B > 0;
-        for (int p = 0; p < 4; p++) shape_ok &= ref[k * 4 + p].size() == (size_t) std::max(B, 0) * per[p];
+        for (int p = 0; p < NP; p++) shape_ok &= ref[k * NP + p].size() == (size_t) std::max(B, 0) * per[p];
         if (!shape_ok) {
             printf("PARITY %-16s FAIL: batch %d is not the %d segment(s) this audio gives it\n", cap.c_str(), k,
                    std::max(B, 0));
             g_parity_fail++;
             continue;
         }
+        const std::string bk = "b" + std::to_string(k) + ".";
+        auto R = [&](int p) { return ref[k * NP + p].data(); };
         // fed: each stage from the captured input of that stage
-        const std::vector<float> spec = spectrogram(ref[k * 4].data(), B, e.w.window.data());
-        const std::vector<float> pre  = pre_encode(e, ref[k * 4 + 1].data(), B);
-        const std::vector<float> enc  = encode(e, ref[k * 4 + 2].data(), B);
-        const std::vector<float> * fed[4] = { nullptr, &spec, &pre, &enc };
-        if (!dump.empty())
-            for (int p = 1; p < 4; p++) {
-                const std::string b = dump + "/b" + std::to_string(k) + ".";
-                const size_t      n = ref[k * 4 + p].size();
-                if (!write_file(b + "chained." + POINT[p] + ".f32", chained[p]->data() + (size_t) k * BATCH * per[p], n * 4) ||
-                    !write_file(b + "fed." + POINT[p] + ".f32", fed[p]->data(), n * 4))
+        const std::vector<float> spec = spectrogram(R(0), B, e.w.window.data());
+        const std::vector<float> pre  = pre_encode(e, R(1), B);
+        const std::vector<float> enc  = encode(e, R(2), B);
+        const std::vector<float> pdf  = decoder_prepare(e, d, R(3), B, false);
+        // chained decoder: from this run's encoder states
+        const std::vector<float> pdc  = decoder_prepare(e, d, c.enc.data() + (size_t) k * BATCH * per[3], B, false);
+        double    t0 = now_ms();
+        DecodeOut oc;
+        decoder_greedy(e, d, oc);
+        ms_dec += now_ms() - t0;
+        steps += oc.steps;
+        // fed decoder: from the captured pre-decoder states
+        decoder_prepare(e, d, R(4), B, true);
+        DecodeOut of;
+        decoder_greedy(e, d, of);
+        const std::vector<float> * fed[5] = { nullptr, &spec, &pre, &enc, &pdf };
+        if (!dump.empty()) {
+            for (int p = 1; p < 5; p++) {
+                const size_t n  = ref[k * NP + p].size();
+                const float * cp = p < 4 ? chained[p]->data() + (size_t) k * BATCH * per[p] : pdc.data();
+                if (!write_file(dump + "/" + bk + "chained." + POINT[p] + ".f32", cp, n * 4) ||
+                    !write_file(dump + "/" + bk + "fed." + POINT[p] + ".f32", fed[p]->data(), n * 4))
                     g_parity_fail++;
             }
-        for (int p = 0; p < 4; p++) {
-            const std::vector<float> & r = ref[k * 4 + p];
-            const double ch = span_err(chained[p]->data() + (size_t) k * BATCH * per[p], r.data(), r.size());
-            parity_row(cap, "b" + std::to_string(k) + "." + POINT[p], ch, fed[p] ? span_err(fed[p]->data(), r.data(), r.size()) : NaN, G);
+            const std::string jc = tokens_json(oc.tok), jf = tokens_json(of.tok);
+            if (!write_file(dump + "/" + bk + "chained.tokens.json", jc.data(), jc.size()) ||
+                !write_file(dump + "/" + bk + "fed.tokens.json", jf.data(), jf.size()))
+                g_parity_fail++;
+        }
+        for (int p = 0; p < 5; p++) {
+            const std::vector<float> & r  = ref[k * NP + p];
+            const float *              cp = p < 4 ? chained[p]->data() + (size_t) k * BATCH * per[p] : pdc.data();
+            parity_row(cap, bk + POINT[p], span_err(cp, r.data(), r.size()), fed[p] ? span_err(fed[p]->data(), r.data(), r.size()) : NaN, G);
+        }
+        // Logits: the reference's cached step was fed the argmax of its own prefill.
+        auto argmax_rows = [&](const float * lg, int S) {
+            std::vector<int> a(S, 0);
+            for (int s = 0; s < S; s++)
+                for (int v = 1; v < VOCAB; v++)
+                    if (lg[(size_t) s * VOCAB + v] > lg[(size_t) s * VOCAB + a[s]]) a[s] = v;
+            return a;
+        };
+        const int        S  = B * N_CH;
+        const auto       ra = argmax_rows(R(5), S);
+        const bool       cs = argmax_rows(oc.lg_prefill.data(), S) == ra, fs = argmax_rows(of.lg_prefill.data(), S) == ra;
+        const double     big = INFINITY;
+        auto lerr = [&](const std::vector<float> & mine, int p, bool valid) {
+            return valid && mine.size() == ref[k * NP + p].size() ? span_err(mine.data(), R(p), mine.size()) : big;
+        };
+        parity_row(cap, bk + POINT[5], lerr(oc.lg_prefill, 5, true), lerr(of.lg_prefill, 5, true), G);
+        parity_row(cap, bk + POINT[6], lerr(oc.lg_step, 6, cs), lerr(of.lg_step, 6, fs), G);
+        if (!cs || !fs) printf("  %s: prefill argmax differs from the reference's (%s), so the cached step saw another token\n",
+                               bk.c_str(), !cs && !fs ? "chained and fed" : !cs ? "chained" : "fed");
+        if (!oc.finite || !of.finite) printf("  %s: non-finite logits (%s)\n", bk.c_str(), !oc.finite ? "chained" : "fed");
+        // token streams, exact, padding included
+        int cb = 0, fb = 0;
+        std::string which;
+        for (int s = 0; s < S; s++) {
+            const std::vector<int> & r = ref_tok[(size_t) k * BATCH * N_CH + s];
+            if (stream_body(oc.tok[s]) != stream_body(r)) {
+                cb++;
+                which += " seg" + std::to_string(k * BATCH + s / N_CH) + "/ch" + std::to_string(s % N_CH);
+            }
+            fb += stream_body(of.tok[s]) != stream_body(r) || of.steps != batch_len[k];
+            ch_tok.push_back(oc.tok[s]);
+            fed_tok.push_back(of.tok[s]);
+        }
+        char note[96];
+        snprintf(note, sizeof note, "(to EOS; batch length %d/%d chained/fed, ref %d)", oc.steps, of.steps, batch_len[k]);
+        exact_row(cap, bk + "token-streams", cb, S, fb, S, note);
+        if (cb) printf("  %s chained streams that differ:%s\n", bk.c_str(), which.c_str());
+    }
+    // events: the codec table against upstream's vocabulary
+    int voc_bad = 0;
+    {
+        yyjson_val * root = yyjson_doc_get_root(voc);
+        for (int i = 0; i < VOCAB; i++) {
+            const Event  ev = decode_event(i);
+            yyjson_val * x  = yyjson_arr_get(root, i);
+            const char * ty = yyjson_get_str(yyjson_obj_get(x, "type"));
+            voc_bad += !(ev.type >= 0 && ty && !strcmp(ty, EV_NAME[ev.type]) && yyjson_get_int(yyjson_obj_get(x, "value")) == ev.value);
         }
     }
+    exact_row(cap, "events.vocabulary", -1, 0, voc_bad, VOCAB, "(token id -> event, every id)");
+    // notes, from the captured tokens (fed) and from this run's chained tokens
+    std::vector<Note> nc, nf;
+    const int         ec = tokens_to_notes(ch_tok, (int) ch_tok.size() / N_CH, N_CH, SEG, SR, nc);
+    const int         ef = tokens_to_notes(ref_tok, (int) ref_tok.size() / N_CH, N_CH, SEG, SR, nf);
+    const std::vector<Note> mc[3] = { nc, select_vocal(nc), select_drums(nc) };
+    const std::vector<Note> mf[3] = { nf, select_vocal(nf), select_drums(nf) };
+    for (int p = 0; p < 3; p++) {
+        if (!np[p].have) continue;
+        double      tc = 0, tf = 0;
+        std::string dc;
+        const int   bc = notes_mismatch(mc[p], np[p].ref, &tc, &dc);
+        const int   bf = notes_mismatch(mf[p], np[p].ref, &tf, nullptr);
+        char        note[96];
+        snprintf(note, sizeof note, "(%zu/%zu notes chained/fed, ref %zu; max time err %.2g/%.2g s)", mc[p].size(), mf[p].size(),
+                 np[p].ref.size(), tc, tf);
+        exact_row(cap, np[p].row, bc, (int) np[p].ref.size(), bf, (int) np[p].ref.size(), note);
+        if (bc) printf("  %s chained, + this run only, - reference only:%s\n", np[p].row, dc.c_str());
+    }
+    printf("  decoding errors counted (upstream drops the event): chained %d, from captured tokens %d\n", ec, ef);
+    // BPM: librosa.beat.beat_track's tempo at the source rate
+    if (bpm_v) {
+        const double t0  = now_ms();
+        const double bpm = chordnet::beat_track_tempo(mono, sr);
+        const double ref_bpm = yyjson_get_num(bpm_v);
+        printf("  bpm: %.6f, reference %.6f (%.0f ms)\n", bpm, ref_bpm, now_ms() - t0);
+        parity_row(cap, "bpm", std::fabs(bpm - ref_bpm), NaN, G);
+    }
+    for (auto & s : skipped) printf("PARITY %-16s %-20s skipped: absent after a recorded rejection\n", cap.c_str(), s.c_str());
     yourmt3_timing(cap.c_str(), c, (double) mono.size() / sr, ggml_backend_name(e.bp.backend));
+    printf("TIMING %-16s chained decode %.0f ms, %d steps\n", cap.c_str(), ms_dec, steps);
+    decoder_free(d);
     encoder_free(e);
     done();
     printf("yourmt3 parity %s: %d failing row(s)\n", g_parity_fail ? "FAIL" : "PASS", g_parity_fail);
     return g_parity_fail ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Native lead-sheet source (--lead-sheet): YourMT3+ notes, ChordNet chords and
+// upstream's BPM for one audio file, in raw seconds, as one JSON. Upstream's
+// two rejections (no positive BPM, no program-100 note) are stated with their
+// reasons; nothing is substituted. With --beat-model and --abc-out the same run
+// writes the YuE2 ABC on the Beat This! grid: Vocal from program 100, Ins the
+// busiest melodic instrument, and with --abc-chordnet ChordNet's labels in
+// place of the template chord estimate.
+// ---------------------------------------------------------------------------
+
+static void notes_json(std::string & j, const char * key, const std::vector<yourmt3::Note> & v) {
+    char b[192];
+    j += std::string(",\n\"") + key + "\": [";
+    for (size_t i = 0; i < v.size(); i++) {
+        snprintf(b, sizeof b, "%s{\"onset\": %.17g, \"offset\": %.17g, \"pitch\": %d, \"program\": %d, \"is_drum\": %s, \"velocity\": %d}",
+                 i ? ",\n  " : "\n  ", v[i].onset, v[i].offset, v[i].pitch, v[i].program, v[i].is_drum ? "true" : "false",
+                 v[i].velocity);
+        j += b;
+    }
+    j += "]";
+}
+
+static std::string json_str(const std::string & s) {
+    std::string o = "\"";
+    for (char c : s) o += (c == '"' || c == '\\') ? std::string("\\") + c : std::string(1, c);
+    return o + "\"";
+}
+
+static int run_lead_sheet(const std::string & mt3_model, const std::string & chord_model, const std::string & chord_vocab,
+                          const std::string & audio, const std::string & out_path, const std::string & beat_model,
+                          const std::string & beats_out, const GridExport & opts, AbcOpts ao, bool abc_chordnet) {
+    using yourmt3::now_ms;
+    const double t_start = now_ms();
+    int                sr   = 0;
+    std::vector<float> mono = load_audio_mono(audio, &sr);
+    const double       dur  = (double) mono.size() / sr;
+    // YourMT3+, then its memory is released before ChordNet, as upstream does
+    double              t0 = now_ms();
+    yourmt3::Encoder    e;
+    if (!yourmt3::encoder_init(e, mt3_model)) return 1;
+    const double        ms_load = now_ms() - t0;
+    yourmt3::Decoder    d;
+    yourmt3::Transcript t;
+    yourmt3::transcribe(e, d, mono, sr, t);
+    const std::string be = ggml_backend_name(e.bp.backend);
+    yourmt3::decoder_free(d);
+    yourmt3::encoder_free(e);
+    if (!t.finite) {
+        fprintf(stderr, "[ace-midi] lead sheet: YourMT3 produced non-finite logits\n");
+        return 1;
+    }
+    t0 = now_ms();
+    const double bpm    = chordnet::beat_track_tempo(mono, sr);
+    const double ms_bpm = now_ms() - t0;
+    t0 = now_ms();
+    chordnet::Weights               cw;
+    std::vector<chordnet::Template> tpl;
+    if (!chord_load(chord_model, chord_vocab, cw, tpl)) return 1;
+    chordnet::Result cr;
+    chordnet::transcribe(cw, tpl, mono, sr, chord_threads(), cr);
+    chordnet::free_weights(cw);
+    const double ms_chords = now_ms() - t0;
+
+    // the YuE2 ABC on the Beat This! grid
+    double ms_abc = 0;
+    if (!ao.out.empty()) {
+        t0 = now_ms();
+        std::vector<MidiNote> mn;
+        for (auto & n : t.notes) mn.push_back({ n.is_drum, n.program, n.onset, n.offset, n.pitch });
+        std::vector<AbcChord> ch;
+        for (auto & s : cr.segs) ch.push_back({ s.label, s.onset, s.offset });
+        ao.vocal_program = yourmt3::VOCAL_PROGRAM;
+        ao.chords        = abc_chordnet ? &ch : nullptr;
+        BeatTrack tr;
+        if (!run_beats(beat_model, mono, sr, &tr)) return 1;
+        grid_midi(mn, tr, dur, opts, beats_out, ao);
+        ms_abc = now_ms() - t0;
+    }
+
+    char b[512];
+    snprintf(b, sizeof b, "{\"version\": 1, \"duration\": %.17g, \"sample_rate\": %d,\n\"bpm\": %.17g, \"bpm_rejection\": %s", dur, sr,
+             bpm, bpm > 0 ? "null" : "\"Could not determine a positive BPM; provide bpm explicitly\"");
+    std::string j = b;
+    notes_json(j, "notes", t.notes);
+    notes_json(j, "vocal", t.vocal);
+    j += std::string(",\n\"vocal_rejection\": ") + (t.vocal.empty() ? "\"Melody must contain at least one note.\"" : "null");
+    notes_json(j, "drums", t.drums);
+    j += ",\n\"chords\": [";
+    for (size_t i = 0; i < cr.segs.size(); i++) {
+        snprintf(b, sizeof b, "%s[%s, %.17g, %.17g]", i ? ",\n  " : "\n  ", json_str(cr.segs[i].label).c_str(), cr.segs[i].onset,
+                 cr.segs[i].offset);
+        j += b;
+    }
+    j += "]\n}\n";
+    if (!write_file(out_path, j.data(), j.size())) return 1;
+    const double total = now_ms() - t_start;
+    printf("TIMING lead-sheet %.2f s audio, %d segments, %s: load %.0f ms, features %.0f ms (resample %.0f, spectrogram %.0f), "
+           "pre-encoder %.0f ms, encoder %.0f ms, decode %.0f ms (%d steps), events and merge %.0f ms, BPM %.0f ms, "
+           "ChordNet %.0f ms, ABC %.0f ms, total %.0f ms\n",
+           dur, t.n_seg, be.c_str(), ms_load, t.ms_resample + t.ms_spec, t.ms_resample, t.ms_spec, t.ms_pre, t.ms_enc, t.ms_dec,
+           t.steps, t.ms_events, ms_bpm, ms_chords, ms_abc, total);
+    fprintf(stderr, "[ace-midi] lead sheet: %zu notes (%zu vocal, %zu drums), %zu chord segments, BPM %.4f, %d decoding errors -> %s\n",
+            t.notes.size(), t.vocal.size(), t.drums.size(), cr.segs.size(), bpm, t.errors, out_path.c_str());
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2438,7 +2789,8 @@ int main(int argc, char ** argv) {
     bool   is_raw = false;
     double tol    = 1e-3;
     std::string chord_model, chord_vocab, chord_audio, chord_validate;
-    std::string mt3_model, mt3_validate, mt3_audio, mt3_dump;
+    std::string mt3_model, mt3_validate, mt3_audio, mt3_dump, lead_audio;
+    bool        abc_chordnet = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--self-test-grid")) return grid_self_test();
         else if (!strcmp(argv[i], "--beat-model") && i + 1 < argc) beat_model = argv[++i];
@@ -2481,6 +2833,8 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--validate-yourmt3") && i + 1 < argc) mt3_validate = argv[++i];
         else if (!strcmp(argv[i], "--yourmt3-encode") && i + 1 < argc) mt3_audio = argv[++i];
         else if (!strcmp(argv[i], "--yourmt3-dump") && i + 1 < argc) mt3_dump = argv[++i];
+        else if (!strcmp(argv[i], "--lead-sheet") && i + 1 < argc) lead_audio = argv[++i];
+        else if (!strcmp(argv[i], "--abc-chordnet")) abc_chordnet = true;
     }
     {
         const double l2 = opts.beat_scale > 0 ? log2(opts.beat_scale) : 0.5;
@@ -2510,6 +2864,15 @@ int main(int argc, char ** argv) {
 #else
         setenv("GGML_BACKEND", device == "cpu" ? "CPU" : device.c_str(), 1);
 #endif
+    }
+    if (!lead_audio.empty()) {
+        if (mt3_model.empty() || chord_model.empty() || chord_vocab.empty() || (!abc.out.empty() && beat_model.empty())) {
+            fprintf(stderr, "[ace-midi] --lead-sheet needs --yourmt3-model, --chord-model and --chord-vocab; --abc-out needs --beat-model\n");
+            return 2;
+        }
+        ggml_time_init();
+        if (out_path == "out.mid") out_path = "lead-sheet.json";
+        return run_lead_sheet(mt3_model, chord_model, chord_vocab, lead_audio, out_path, beat_model, beats_out, opts, abc, abc_chordnet);
     }
     if (!mt3_validate.empty() || !mt3_audio.empty()) {
         if (mt3_model.empty()) {
@@ -2574,7 +2937,12 @@ int main(int argc, char ** argv) {
                 "                              encoder) against a reference capture; the dump keeps\n"
                 "                              this run's chained and fed outputs\n"
                 "  ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]\n"
-                "                              audio through the YourMT3+ encoder: placement and times only\n");
+                "                              audio through the YourMT3+ encoder: placement and times only\n"
+                "  ace-midi --lead-sheet <audio> --yourmt3-model <gguf> --chord-model <gguf> --chord-vocab <tsv>\n"
+                "           [--out lead-sheet.json] [--device cpu] [--beat-model <dir> --abc-out <score.abc> [--abc-chordnet]]\n"
+                "                              YourMT3+ notes, program-100 vocal, drums, ChordNet chords and\n"
+                "                              upstream's BPM in raw seconds; the ABC takes program 100 as Vocal,\n"
+                "                              and --abc-chordnet puts ChordNet's labels in place of the estimate\n");
         return 2;
     }
 

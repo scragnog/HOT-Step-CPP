@@ -1164,26 +1164,43 @@ rates print an approximation notice on stderr. `GGML_N_THREADS` sets the CPU thr
 
 ## ace-midi YourMT3+ reference
 
-The YourMT3+ front half, from audio to encoder states. It loads no MuScriptor model, and
-it has no transcribe mode yet. Design, parity findings, placement and times:
-[ace-midi YourMT3+](../../docs/dev/engine.md#ace-midi-yourmt3-front-half).
+YourMT3+ end to end, and the native lead-sheet source built on it (YourMT3+ notes,
+ChordNet chords and upstream's BPM). It loads no MuScriptor model. Design, JSON schema,
+rejections, parity findings, placement and times:
+[ace-midi YourMT3+](../../docs/dev/engine.md#ace-midi-yourmt3).
 
 ```
-Usage: ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <gguf> [--device cpu] [--yourmt3-dump <dir>]
+Usage: ace-midi --lead-sheet <audio> --yourmt3-model <gguf> --chord-model <gguf> --chord-vocab <tsv>
+                [--out lead-sheet.json] [--device cpu] [--beat-model <dir> --abc-out <score.abc> [--abc-chordnet]]
+       ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <gguf> [--device cpu] [--yourmt3-dump <dir>]
        ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]
 
+  --lead-sheet <audio>        WAV or MP3 at any rate: notes, program-100 vocal, drums, ChordNet
+                              chord segments and the librosa BPM in raw seconds, as one JSON
+  --out <file>                lead-sheet JSON (default lead-sheet.json)
+  --chord-model, --chord-vocab  ChordNet GGUF and templates, as for --chords
+  --beat-model <dir>          Beat This! weights; needed for --abc-out
+  --abc-out <score.abc>       also write the YuE2 ABC on the Beat This! grid: Vocal = program 100,
+                              Ins = the busiest melodic instrument (or --abc-ins)
+  --abc-chordnet              with --abc-out: ChordNet's labels in place of the template chords
+  --beats-out, --abc-ins, --abc-melody-only and the tempo options apply as for --transcribe
   --yourmt3-model <gguf>      f32 GGUF from engine/tools/convert-yourmt3.py (local only)
-  --validate-yourmt3 <dir>    PARITY rows against a tools/lead-sheet-reference capture:
-                              padded waveform, spectrogram, pre-encoder, encoder per batch
-  --yourmt3-dump <dir>        with --validate-yourmt3: write b<k>.{chained,fed}.<point>.f32
+  --validate-yourmt3 <dir>    PARITY rows against a tools/lead-sheet-reference capture: padded
+                              waveform, spectrogram, pre-encoder, encoder, pre-decoder, prefill
+                              and cached-step logits, token streams per batch; codec table,
+                              merged notes, program-100 vocal, drums, BPM
+  --yourmt3-dump <dir>        with --validate-yourmt3: write b<k>.{chained,fed}.<point>.f32 and
+                              b<k>.{chained,fed}.tokens.json
   --yourmt3-encode <audio>    WAV or MP3 at any rate through the encoder; prints
                               PLACEMENT and TIMING lines, writes nothing
-  --device auto|cpu|<name>    backend (default auto = best available)
+  --device auto|cpu|<name>    backend for YourMT3+ (default auto = best available); ChordNet
+                              and the BPM run on the CPU
 ```
 
-Exit codes: 0 success (including a capture skipped for a recorded upstream rejection);
-1 unreadable audio, model or capture, or a failed parity row; 2 a YourMT3 mode without
-`--yourmt3-model`.
+Exit codes: 0 success (including a capture skipped for a recorded upstream rejection, and
+a lead sheet whose BPM or vocal is rejected: the JSON states why); 1 unreadable audio,
+model or capture, non-finite logits, or a failed parity row; 2 a YourMT3 mode without
+`--yourmt3-model`, or `--lead-sheet` without its models.
 
 ## quantize reference
 

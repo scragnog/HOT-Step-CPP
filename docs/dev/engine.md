@@ -71,7 +71,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `ace-synth` | `tools/ace-synth.cpp` | ACE-Step text encoder, DiT and VAE from the command line: request JSONs in, MP3 or WAV out |
 | `ace-understand` | `tools/ace-understand.cpp` | Reverse pipeline: audio in, caption, lyrics and metadata out |
 | `ace-caption` | `tools/ace-caption.cpp` | Local captioning with MOSS-Music or Music Flamingo (`--family`, else picked by the files in `--models`): audio in, prose caption, MM3-format caption, YuE2 fields or section-tagged lyrics out. `--hint` (or a third `--src-list` column) is appended to every non-lyrics prompt. Decoding is greedy unless `--temperature` > 0, then nucleus sampling (`--top-p`, `--seed`). Weights come from `tools/convert-moss.py` / `tools/convert-flamingo.py` |
-| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below). `--chords` runs ChordNet chord recognition on the CPU (see [ace-midi chords](#ace-midi-chords-chordnet)). `--validate-yourmt3` and `--yourmt3-encode` run the YourMT3+ front half (see [ace-midi YourMT3+](#ace-midi-yourmt3-front-half)) |
+| `ace-midi` | `tools/ace-midi.cpp` | MuScriptor audio-to-MIDI transcription (`--transcribe`), plus parity modes against a Python oracle. With `--beat-model` it also runs Beat This! (see below). `--chords` runs ChordNet chord recognition on the CPU (see [ace-midi chords](#ace-midi-chords-chordnet)). `--lead-sheet` runs YourMT3+, ChordNet and the BPM estimate for the native lead-sheet source; `--validate-yourmt3` and `--yourmt3-encode` check and time YourMT3+ (see [ace-midi YourMT3+](#ace-midi-yourmt3)) |
 | `ace-train` | `tools/ace-train.cpp` | Training toolchain, one subcommand per job (see [Training subcommands](#training-subcommands)) |
 | `neural-codec` | `tools/neural-codec.cpp` | ACE-Step VAE encode and decode, with optional Q8/Q4 latent compression |
 | `mp3-codec` | `tools/mp3-codec.cpp` | Standalone MP3 encoder and decoder |
@@ -268,14 +268,18 @@ run in the reference venv.
 Measured CPU time for a 240 s, 48 kHz stereo file, all five folds, 16 threads on a Ryzen 9
 9950X3D: features 2.4 s, model 7.8 s, decode 0.04 s, peak working set about 790 MB.
 
-### ace-midi YourMT3+ (front half)
+### ace-midi YourMT3+
 
-The melody transcriber MuLaCover uses is YourMT3+ (the YPTF.MoE+Multi checkpoint). This
-stage ports its front half: audio in, encoder states out. The decoder, the event
-tokens and a transcribe mode come in a later stage. The code is in `engine/src/yourmt3/`
-and its notices are in `engine/src/yourmt3/LICENSE`.
+The melody transcriber MuLaCover uses is YourMT3+ (the YPTF.MoE+Multi checkpoint). It is
+ported end to end: audio in; notes, the program-100 vocal and the drums out in seconds.
+With ChordNet and upstream's BPM estimate beside it, this is the engine side of the
+native lead-sheet source (`--lead-sheet`, below). The code is in `engine/src/yourmt3/`
+and `engine/src/chordnet/tempo.h`; the notices are in their `LICENSE` files.
 
 ```
+ace-midi --lead-sheet <audio> --yourmt3-model <yourmt3-F32.gguf> --chord-model <chordnet-F32.gguf>
+         --chord-vocab <templates.tsv> [--out lead-sheet.json] [--device cpu]
+         [--beat-model <dir> --abc-out <score.abc> [--abc-chordnet]]
 ace-midi --validate-yourmt3 <capture dir> --yourmt3-model <yourmt3-F32.gguf> [--device cpu] [--yourmt3-dump <dir>]
 ace-midi --yourmt3-encode <audio> --yourmt3-model <gguf> [--device cpu]
 ```
@@ -360,7 +364,7 @@ encoder states (CPU or CUDA), decodes 104 of 104 streams equal to the reference 
 it decodes 103 of 104; the stream that differs is segment 0, channel 5. A float64 torch
 chain from the same audio differs on that same stream, so there the port agrees with
 float64 rather than with the float32 reference. Fed from the captured pre-encoder, every
-stream matches. The token gate for the full port should take this into account. The
+stream matches. The port's own decoder gives the same result; see the token rows below. The
 checks are `_experiments/lead-sheet-port/yourmt3-f64-check.py` and
 `yourmt3-token-check.py`, run from the upstream clone in the reference venv on a
 `--yourmt3-dump` directory.
@@ -378,6 +382,113 @@ model load 0.36 s, resample 0.05 s, spectrogram 0.25 s, pre-encoder 5.7 s and en
 about 2.3 s in the pre-encoder and 1.8 s in the encoder. An im2col and strict SGEMM
 pre-encoder would probably be several times faster (an estimate, not measured). It was
 not built, because 7 s sits well inside the 300 s Prepare budget.
+
+**Decoder.** `yourmt3/decoder.h` pairs the 26 latents into 13 channels and projects them
+to 512 (one shared linear). Each T5 layer's cross-attention K and V are computed once per
+batch. A step embeds one token per stream and adds the learned position. It then runs 8
+T5 layers: RMS norm with eps 1e-6, unscaled attention over 6 heads of 64 against a KV
+cache, and a gated tanh-GELU feed-forward. After the final norm it scales by 1/sqrt(512)
+and applies the LM head. A full batch is 104 streams (8 segments by 13 channels). Greedy
+decoding follows upstream's `task_cond_dec_generate`: BOS 0 for every stream, the prefill
+token kept as it is, then PAD for a stream once it has emitted EOS. The batch stops when
+every stream has emitted EOS, or at 256 tokens. The spike's numerics rules hold here too.
+Every matmul is strict F32. On the CPU backend the GELU is built from basic ops, because
+ggml-cpu's `ggml_gelu` reads an fp16 table.
+
+**Events and notes.** `yourmt3/events.h` is integer work with float64 times, following
+upstream's `event_codec.py`, `event2note.py` and `note2event.py`. Ids map to the mt3
+codec's 596 events (PAD, EOS, UNK, 206 shifts, 128 pitches, 2 velocities, tie, 128
+programs, 128 drums). Each segment has a tie section, listing notes still sounding from
+the segment before, then timed events at 100 ticks per second. The start tick is
+`round(start * 100)` with ties to even, as Python rounds. Per channel the segments are
+merged in order. A note the previous segment left sounding, and that the next segment's
+tie section does not carry, gets a note-off at the next segment's start time. Note events
+then become notes: notes over 10 s are cut to 0.01 s, short and inverted notes are fixed,
+and overlaps on one pitch and program are trimmed. Last, the 13 channels are mixed. Every
+sort is stable, so equal keys keep upstream's order. Upstream counts decoding errors and
+drops the offending event, and so does the port. The vocal is the non-drum program-100
+notes. The drums are the drum notes.
+
+**BPM.** MuLaCover's BPM is the tempo `librosa.beat.beat_track` returns at the source
+sample rate. `chordnet/tempo.h` ports the part that sets it: `onset_strength` (power
+STFT 2048/512, 128 Slaney mel bands to sr/2, `power_to_db` with top_db 80, positive
+difference, median over bands) and `feature.tempo`. That second step builds an 8 s
+autocorrelation tempogram, max-normalised per frame and averaged over time, scored as
+`log1p(1e6 tg)` plus a log-normal prior at 120 BPM, with lags faster than 320 BPM excluded.
+The beat positions are not ported: `beat_track` estimates the tempo before it tracks
+beats and returns that estimate unchanged. An onset envelope with no positive value gives
+0, as librosa does. librosa runs the STFT and mel stages in float32; the port runs them
+in float64. On the reference clips and a four-minute song the envelopes differ by up to
+1.1e-5, while the winning lag leads the runner-up by 0.066 to 0.29 in score. The BPM is
+60 sr / (512 lag), so it is exact once the lag is.
+
+**Lead sheet (`--lead-sheet`).** One audio file in, one JSON out (`--out`, default
+`lead-sheet.json`). Everything is in raw seconds of the audio, with no snapping and no
+rolls: the server quantises.
+
+```
+{"version": 1, "duration": s, "sample_rate": hz, "bpm": x, "bpm_rejection": null | reason,
+ "notes": [{onset, offset, pitch, program, is_drum, velocity}], "vocal": [same, program 100],
+ "vocal_rejection": null | reason, "drums": [same], "chords": [[label, onset, offset]]}
+```
+
+Upstream's two rejections are stated, not worked around. A BPM of 0 gives
+`bpm_rejection` "Could not determine a positive BPM; provide bpm explicitly". An empty
+program-100 selection gives `vocal_rejection` "Melody must contain at least one note.".
+Both are upstream's own messages. The raw events stay as transcribed either way. The
+Vocal-to-Ins fallback is the server's. YourMT3+ is released before ChordNet loads, as
+upstream does. ChordNet runs as `--chords` does, on the CPU. Non-finite logits fail the run.
+
+With `--beat-model` and `--abc-out` the same run writes the YuE2 ABC through
+`midi_to_yue2_abc` on the Beat This! grid. Program 100 is the Vocal voice. Ins is the
+busiest melodic instrument, using the MuScriptor rule (no drums, bass or vocal), or
+`--abc-ins`. The chords are the template estimate by default. With `--abc-chordnet` they
+are ChordNet's segments, each end snapped to the notation's subbeat grid, with the root
+spelt for the key and an inversion's bass written as a note name. The server's lead-sheet
+parser reads maj, min, 7, maj7, min7, dim, aug, sus2, sus4 and a slash bass. The ChordNet
+qualities it cannot read are reduced to chord tones it can: 9, 11 and 13 to 7, maj9 to
+maj7, min9 to min7, hdim7 and dim7 to dim, sus4(b7) to sus4. All 301 template labels,
+in sharp and flat keys, pass the notation's `chord_symbol_to_abc`, and all 306 resulting
+chord texts parse with the server's `abcLeadSheetEvents`. Without these options
+`midi_to_yue2_abc` is unchanged: a MuScriptor transcription writes the same ABC, MIDI and
+`beats.json` bytes as before.
+
+**Decoder validation.** `--validate-yourmt3` adds these rows after the front-half rows,
+per batch: pre-decoder (fed from the captured encoder), prefill and cached-step logits
+(fed from the captured pre-decoder), and the token streams. Streams are exact up to EOS,
+with the batch length shown. A fed run must also match the batch length. The rows then
+cover the codec table against `event-vocabulary.json`; the merged notes, the program-100
+vocal and the drums (fed from the captured tokens, chained from this run's own tokens),
+exact with times within 1e-6 s; and the BPM against the manifest's `librosa_bpm`, within
+1e-3. The 6d rules still hold. A later point that is absent because the manifest records a
+later rejection is reported as skipped with that reason. `--yourmt3-dump` also writes the
+pre-decoder and both token sets.
+
+Fed, every row passes on all five captures, on CUDA strict F32 and on the CPU. The worst
+results are pre-decoder 6.7e-6, prefill logits 4.2e-4 and cached-step logits 3.4e-4. All
+104 streams of every capture match. The codec table, merged notes, vocal and drums are
+exact, and the BPM is exact everywhere, 0.0 on `library-vocal` included. Chained, CPU and
+CUDA give the same tokens and notes. Every stream matches except one: on `v2-vocal` and
+`v2-silent`, segment 0 channel 5 stops at EOS after 21 tokens, where the float32
+reference adds two more chord pairs. Upstream's own model, run in float64 from the
+captured waveform, gives the port's tokens on all 104 streams of both captures, so that
+stream follows float64 and the row stays FAIL as a recorded finding. It removes 14
+program-48 notes (two seven-note chords at 1.37 s and 1.73 s) from the merged notes. The
+vocal and drums are unchanged. The chained pre-decoder and logit rows fail because the
+chained encoder does (above). On a four-minute song, upstream's float32 transcriber and
+the port agree on 2,892 of 2,901 notes, with all 282 vocal notes equal. The 15 that
+differ are drum notes, which were not checked against float64. The scratch checks are
+`f64_tokens.py` and `four_min_notes.py` in `_experiments/lead-sheet-port/scratch/`.
+
+**Decoder placement.** The projection and cross-K/V graph is 69 nodes and the decoder
+step 327 (391 on the CPU, with the composite GELU). Each has one split, with nothing off
+CUDA0.
+
+**Lead-sheet time.** On the same 240 s, 48 kHz song, RTX 5090, no Unreal, about 6 GB of
+idle dev-stack models resident, two runs: model load 0.4 s; features 0.3 s; pre-encoder
+6.9 s; encoder 1.0 s; decode 7.9 to 8.2 s (2,145 steps over 15 batches); events and merge
+under 1 ms; BPM 1.0 s; ChordNet 10.1 to 10.3 s (CPU); Beat This! and ABC 0.6 s. That
+totals 28.4 to 28.9 s, against the 300 s Prepare budget.
 
 ## HeartMuLa
 

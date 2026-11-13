@@ -7,7 +7,8 @@
 //   Vocal   MuScriptor's "voice" notes; Ins one melodic instrument (the
 //           busiest, or the caller's choice), each made monophonic (top note)
 //   key     Krumhansl-Schmuckler on the duration-weighted pitch classes
-//   chords  per half bar, triad/seventh templates on the other instruments
+//   chords  per half bar, triad/seventh templates on the other instruments,
+//           or the caller's chord segments (ChordNet) snapped to the same grid
 // Notes are snapped to the notation's 4-per-beat subbeat grid first, so the
 // renderer never meets a note it cannot place. Drums and other instruments
 // are dropped: YuE2's ABC has two voices.
@@ -26,6 +27,12 @@ struct AbcNote {
     bool   drum;
 };
 
+// A chord segment in seconds of the audio, "Root:quality[/degree]" (ChordNet's labels)
+struct AbcChord {
+    std::string label;
+    double      onset, offset;
+};
+
 struct AbcResult {
     bool        ok = false;
     std::string abc, error, repaired, key;
@@ -34,9 +41,9 @@ struct AbcResult {
 
 #define ABC_VOICE_PROGRAM 52
 
-// lead-sheet Ins candidates: not drums, voice or bass
-static bool abc_melodic(int program) {
-    return program != ABC_VOICE_PROGRAM && !(program >= 32 && program <= 39) && program != 43 && program < 128;
+// lead-sheet Ins candidates: not drums, the voice or bass
+static bool abc_melodic(int program, int vocal_program = ABC_VOICE_PROGRAM) {
+    return program != vocal_program && !(program >= 32 && program <= 39) && program != 43 && program < 128;
 }
 
 static const char * ABC_SHARP[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -102,10 +109,56 @@ static std::string abc_chord(const double * chroma, double bass_pc_weight, int b
     return std::string(flats ? ABC_FLAT[best_root] : ABC_SHARP[best_root]) + ":" + best_q->name;
 }
 
+// A ChordNet label as abc_chord writes labels: "Root:quality", the root spelt
+// for the key, an inversion's bass as a note name. The qualities the server's
+// lead-sheet parser cannot read are reduced to the chord tones it can:
+// 9, 11, 13 -> 7; maj9 -> maj7; min9 -> min7; hdim7, dim7 -> dim; sus4(b7) -> sus4.
+// "N", or anything unreadable, is "N".
+static std::string abc_chordnet_label(const std::string & label, bool flats) {
+    static const char * KEEP[] = { "maj", "min", "7", "maj7", "min7", "dim", "aug", "sus2", "sus4" };
+    static const struct { const char * from, * to; } REDUCE[] = {
+        { "9", "7" }, { "11", "7" }, { "13", "7" }, { "maj9", "maj7" }, { "min9", "min7" },
+        { "hdim7", "dim" }, { "dim7", "dim" }, { "sus4(b7)", "sus4" },
+    };
+    static const struct { const char * deg; int semis; } BASS[] = { { "2", 2 }, { "b3", 3 }, { "3", 4 }, { "5", 7 }, { "b7", 10 } };
+    static const int LETTER[7] = { 9, 11, 0, 2, 4, 5, 7 };  // A..G
+    const size_t colon = label.find(':');
+    if (colon == std::string::npos || colon < 1 || colon > 2 || label[0] < 'A' || label[0] > 'G') return "N";
+    int root = LETTER[label[0] - 'A'];
+    if (colon == 2) {
+        if (label[1] == '#') root++;
+        else if (label[1] == 'b') root--;
+        else return "N";
+    }
+    root = (root + 12) % 12;
+    std::string q = label.substr(colon + 1), bass;
+    const size_t slash = q.find('/');
+    if (slash != std::string::npos) {
+        bass = q.substr(slash + 1);
+        q    = q.substr(0, slash);
+    }
+    bool known = false;
+    for (const char * k : KEEP) known |= q == k;
+    for (const auto & r : REDUCE)
+        if (q == r.from) { q = r.to; known = true; }
+    if (!known) return "N";
+    const char * const * names = flats ? ABC_FLAT : ABC_SHARP;
+    std::string out = std::string(names[root]) + ":" + q;
+    if (!bass.empty()) {
+        for (const auto & b : BASS)
+            if (bass == b.deg) return out + "/" + names[(root + b.semis) % 12];
+        return "N";
+    }
+    return out;
+}
+
 // `grid` is the resolved grid the MIDI was written on (onset delay included);
-// ins_program < 0 picks the busiest melodic instrument.
+// ins_program < 0 picks the busiest melodic instrument. vocal_program is the
+// program of the Vocal voice. chords, when given, replace the template chord
+// estimate: each segment's ends are snapped to the subbeat grid.
 static AbcResult midi_to_yue2_abc(const std::vector<AbcNote> & notes_in, const BeatGrid & grid, double duration,
-                                  int ins_program, bool melody_only) {
+                                  int ins_program, bool melody_only, int vocal_program = ABC_VOICE_PROGRAM,
+                                  const std::vector<AbcChord> * chords = nullptr) {
     AbcResult out;
     const double delay = grid.onset_delay;
     std::vector<AbcNote> notes;
@@ -156,7 +209,7 @@ static AbcResult midi_to_yue2_abc(const std::vector<AbcNote> & notes_in, const B
     // Ins: the busiest melodic instrument unless one was asked for
     if (ins_program < 0) {
         std::vector<int> count(128, 0);
-        for (auto & n : notes) if (abc_melodic(n.program)) count[n.program]++;
+        for (auto & n : notes) if (abc_melodic(n.program, vocal_program)) count[n.program]++;
         int best = (int) (std::max_element(count.begin(), count.end()) - count.begin());
         ins_program = count[best] > 0 ? best : -1;
     }
@@ -164,7 +217,7 @@ static AbcResult midi_to_yue2_abc(const std::vector<AbcNote> & notes_in, const B
 
     std::vector<Yue2SheetRawNote> raw;
     for (auto & n : notes) {
-        const int track = n.program == ABC_VOICE_PROGRAM ? 0 : n.program == ins_program ? 1 : -1;
+        const int track = n.program == vocal_program ? 0 : n.program == ins_program ? 1 : -1;
         if (track < 0) continue;
         double s = snap(n.onset), e = snap(n.offset);
         if (e > s + 1e-9) raw.push_back({ s, e, n.pitch, track });
@@ -190,7 +243,20 @@ static AbcResult midi_to_yue2_abc(const std::vector<AbcNote> & notes_in, const B
     in.key_rows.push_back({ cell(t0), cell(t1), out.key });
 
     // chords per half bar (a whole bar in odd meters) from the accompaniment
-    if (!melody_only) {
+    if (!melody_only && chords) {
+        for (const AbcChord & c : *chords) {
+            const double s = std::max(t0, std::min(t1, snap(c.onset - delay)));
+            const double e = std::max(t0, std::min(t1, snap(c.offset - delay)));
+            if (e <= s) continue;
+            const std::string label = abc_chordnet_label(c.label, flats);
+            if (in.chord_rows.empty() && s > t0) in.chord_rows.push_back({ cell(t0), cell(s), "N" });
+            if (!in.chord_rows.empty() && in.chord_rows.back()[2] == label) in.chord_rows.back()[1] = cell(e);
+            else in.chord_rows.push_back({ cell(s), cell(e), label });
+        }
+        if (in.chord_rows.empty()) in.chord_rows.push_back({ cell(t0), cell(t1), "N" });
+        else if (in.chord_rows.back()[1] != cell(t1)) in.chord_rows.push_back({ in.chord_rows.back()[1], cell(t1), "N" });
+        for (auto & r : in.chord_rows) if (r[2] != "N") out.chords++;
+    } else if (!melody_only) {
         const size_t span = bpb % 2 == 0 ? bpb / 2 : bpb;
         // spans start on the downbeats; the pickup before the first is one span
         std::vector<size_t> starts = { 0 };
@@ -204,7 +270,7 @@ static AbcResult midi_to_yue2_abc(const std::vector<AbcNote> & notes_in, const B
             double c[12] = { 0 }, low_w = 0;
             int    low = 128;
             for (auto & n : notes) {
-                if (n.program == ABC_VOICE_PROGRAM) continue;
+                if (n.program == vocal_program) continue;
                 const double ov = std::min(e, n.offset) - std::max(s, n.onset);
                 if (ov <= 0) continue;
                 c[((n.pitch % 12) + 12) % 12] += ov;

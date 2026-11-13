@@ -23,6 +23,17 @@ Hann-windowed sinc kernel and its strided application) from torchaudio
 engine/tools/convert-yourmt3.py loads the checkpoint the way MuLaCover's
 restricted loader does (Apache License 2.0).
 
+decoder.h follows the same source's multi-channel projection and T5 decoder
+(model/projection_layer.py, model/t5mod.py) and its greedy generation loop
+(model/t5mod_helper.py, task_cond_dec_generate). The T5 layers there come from
+Hugging Face Transformers 4.45.1, transformers/models/t5/modeling_t5.py
+(model/t5_compat.py), "Copyright 2018 Mesh TensorFlow authors, T5 Authors and
+HuggingFace Inc. team", Apache License 2.0. events.h follows the event codec
+and note processing of that source (utils/event_codec.py, utils/event2note.py,
+utils/note2event.py; Copyright 2024 The YourMT3 Authors, Apache License 2.0),
+which in turn adapts MT3 (Gardner et al., Apache License 2.0). The Apache
+License 2.0 text is below.
+
 No YourMT3 checkpoint or weights are included. Checkpoint redistribution is
 not cleared: the converted GGUF stays local and has no download entry.
 

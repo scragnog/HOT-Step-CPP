@@ -31,7 +31,9 @@ SOFTWARE.
 
 features.h implements the tuning estimate (estimate_tuning, piptrack,
 pitch_tuning) and the hybrid constant-Q transform (hybrid_cqt, pseudo_cqt,
-vqt, wavelet filters, sparsify_rows) as librosa 0.11 defines them:
+vqt, wavelet filters, sparsify_rows), and tempo.h the tempo step of
+beat_track (onset_strength with the Slaney mel filters and power_to_db, the
+autocorrelation tempogram and tempo), as librosa 0.11 defines them:
 https://github.com/librosa/librosa
 
 ISC License
