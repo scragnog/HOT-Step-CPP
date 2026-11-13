@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
-  mm3TailFadeStartSec,
 } from './generate.js';
 import { mm3PlankDir } from './plank.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
@@ -84,25 +83,16 @@ test('MM3 audio to audio: source and dials travel only with a strength, and the 
   }
 });
 
-test('MM3 sends the LM adapter fade only when set, and a fade keeps the selected mode', (t) => {
+test('MM3 ignores the retired adapter fade params from saved presets', (t) => {
   const installed = listMm3LmAdapters()[0];
   if (!installed) return t.skip('no MM3 LM adapter installed');
-  const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3LmAdapterMode: 'merge' };
+  const params = { prompt: 'x', seed: 42, lyrics: 'word '.repeat(336), mm3LmAdapter: installed.file, mm3LmAdapterMode: 'merge' };
   const plain = mapMinimaxParams(params).req as unknown as Record<string, unknown>;
-  assert.equal(plain.lm_adapter_mode, 'merge');
-  assert.equal(Object.keys(plain).some((k) => k.startsWith('lm_adapter_fade')), false);
-  const faded = mapMinimaxParams({ ...params, mm3LmAdapterFadeOut: 150, mm3LmAdapterFadeLen: 60, mm3LmAdapterFadeFloor: 7 })
-    .req as unknown as Record<string, unknown>;
-  assert.equal(faded.lm_adapter_mode, 'merge');  // the engine fades a merged adapter in-graph
-  assert.equal(faded.lm_adapter_fade_out, 150);
-  assert.equal(faded.lm_adapter_fade_len, 60);
-  assert.equal(faded.lm_adapter_fade_floor, undefined);  // out of range is dropped
-  const fadeRuntime = mapMinimaxParams({ ...params, mm3LmAdapterMode: 'runtime', mm3LmAdapterFadeOut: 150 })
-    .req as unknown as Record<string, unknown>;
-  assert.equal(fadeRuntime.lm_adapter_mode, 'runtime');
-  const fadePlan = mapMinimaxParams({ ...params, mm3LmAdapterFadeOut: 150, mm3LmAdapterScalePlan: 0.25 })
-    .req as unknown as Record<string, unknown>;
-  assert.equal(fadePlan.lm_adapter_mode, 'runtime');  // the plan dial still needs the base weights
+  const stale = mapMinimaxParams({ ...params, mm3AdapterTailFade: true, mm3LmAdapterFadeIn: 10,
+    mm3LmAdapterFadeOut: 150, mm3LmAdapterFadeLen: 60, mm3LmAdapterFadeFloor: 0.5 }).req as unknown as Record<string, unknown>;
+  assert.deepEqual(stale, plain);
+  assert.equal(stale.lm_adapter_mode, 'merge');
+  assert.equal(Object.keys(stale).some((k) => k.startsWith('lm_adapter_fade')), false);
 });
 
 test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => {
@@ -144,22 +134,6 @@ test('MM3 plan dial: more than 2 takes ride the q8 planner cache, otherwise 2 as
   const missing = req({ mm3LmAdapter: 'no-such-run/adapter_model.safetensors', mm3LmAdapterScalePlan: 0.25, mm3Takes: 4 });
   assert.equal(missing.takes, 4);
   assert.equal(Object.hasOwn(missing, 'lm_kv_q8'), false);
-});
-
-test('MM3 tail fade toggle times the fade from the lyrics', (t) => {
-  assert.equal(mm3TailFadeStartSec(''), null);
-  assert.equal(mm3TailFadeStartSec('[Verse] ' + 'word '.repeat(336)), 212);  // the 2026-11-08 test sheet: ~210 s
-  assert.equal(mm3TailFadeStartSec('word '.repeat(10)), 60);
-  assert.equal(mm3TailFadeStartSec('word '.repeat(2000)), 240);
-  const installed = listMm3LmAdapters()[0];
-  if (!installed) return t.skip('no MM3 LM adapter installed');
-  const base = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3AdapterTailFade: true };
-  const sung = mapMinimaxParams({ ...base, lyrics: 'word '.repeat(336) }).req as unknown as Record<string, unknown>;
-  assert.equal(sung.lm_adapter_fade_out, 212);
-  assert.equal(sung.lm_adapter_fade_len, 60);
-  assert.equal(sung.lm_adapter_mode, 'runtime');
-  const inst = mapMinimaxParams({ ...base, lyrics: '' }).req as unknown as Record<string, unknown>;
-  assert.equal(inst.lm_adapter_fade_out, undefined);
 });
 
 test('MM3 source guide: sent only from the plank folder, with its dials, and endings stand down', () => {

@@ -1242,7 +1242,9 @@ Other adapter paths:
   runtime DoRA gets a one-time norm pass (`mm3-lm-dora.h`), and `adapter_runtime_dora`
   re-normalises it for the request's scale dials. MM3 DiT LoRAs and DoRAs merge at
   load (`mm3-adapter.h`). A runtime MM3 LM adapter can change strength along the
-  song (`lm_adapter_fade_*`, `MM3LmAdapterSchedule` in `mm3-lm-adapter.h`): the AR
+  song (`lm_adapter_fade_*`, `MM3LmAdapterSchedule` in `mm3-lm-adapter.h`; a diagnostic
+  since the app's Adapter Tail Fade was withdrawn, because the base on the adapter's KV
+  cache collapsed capped plans into repetition and static): the AR
   loop re-sets the scales between iterations, which rebuilds the decode graph and
   keeps the KV cache. In merge mode (`MM3ArOptions::lm_adapter_merged`) the graph keeps
   the merged weights and, below full strength, carries the adapter again at

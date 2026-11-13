@@ -202,7 +202,12 @@ is a different song from the same seed by design (check-mm3-ensemble.mjs).
 Knock-ons: Save Plan To Disk is dead while the toggle is on; each ended
 candidate costs its own flow pass.
 
-**Adapter fade (2026-11-08, 28c79e42, opt-in, no UI dial yet).** Adapters
+**Adapter fade (2026-11-08, 28c79e42; app toggle WITHDRAWN 2026-11-13).** The
+server no longer sends `lm_adapter_fade_*` and ignores the old `mm3AdapterTailFade` /
+`mm3LmAdapterFade*` params; the engine fields stay for experiments. Why: on a user's own
+adapter the base weights ran on the cache the adapter built and every capped take collapsed
+into repetition and static (0 of 8 ended, 8 of 8 degraded); the base on a cache it rebuilt
+itself ended 7 of 8. The measurements below are kept as history. Adapters
 suppress the base's ending instinct, so `lm_adapter_fade_*` (engine
 ARCHITECTURE.md) can step the LM adapter down to the base for the tail
 (`MM3LmAdapterSchedule`). Since 2026-11-11 merge mode fades too: the weights stay

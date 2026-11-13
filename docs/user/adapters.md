@@ -331,15 +331,10 @@ trained position. Leave it on unless you are placing the trigger yourself. If a 
 recorded a trigger it never trained, the panel says so and does not add it.
 
 Adapters often stop songs from ending on their own: the render runs to the 5-minute cap.
-**Adapter Tail Fade** in the Generation dropdown (off by default) keeps the adapter at full
-strength until the lyrics should be done, then steps it down to the base model over 60 s
-so the base can close the song. The start comes from the word count: about 1.85 words a
-second plus 30 s, never later than 4:00. The fade keeps what has already been generated,
-so the timbre holds. In a test on one adapter, 9 of 12 plans ended on their own with the
-fade against 2 of 12 without. It needs lyrics. In Merge mode the song plans at merge speed
-up to the fade and only the faded stretch runs the slower runtime adapter maths. A DoRA
-adapter fades in Runtime mode instead, and a LoHa or HiRA adapter cannot fade once merged
-(the fade is skipped). The **Plan** dial below 1 still renders in Runtime mode.
+The **Adapter Tail Fade** toggle that tried to fix this has been withdrawn. It handed the
+end of the song to the base model while keeping the adapter's planner cache, and on a
+tested adapter that ended no more takes and turned every capped one to static over its last
+two minutes. A preset saved with it still loads; the setting is ignored.
 
 An adapter that fails to load fails the job. It never renders the base model silently.
 
