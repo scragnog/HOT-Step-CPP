@@ -460,9 +460,13 @@ with the batch length shown. A fed run must also match the batch length. The row
 cover the codec table against `event-vocabulary.json`; the merged notes, the program-100
 vocal and the drums (fed from the captured tokens, chained from this run's own tokens),
 exact with times within 1e-6 s; and the BPM against the manifest's `librosa_bpm`, within
-1e-3. The 6d rules still hold. A later point that is absent because the manifest records a
-later rejection is reported as skipped with that reason. `--yourmt3-dump` also writes the
-pre-decoder and both token sets.
+1e-3. The 6d rules still hold. The capture writes the notes, both selections and the BPM
+right after YourMT3, before either reference rejection, so once YourMT3 has run every one is
+required. The token file is checked before use: integer ids inside the vocabulary, full
+batches of 8 segments except the last, 13 channels and one stream length per batch. A
+count that does not match the source audio fails the capture outright. A non-finite logit
+at any decode step fails, even when the tokens come out unchanged. `--yourmt3-dump` also
+writes the pre-decoder and both token sets.
 
 Fed, every row passes on all five captures, on CUDA strict F32 and on the CPU. The worst
 results are pre-decoder 6.7e-6, prefill logits 4.2e-4 and cached-step logits 3.4e-4. All
