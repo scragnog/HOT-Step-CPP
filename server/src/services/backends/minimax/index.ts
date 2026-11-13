@@ -642,6 +642,21 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: true,
       },
       {
+        // Base handoff (engine eos_handoff, HOTSTEP-1194). Acts only with
+        // Require Natural Ending on and an LM adapter loaded.
+        key: 'mm3BaseHandoff',
+        type: 'toggle',
+        label: 'Base Model Ending',
+        hint: 'With an LM adapter loaded and Require Natural Ending on: when a '
+            + 'take runs to the 5-minute cap, it is cut 25 s after its last '
+            + 'steadily placed lyric line and the base model plays the song out '
+            + 'from there and ends it. The take keeps the adapter\'s audio up to '
+            + 'the switch, with a 1 s crossfade. Each rescue adds about one more '
+            + 'plan and render of that take. Natural endings are always used first.',
+        default: true,
+        visible_when: { key: 'mm3LmAdapter', not_equals: '' },
+      },
+      {
         key: 'mm3LmTemperature',
         group: 'lm',
         type: 'slider',

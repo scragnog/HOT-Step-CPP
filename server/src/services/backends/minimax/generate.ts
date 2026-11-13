@@ -659,6 +659,11 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         require_eos: true,
         eos_rounds: MM3_ENDING_ROUNDS,
         ...(askedTakes === 1 ? { stop_after_first_eos: true } : {}),
+        // Base handoff: the engine rescues capped adapter takes of the first
+        // round (base renders are untouched). Omitted when off or without an
+        // adapter, so those requests are what they were.
+        ...(params.mm3BaseHandoff !== false && lmAdapterPath && fs.existsSync(lmAdapterPath)
+          ? { eos_handoff: true } : {}),
       } : {}),
       // Minimum length. Omitted at 0 so turning the toggle off gives back
       // exactly the request this backend sent before the check existed. With
@@ -1393,7 +1398,8 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         .filter(s => s.length > 0);
       job.mm3Takes = nTakes;
       if (seeds.length) job.mm3TakeSeeds = seeds;
-      job.mm3Ending = { planned, rendered: nTakes, dropped, rounds };
+      const rescued = takeDetail.flatMap((d, i) => (d?.rescued === true ? [i] : []));
+      job.mm3Ending = { planned, rendered: nTakes, dropped, rounds, ...(rescued.length ? { rescued } : {}) };
       const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
       log('INFO',
         `[MM3] Candidates: ${planned} ${plural(planned, 'plan', 'plans')} in `
@@ -1402,6 +1408,13 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         + `${tooShort} too short, `
         + `${Math.max(0, dropped - capped - tooShort)} other candidates not selected`
         + (seeds.length ? ` (seeds ${seeds.join(', ')})` : ''));
+      if (rescued.length) {
+        log('INFO', `[MM3] Base handoff: ${rescued.length} capped ${plural(rescued.length, 'take', 'takes')} ended by `
+          + 'the base model ('
+          + rescued.map(i => `take ${i + 1}: switched at ${Number(takeDetail[i].handoff_cue_s).toFixed(1)}s, `
+            + `ended ${Number(takeDetail[i].handoff_eos_s).toFixed(1)}s later`).join('; ')
+          + ')');
+      }
       if (finalDetail?.eos_fallback) {
         // Every plan hit the cap. The engine rendered the longest one instead
         // of failing, so the user gets audio — but it does not end, and the two

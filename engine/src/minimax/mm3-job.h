@@ -202,6 +202,12 @@ struct MM3TakeOutput {
     bool     has_nan     = false;
     /** Natural-ending candidates: the planning round this take came from. */
     int      round       = 0;
+    /** Base handoff (MM3GenRequest::eos_handoff): this capped take was cut at
+     *  handoff_cue s and the base plan ended handoff_eos s later. */
+    bool     rescued      = false;
+    double   handoff_cue  = 0.0;
+    double   handoff_eos  = 0.0;
+    uint64_t handoff_seed = 0;
 
     /** This take's live chunk queue. One per take, because the takes render in
      *  lockstep and a reader subscribes to ONE of them — a shared queue would
@@ -246,6 +252,8 @@ struct MM3JobState {
      *  — a distinct failure from hitting the cap, and the one worth telling a
      *  user about, because it means the planner keeps ending the song early. */
     int      takes_short     = 0;
+    /** Capped takes the base handoff rescued and rendered. */
+    int      takes_rescued   = 0;
     /** True when NO candidate was ever accepted and the longest capped plan was
      *  rendered anyway. The job succeeded, but not as the user asked. */
     bool     eos_fallback    = false;
@@ -563,6 +571,9 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
     add_i("require_eos", req.gen.require_eos ? 1 : 0);
     add_i("eos_rounds", req.gen.require_eos ? req.gen.eos_rounds : 0);
     add_i("first_eos", req.gen.stop_after_first_eos ? 1 : 0);
+    if (req.gen.eos_handoff && req.gen.require_eos) {
+        add_i("handoff", 1);  // decides which plan a capped round keeps; absent when off, so old keys stand
+    }
     // A length floor decides which round's plan is kept, so two requests that
     // differ only here can end on different codes — a shared slot would hand
     // one of them the other's answer.
@@ -1230,6 +1241,10 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
                 req.gen.lm_adapter_merged = req.lm_adapter_sched.active() && mm3_lm_merge_fade_ok(g_mm3_lm_adapter)
                                                 ? g_mm3_lm_adapter
                                                 : nullptr;
+                // The base handoff takes the merged delta back out in-graph on
+                // its rescue pass only, so a render that needs no rescue keeps
+                // merge speed. Same linear-delta condition as the fade.
+                req.gen.handoff_merged = mm3_lm_merge_fade_ok(g_mm3_lm_adapter) ? g_mm3_lm_adapter : nullptr;
                 // The soft-prompt halves survive the merge. A token is a
                 // conditioning input on k prompt positions and a prefix is n KV
                 // columns; neither is a weight delta, so mm3_lm_merge_apply
@@ -1421,6 +1436,7 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             st->takes_dropped   = planned - K;
             st->takes_capped    = capped;
             st->takes_short     = too_short;
+            st->takes_rescued   = rs[0].cand_rescued;
             st->eos_fallback    = rs[0].eos_fallback;
         }
         if (rs[0].eos_fallback) {
@@ -1430,9 +1446,9 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
                     job->id.c_str(), (long long) rs[0].ar.n_frames, (double) rs[0].ar.n_frames / 25.0);
         }
         const std::string tail = dropped_seeds.empty() ? std::string() : " (dropped seeds in the last round: " + dropped_seeds + ")";
-        fprintf(stderr, "[MM3-Job] %s: candidates - %d planned over %d round(s), %d kept and rendered, "
-                        "%d capped, %d too short, %d other candidates not selected%s\n",
-                job->id.c_str(), planned, rs[0].eos_rounds_used, K, capped, too_short,
+        fprintf(stderr, "[MM3-Job] %s: candidates - %d planned over %d round(s), %d kept and rendered (%d rescued "
+                        "by the base handoff), %d capped, %d too short, %d other candidates not selected%s\n",
+                job->id.c_str(), planned, rs[0].eos_rounds_used, K, rs[0].cand_rescued, capped, too_short,
                 planned - K - capped - too_short, tail.c_str());
     }
     // Take 0 is the job's primary result: it fills the upstream Job exactly as
@@ -1453,7 +1469,8 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         r.ar.lrc          = g_mm3_ar_cache.lrc;
         r.ar.n_frames     = g_mm3_ar_cache.frames;
         r.ar.eos_hit      = g_mm3_ar_cache.eos_hit;
-    } else if ((req.reuse_ar || req.save_frame_hiddens) && r.frames > 0 && !r.ar.frame_hiddens.empty()) {
+    } else if ((req.reuse_ar || req.save_frame_hiddens) && r.frames > 0 && !r.ar.frame_hiddens.empty() &&
+               !r.rescued) {  // a rescued take's audio is a splice its hiddens alone cannot replay
         // `save_frame_hiddens` fills the slot too, and it has to: the save below
         // writes FROM the slot, so gating the fill on `reuse_ar` alone would
         // either write nothing or — worse, and this is the failure mode worth
@@ -1575,6 +1592,10 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         to.peak        = rt.peak;
         to.eos         = rt.ar.eos_hit;
         to.has_nan     = rt.has_nan;
+        to.rescued      = rt.rescued;
+        to.handoff_cue  = rt.handoff_cue;
+        to.handoff_eos  = rt.handoff_eos;
+        to.handoff_seed = rt.handoff_seed;
         to.seed        = rt.ar.seed ? rt.ar.seed : req.gen.seed + (uint64_t) t;
         to.lrc         = rt.ar.lrc;
         if (t == 0) {
@@ -1924,6 +1945,7 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     yyjson_mut_obj_add_int(o, orot, "takes_dropped", st->takes_dropped);
     yyjson_mut_obj_add_int(o, orot, "takes_capped", st->takes_capped);
     yyjson_mut_obj_add_int(o, orot, "takes_short", st->takes_short);
+    yyjson_mut_obj_add_int(o, orot, "takes_rescued", st->takes_rescued);
     yyjson_mut_obj_add_bool(o, orot, "eos_fallback", st->eos_fallback);
     if (st->n_takes > 1 || st->require_eos) {
         yyjson_mut_val * arr = yyjson_mut_arr(o);
@@ -1939,6 +1961,12 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
             yyjson_mut_obj_add_real(o, e, "duration_s", to.duration_s);
             yyjson_mut_obj_add_bool(o, e, "eos", to.eos);
             yyjson_mut_obj_add_int(o, e, "round", to.round);
+            yyjson_mut_obj_add_bool(o, e, "rescued", to.rescued);
+            if (to.rescued) {
+                yyjson_mut_obj_add_real(o, e, "handoff_cue_s", to.handoff_cue);
+                yyjson_mut_obj_add_real(o, e, "handoff_eos_s", to.handoff_eos);
+                yyjson_mut_obj_add_strcpy(o, e, "handoff_seed", std::to_string(to.handoff_seed).c_str());
+            }
             yyjson_mut_obj_add_real(o, e, "rms", to.rms);
             yyjson_mut_obj_add_real(o, e, "peak", to.peak);
             // Take 0's audio comes from the shared GET /job?id=&result=1; the

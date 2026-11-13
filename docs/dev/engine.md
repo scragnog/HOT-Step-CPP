@@ -1368,6 +1368,14 @@ Other adapter paths:
   splitting into 8-row matrix-vector matmuls (`MM3_LM_ROW_SPLIT=1`): 31.5 against 38.2 ms
   per AR iteration at 16 rows on a 5090. The request's `lm_kv_q8` stores the KV cache at
   Q8_0 so 4 takes fit. The depth decoder and flow stage only see the adapter rows.
+- Base handoff (`eos_handoff`, `mm3-pipeline.h`): with `require_eos`, capped adapter takes of
+  round 1 get a cue from `mm3_align_handoff_cue` (`mm3-align.h`): the LRC replay of the whole
+  take, and the DTW again on its first `cap - 50 s` columns (decode attention is causal, so no
+  second replay); the last line both place within 2 s, plus 25 s. The rescue pass is
+  `mm3_ar_plan_takes` with the prefix forced and `forced_continue`, one take, no adapter
+  (merge mode: the merged adapter at minus its scale, `handoff_merged`), so the base builds its
+  own KV. A kept rescue renders its capped plan's windows up to the crossfade (the full-length
+  window plan, `MM3TakeRun::NW_stop`) and the base plan in full, then splices them.
 - YuE2 adapters merge at load (`yue2-adapter.h`): AR (composer) and NAR files in
   LoRA, LoKr or DoRA form (`yue2-{ar,nar}-{lora,lokr,dora}-v1`), chosen with
   `POST /yue2/select-model`. On a ConvRot INT8 base the LoRA factors are applied at

@@ -173,6 +173,10 @@ struct MM3ArResult {
     // when alignment was off, the track was instrumental, or alignment failed —
     // never a reason to fail the run.
     std::string lrc;
+    // Base handoff cue (MM3ArOptions::handoff_cue): the frame a capped take is
+    // cut at before the base plays it out, and that point in seconds. -1 = none.
+    int64_t     handoff_cut = -1;
+    double      handoff_cue = 0.0;
 
     std::vector<int32_t> semantic_all;    // [I]        includes the un-emitted iteration 0
     std::vector<int32_t> acoustic_all;    // [I, NC]
@@ -286,6 +290,10 @@ struct MM3ArOptions {
     // together or not at all.
     bool                  want_lrc = false;
     bool                  lrc_eos_only = false;
+    // Base handoff: while fewer takes ended than are wanted, align the capped
+    // ones too and set MM3ArResult::handoff_cut (mm3_align_handoff_cue). Needs
+    // want_lrc and tok.
+    bool                  handoff_cue = false;
     bool                  stop_after_first_eos = false;
     const MM3Tokenizer *  tok      = nullptr;
 
@@ -1885,10 +1893,16 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         if (sched_on) {
             mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
         }
+        int n_ended = 0;
+        for (int t = 0; t < K; t++) {
+            n_ended += outs[t].eos_hit ? 1 : 0;
+        }
+        const bool want_cue = opt.handoff_cue && n_ended < (opt.stop_after_first_eos ? 1 : K);
         for (int t = 0; t < K; t++) {
             MM3ArResult * o = &outs[t];
+            const bool    cue = want_cue && !o->eos_hit && o->n_frames >= max_frames;
             // Selection is already known, before any alignment work.
-            if ((opt.lrc_eos_only && !o->eos_hit) || (first_eos_take >= 0 && t != first_eos_take)) {
+            if (!cue && ((opt.lrc_eos_only && !o->eos_hit) || (first_eos_take >= 0 && t != first_eos_take))) {
                 continue;
             }
             if (o->n_frames <= 1) {
@@ -1908,7 +1922,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                                   n_steps, lyr0, lyr1, &flat, &rerr)) {
                 const float dur = m.lm_cfg.frame_rate > 0 ? (float) o->n_frames / (float) m.lm_cfg.frame_rate : 0.0f;
                 const std::vector<int> ids(cond_ids + lyr0, cond_ids + lyr1);
-                o->lrc              = mm3_align_build_lrc(flat, ids, opt.tok->bpe, (int) n_steps, dur);
+                if (cue && n_steps == o->n_frames) {
+                    o->handoff_cut = mm3_align_handoff_cue(flat, ids, opt.tok->bpe, (int) n_steps, max_frames,
+                                                           &o->lrc, &o->handoff_cue);
+                    fprintf(stderr, "[MM3-AR] handoff cue, take %d: %.2f s (frame %lld; -1 = no line held)\n", t,
+                            o->handoff_cue, (long long) o->handoff_cut);
+                } else {
+                    o->lrc = mm3_align_build_lrc(flat, ids, opt.tok->bpe, (int) n_steps, dur);
+                }
                 const double lrc_ms =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_lrc).count();
                 fprintf(stderr, "[MM3-LRC] %s via replay%s (%lld frames, %.1f s, %.0f ms)\n",

@@ -99,6 +99,9 @@ export interface GenerationJob {
     dropped: number;
     /** Planning rounds it took (1 on the common path). */
     rounds: number;
+    /** Take indices whose ending came from the base handoff (capped adapter
+     *  takes the base model played out). Absent when none were. */
+    rescued?: number[];
   };
 }
 

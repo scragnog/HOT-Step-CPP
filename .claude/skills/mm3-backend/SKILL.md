@@ -228,6 +228,19 @@ at 1 take, 11.0 at 2, plan 0.25 13.4. An Nsight trace showed the A side on 8
 blocks per launch (mmf tiles 32 rows; rank 256). What is left is the B side
 (mmf, 3-6 us per launch) and the adds.
 
+**Base handoff (2026-11-13, `eos_handoff`, UI "Base Model Ending", default on).** What
+replaced the fade. With `require_eos` and an LM adapter, when round 1 ends fewer takes than
+wanted, its capped takes are rescued in take order until the count is met: cue from the
+take's own lyric timing (`mm3_align_handoff_cue`: last line the full and the cap-50 s
+alignments place within 2 s, plus 25 s; none past cap-20 s), then the base re-reads the
+prefix on a cache it builds itself (`forced_continue`, no adapter; merged: the delta at minus
+its scale) and samples to EOS or the cap. Kept rescues sort after natural endings and render as
+a splice: the capped plan's own windows up to the crossfade, the base plan in full, 1 s linear
+crossfade on the cue. Two traps it was built around: base weights on the adapter's KV collapse
+plans into static (0 of 8 ended, 8 of 8 degraded), and re-rendering the adapter prefix from the
+base plan's hiddens is not the audio that was listened to. A rescued take is never put in the
+AR cache (its hiddens cannot replay the splice) and is not streamed.
+
 **Plan dial (2026-11-09, `lm_adapter_plan`, UI "Plan", default 1).** Splits
 the adapter's two jobs at the semantic/acoustic seam: the LM's semantic draw
 is the plan, the depth decoder reading the LM hidden is the voice. Below 1

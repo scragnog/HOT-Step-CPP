@@ -46,7 +46,10 @@
 #include "../lrc-alignment.h"
 #include "mm3-model.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -348,4 +351,96 @@ static std::string mm3_align_build_lrc(const std::vector<float> & scores, const 
         fprintf(stderr, "[MM3-LRC] no lines produced\n");
     }
     return out;
+}
+
+// ── Base handoff cue (MM3ArOptions::handoff_cue) ─────────────────────────────
+//
+// Where a capped adapter take is cut before the base model plays it out. The
+// rule was written before any data and not tuned afterwards: align the take in
+// full and again as if it had stopped 50 s before the cap; a sheet line is HELD
+// when the two alignments agree within 2 s and the cut one places it at least
+// 2 s before its own end. Cue = the last held line + 25 s, none past 20 s before
+// the cap. At the app's 300 s cap that is "cut at 250 s, held by 248 s, no cue
+// past 280 s".
+//
+// The cut alignment needs no second pass. Decode attention is causal, so the
+// first C columns of the full replay are what a replay of the first C frames
+// would capture; only the DTW, which must end on the last token at the last
+// frame, sees the shorter matrix differently. Timestamps are parsed back out of
+// the LRC text, so the cue carries the same 0.01 s rounding a script reading
+// the LRC gets.
+struct MM3LrcLine {
+    double t;
+};
+
+static std::vector<MM3LrcLine> mm3_align_sheet_lines(const std::string & lrc) {
+    std::vector<MM3LrcLine> rows;
+    size_t                  i = 0;
+    while (i < lrc.size()) {
+        size_t e = lrc.find('\n', i);
+        if (e == std::string::npos) {
+            e = lrc.size();
+        }
+        const std::string l = lrc.substr(i, e - i);
+        i                   = e + 1;
+        const size_t close  = l.find(']');
+        const size_t colon  = l.find(':');
+        if (l.empty() || l[0] != '[' || close == std::string::npos || colon == std::string::npos || colon > close) {
+            continue;
+        }
+        std::string text = l.substr(close + 1);
+        const size_t a = text.find_first_not_of(" \t\r");
+        const size_t b = text.find_last_not_of(" \t\r");
+        text = a == std::string::npos ? std::string() : text.substr(a, b - a + 1);
+        // Section tags ("[chorus]") and blank lines are not sheet lines.
+        if (text.empty() || (text.front() == '[' && text.back() == ']')) {
+            continue;
+        }
+        rows.push_back({ strtod(l.substr(1, colon - 1).c_str(), nullptr) * 60.0 +
+                         strtod(l.substr(colon + 1, close - colon - 1).c_str(), nullptr) });
+    }
+    return rows;
+}
+
+// The rule on two LRCs. Returns the cut frame (cue at 25 fps), or -1 = no cue.
+static int64_t mm3_align_handoff_rule(const std::string & full_lrc, const std::string & cut_lrc, double cut_sec,
+                                      double cap_sec, double * cue_sec) {
+    const std::vector<MM3LrcLine> full = mm3_align_sheet_lines(full_lrc);
+    const std::vector<MM3LrcLine> cut  = mm3_align_sheet_lines(cut_lrc);
+    int                           L    = -1;
+    for (size_t i = 0; i < std::min(full.size(), cut.size()); i++) {
+        if (std::fabs(full[i].t - cut[i].t) <= 2.0 && cut[i].t <= cut_sec - 2.0) {
+            L = (int) i;
+        }
+    }
+    if (L < 0) {
+        return -1;
+    }
+    const double c = full[(size_t) L].t + 25.0;
+    if (c > cap_sec - 20.0) {
+        return -1;
+    }
+    if (cue_sec) {
+        *cue_sec = c;
+    }
+    return (int64_t) std::floor(c * 25.0 + 0.5);
+}
+
+// From a full replay's [head][token][frame] scores (n_fr columns, n_fr frames
+// at 25 fps) of a take that ran to `cap_frames`. Writes the full LRC too.
+static int64_t mm3_align_handoff_cue(const std::vector<float> & scores, const std::vector<int> & ids,
+                                     const BPETokenizer & bpe, int n_fr, int64_t cap_frames, std::string * full_lrc,
+                                     double * cue_sec) {
+    const int64_t C = cap_frames - 50 * 25;
+    const int     T = (int) ids.size();
+    if (C <= 1 || n_fr <= C || scores.size() != (size_t) MM3_ALIGN_N_HEADS * T * n_fr) {
+        return -1;
+    }
+    *full_lrc = mm3_align_build_lrc(scores, ids, bpe, n_fr, (float) n_fr / 25.0f);
+    std::vector<float> head((size_t) MM3_ALIGN_N_HEADS * T * C);
+    for (size_t r = 0; r < (size_t) MM3_ALIGN_N_HEADS * T; r++) {
+        memcpy(head.data() + r * C, scores.data() + r * n_fr, (size_t) C * sizeof(float));
+    }
+    const std::string cut_lrc = mm3_align_build_lrc(head, ids, bpe, (int) C, (float) C / 25.0f);
+    return mm3_align_handoff_rule(*full_lrc, cut_lrc, (double) C / 25.0, (double) cap_frames / 25.0, cue_sec);
 }

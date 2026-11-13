@@ -617,6 +617,9 @@ struct MM3SynthRequest {
     bool    require_eos = false;
     bool    stop_after_first_eos = false;
     int     eos_rounds  = 4;
+    /** Base handoff for capped adapter takes: see MM3GenRequest::eos_handoff. */
+    bool    eos_handoff  = false;
+    int64_t handoff_seed = -1;
     /** Shortest plan worth rendering, in frames (25 fps). 0 = no floor.
      *  A plan that stops after a second or two has "ended" as far as the model
      *  is concerned and is useless as the song that was asked for, so it is
@@ -1000,6 +1003,26 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 return false;
             }
             out->require_eos = yyjson_get_bool(v);
+        }
+        yyjson_val * ho = yyjson_obj_get(root, "eos_handoff");
+        if (ho && !yyjson_is_null(ho)) {
+            if (!yyjson_is_bool(ho)) {
+                if (err) {
+                    *err = "\"eos_handoff\" must be a boolean";
+                }
+                return false;
+            }
+            out->eos_handoff = yyjson_get_bool(ho);
+        }
+        yyjson_val * hs = yyjson_obj_get(root, "handoff_seed");
+        if (hs && !yyjson_is_null(hs)) {
+            if (!yyjson_is_int(hs) || yyjson_get_sint(hs) < 0) {
+                if (err) {
+                    *err = "\"handoff_seed\" must be a non-negative integer";
+                }
+                return false;
+            }
+            out->handoff_seed = yyjson_get_sint(hs);
         }
         yyjson_val * r = yyjson_obj_get(root, "eos_rounds");
         yyjson_val * first = yyjson_obj_get(root, "stop_after_first_eos");
@@ -1469,6 +1492,8 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     out->gen.require_eos = out->require_eos;
     out->gen.stop_after_first_eos = out->stop_after_first_eos;
     out->gen.eos_rounds  = out->eos_rounds;
+    out->gen.eos_handoff  = out->eos_handoff;
+    out->gen.handoff_seed = out->handoff_seed;
     out->gen.min_frames  = out->min_frames;
     out->gen.plugins    = plug;
     // MM3 Plank replay. MM3GenRequest holds these by value, and the job worker

@@ -1227,6 +1227,8 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
         }
         opt.want_lrc = true;
         opt.tok      = &g_mm3_tokenizer;
+        // Base handoff cue on capped takes (mm3_align_handoff_cue), for tests.
+        opt.handoff_cue = mm3_json_bool(root, "handoff_cue", false);
     }
 
     // ── LM adapter, runtime deltas only ──
@@ -1464,6 +1466,10 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     if (opt.want_lrc) {
         yyjson_mut_obj_add_strcpy(o, orot, "lrc", r.lrc.c_str());
     }
+    if (opt.handoff_cue) {
+        yyjson_mut_obj_add_int(o, orot, "handoff_cut", r.handoff_cut);
+        yyjson_mut_obj_add_real(o, orot, "handoff_cue", r.handoff_cue);
+    }
     yyjson_mut_obj_add_uint(o, orot, "prompt_tokens", ids_cond.size());
     yyjson_mut_obj_add_uint(o, orot, "hidden_dim", r.hidden_dim);
     yyjson_mut_obj_add_uint(o, orot, "num_codebooks", r.n_codebooks);
@@ -1533,6 +1539,10 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
             yyjson_mut_obj_add_bool(o, e, "eos", rs[(size_t) t].eos_hit);
             if (opt.want_lrc) {
                 yyjson_mut_obj_add_strcpy(o, e, "lrc", rs[(size_t) t].lrc.c_str());
+            }
+            if (opt.handoff_cue) {
+                yyjson_mut_obj_add_int(o, e, "handoff_cut", rs[(size_t) t].handoff_cut);
+                yyjson_mut_obj_add_real(o, e, "handoff_cue", rs[(size_t) t].handoff_cue);
             }
             yyjson_mut_obj_add_real(o, e, "prefill_sum", rs[(size_t) t].prefill_sum);
             yyjson_mut_obj_add_real(o, e, "iter0_max", rs[(size_t) t].iter0_max);

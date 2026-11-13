@@ -95,6 +95,22 @@ test('MM3 ignores the retired adapter fade params from saved presets', (t) => {
   assert.equal(Object.keys(stale).some((k) => k.startsWith('lm_adapter_fade')), false);
 });
 
+test('MM3 base handoff rides Require Natural Ending, only with an LM adapter', (t) => {
+  const plain = mapMinimaxParams({ prompt: 'x', seed: 42 }).req as unknown as Record<string, unknown>;
+  assert.equal(Object.hasOwn(plain, 'eos_handoff'), false);  // a base render is untouched
+  const installed = listMm3LmAdapters()[0];
+  if (!installed) return t.skip('no MM3 LM adapter installed');
+  const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file };
+  const req = (p: Record<string, unknown>) => mapMinimaxParams({ ...params, ...p }).req as unknown as Record<string, unknown>;
+  assert.equal(req({}).eos_handoff, true);
+  assert.equal(req({}).require_eos, true);
+  const off = req({ mm3BaseHandoff: false });
+  assert.equal(Object.hasOwn(off, 'eos_handoff'), false);
+  assert.deepEqual({ ...req({}), eos_handoff: undefined }, { ...off, eos_handoff: undefined });
+  assert.equal(Object.hasOwn(req({ mm3RequireEnding: false }), 'eos_handoff'), false);
+  assert.equal(Object.hasOwn(req({ mm3LmAdapter: 'no-such-run/adapter_model.safetensors' }), 'eos_handoff'), false);
+});
+
 test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => {
   const installed = listMm3LmAdapters()[0];
   if (!installed) return t.skip('no MM3 LM adapter installed');

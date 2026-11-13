@@ -336,6 +336,19 @@ end of the song to the base model while keeping the adapter's planner cache, and
 tested adapter that ended no more takes and turned every capped one to static over its last
 two minutes. A preset saved with it still loads; the setting is ignored.
 
+**Base Model Ending** in the Generation dropdown (shown when an LM adapter is picked, on by
+default) takes its place. It only acts when **Require Natural Ending** is on. If the first
+round of candidates ends fewer songs than you asked for, each take that ran to the cap is cut
+25 s after its last lyric line that the alignment places steadily, and the base model re-reads
+the song up to that point and plays it on until it ends. The take keeps your adapter's audio
+up to the switch, joined to the base model's audio with a 1 s crossfade. Natural endings
+always come first; a rescued take is listed after them, and the generation log names it. A
+take with no steady lyric line, or whose switch would come later than 4:40, is not rescued,
+and a rescue that still reaches the cap is dropped like any capped take. Each rescue costs
+one more plan from the switch onward and one more render of that take. In Merge mode the
+rescue takes the merged adapter back out for its own pass only (plain LoRA and PiSSA; other
+adapter types are not rescued in Merge mode).
+
 An adapter that fails to load fails the job. It never renders the base model silently.
 
 ## YuE2
