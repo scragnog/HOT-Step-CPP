@@ -827,6 +827,8 @@ Output:
 Server:
   --host <addr>           Listen address (default: 127.0.0.1)
   --port <N>              Listen port (default: 8080)
+  --allow-origin <csv>    Extra browser origins allowed to call the server,
+                          e.g. http://myhost:3001 (also env ACESTEPCPP_ALLOWED_ORIGINS)
   --max-batch <N>         LM batch limit (default: 1)
   --max-seq <N>           KV cache size (default: 8192)
 
