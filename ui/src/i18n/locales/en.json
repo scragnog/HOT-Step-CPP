@@ -777,7 +777,7 @@
     "trainingStudio.yue2.method.previewSeedMeta": "default 424242",
     "trainingStudio.yue2.method.previewSeedInfo": "The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.",
     "trainingStudio.yue2.method.previewSecondsMeta": "default 300",
-    "trainingStudio.yue2.method.previewSecondsInfo": "How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.",
+    "trainingStudio.yue2.method.previewSecondsInfo": "How long the rendered preview sample is, from 8 to 360 seconds. Longer previews show more of the song but take longer to render at every checkpoint.",
     "trainingStudio.yue2.method.previewEngineStopped": "The engine is stopped during training, so only the final checkpoint gets a preview automatically; render the other rungs from the ladder after the run.",
     "trainingStudio.yue2.method.previewParallelInfo": "Render each checkpoint's preview while training continues; needs the engine up (this also turns \"Stop the engine during training\" off). Off: training pauses at each checkpoint, renders, and resumes, which fits a smaller card but takes longer.",
     "trainingStudio.yue2.method.previewParallel": "In parallel with training",
