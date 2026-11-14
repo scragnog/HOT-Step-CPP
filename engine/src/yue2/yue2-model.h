@@ -129,6 +129,12 @@ struct Yue2VaeConfig {
     // the shipped files, where it equals res_dilations; a grown fine-tuned
     // decoder carries more units ([1,3,9] repeated) while its encoder stays at 3.
     std::vector<int32_t> dec_res_dilations;
+    // Residual units at the latent rate between dec.conv_in and the first
+    // block (yue2vae.dec_pre_dilations, dec.pre.<i>.*). Empty for all but rs-x3.
+    std::vector<int32_t> dec_pre_dilations;
+    // yue2vae.strict_f32: every decoder GEMM runs in true F32 (no TF32), as the
+    // rs-x3 release requires to stay within its 1e-4 verify tolerance.
+    bool        strict_f32          = false;
     bool        use_snake           = false;
     std::string snake_type;               // "vanilla" (SnakeBeta)
     float       snake_eps            = 0.0f;  // 1e-9
@@ -239,6 +245,7 @@ struct Yue2VaeWeights {
     // Decoder — always loaded, this is what generation actually runs.
     ggml_tensor * dec_conv_in_w = nullptr;  // [7, latent_dim, C0]
     ggml_tensor * dec_conv_in_b = nullptr;  // [C0]
+    std::vector<Yue2VaeResUnit> dec_pre;    // latent-rate units at C0, dec_pre_dilations.size()
     std::vector<Yue2VaeDecBlock> dec_blk;   // 6 entries, strides.size()
     ggml_tensor * dec_snake_out_alpha = nullptr;
     ggml_tensor * dec_snake_out_beta  = nullptr;
@@ -286,9 +293,30 @@ struct Yue2Variant {
 
 // dec2x: a locally fine-tuned standard VAE whose decoder has 9 residual units per
 // block (tools/yue2-vae-train). Same encoder and latent space as standard.
-enum Yue2VaeVariant { YUE2_VAE_STANDARD = 0, YUE2_VAE_LEGACY = 1, YUE2_VAE_DEC2X = 2, YUE2_VAE_VARIANT_COUNT };
+// rs-x3: Ruach Studio's YuE2-VAE-RS x3 decoder (3 latent-rate units after
+// conv_in, 6 units per block, 60-frame halo, strict F32), Standard's encoder.
+enum Yue2VaeVariant {
+    YUE2_VAE_STANDARD = 0,
+    YUE2_VAE_LEGACY   = 1,
+    YUE2_VAE_DEC2X    = 2,
+    YUE2_VAE_RS_X3    = 3,
+    YUE2_VAE_VARIANT_COUNT
+};
 
-static const char * const YUE2_VAE_VARIANT_NAME[YUE2_VAE_VARIANT_COUNT] = { "standard", "legacy", "dec2x" };
+static const char * const YUE2_VAE_VARIANT_NAME[YUE2_VAE_VARIANT_COUNT] = { "standard", "legacy", "dec2x", "rs-x3" };
+
+// Name ("standard", "rs-x3", ...) -> variant. False for an unknown name.
+static bool yue2_vae_variant_from_name(const std::string & s, Yue2VaeVariant * out) {
+    for (int v = 0; v < YUE2_VAE_VARIANT_COUNT; v++) {
+        if (s == YUE2_VAE_VARIANT_NAME[v]) {
+            *out = (Yue2VaeVariant) v;
+            return true;
+        }
+    }
+    return false;
+}
+
+static const char * const YUE2_VAE_VARIANT_ERROR = "vae_variant must be \"standard\"|\"legacy\"|\"dec2x\"|\"rs-x3\"";
 
 // ── The model ────────────────────────────────────────────────────────────────
 
@@ -633,7 +661,9 @@ static void yue2_parse_vae_config(const GGUFModel & gf, Yue2VaeConfig * c) {
     if (c->dec_res_dilations.empty()) {
         c->dec_res_dilations = c->res_dilations;
     }
-    c->use_snake            = gf_get_bool(gf, "yue2vae.use_snake");
+    c->dec_pre_dilations    = yue2_get_i32_arr(gf, "yue2vae.dec_pre_dilations");
+    c->strict_f32           = gf_get_bool(gf, "yue2vae.strict_f32");
+    c->use_snake          = gf_get_bool(gf, "yue2vae.use_snake");
     c->snake_type           = gf_get_str(gf, "yue2vae.snake_type");
     c->snake_eps            = gf_get_f32(gf, "yue2vae.snake_eps");
     c->snake_formula        = gf_get_str(gf, "yue2vae.snake_formula");
@@ -676,6 +706,7 @@ static void yue2_validate_vae_config(const Yue2VaeConfig & c, std::vector<std::s
     need(c.res_dilations.size() == 3, "yue2vae.res_dilations is not 3 entries");
     need(!c.dec_res_dilations.empty() && c.dec_res_dilations.size() <= 32,
          "yue2vae.dec_res_dilations is empty or longer than 32 entries");
+    need(c.dec_pre_dilations.size() <= 32, "yue2vae.dec_pre_dilations is longer than 32 entries");
     need(c.channels > 0, "yue2vae.channels is 0 or missing");
     need(c.latent_dim > 0, "yue2vae.latent_dim is 0 or missing");
     need(c.audio_channels > 0, "yue2vae.audio_channels is 0 or missing");
@@ -1136,7 +1167,8 @@ static bool yue2_load_vae_tensors(Yue2Model * m, const GGUFModel & gf, bool want
 
     // Budget: dec (2 conv_in + NB*(2 snake_pre + 2 upsample + NRD*8) + 2 snake_out + 1 conv_out)
     // + optionally enc (mirror shape, minus the dec asymmetries).
-    const int n_dec = 2 + (int) NB * (2 + 2 + (int) NRD * 8) + 2 + 1;
+    const size_t NPRE = c.dec_pre_dilations.size();  // decoder latent-rate units: 0, or 3 for rs-x3
+    const int n_dec = 2 + (int) NPRE * 8 + (int) NB * (2 + 2 + (int) NRD * 8) + 2 + 1;
     const int n_enc = want_encoder ? 2 + (int) NB * ((int) NR * 8 + 2 + 2) + 2 + 2 : 0;
     wctx_init(&m->wctx_vae, n_dec + n_enc);
     Yue2Loader ld{ &m->wctx_vae, &gf, &m->tmap_vae, errs };
@@ -1144,6 +1176,21 @@ static bool yue2_load_vae_tensors(Yue2Model * m, const GGUFModel & gf, bool want
     // ── decoder ──
     m->vae.dec_conv_in_w = ld.req("dec.conv_in.weight", 7, c.latent_dim, dw(0));
     m->vae.dec_conv_in_b = ld.req("dec.conv_in.bias", dw(0));
+
+    m->vae.dec_pre.assign(NPRE, Yue2VaeResUnit{});
+    for (size_t r = 0; r < NPRE && errs->empty(); r++) {
+        Yue2VaeResUnit & ru = m->vae.dec_pre[r];
+        const int        ri = (int) r;
+        const int64_t    ch = dw(0);
+        ru.snake1_alpha = ld.req(yue2_fmt("dec.pre.%d.snake1.alpha", ri), ch);
+        ru.snake1_beta  = ld.req(yue2_fmt("dec.pre.%d.snake1.beta", ri), ch);
+        ru.conv1_w      = ld.req(yue2_fmt("dec.pre.%d.conv1.weight", ri), 7, ch, ch);
+        ru.conv1_b      = ld.req(yue2_fmt("dec.pre.%d.conv1.bias", ri), ch);
+        ru.snake2_alpha = ld.req(yue2_fmt("dec.pre.%d.snake2.alpha", ri), ch);
+        ru.snake2_beta  = ld.req(yue2_fmt("dec.pre.%d.snake2.beta", ri), ch);
+        ru.conv2_w      = ld.req(yue2_fmt("dec.pre.%d.conv2.weight", ri), 1, ch, ch);
+        ru.conv2_b      = ld.req(yue2_fmt("dec.pre.%d.conv2.bias", ri), ch);
+    }
 
     m->vae.dec_blk.assign(NB, Yue2VaeDecBlock{});
     for (size_t bi = 0; bi < NB && errs->empty(); bi++) {

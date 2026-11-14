@@ -24,6 +24,8 @@
 #                                                yue2_generation_config.json, model.safetensors)
 #   --src-vae         K:/yue2/models/YuE2-Vae         (release_variant: "standard")
 #   --src-vae-legacy  K:/yue2/models/YuE2-Vae-legacy  (release_variant: "legacy")
+#   --src-vae-rs-x3   YuE2-VAE-RS-x3_v1.safetensors   (Ruach Studio's decoder, goldhub/YuE2-VAE-RS-x3;
+#                                                       needs --src-vae for Standard's encoder and config)
 #
 # DEPENDENCIES: numpy + gguf (llama.cpp gguf-py). No torch needed -- BF16/F32 are
 # read directly off the safetensors header+mmap, same small reader convert-mm3.py uses.
@@ -112,6 +114,16 @@ VAE_DECODE_CORE_FRAMES = 1024
 VAE_DECODE_HALO_FRAMES = 16
 VAE_REQUIRED_HALO = 12               # computed dependency-interval minimum, 03-ref §4.1
 VAE_OUTPUT_CLAMP = (-1.0, 1.0)       # pipeline-level post-process, not a decoder property
+# rs-x3 (goldhub/YuE2-VAE-RS-x3, docs/VAE-RS-x3-integration.md): 3 latent-rate units,
+# 6 units per block, and a 60-frame receptive field each side (its exact halo).
+RS_X3_PRE_DILATIONS = (1, 3, 9)
+RS_X3_RES_UNITS = 6
+RS_X3_HALO = 60
+RS_X3_ATTRIBUTION = (
+    "Decoder: YuE2-VAE-RS x3 by Viktor Zhuromskyy / Ruach Studio "
+    "(https://huggingface.co/goldhub/YuE2-VAE-RS-x3, DOI 10.5281/zenodo.24167962), an adaptation "
+    "of m-a-p's YuE2-Vae, CC BY-NC 4.0. Encoder: m-a-p's YuE2-Vae (standard), unchanged. "
+)
 
 # -- licence (K:/yue2/models/*/LICENSE, all three checkpoints) ---------------
 LICENSE_NAME = "CC BY-NC 4.0"
@@ -257,6 +269,51 @@ class Source:
         self.file.close()
 
 
+class RsX3Source(Source):
+    """Ruach Studio's YuE2-VAE-RS x3 decoder file (goldhub/YuE2-VAE-RS-x3), read
+    under m-a-p's decoder.* names so build_vae binds it like any other decoder.
+
+    The file keeps its own module names (conv1, pre.<i>, blocks.<b>.units.<j>,
+    snake1, conv2) with weight norm stored as parametrizations original0 (g) /
+    original1 (v). Same unit form as Standard: 3 latent-rate units after conv_in
+    (decoder.pre.<i>, ours) and 3 more per block (layers 5..7 of each block)."""
+
+    UNIT = ("snake1", "conv1", "snake2", "conv2")
+
+    def __init__(self, path):
+        super().__init__(path)
+        meta = self.file.metadata
+        cfg = json.loads(meta.get("config", "{}"))
+        if (meta.get("variant") != "x3" or cfg.get("pre") != 3 or cfg.get("pre_dil") != list(RS_X3_PRE_DILATIONS)
+                or cfg.get("extra") != [3] * 6 or cfg.get("pre_mult") != 1.0 or cfg.get("mult") != [1.0] * 6):
+            die(f"{path}: not a YuE2-VAE-RS x3 decoder (metadata variant={meta.get('variant')!r} config={cfg})")
+        self.step = meta.get("step", "unknown")
+
+    def raw_name(self, name):
+        m = re.fullmatch(r"decoder\.(.+)\.(weight_g|weight_v|bias|alpha|beta)", name)
+        if not m:
+            die(f"RsX3Source: unexpected name {name}")
+        path, leaf = m.groups()
+        leaf = {"weight_g": "parametrizations.weight.original0",
+                "weight_v": "parametrizations.weight.original1"}.get(leaf, leaf)
+        fixed = {"layers.0": "conv1", "layers.7": "snake1", "layers.8": "conv2"}
+        if path in fixed:
+            return f"{fixed[path]}.{leaf}"
+        p = re.fullmatch(r"pre\.(\d+)\.layers\.([0-3])", path)
+        if p:
+            return f"pre.{p[1]}.{self.UNIT[int(p[2])]}.{leaf}"
+        p = re.fullmatch(r"layers\.([1-6])\.layers\.([01])", path)
+        if p:
+            return f"blocks.{int(p[1]) - 1}.{('snake1', 'conv_t1')[int(p[2])]}.{leaf}"
+        p = re.fullmatch(r"layers\.([1-6])\.layers\.(\d+)\.layers\.([0-3])", path)
+        if p:
+            return f"blocks.{int(p[1]) - 1}.units.{int(p[2]) - 2}.{self.UNIT[int(p[3])]}.{leaf}"
+        die(f"RsX3Source: no mapping for {name}")
+
+    def get(self, name, expect=None, label=None):
+        return super().get(self.raw_name(name), expect, label or name)
+
+
 # ---------------------------------------------------------------------------
 # Tensor policy + GGUF writer
 # ---------------------------------------------------------------------------
@@ -373,9 +430,9 @@ def sha256_matches_pin(manifest_path, pin_sha256):
 # Component: LM  ->  arch "yue2"
 # ---------------------------------------------------------------------------
 
-def common_meta(b, type_):
+def common_meta(b, type_, attribution=LICENSE_ATTRIBUTION):
     b.meta("add_license", LICENSE_NAME)
-    b.meta("add_string", "yue2.license_attribution", LICENSE_ATTRIBUTION)
+    b.meta("add_string", "yue2.license_attribution", attribution)
     b.meta("add_uint32", "yue2.converter_version", CONVERTER_VERSION)
     type_map = {"bf16": gguf.LlamaFileType.MOSTLY_BF16,
                 "f16": gguf.LlamaFileType.MOSTLY_F16,
@@ -601,13 +658,14 @@ def add_tokenizer_kv(b, tok_dir):
 # Component: VAE  ->  arch "yue2-vae"
 # ---------------------------------------------------------------------------
 
-def build_vae(src_dir, bundle, type_, variant):
+def build_vae(src_dir, bundle, type_, variant, rs_x3_path=None):
     cfg_path = os.path.join(src_dir, "config.json")
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
     got_variant = cfg.get("release_variant")
-    if got_variant != variant:
+    # rs-x3 takes Standard's encoder and config; only its decoder comes from elsewhere.
+    if got_variant != ("standard" if rs_x3_path else variant):
         die(f"{src_dir}: config.json release_variant={got_variant!r}, expected {variant!r} "
             f"-- refusing a standard/legacy VAE mix-up (05-gguf-layout.md §8)")
 
@@ -638,9 +696,13 @@ def build_vae(src_dir, bundle, type_, variant):
     # units per block; the released ones have none and use 3. More units widen
     # the receptive field, so such a config also carries its own halo.
     dec_res_units = int(dec_cfg.get("res_units", 3))
-    dec_dilations = [VAE_RES_DILATIONS[i % 3] for i in range(dec_res_units)]
     required_halo = int(cfg.get("required_halo", VAE_REQUIRED_HALO))
     decode_halo = int(cfg.get("decode_halo_frames", VAE_DECODE_HALO_FRAMES))
+    dsrc = None
+    if rs_x3_path:
+        dsrc = RsX3Source(rs_x3_path)
+        dec_res_units, required_halo, decode_halo = RS_X3_RES_UNITS, RS_X3_HALO, RS_X3_HALO
+    dec_dilations = [VAE_RES_DILATIONS[i % 3] for i in range(dec_res_units)]
     if decode_halo < required_halo:
         die(f"decode_halo_frames {decode_halo} < required_halo {required_halo}")
 
@@ -648,8 +710,9 @@ def build_vae(src_dir, bundle, type_, variant):
     src = Source(st_path)
 
     manifest_path = os.path.join(src_dir, "weights_manifest.json")
-    match = sha256_matches_pin(manifest_path, PINS[variant]["sha256"]) if variant in PINS else False
-    pin = PINS[variant] if match else {"repo": "unknown", "revision": "unknown", "sha256": "unknown"}
+    pin_key = "standard" if dsrc else variant  # rs-x3 pins the Standard checkpoint its encoder comes from
+    match = sha256_matches_pin(manifest_path, PINS[pin_key]["sha256"]) if pin_key in PINS else False
+    pin = PINS[pin_key] if match else {"repo": "unknown", "revision": "unknown", "sha256": "unknown"}
     if match is False:
         log(f"WARNING: {manifest_path} sha256 does not match the pinned {variant} VAE "
             f"revision -- writing yue2vae.pinned.* as 'unknown'")
@@ -663,7 +726,7 @@ def build_vae(src_dir, bundle, type_, variant):
            f"YuE2 Oobleck-style VAE, {variant} release variant: SnakeBeta activations, "
            f"weight-norm folded at conversion time. dec.* is what inference decodes with; "
            f"enc.* is carried because the source checkpoint ships a full encoder.")
-    common_meta(b, type_)
+    common_meta(b, type_, (RS_X3_ATTRIBUTION + LICENSE_ATTRIBUTION) if dsrc else LICENSE_ATTRIBUTION)
 
     b.meta("add_string", "yue2vae.variant", variant)
     b.meta("add_uint32", "yue2vae.sample_rate", VAE_SAMPLE_RATE)
@@ -676,6 +739,11 @@ def build_vae(src_dir, bundle, type_, variant):
     b.meta("add_array", "yue2vae.res_dilations", list(VAE_RES_DILATIONS))
     if dec_res_units != 3:
         b.meta("add_array", "yue2vae.dec_res_dilations", dec_dilations)
+    if dsrc:
+        b.meta("add_array", "yue2vae.dec_pre_dilations", list(RS_X3_PRE_DILATIONS))
+        b.meta("add_bool", "yue2vae.strict_f32", True)
+        b.meta("add_string", "yue2vae.decoder_source",
+               f"goldhub/YuE2-VAE-RS-x3 {os.path.basename(rs_x3_path)} (training step {dsrc.step})")
     b.meta("add_bool", "yue2vae.use_snake", True)
     b.meta("add_string", "yue2vae.snake_type", "vanilla")
     b.meta("add_float32", "yue2vae.snake_eps", VAE_SNAKE_EPS)
@@ -694,16 +762,21 @@ def build_vae(src_dir, bundle, type_, variant):
     b.meta("add_string", "yue2vae.pinned.revision", pin["revision"])
     b.meta("add_string", "yue2vae.pinned.sha256", pin["sha256"])
 
+    def of(key):  # an rs-x3 decoder comes from its own file, everything else from src
+        return dsrc if dsrc and key.startswith("decoder.") else src
+
     def wn(dst, key, expect_v, expect_bias):
-        g = src.get(f"{key}.weight_g", expect=(expect_v[0], 1, 1))
-        v = src.get(f"{key}.weight_v", expect=expect_v)
+        s = of(key)
+        g = s.get(f"{key}.weight_g", expect=(expect_v[0], 1, 1))
+        v = s.get(f"{key}.weight_v", expect=expect_v)
         b.put(f"{dst}.weight", fold_weight_norm(g, v, dst), F32)
         if expect_bias is not None:
-            b.put(f"{dst}.bias", src.get(f"{key}.bias", expect=(expect_bias,)), F32)
+            b.put(f"{dst}.bias", s.get(f"{key}.bias", expect=(expect_bias,)), F32)
 
     def alpha_beta(dst, key, ch):
-        b.put(f"{dst}.alpha", src.get(f"{key}.alpha", expect=(ch,)), F32)
-        b.put(f"{dst}.beta", src.get(f"{key}.beta", expect=(ch,)), F32)
+        s = of(key)
+        b.put(f"{dst}.alpha", s.get(f"{key}.alpha", expect=(ch,)), F32)
+        b.put(f"{dst}.beta", s.get(f"{key}.beta", expect=(ch,)), F32)
 
     # Channel ladder, shared by both sides (05-gguf-layout.md §4.1/§4.2): the
     # config's own c_mults=[1,2,4,8,16,32] gives an 7-entry width sequence
@@ -720,6 +793,14 @@ def build_vae(src_dir, bundle, type_, variant):
 
     # -- decoder: dec.* --------------------------------------------------
     wn("dec.conv_in", "decoder.layers.0", (dwidths[0], VAE_LATENT_DIM, 7), dwidths[0])
+    if dsrc:
+        c0 = dwidths[0]
+        for pi in range(len(RS_X3_PRE_DILATIONS)):
+            pbase = f"decoder.pre.{pi}"
+            alpha_beta(f"dec.pre.{pi}.snake1", f"{pbase}.layers.0", c0)
+            wn(f"dec.pre.{pi}.conv1", f"{pbase}.layers.1", (c0, c0, 7), c0)
+            alpha_beta(f"dec.pre.{pi}.snake2", f"{pbase}.layers.2", c0)
+            wn(f"dec.pre.{pi}.conv2", f"{pbase}.layers.3", (c0, c0, 1), c0)
     for bi in range(1, 7):
         cin, cout, stride = dwidths[bi - 1], dwidths[bi], dstrides[bi - 1]
         base = f"decoder.layers.{bi}"
@@ -751,7 +832,9 @@ def build_vae(src_dir, bundle, type_, variant):
     wn("enc.conv_out", "encoder.layers.8",
        (VAE_ENCODER_LATENT_DIM, widths[6], 3), VAE_ENCODER_LATENT_DIM)
 
-    leftover = src.unconsumed(lambda n: True)
+    # rs-x3: Standard's own decoder tensors in src are unused by design.
+    leftover = src.unconsumed(lambda n: not (dsrc and n.startswith("decoder.")))
+    leftover += dsrc.unconsumed(lambda n: True) if dsrc else []
     if leftover:
         log(f"ERROR: {len(leftover)} VAE ({variant}) source tensors were not consumed:")
         for n in leftover[:40]:
@@ -762,6 +845,8 @@ def build_vae(src_dir, bundle, type_, variant):
             "refusing to leave a partial model in place")
 
     src.close()
+    if dsrc:
+        dsrc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -777,6 +862,9 @@ def main():
     ap.add_argument("--src-vae-legacy", metavar="DIR", help="YuE2-Vae-legacy model dir")
     ap.add_argument("--src-vae-dec2x", metavar="DIR",
                     help="fine-tuned grown decoder exported by tools/yue2-vae-train/export.py")
+    ap.add_argument("--src-vae-rs-x3", metavar="FILE",
+                    help="YuE2-VAE-RS-x3_v1.safetensors (goldhub/YuE2-VAE-RS-x3); writes "
+                         "yue2-vae-rs-x3-<type>.gguf with --src-vae's encoder")
     ap.add_argument("--tokenizer-dir", metavar="DIR",
                      help="output dir of yue2-tokenizer-convert.py (vocab.json/merges.txt/"
                           "special_tokens.json/pretokenizer.json); if missing, that script "
@@ -841,17 +929,23 @@ def main():
     if "vae" in want:
         for flag, srcdir, variant in (("--src-vae", args.src_vae, "standard"),
                                        ("--src-vae-legacy", args.src_vae_legacy, "legacy"),
-                                       ("--src-vae-dec2x", args.src_vae_dec2x, "dec2x")):
+                                       ("--src-vae-dec2x", args.src_vae_dec2x, "dec2x"),
+                                       ("--src-vae-rs-x3", args.src_vae_rs_x3, "rs-x3")):
             if not srcdir:
                 log(f"skip {variant} VAE: {flag} not given")
                 continue
+            rs_x3_path = None
+            if variant == "rs-x3":
+                if not args.src_vae:
+                    die("--src-vae-rs-x3 needs --src-vae (Standard's encoder and config)")
+                rs_x3_path, srcdir = srcdir, args.src_vae
             vae_type = args.type or "f32"
             vae_path = os.path.join(args.out, f"yue2-vae-{variant}-{vae_type}.gguf")
             if os.path.exists(vae_path) and not args.force:
                 log(f"skip (exists): {vae_path} -- pass --force to overwrite")
                 continue
             b = Bundle("yue2-vae")
-            build_vae(srcdir, b, vae_type, variant)
+            build_vae(srcdir, b, vae_type, variant, rs_x3_path)
             b.write(vae_path, vae_type)
 
     log("Done.")

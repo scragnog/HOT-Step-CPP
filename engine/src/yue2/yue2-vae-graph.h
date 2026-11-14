@@ -115,6 +115,7 @@ struct Yue2VaeGraph {
     // which frees and reallocates wctx_vae. Rebuild whenever this changes.
     const void * weights_token = nullptr;
 
+    std::vector<Yue2VaePrepRes> pre;  // latent-rate units (rs-x3), empty otherwise
     std::vector<Yue2VaePrepBlk> blk;
     Yue2VaeSnakePrep             snake_out;
 
@@ -263,6 +264,7 @@ static void yue2_vae_graph_free(Yue2VaeGraph * g) {
         g->sched = nullptr;
     }
     wctx_free(&g->prep);
+    g->pre.clear();
     g->blk.clear();
     g->snake_out     = Yue2VaeSnakePrep{};
     g->weights_token = nullptr;
@@ -307,12 +309,25 @@ static bool yue2_vae_prepare(const Yue2Model & m, Yue2VaeGraph * g, std::string 
     g->backend_ref = false;
 
     // Per block: 1 snake_pre (2 tensors) + 1 repacked convt + NR*(2 snakes,
-    // 4 tensors). Plus 1 snake_out (2 tensors).
-    const int n_prep = NB * (2 + 1 + NR * 4) + 2;
+    // 4 tensors). Plus 1 snake_out (2 tensors) and NPRE latent-rate units (4 each).
+    const int NPRE   = (int) vc.dec_pre_dilations.size();
+    const int n_prep = NB * (2 + 1 + NR * 4) + 2 + NPRE * 4;
     wctx_init(&g->prep, n_prep);
 
     std::string e;
     bool        ok = true;
+    g->pre.assign((size_t) NPRE, Yue2VaePrepRes{});
+    for (int r = 0; r < NPRE && ok; r++) {
+        char                   nm[96];
+        const Yue2VaeResUnit & wr = vw.dec_pre[(size_t) r];
+        snprintf(nm, sizeof(nm), "vae.dec.pre.%d.snake1", r);
+        ok = yue2_vae_make_snake_prep(&g->prep, wr.snake1_alpha, wr.snake1_beta, eps, nm, &g->pre[(size_t) r].snake1, &e);
+        if (ok) {
+            snprintf(nm, sizeof(nm), "vae.dec.pre.%d.snake2", r);
+            ok = yue2_vae_make_snake_prep(&g->prep, wr.snake2_alpha, wr.snake2_beta, eps, nm,
+                                          &g->pre[(size_t) r].snake2, &e);
+        }
+    }
     g->blk.assign((size_t) NB, Yue2VaePrepBlk{});
     for (int b = 0; b < NB && ok; b++) {
         char nm[96];
@@ -471,6 +486,11 @@ static ggml_tensor * yue2_vae_build(ggml_context * ctx, const Yue2Model & m, con
 
     ggml_tensor * x = yue2_vae_conv1d(ctx, vw.dec_conv_in_w, vw.dec_conv_in_b, latent, 3, 1);  // 64 -> C0, k=7 p=3
 
+    // Latent-rate units between conv_in and the first block (rs-x3 only).
+    for (size_t r = 0; r < vc.dec_pre_dilations.size(); r++) {
+        x = yue2_vae_res_unit(ctx, vw.dec_pre[r], g.pre[r], x, (int) vc.dec_pre_dilations[r]);
+    }
+
     for (int b = 0; b < NB; b++) {
         const Yue2VaeDecBlock & wb     = vw.dec_blk[(size_t) b];
         const Yue2VaePrepBlk &  pb     = g.blk[(size_t) b];
@@ -526,6 +546,19 @@ static bool yue2_vae_ensure_graph(const Yue2Model & m, Yue2VaeGraph * g, int64_t
 
     g->graph = ggml_new_graph_custom(ctx, YUE2_VAE_MAX_NODES, false);
     ggml_build_forward_expand(g->graph, g->output);
+
+    // yue2vae.strict_f32 (rs-x3): every conv and convT GEMM in true F32. ggml-cuda
+    // otherwise runs F32 products on TF32 (mma kernels and the cuBLAS handle's math
+    // mode), ~1e-3 off the reference; HOT-ggml's hint routes them to cuBLAS in the
+    // default math mode. Other backends ignore it. Standard's graph is untouched.
+    if (m.vae_cfg.strict_f32) {
+        for (int i = 0; i < ggml_graph_n_nodes(g->graph); i++) {
+            ggml_tensor * n = ggml_graph_node(g->graph, i);
+            if (n->op == GGML_OP_MUL_MAT) {
+                ggml_mul_mat_set_hint(n, GGML_HINT_STRICT_F32);
+            }
+        }
+    }
 
     ggml_backend_sched_reset(g->sched);
     if (!ggml_backend_sched_alloc_graph(g->sched, g->graph)) {

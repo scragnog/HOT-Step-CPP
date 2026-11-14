@@ -2361,10 +2361,10 @@ static int run_vae_parity(const std::string & models_dir, const std::string & fi
     // ("iterate until standard passes ... run legacy once") — legacy is
     // opt-in via --variant legacy, not run automatically alongside it.
     std::vector<Yue2VaeVariant> variants;
-    if (variant_arg == "legacy") {
-        variants.push_back(YUE2_VAE_LEGACY);
-    } else {
-        variants.push_back(YUE2_VAE_STANDARD);
+    {
+        Yue2VaeVariant v = YUE2_VAE_STANDARD;
+        yue2_vae_variant_from_name(variant_arg, &v);  // main() already rejected an unknown name
+        variants.push_back(v);
     }
 
     int rc = 0;
@@ -5875,14 +5875,8 @@ int main(int argc, char ** argv) {
             gen_seed = strtoull(argv[++i], nullptr, 10);
         } else if (!strcmp(argv[i], "--vae") && i + 1 < argc) {
             const std::string v = argv[++i];
-            if (v == "standard") {
-                variant = YUE2_VAE_STANDARD;
-            } else if (v == "legacy") {
-                variant = YUE2_VAE_LEGACY;
-            } else if (v == "dec2x") {
-                variant = YUE2_VAE_DEC2X;
-            } else {
-                fprintf(stderr, "--vae must be 'standard', 'legacy' or 'dec2x', got '%s'\n", v.c_str());
+            if (!yue2_vae_variant_from_name(v, &variant)) {
+                fprintf(stderr, "--vae must be 'standard', 'legacy', 'dec2x' or 'rs-x3', got '%s'\n", v.c_str());
                 return 2;
             }
         } else if (!strcmp(argv[i], "--adapter") && i + 1 < argc) {
@@ -6009,8 +6003,9 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "--vae-parity requires --models <dir>\n");
             return 2;
         }
-        if (!vae_parity_variant.empty() && vae_parity_variant != "standard" && vae_parity_variant != "legacy") {
-            fprintf(stderr, "--variant must be 'standard' or 'legacy', got '%s'\n", vae_parity_variant.c_str());
+        Yue2VaeVariant pv = YUE2_VAE_STANDARD;
+        if (!vae_parity_variant.empty() && !yue2_vae_variant_from_name(vae_parity_variant, &pv)) {
+            fprintf(stderr, "--variant: %s, got '%s'\n", YUE2_VAE_VARIANT_ERROR, vae_parity_variant.c_str());
             return 2;
         }
         return run_vae_parity(models_dir, vae_parity_dir, vae_parity_variant);
