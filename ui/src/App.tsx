@@ -103,6 +103,7 @@ import { ABCompareModal } from './components/shared/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
 import { useDiscoMode, toggleDiscoMode, setDiscoPlaying, setDiscoDataUrl, syncStems, updateMainTime } from './stores/discoStore';
 import { DiscoPulseWrapper } from './components/shared/DiscoPulseWrapper';
+import { Toggle } from './components/shared/Toggle';
 
 import { HiHatParticles } from './components/shared/HiHatParticles';
 import { subscribeEventSource } from './services/sharedEventSource';
@@ -1553,15 +1554,14 @@ const AppContent: React.FC = () => {
             <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4">
               Delete "{pendingDeleteItem.title}"{pendingDeleteItem.artistName ? ` by ${pendingDeleteItem.artistName}` : ''}? This cannot be undone.
             </p>
-            <label className="flex items-center gap-2 mb-6 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={deleteConfirmDismissed}
-                onChange={(e) => setDeleteConfirmDismissed(e.target.checked)}
-                className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-600 text-pink-600 focus:ring-pink-500"
-              />
-              <span className="text-xs text-zinc-600 dark:text-zinc-400">Don't ask again</span>
-            </label>
+            <Toggle
+              size="sm"
+              className="mb-6"
+              checked={deleteConfirmDismissed}
+              onChange={setDeleteConfirmDismissed}
+              label="Don't ask again"
+              info="From now on a left swipe on the phone playlist deletes the song without asking, in this browser only. Clearing the site's data in the browser brings the prompt back."
+            />
             <div className="flex items-center justify-end gap-3">
               <button
                 onClick={handleDeleteCancel}

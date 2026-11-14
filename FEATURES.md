@@ -199,7 +199,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Rate and pitch preview | Playback speed from 0.5x to 2x, and a 48k/44.1k toggle that hears a render clocked at 44.1 kHz. |
 | Variant switch | No Adapter, Unmastered and Mastered versions, each with its own download. |
 | Waveform tools | One crop and fade mode: pick Intro or Outro, drag the cut on the waveform, set that end's fade length and curve, hear it previewed, then Done writes both ends at once, section markers, and a synced LRC lyrics bar that highlights each Whisper word with a tick per syllable on the waveform. An Edit button on the open strip opens a lyric editor modal: transport, speed, volume, the waveform, a 30 to 600 px/s zoom, one row per line with a draggable chip per word, word nudge, loop and split, whole-track nudge, undo and redo, optional autosave, and revision-checked saves that rebuild the `.lrc`. Unsaved edits can be discarded on close. |
-| Playlist queue | One browser-local play queue with reorder, Play All and Download All. Ordered playlist snapshots save with server revisions. A browser playlist can be imported explicitly; a failed save keeps the local edit visible for reapplication. |
+| Playlist queue | One browser-local play queue with reorder, Play All and Download All. On phones it opens full screen with swipe to remove or delete. Ordered playlist snapshots save with server revisions. A browser playlist can be imported explicitly; a failed save keeps the local edit visible for reapplication. |
 
 ## Lyric Studio
 

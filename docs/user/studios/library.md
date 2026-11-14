@@ -241,6 +241,12 @@ playlist** to move that snapshot to server storage; the browser copy stays in
 place. A save error shows under the header, and **Reload and reapply** retries
 the pending edit against the latest saved revision.
 
+On a phone, the playlist button in the top bar (a count badge shows how many tracks
+are queued) opens the queue full screen, with the player still at the bottom. Swipe
+a track right to take it off the queue, or left to delete the song itself. Deleting
+asks first; tick **Don't ask again** to skip the prompt in that browser from then on.
+Esc or the close button returns to the app.
+
 ## Song details
 
 Click the i button on a track (on the grid card's footer, or among a list or
