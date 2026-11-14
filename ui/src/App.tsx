@@ -46,6 +46,7 @@ import { CropFadeControls } from './components/player/CropFadeControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
+import { SongDetailsSlideOver } from './components/details/SongDetailsSlideOver';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
@@ -821,6 +822,34 @@ const AppContent: React.FC = () => {
     return <ServerOfflineOverlay />;
   }
   // Main content renderer
+  // The Song Details column, shared by Create, Generations and Library.
+  // It slides in from the right and the centre column reflows as it does.
+  const renderSongDetails = (hideNarrow: boolean) => (
+    <SongDetailsSlideOver
+      open={showRightSidebar && !!selectedSong}
+      width={rightSidebarWidth}
+      onResize={setRightSidebarWidth}
+      hideNarrow={hideNarrow}
+    >
+      {selectedSong && (
+        <DiscoPulseWrapper hue={DISCO.rightSidebar}
+          className="h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5"
+        >
+          <RightSidebar
+            song={selectedSong}
+            onClose={() => setShowRightSidebar(false)}
+            onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
+            onDelete={handleDelete}
+            onPlay={playSong}
+            isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
+            onDownload={handleDownload}
+            onRename={handleRename}
+          />
+        </DiscoPulseWrapper>
+      )}
+    </SongDetailsSlideOver>
+  );
+
   const renderContent = () => {
     if (activeView === 'settings') {
       return (
@@ -999,50 +1028,7 @@ const AppContent: React.FC = () => {
 
 
           {/* Right Sidebar — Song detail (same as Create) */}
-          {showRightSidebar && selectedSong && (
-            <>
-              {/* Right resize handle */}
-              <div
-                className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  const startX = e.clientX;
-                  const startW = rightSidebarWidth;
-                  const onMove = (ev: MouseEvent) => {
-                    const newW = Math.min(600, Math.max(280, startW + startX - ev.clientX));
-                    setRightSidebarWidth(newW);
-                  };
-                  const onUp = () => {
-                    document.removeEventListener('mousemove', onMove);
-                    document.removeEventListener('mouseup', onUp);
-                    document.body.style.cursor = '';
-                    document.body.style.userSelect = '';
-                  };
-                  document.body.style.cursor = 'col-resize';
-                  document.body.style.userSelect = 'none';
-                  document.addEventListener('mousemove', onMove);
-                  document.addEventListener('mouseup', onUp);
-                }}
-              >
-                <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-              </div>
-              <DiscoPulseWrapper hue={DISCO.rightSidebar}
-                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5 max-xl:max-w-[26vw]"
-                style={{ width: rightSidebarWidth }}
-              >
-                <RightSidebar
-                  song={selectedSong}
-                  onClose={() => setShowRightSidebar(false)}
-                  onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
-                  onDelete={handleDelete}
-                  onPlay={playSong}
-                  isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
-                  onDownload={handleDownload}
-                  onRename={handleRename}
-                />
-              </DiscoPulseWrapper>
-            </>
-          )}
+          {renderSongDetails(false)}
         </div>
       );
     }
@@ -1100,50 +1086,7 @@ const AppContent: React.FC = () => {
           </DiscoPulseWrapper>
 
           {/* Right Sidebar — Song detail */}
-          {showRightSidebar && selectedSong && (
-            <>
-              {/* Resize handle */}
-              <div
-                className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  const startX = e.clientX;
-                  const startW = rightSidebarWidth;
-                  const onMove = (ev: MouseEvent) => {
-                    const newW = Math.min(600, Math.max(280, startW + startX - ev.clientX));
-                    setRightSidebarWidth(newW);
-                  };
-                  const onUp = () => {
-                    document.removeEventListener('mousemove', onMove);
-                    document.removeEventListener('mouseup', onUp);
-                    document.body.style.cursor = '';
-                    document.body.style.userSelect = '';
-                  };
-                  document.body.style.cursor = 'col-resize';
-                  document.body.style.userSelect = 'none';
-                  document.addEventListener('mousemove', onMove);
-                  document.addEventListener('mouseup', onUp);
-                }}
-              >
-                <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-              </div>
-              <DiscoPulseWrapper hue={DISCO.rightSidebar}
-                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5 max-xl:max-w-[26vw]"
-                style={{ width: rightSidebarWidth }}
-              >
-                <RightSidebar
-                  song={selectedSong}
-                  onClose={() => setShowRightSidebar(false)}
-                  onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
-                  onDelete={handleDelete}
-                  onPlay={playSong}
-                  isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
-                  onDownload={handleDownload}
-                  onRename={handleRename}
-                />
-              </DiscoPulseWrapper>
-            </>
-          )}
+          {renderSongDetails(false)}
         </div>
       );
     }
@@ -1243,52 +1186,7 @@ const AppContent: React.FC = () => {
 
 
         {/* Right Sidebar — resizable; hidden on narrow / portrait stacked layout */}
-        {showRightSidebar && selectedSong && (
-          <>
-            {/* Right resize handle */}
-            <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors
-                max-[1023px]:hidden portrait-wide:hidden"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startW = rightSidebarWidth;
-                const onMove = (ev: MouseEvent) => {
-                  const newW = Math.min(600, Math.max(280, startW + startX - ev.clientX));
-                  setRightSidebarWidth(newW);
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                  document.body.style.cursor = '';
-                  document.body.style.userSelect = '';
-                };
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
-            >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-            </div>
-            <DiscoPulseWrapper hue={DISCO.rightSidebar}
-              className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5
-                max-xl:max-w-[26vw] max-[1023px]:hidden portrait-wide:hidden"
-              style={{ width: rightSidebarWidth }}
-            >
-              <RightSidebar
-                song={selectedSong}
-                onClose={() => setShowRightSidebar(false)}
-                onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
-                onDelete={handleDelete}
-                onPlay={playSong}
-                isPlaying={isPlaying && currentTrack?.id === selectedSong?.id}
-                onDownload={handleDownload}
-                onRename={handleRename}
-              />
-            </DiscoPulseWrapper>
-          </>
-        )}
+        {renderSongDetails(true)}
       </div>
     );
   };
