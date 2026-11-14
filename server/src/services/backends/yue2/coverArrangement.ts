@@ -43,6 +43,7 @@
 import { splitLyricBlocks } from './sectionMatch.js';
 import { sectionKind } from './coverDrift.js';
 import { scoreSections } from './scoreSections.js';
+import { barsIn, hasSoundingVocalBar, isScoreVocalVoice, scoreBarSegments, vocalVoiceIds } from './scoreHealth.js';
 import type { Yue2Take } from '../../yue2Takes.js';
 
 export const BUILD_SESSION_VERSION = 2;
@@ -454,4 +455,69 @@ export function migrateLegacySession<T extends LegacySession>(stored: T, codesOf
   });
   return { ...stored, version: BUILD_SESSION_VERSION, revision: 0, takes,
     arrangement: { sections, plan, nextOccurrence: plan.length, finished: true } };
+}
+
+// ── New chords per take (plan_continue) ─────────────────────────────────────
+// A take of a section with no kept occurrence may write its own lines for it:
+// the engine plans one section on from the score as it stands (the composed
+// score cut before that occurrence, plus its label line), the draw is checked
+// here, and the take's score is the session score with that section's lines
+// replaced. Keep makes that score the session's, so later repeats follow it.
+
+/** A planned section may be this much shorter or longer than the slot it replaces. */
+export const PLAN_BAND = [0.5, 2] as const;
+
+/** The score a plan_continue request starts from for occurrence `k` of `plan`:
+ *  the composed score up to its first line plus its label line and newline. */
+export function planPrefix(abc: string, lyrics: string, plan: PlanEntry[], sing: Array<string | undefined>, k: number): string {
+  const composed = composeArrangement(abc, lyrics, plan, sing);
+  const chars = Array.from(composed.abc);
+  const at = composed.occurrences[k].abcStart;
+  const rest = chars.slice(at).join('').split('\n');
+  const end = rest.findIndex(line => label(line.trim()));
+  if (end < 0) throw new Error('The occurrence has no label line.');
+  return `${chars.slice(0, at).join('')}${rest.slice(0, end + 1).join('\n')}\n`;
+}
+
+/** Bars written per voice kind; a voice named neither Vocal nor Ins is not counted. */
+function voiceBars(abc: string): { vocal: number; ins: number } {
+  const ids = vocalVoiceIds(abc), n = { vocal: 0, ins: 0 };
+  let voice: 'vocal' | 'ins' | null = null;
+  for (const raw of abc.split('\n')) {
+    const line = raw.trim();
+    if (/^V:/.test(line)) { voice = isScoreVocalVoice(line, ids) ? 'vocal' : /^V:\s*Ins/i.test(line) ? 'ins' : null; continue; }
+    if (!voice || !line || line.startsWith('%') || /^[A-Za-z]:/.test(line)) continue;
+    for (const bar of scoreBarSegments(line)) n[voice] += barsIn(bar);
+  }
+  return n;
+}
+
+/** Why a plan_continue draw cannot replace a section of `slot.bars` bars, or null.
+ *  `text` is the result score, `prefix` what was sent, `end` the plan stage's
+ *  end reason. `eos` and `section_end` both pass: the section is complete. */
+export function planDrawRefusal(prefix: string, text: string, end: string | undefined, slot: { bars: number; sung: boolean }): string | null {
+  if (end === 'limit_hit') return 'it ran past the plan limit';
+  if (!text.startsWith(prefix)) return 'it did not keep the score before it';
+  const added = text.slice(prefix.length);
+  const head = prefix.trimEnd().split('\n').at(-1)!;
+  if (scoreSections(`${head}\n${added}`).length !== 1) return 'it wrote more than one section';
+  if (/^\s*[MLQ]:/m.test(added)) return 'it changed the meter, note length or tempo';
+  const all = voiceBars(text), before = voiceBars(prefix);
+  const vocal = all.vocal - before.vocal, ins = all.ins - before.ins;
+  if (vocal <= 0) return 'it wrote no vocal bars';
+  if (vocal !== ins) return 'its vocal and instrument bars differ';
+  if (vocal < slot.bars * PLAN_BAND[0] || vocal > slot.bars * PLAN_BAND[1]) return `its ${vocal} bars are far from the ${slot.bars} planned`;
+  if (slot.sung && !hasSoundingVocalBar(added)) return 'it has no sounding vocal bar for the lyrics';
+  return null;
+}
+
+/** `abc` with the lines of source section `section` (after its label) replaced by `added`. */
+export function spliceSection(abc: string, section: number, added: string): string {
+  const lines = abc.replace(/\r\n?/g, '\n').split('\n');
+  const starts = lines.flatMap((line, i) => (label(line.trim()) ? [i] : []));
+  if (section < 0 || section >= starts.length) throw new Error('No such section in the score.');
+  const trailer = lines.at(-1) === '' ? [lines.pop()!] : [];
+  const end = starts[section + 1] ?? lines.length;
+  lines.splice(starts[section] + 1, end - starts[section] - 1, ...added.replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n'));
+  return [...lines, ...trailer].join('\n');
 }

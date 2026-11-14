@@ -641,7 +641,9 @@ Custom-Gen has two tabs when the engine is YuE2. **One-shot** is the usual page.
 
 1. Fill in the style and lyrics on the One-shot tab, with a `[tag]` line for each section.
 2. Open Build by section and click **Plan the score**. The planner writes a score from your form. If its sections do not match your lyric tags, the tab says so; click **Re-plan with a new seed** until they pair. A lead sheet you pasted on the One-shot tab is used as it is.
-3. Click a section on the Source bar to add it to the song, then **Generate N takes**. Keep one take, then do the next section. A repeat (a second chorus) follows the score lines of the first. Takes differ in performance, not in chords.
+3. Click a section on the Source bar to add it to the song, then **Generate N takes**. Keep one take, then do the next section.
+   - **New chords per take** (the default here): each take of a section you have not built yet writes its own chords and melody for that section, planned after the sections you kept, so a chorus follows on from your verse. Keep writes the kept take's lines into the song, so a repeat (a second chorus) follows the kept one. A take that could not get a usable plan follows the score for that section and says so under its name; an older engine cannot plan this way, and says so too. A take costs a few seconds more for the planning.
+   - **Follow the score** (the default in Cover Studio): every take of a section follows the same score lines, so takes differ in performance, not in chords.
 4. **Condition strength** and **AR strength** can be changed until you keep the first take; Apply rebuilds the build and drops the takes made before it. After a keep they are locked, and changing them starts a fresh build.
 5. **Render Final Song** saves the kept sections as a song in the Library, with the usual post-processing.
 

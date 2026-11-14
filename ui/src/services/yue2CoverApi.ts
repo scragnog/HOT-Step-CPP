@@ -173,6 +173,8 @@ export interface Yue2BuildTake {
   style?: string;
   /** Its own caption; missing when it used the session's. */
   caption?: string;
+  /** What did not go to plan with its own chords: a section it followed the score for, or why none was planned. */
+  planNote?: string;
 }
 /** A section of the score, as the arrangement names it (s0, s1, ... in score order). */
 export interface Yue2SourceSection { id: string; label: string; startBar: number; bars: number; lyricBlock: number | null }
@@ -263,8 +265,9 @@ export const yue2CoverApi = {
     request<Yue2BuildSession>(`/build/${id}/plan`, { method: 'POST', body: JSON.stringify({ revision, upcoming, finished }) }, { silent: true }),
   buildGet: (id: string, options: ReadOptions = {}) => request<Yue2BuildSession>(`/build/${id}`, options),
   /** `caption`, when non-empty, replaces the session's caption for these takes only. */
-  buildGenerate: (id: string, revision: number, to: number, count: number, caption?: string) =>
-    request<Yue2BuildSession>(`/build/${id}/generate`, { method: 'POST', body: JSON.stringify({ revision, to, count, ...(caption ? { caption } : {}) }) }, { silent: true }),
+  /** `newChords` has each take plan its own chords for the sections not built yet. */
+  buildGenerate: (id: string, revision: number, to: number, count: number, caption?: string, newChords?: boolean) =>
+    request<Yue2BuildSession>(`/build/${id}/generate`, { method: 'POST', body: JSON.stringify({ revision, to, count, ...(caption ? { caption } : {}), ...(newChords ? { newChords } : {}) }) }, { silent: true }),
   buildCancel: (id: string) =>
     request<Yue2BuildSession>(`/build/${id}/cancel`, { method: 'POST' }, { silent: true }),
   buildKeep: (id: string, revision: number, take: string) =>

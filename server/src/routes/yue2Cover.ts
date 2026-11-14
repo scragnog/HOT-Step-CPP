@@ -7,7 +7,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import { getDb } from '../db/database.js';
-import { yue2Align } from '../services/backends/yue2/client.js';
+import { yue2AdapterWire, yue2Align } from '../services/backends/yue2/client.js';
+import { yue2PlanStackFrom, yue2ResolvePick } from '../services/backends/yue2/index.js';
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
 import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
 import { remeterTwoFourToFourFour, shiftBarLines } from '../services/backends/yue2/coverScoreTransform.js';
@@ -245,10 +246,12 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   router.get('/build/:id', (req: Request, res: Response) =>
     takes(res, () => getBuildSession(String(req.params.id), authenticate(req)!)));
   // `caption` (optional) is these takes' own caption; empty uses the session's.
+  // `newChords: true` has each take plan its own lines for sections not yet built.
   router.post('/build/:id/generate', (req: Request, res: Response) => {
     const userId = authenticate(req)!;
     return takes(res, () => generateBuildTakes(String(req.params.id), userId, req.body?.to, req.body?.count, req.body?.revision,
-      req.body?.caption, params => buildRequest(params, userId).style));
+      req.body?.caption, params => buildRequest(params, userId).style, req.body?.newChords,
+      params => yue2AdapterWire(yue2PlanStackFrom(yue2ResolvePick(params).adapters))));
   });
   router.post('/build/:id/cancel', (req: Request, res: Response) =>
     takes(res, () => cancelBuildTakes(String(req.params.id), authenticate(req)!)));

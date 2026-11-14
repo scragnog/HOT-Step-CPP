@@ -29,7 +29,7 @@ import { config } from '../config.js';
 import { aceClient } from './aceClient.js';
 import { runOnGpuLane, type LaneLease } from './generation/gpuLane.js';
 import { evictOtherFamilies } from './generation/residency.js';
-import { yue2Align, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed } from './backends/yue2/client.js';
+import { yue2Align, yue2Props, yue2Synth, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed } from './backends/yue2/client.js';
 import { splitLyricBlocks } from './backends/yue2/sectionMatch.js';
 import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { scoreSections } from './backends/yue2/scoreSections.js';
@@ -37,7 +37,7 @@ import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import { blindYue2Schedule } from './backends/yue2/lyricSchedule.js';
 import {
   BUILD_SESSION_VERSION, IMPROV, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
-  occurrenceLabel, planSections, revisionRefusal, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession,
+  occurrenceLabel, planDrawRefusal, planPrefix, planSections, revisionRefusal, spliceSection, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession, type PlanEntry,
 } from './backends/yue2/coverArrangement.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 
@@ -97,6 +97,13 @@ export interface Yue2Take {
   /** The codec frame its audio file starts at: a take renders only from a
    *  lead-in before its new part. Missing or 0: the file starts at the song's start. */
   audioStart?: number;
+  /** The whole score (source order) it was composed under, when it planned its
+   *  own chords (generateBuildTakes' newChords). Keep makes it the session's
+   *  score. Missing: it followed the score it was sent, and keeping it leaves
+   *  the score as it was. Not sent to the page. */
+  abc?: string;
+  /** What did not go to plan: a section it followed the score for, or why no section was planned. */
+  planNote?: string;
 }
 
 /** Session file version 2 (coverArrangement.ts): revisions, take parents, the
@@ -123,8 +130,10 @@ export interface Yue2BuildSession extends ArrangedSession {
   preview?: { spine: string; status: 'rendering' | 'done' | 'failed'; progress?: number; audioUrl?: string; error?: string } | null;
 }
 
-/** `request` holds the score and lyrics in source order; arranged() writes them out in plan order. */
-interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRequest }
+/** `request` holds the score and lyrics in source order; arranged() writes them out in plan order.
+ *  `request.abc` is the score the next take starts from: the last kept take's
+ *  own (applyScore), else `baseAbc`, the one the build began with. */
+interface Stored extends Yue2BuildSession { userId: string; request: Yue2SynthRequest; baseAbc?: string }
 
 interface BuildRun { cancelled: boolean; jobId?: string }
 const runs = new Map<string, BuildRun>();
@@ -173,7 +182,22 @@ function save(stored: Stored): void {
 }
 
 // Older session files also carry scoreStarts, which arranged() replaced.
-const view = ({ request: _r, scoreStarts: _s, userId: _u, ...rest }: Stored & { scoreStarts?: unknown }): Yue2BuildSession => rest;
+const view = ({ request: _r, scoreStarts: _s, userId: _u, baseAbc: _b, takes, ...rest }: Stored & { scoreStarts?: unknown }): Yue2BuildSession =>
+  ({ ...rest, takes: takes.map(({ abc: _abc, ...take }) => take) });
+
+/** Sets the score the next take starts from: the last kept take's own, else the
+ *  build's first. A take that followed the score has none of its own and
+ *  leaves the score its parent had, so the last kept one that has one wins.
+ *  Run after any change to what is kept (keep, undo). */
+function applyScore(stored: Stored): void {
+  stored.baseAbc ??= stored.request.abc;
+  const own = stored.kept.map(id => stored.takes.find(t => t.id === id)?.abc).findLast(abc => abc !== undefined);
+  const abc = own ?? stored.baseAbc;
+  if (abc === stored.request.abc) return;
+  stored.request = { ...stored.request, abc };
+  stored.arrangement = { ...stored.arrangement, sections: sourceSections(abc!, stored.request.lyrics ?? '') };
+  stored.sections = scoreSections(abc!).map(x => ({ label: x.label.trim(), startBar: x.startBar }));
+}
 
 /** A lyric span per occurrence (code points in the composed lyrics), or null when unsung. */
 type Spans = Array<[number, number] | null>;
@@ -376,7 +400,7 @@ export function createBuildSession(params: Record<string, unknown>, request: Yue
   const id = randomUUID();
   fs.mkdirSync(sessionDir(id), { recursive: true });
   const stored: Stored = {
-    id, userId, sections, takes: [], kept: [], pending: [], error: null, params, request,
+    id, userId, sections, takes: [], kept: [], pending: [], error: null, params, request, baseAbc: request.abc,
     version: BUILD_SESSION_VERSION, revision: 0,
     arrangement: { sections: source, plan: source.map((s, i) => ({ id: `o${i}`, section: s.id })), nextOccurrence: source.length, finished: true },
     ...(prepared ? { prepared } : {}),
@@ -394,9 +418,15 @@ export function getBuildSession(id: string, userId: string): Yue2BuildSession {
  *  as they finish. A non-empty `caption` replaces the session's for these
  *  takes only; `toStyle` composes the style prompt a render of params would
  *  send (adapter trigger and template included). Empty or missing inherits.
- *  It is not session state, so the revision stays. */
+ *  It is not session state, so the revision stays.
+ *
+ *  `newChords: true` has each take write its own lines for the sections with
+ *  no kept occurrence (planTakeScores) under `planAdapter`, the planner-strength
+ *  adapter stack; anything else, and any section that cannot be planned,
+ *  follows the score. */
 export function generateBuildTakes(id: string, userId: string, to: number, count: number, revision: unknown,
-  caption?: unknown, toStyle?: (params: Record<string, unknown>) => string): Yue2BuildSession {
+  caption?: unknown, toStyle?: (params: Record<string, unknown>) => string, newChords?: unknown,
+  planAdapter?: (params: Record<string, unknown>) => Yue2SynthRequest['lm_adapter']): Yue2BuildSession {
   const stored = load(id, userId);
   checkRevision(stored, revision);
   if (caption !== undefined && caption !== null && typeof caption !== 'string') throw new TakesError('caption must be text.');
@@ -428,8 +458,8 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   if (own) request.style = toStyle!({ ...stored.params, prompt: own });
   const occurrences = spans.length;
   const last = to + 1 >= occurrences;
-  const length = clock[to + 1] - clock[from];
-  const cap = last ? undefined : start + Math.round(Math.max(length, 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES;
+  const capOf = (marks: number[]) => (last ? undefined
+    : start + Math.round(Math.max(marks[to + 1] - marks[from], 1) * TAKE_SLACK) + TAKE_SLACK_FRAMES);
   const name = (i: number) => occurrenceLabel(stored.arrangement, i) ?? `#${i + 1}`;
   const extra = lookaheadSection(stored.arrangement);
   const after = last ? undefined : stored.arrangement.plan[to + 1]?.section ?? (extra === null ? undefined : stored.arrangement.sections[extra].id);
@@ -448,6 +478,22 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
   if (blind.length) {
     request.lyric_schedule = blindYue2Schedule(request.abc!, request.lyrics ?? '', blind);
   }
+  // The sections this take writes its own chords for: each source section
+  // with no kept occurrence, once. A crop that resumes inside `from` keeps
+  // part of its audio, composed under the score as it was.
+  const heard = new Set(stored.arrangement.plan.slice(0, from).map(o => o.section));
+  const todo: Array<{ k: number; s: number; name: string }> = [];
+  for (let k = from; k <= to; k++) {
+    const section = stored.arrangement.plan[k].section;
+    if (section === IMPROV || heard.has(section) || (k === from && spine?.resume !== undefined)) continue;
+    heard.add(section);
+    todo.push({ k, s: stored.arrangement.sections.findIndex(x => x.id === section), name: name(k) });
+  }
+  const planning = newChords === true && todo.length > 0;
+  const sourceLyrics = stored.request.lyrics ?? '';
+  const baseScore = stored.request.abc!;
+  const planPlan = planSections(stored.arrangement), planOwn = planLyrics(stored.arrangement);
+  const planWire = planAdapter?.(stored.params);
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.');
   if (previewRuns.has(id)) throw new TakesError('Wait for the build render to finish first.');
   const identity = takeIdentity(stored, to);
@@ -476,6 +522,20 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             save(fresh);
           };
           update('starting', 0);
+          // Each take's own score, and what its clock and request are made from it.
+          let scores = seeds.map(() => baseScore), notes = seeds.map(() => ''), planned = seeds.map(() => false);
+          if (planning) {
+            update('plan', 0);
+            const plans = await planTakeScores({ run, lease, checkCancelled, base: baseScore, sourceLyrics, lyrics, plan: planPlan, own: planOwn,
+              request, todo, seeds, planAdapter: planWire });
+            scores = plans.map(p => p.abc);
+            notes = plans.map(p => p.note);
+            planned = plans.map(p => p.planned);
+            update('starting', 0);
+          }
+          const views = scores.map(abc => (abc === baseScore ? { request, lyrics, spans, clock }
+            : arranged({ request: { ...stored.request, abc }, arrangement: { ...stored.arrangement, sections: sourceSections(abc, sourceLyrics) } }, true)));
+          const cap = Math.max(...views.map(v => capOf(v.clock) ?? 0)) || undefined;
           const req: Yue2SynthRequest = { ...request, synth_batch_size: 1,
             ...(prefix.length ? { codec_ids: prefix, continue_codec_ids: true } : {}),
             ...(cap ? { preview_max_frames: cap } : {}),
@@ -483,10 +543,10 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
           // Sessions saved by older servers may still carry batch fields.
           delete req.lm_batch_size;
           delete req.songs;
-          if (seeds.length === 1) req.seed = seeds[0];
+          if (seeds.length === 1) { req.seed = seeds[0]; req.abc = views[0].request.abc; }
           else {
             delete req.seed;
-            req.songs = seeds.map(seed => ({ style: request.style, lyrics: request.lyrics, abc: request.abc, seed }));
+            req.songs = seeds.map((seed, i) => ({ style: request.style, lyrics: views[i].request.lyrics, abc: views[i].request.abc, seed }));
           }
           // Retry winners use a different seed, which breaks the take identity.
           delete req.semantic_retries;
@@ -505,17 +565,18 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             const mapped = mapTakeTracks(seeds, tracks, parts);
             update('aligning', 100);
             const takes: ArrangedTake[] = [];
-            for (const { seed, ids, wav, audioStart } of mapped) {
+            for (const [i, { seed, ids, wav, audioStart }] of mapped.entries()) {
               checkCancelled();
               const starts = await alignStarts(lyrics, spans, wav, ids.length, last ? undefined : to + 1, from, audioStart);
               checkCancelled();
               for (let i = 0; i <= from; i++) starts[i] = spine ? spine.starts[i] : i === 0 ? 0 : null;
-              fillStarts(starts, clock, from, Math.min(to + 1, occurrences - 1), sectionStart, ids.length);
+              fillStarts(starts, views[i].clock, from, Math.min(to + 1, occurrences - 1), sectionStart, ids.length);
               const takeId = randomUUID().slice(0, 8);
               const peaks = wavPeaks(wav, Math.max(0, start / YUE2_FPS - (start ? LEAD_IN_S : 0)) - audioStart / YUE2_FPS, (ids.length - audioStart) / YUE2_FPS);
               fs.writeFileSync(path.join(sessionDir(id), `${takeId}.wav`), wav);
               fs.writeFileSync(codesFile(id, takeId), JSON.stringify(ids));
-              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, ...(after ? { after } : {}), style: request.style, ...(own ? { caption: own } : {}), ...(audioStart ? { audioStart } : {}), ...identity });
+              takes.push({ id: takeId, from, to, seed, audioUrl: `/audio/takes/${id}/${takeId}.wav`, frames: ids.length, starts, peaks, prefix: start, ...(after ? { after } : {}), style: request.style, ...(own ? { caption: own } : {}), ...(audioStart ? { audioStart } : {}),
+                ...(planned[i] ? { abc: scores[i] } : {}), ...(notes[i] ? { planNote: notes[i] } : {}), ...identity });
             }
             const fresh = load(id, userId);
             fresh.takes.push(...takes);
@@ -541,6 +602,76 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
     }
   })();
   return view(stored);
+}
+
+interface PlanTakes {
+  run: BuildRun; lease: LaneLease; checkCancelled: () => void;
+  /** The session score (source order) every take starts from, and the lyrics it pairs with. */
+  base: string; sourceLyrics: string;
+  /** The composed lyrics a take sends, and the plan they are composed in. */
+  lyrics: string; plan: PlanEntry[]; own: Array<string | undefined>;
+  /** The take's request: style and settings for the plan pass. */
+  request: Yue2SynthRequest;
+  /** Plan indexes of the sections to write, with their source section index, in order. */
+  todo: Array<{ k: number; s: number; name: string }>;
+  seeds: number[];
+  planAdapter?: Yue2SynthRequest['lm_adapter'];
+}
+
+/** The most tokens one planned section may take: a section is a few hundred. */
+const PLAN_SECTION_TOKENS = 1024;
+
+/** One take's own score for each seed: the session score with the lines of each
+ *  `todo` section planned by the engine (plan_continue) after the score as the
+ *  take has it so far, so a chorus is written knowing the verse before it.
+ *  One batched pass per section serves every seed; a draw that fails the
+ *  checks (planDrawRefusal) gets one more pass with a new seed. A seed still
+ *  without a plan follows the score for that section and says so; the planner
+ *  never blocks a take. `planned` is false for a seed that did not try. */
+export async function planTakeScores(job: PlanTakes): Promise<Array<{ abc: string; note: string; planned: boolean }>> {
+  const unplanned = (note: string) => job.seeds.map(() => ({ abc: job.base, note, planned: false }));
+  if (job.request.cot === 'off') return unplanned('Chain of Thought is off, so there is no plan to write: this take follows the score.');
+  if (!(await yue2Props()).props?.plan_continue) return unplanned('This engine cannot plan from the kept score yet (update it): this take follows the score.');
+  const scores = job.seeds.map(() => job.base), notes = job.seeds.map((): string[] => []);
+  for (const { k, s, name } of job.todo) {
+    let open = job.seeds.map((_, i) => i);
+    const why = new Map<number, string>();
+    for (let attempt = 0; attempt < 2 && open.length; attempt++) {
+      job.checkCancelled();
+      const sent = open.map(i => ({ i, prefix: planPrefix(scores[i], job.sourceLyrics, job.plan, job.own, k),
+        seed: attempt ? randomInt(1, 2 ** 31 - 1) : job.seeds[i] }));
+      const req = plainRequest(job.request);
+      for (const key of ['abc', 'lyrics', 'noise_seed', 'codec_ids', 'continue_codec_ids', 'preview_max_frames', 'render_from_frame',
+        'semantic_retries', 'lyric_schedule'] as const) delete req[key];
+      Object.assign(req, { plan_only: true, plan_continue: true, plan_max_tokens: PLAN_SECTION_TOKENS,
+        songs: sent.map(x => ({ style: job.request.style, lyrics: job.lyrics, abc: x.prefix, seed: x.seed })) });
+      if (job.planAdapter !== undefined) req.lm_adapter = job.planAdapter;
+      let tracks: Yue2TrackDetail[] = [];
+      try {
+        const sub = await yue2Synth(req);
+        job.run.jobId = sub.job_id;
+        try { tracks = await waitJob(sub.job_id, job.run, job.lease, () => {}); }
+        catch (err) { await aceClient.cancelJob(sub.job_id).catch(() => {}); throw err; }
+        finally { job.run.jobId = undefined; }
+      } catch (err) {
+        job.checkCancelled();
+        for (const x of sent) why.set(x.i, `the plan pass failed (${(err as Error).message})`);
+        open = sent.map(x => x.i);
+        continue;
+      }
+      open = [];
+      for (const [n, { i, prefix }] of sent.entries()) {
+        const track = tracks.find(t => t.song === n);
+        const slot = sourceSections(scores[i], job.sourceLyrics)[s];
+        const refusal = !track?.abc ? 'the planner returned no score'
+          : planDrawRefusal(prefix, track.abc, track.stage_end_reasons?.plan, { bars: slot.bars, sung: slot.lyricBlock !== null });
+        if (refusal) { why.set(i, refusal); open.push(i); continue; }
+        scores[i] = spliceSection(scores[i], s, track!.abc!.slice(prefix.length));
+      }
+    }
+    for (const i of open) notes[i].push(`${name} follows the score: ${why.get(i)}.`);
+  }
+  return scores.map((abc, i) => ({ abc, note: notes[i].join(' '), planned: true }));
 }
 
 /** Validate every track before any take is saved. Parts follow track order. */
@@ -584,6 +715,7 @@ export function keepBuildTake(id: string, userId: string, takeId: string, revisi
   const refusal = keepRefusal(stored, take);
   if (refusal) throw new TakesError(refusal, 409);
   stored.kept.push(take.id);
+  applyScore(stored);
   save(stored);
   return view(stored);
 }
@@ -599,6 +731,7 @@ export function undoBuildKeep(id: string, userId: string, section: number | unde
     if (!Number.isInteger(section) || section < 0) throw new TakesError('No such section.');
     while (stored.kept.length && nextOccurrence(stored) > section) stored.kept.pop();
   }
+  applyScore(stored);
   save(stored);
   return view(stored);
 }
@@ -966,16 +1099,17 @@ export function applyBuildLyrics(id: string, userId: string, revision: unknown, 
   const text = (lyrics as string).replace(/\r\n?/g, '\n');
   const params = { ...stored.params, lyrics: text };
   const request = plainRequest(toRequest(params));
-  if (request.abc !== stored.request.abc) throw new TakesError('The score changed; start a new build.', 409);
+  if (request.abc !== (stored.baseAbc ?? stored.request.abc)) throw new TakesError('The score changed; start a new build.', 409);
   if (request.lyrics === stored.request.lyrics && text === stored.params.lyrics) return view(stored);
   const locked = builtLyricsRefusal(stored, request.lyrics ?? '');
   if (locked) throw new TakesError(locked, 409);
   stored.params = params;
-  stored.request = request;
+  stored.baseAbc ??= stored.request.abc;
+  stored.request = { ...request, abc: stored.request.abc };
   stored.revision++;
   // New lyrics for the whole build replace the unbuilt occurrences' own too.
   const built = nextOccurrence(stored);
-  stored.arrangement = { ...stored.arrangement, sections: sourceSections(request.abc!, request.lyrics ?? ''),
+  stored.arrangement = { ...stored.arrangement, sections: sourceSections(stored.request.abc!, request.lyrics ?? ''),
     plan: stored.arrangement.plan.map((o, i) => (i < built ? o : (({ lyrics: _, ...rest }) => rest)(o))) };
   save(stored);
   return view(stored);
@@ -1063,7 +1197,7 @@ export function applyBuildSettings(id: string, userId: string, revision: unknown
     arrangement = { sections: source, plan: source.map((s, i) => ({ id: `o${n + i}`, section: s.id })), nextOccurrence: n + source.length, finished: true };
   }
   arranged({ request, arrangement });
-  Object.assign(stored, { params, request, sections, arrangement, revision: stored.revision + 1 });
+  Object.assign(stored, { params, request, baseAbc: request.abc, sections, arrangement, revision: stored.revision + 1 });
   save(stored);
   return view(stored);
 }

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, revisionRefusal,
-  sourceSections, takeIdentity, type ArrangedSession, type LegacySession,
+  composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, planDrawRefusal, planPrefix, revisionRefusal,
+  sourceSections, spliceSection, takeIdentity, type ArrangedSession, type LegacySession,
 } from './coverArrangement.js';
 import { scoreSections } from './scoreSections.js';
 import { scoreBarClock } from './scoreClock.js';
@@ -276,4 +276,41 @@ test('plan edits add improvs by bar count; the source runs on after the last sou
   // Keeping an upcoming improv by its id keeps its bars.
   const kept = editPlan({ ...s, arrangement }, ['o6', 'o5'], false);
   assert.deepEqual(kept.plan.slice(2), [{ id: 'o6', section: 'improv', bars: 8 }, { id: 'o5', section: 's2' }]);
+});
+
+test('plan_continue: the prefix is the composed score up to an occurrence plus its label line', () => {
+  // Verse then chorus then chorus again: the second chorus is planned after the first.
+  const plan = [VERSE, CHORUS, CHORUS];
+  const composed = composeArrangement(score, lyrics, plan);
+  const prefix = planPrefix(score, lyrics, plan, [], 2);
+  assert.ok(prefix.endsWith('% chorus\n'));
+  assert.equal(prefix.split('% chorus').length - 1, 2, 'the first chorus is inside the prefix');
+  assert.ok(composed.abc.startsWith(prefix.slice(0, -'% chorus\n'.length)));
+  assert.ok(planPrefix(score, lyrics, plan, [], 0).endsWith('% verse\n'));
+});
+
+test('plan_continue: a section\'s lines are replaced, and the labels stay', () => {
+  const lines = 'V: Vocal\nd16|\nV: Ins\nZ|\n';
+  const out = spliceSection(score, CHORUS, lines);
+  assert.equal(scoreSections(out).length, scoreSections(score).length);
+  assert.ok(out.includes(`% chorus\n${lines}% bridge`));
+  assert.ok(!out.includes('c16|\n'), 'the old chorus lines are gone');
+  assert.ok(spliceSection(score, OUTRO, 'V: Vocal\nZ|\nV: Ins\nC8|\n').endsWith('C8|\n'), 'a score ending in a newline still does');
+  assert.equal(out.split('% outro')[1], score.split('% outro')[1]);
+});
+
+test('plan_continue: the five checks on a draw', () => {
+  const prefix = '% chorus\n', ok = 'V: Vocal\n"C"c16|c16|\nV: Ins\nZ2|\n';
+  const refuse = (text: string, end = 'section_end', slot = { bars: 2, sung: true }) => planDrawRefusal(prefix, text, end, slot);
+  assert.equal(refuse(prefix + ok), null);
+  assert.equal(refuse(prefix + ok, 'eos'), null, 'a planner that ended the song here is accepted');
+  assert.match(refuse(prefix + ok, 'limit_hit')!, /plan limit/);
+  assert.match(refuse(`% verse\n${ok}`)!, /did not keep/);
+  assert.match(refuse(`${prefix}${ok}% bridge\n${ok}`)!, /more than one section/);
+  assert.match(refuse(`${prefix}M:3/4\n${ok}`)!, /meter/);
+  assert.match(refuse(`${prefix}V: Vocal\n"C"c16|c16|\nV: Ins\nZ|\n`)!, /differ/);
+  assert.match(refuse(`${prefix}V: Vocal\n"C"c16|c16|c16|c16|c16|\nV: Ins\nZ5|\n`)!, /far from/, 'over twice the slot');
+  const silent = `${prefix}V: Vocal\nz16|z16|\nV: Ins\nZ2|\n`;
+  assert.equal(refuse(silent, 'section_end', { bars: 2, sung: false }), null);
+  assert.match(refuse(silent)!, /sounding vocal/, 'a lyric needs a bar to sing in');
 });

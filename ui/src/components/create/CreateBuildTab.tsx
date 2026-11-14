@@ -174,9 +174,9 @@ export const CreateBuildTab: React.FC<Props> = ({ token, getParams, onSave, onOn
           scoreAbc={abc} recordingUrl="" blocked={blocked}
           busy={build.busy} error={build.error} caption={buildCaption((session?.params ?? form) as Record<string, unknown> | undefined)}
           onOccurrenceLyrics={edits => build.occurrenceLyrics(edits)}
-          onGenerate={(to, count, caption, lyricEdits) => {
+          onGenerate={(to, count, caption, lyricEdits, newChords) => {
             const params = buildParams();
-            return params ? build.generate(params, to, count, caption, lyricEdits).then(Boolean) : Promise.resolve(false);
+            return params ? build.generate(params, to, count, caption, lyricEdits, newChords).then(Boolean) : Promise.resolve(false);
           }}
           onPlan={(upcoming, finished) => { const params = buildParams(); if (params) build.plan(params, upcoming, finished); }}
           onCancel={() => build.cancel()} onKeep={(take, crop, count) => build.keep(take, crop, count)} onDelete={take => build.remove(take)}

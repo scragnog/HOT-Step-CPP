@@ -201,11 +201,11 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
 
   // One mutation per command; they share commit/fail because every one returns the session's new snapshot.
   const generateMut = useMutation({
-    mutationFn: async (v: { params: Record<string, unknown>; to: number; count: number; caption: string; lyrics: Record<string, string> }) => {
+    mutationFn: async (v: { params: Record<string, unknown>; to: number; count: number; caption: string; lyrics: Record<string, string>; newChords: boolean }) => {
       let started = live;
       if (!started) { started = await yue2CoverApi.buildStart(v.params, draft.text ?? undefined); setSessionId(started.id); }
       if (Object.keys(v.lyrics).length) started = await yue2CoverApi.buildOccurrenceLyrics(started.id, started.revision, v.lyrics);
-      return yue2CoverApi.buildGenerate(started.id, started.revision, v.to, v.count, v.caption || undefined);
+      return yue2CoverApi.buildGenerate(started.id, started.revision, v.to, v.count, v.caption || undefined, v.newChords);
     },
     onSuccess: commit, onError: fail,
   });
@@ -276,8 +276,8 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
     /** Generates takes, starting the session from `params` if there is none. A non-empty
      *  `caption` is these takes' own; `lyrics` (occurrence id to lines) is applied first. */
-    generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}) =>
-      generateMut.mutateAsync({ params, to, count, caption, lyrics }).catch(() => null),
+    generate: (params: Record<string, unknown>, to: number, count: number, caption: string, lyrics: Record<string, string> = {}, newChords = false) =>
+      generateMut.mutateAsync({ params, to, count, caption, lyrics, newChords }).catch(() => null),
     /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
     occurrenceLyrics: (edits: Record<string, string | null>) => { void occurrenceLyricsMut.mutateAsync({ edits }).catch(() => null); },
     /** Applies new cover settings to the session (before its first keep). */
@@ -456,7 +456,7 @@ interface PageProps {
   /** The build's caption, which the caption field starts from for each section. */
   caption: string;
   /** `caption`, when non-empty, is these takes' own; `lyrics` (occurrence id to lines) is applied first. True once queued. */
-  onGenerate: (to: number, count: number, caption: string, lyrics: Record<string, string>) => Promise<boolean>;
+  onGenerate: (to: number, count: number, caption: string, lyrics: Record<string, string>, newChords: boolean) => Promise<boolean>;
   /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
   onOccurrenceLyrics: (edits: Record<string, string | null>) => void;
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
@@ -489,6 +489,8 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const generation = useRef(0);
   const [target, setTarget] = useState<string | null>(null);
   const [count, setCount] = useState(4);
+  // New chords per take is the default for a build that is not a cover; a cover follows its score.
+  const [newChords, setNewChords] = useState(p.coverSettings === false);
   const [menu, setMenu] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // Crops set on takes not yet kept (applied by Keep), and the take whose crop is being edited.
@@ -638,7 +640,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
   const current = Object.fromEntries(shown.map(x => [x.item.id, x.lines]));
   const generate = async () => {
     if (range === null) return;
-    if (await p.onGenerate(range, count, submittedCaption(caption, p.caption), pendingLyrics(drafts, current))) setDrafts({});
+    if (await p.onGenerate(range, count, submittedCaption(caption, p.caption), pendingLyrics(drafts, current), newChords)) setDrafts({});
   };
   const bars = (i: number) => s?.arrangement.sections[i]?.bars ?? (p.sections[i + 1]?.startBar ?? p.totalBars + 1) - p.sections[i].startBar;
   const itemBars = (i: PlanItem) => i.improv ?? bars(i.section);
@@ -906,6 +908,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
                   <button type="button" onClick={() => remove(take.id)} disabled={p.busy} aria-label={`Delete take ${i + 1}`}
                     className="rounded p-1 text-zinc-400 hover:text-red-500 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>
                 </div>
+                {take.planNote && <p className="text-xs text-amber-600">{take.planNote}</p>}
                 <TakeWave peaks={take.peaks ?? []} from={full.from} to={full.to} playhead={playheadOf(take.id)} crop={set}
                   canIn={cropLimits(take).inMax > 0} colour={colour}
                   onSeek={at => seek(take.id, take.audioUrl, full.from, full.to, at, offset)} />
@@ -927,6 +930,12 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
             {s?.error && <p role="alert" className="text-xs text-red-500">Last take failed: {s.error}</p>}
           </div>
           {!done && <div className="space-y-1">
+            <div role="radiogroup" aria-label="Chords for these takes" className="flex gap-2 text-xs"
+              title="Takes of a section you have not built yet can each write their own chords, planned after what you kept, or follow the score as it stands. A repeat of a section you kept follows the kept one either way.">
+              {([[true, 'New chords per take'], [false, 'Follow the score']] as const).map(([on, text]) =>
+                <button type="button" key={text} role="radio" aria-checked={newChords === on} onClick={() => setNewChords(on)}
+                  className={`rounded-lg border px-2 py-1 ${newChords === on ? 'border-cyan-500 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' : 'border-zinc-300 dark:border-white/10'}`}>{text}</button>)}
+            </div>
             <div className="flex items-center gap-2">
               <div className="w-20 flex-shrink-0" title="Takes per run">
                 <StyledSelect accent="pink" value={count} onChange={v => setCount(Number(v))}

@@ -1499,9 +1499,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (typeof built === 'string') { showToast(built); return null; }
     return built.params;
   };
-  const generateBuildTakes = (to: number, count: number, caption: string, lyrics: Record<string, string>) => {
+  const generateBuildTakes = (to: number, count: number, caption: string, lyrics: Record<string, string>, newChords: boolean) => {
     const params = buildParams();
-    return params ? build.generate(params, to, count, caption, lyrics).then(Boolean) : Promise.resolve(false);
+    return params ? build.generate(params, to, count, caption, lyrics, newChords).then(Boolean) : Promise.resolve(false);
   };
   const setPrepareSettings = (s: BuildSettings) => {
     setCoverVoices(s.voices);
