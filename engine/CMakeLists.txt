@@ -1086,6 +1086,16 @@ if(BUILD_TESTING)
     target_link_libraries(yue2-recompose-test PRIVATE yyjson luajit)
     link_ggml_backends(yue2-recompose-test)
     add_test(NAME yue2-recompose COMMAND yue2-recompose-test)
+
+    # plan_continue: request parse, section stop rule, tokenizer prefix
+    # property. No GPU, no model; the tokenizer part needs YUE2_TOKENIZER_DIR
+    # (the yue2/tokenizer folder) and skips (77) without it.
+    add_executable(yue2-plan-continue-test tests/test-yue2-plan-continue.cpp)
+    target_include_directories(yue2-plan-continue-test PRIVATE src/yue2)
+    target_link_libraries(yue2-plan-continue-test PRIVATE yyjson)
+    link_ggml_backends(yue2-plan-continue-test)
+    add_test(NAME yue2-plan-continue COMMAND yue2-plan-continue-test)
+    set_tests_properties(yue2-plan-continue PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
 endif()
 
 # Keep this after every executable, including optional test targets. Enable

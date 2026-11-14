@@ -274,8 +274,16 @@ export interface Yue2SynthRequest {
    *  by the UI in v1; carried here for completeness/API callers. */
   abc?: string;
   /** Stop after the plan stage and return only the ABC score — the score
-   *  preview flow. Needs cot melody/full and no `abc`. */
+   *  preview flow. Needs cot melody/full and no `abc` (unless plan_continue). */
   plan_only?: boolean;
+  /** With plan_only: `abc` (or every `songs` entry's) is a kept score ending
+   *  in the label line of the next section plus its newline. The planner
+   *  writes that one section and stops before the next `%` line; the result
+   *  abc is the prefix byte-for-byte plus the section, and
+   *  stage_end_reasons.plan is section_end, eos or limit_hit.
+   *  plan_max_tokens then caps generated tokens only. Engines that support
+   *  it report props.plan_continue. */
+  plan_continue?: boolean;
   /** Stop after the semantic stage: the result body is the raw codec id
    *  stream as a JSON array. No NAR, no VAE. A planner probe for training. */
   semantic_only?: boolean;

@@ -124,6 +124,11 @@ struct Yue2Request {
     // NAR/VAE work, no audio). The score-preview flow: plan once, let the
     // user look at it, then re-submit the same request with `abc` set.
     bool        plan_only = false;
+    // plan_only + abc: the abc is a kept score prefix ending in the label line
+    // ("% chorus\n") of the section to write. The planner prefills it, writes
+    // that one section and stops at the next line starting with '%'. The
+    // result is the prefix byte-for-byte plus the new section.
+    bool        plan_continue = false;
     // Stop after the semantic stage: the result is the raw codec id stream as
     // a JSON array, no NAR, no VAE, no audio. A training-time probe of the
     // planner (the AR half) alone.
@@ -330,6 +335,28 @@ static bool yue2_req_str(yyjson_val * root, const char * key, std::string * out,
     return true;
 }
 
+// plan_continue: a prefix ends with its label line and that line's newline,
+// so the planner starts on a fresh line and its first '%' line ends the section.
+static bool yue2_continue_prefix_ok(const std::string & abc) {
+    if (abc.size() < 2 || abc.back() != '\n') return false;
+    size_t end = abc.find_last_not_of("\r\n");
+    if (end == std::string::npos) return false;
+    const size_t nl    = abc.rfind('\n', end);
+    const size_t start = nl == std::string::npos ? 0 : nl + 1;
+    return abc[start] == '%';
+}
+
+// plan_continue's stop rule, on decoded bytes: the offset of the first '%'
+// that opens a line at or after `from`, or npos. `from` is the prefix length,
+// so the prefix's own last newline counts and an immediate '%' stops at once.
+// The cut keeps the section's last newline. '\n' and '%' are ASCII, so a
+// byte search is safe in UTF-8.
+static size_t yue2_plan_section_cut(const std::string & text, size_t from) {
+    if (from == 0 || from > text.size()) return std::string::npos;
+    const size_t at = text.find("\n%", from - 1);
+    return at == std::string::npos ? std::string::npos : at + 1;
+}
+
 // Parses `body` (a JSON object) into `out`. Does NOT resolve mode-dependent
 // defaults (cfg_scale/ode_steps/seed) — call yue2_request_resolve_defaults
 // next, once the LM config is available (needs the GGUF's own ode_steps/
@@ -402,6 +429,23 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         }
         out->plan_only = yyjson_is_bool(v) && yyjson_get_bool(v);
     }
+    if (yyjson_val * v = yyjson_obj_get(root, "plan_continue")) {
+        if (!yyjson_is_bool(v) && !yyjson_is_null(v)) {
+            if (err) {
+                *err = "\"plan_continue\" must be a boolean";
+            }
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->plan_continue = yyjson_is_bool(v) && yyjson_get_bool(v);
+    }
+    if (out->plan_continue && !out->plan_only) {
+        if (err) {
+            *err = "\"plan_continue\" needs \"plan_only\"";
+        }
+        yyjson_doc_free(doc);
+        return false;
+    }
     if (yyjson_val * v = yyjson_obj_get(root, "semantic_retries")) {
         if (!yyjson_is_int(v) && !yyjson_is_null(v)) {
             if (err) {
@@ -446,7 +490,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc);
         return false;
     }
-    if (out->plan_only && out->abc_provided) {
+    if (out->plan_only && out->abc_provided && !out->plan_continue) {
         if (err) {
             *err = "\"plan_only\" and \"abc\" are exclusive -- the score is already known";
         }
@@ -596,6 +640,21 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         // log lines read; the first song stands in for it when absent.
         if (out->style.empty()) out->style = out->songs[0].style;
         if (out->lyrics.empty()) out->lyrics = out->songs[0].lyrics;
+    }
+    if (out->plan_continue) {
+        // Every song plans on from its own prefix; with "songs" the top-level
+        // abc is not used, so each entry must bring one.
+        std::vector<const std::string *> prefixes;
+        if (out->songs.empty()) prefixes.push_back(&out->abc);
+        for (const Yue2SongSpec & song : out->songs) prefixes.push_back(&song.abc);
+        for (const std::string * a : prefixes) {
+            if (!yue2_continue_prefix_ok(*a)) {
+                if (err) *err = "\"plan_continue\" needs an \"abc\" on the request or on every \"songs\" entry, "
+                                "ending in a label line that starts with '%' and its newline";
+                yyjson_doc_free(doc);
+                return false;
+            }
+        }
     }
 
     if (!yue2_req_num(root, "cfg_scale", &num, &present, err)) {

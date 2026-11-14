@@ -318,6 +318,10 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
             }
             return false;
         }
+        if (req.plan_continue) {
+            plan_idx.push_back(b);  // plans on from the supplied prefix
+            continue;
+        }
         sg.score_abc = sg.abc_text;
         sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
     }
@@ -331,6 +335,9 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     for (int p = 0; p < P; p++) {
         const Yue2SongState & sg = songs[(size_t) plan_idx[(size_t) p]];
         prefixes[(size_t) p] = yue2_token_prefixes(&tok, sg.style, sg.lyrics, req.cot, nullptr);
+        if (req.plan_continue) {
+            prefixes[(size_t) p].insert(prefixes[(size_t) p].end(), sg.abc_ids.begin(), sg.abc_ids.end());
+        }
         max_prefix = std::max<int64_t>(max_prefix, (int64_t) prefixes[(size_t) p].size());
     }
 
@@ -377,7 +384,20 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         logits.insert(logits.end(), pre.logits.begin(), pre.logits.end());
     }
 
+    // plan_continue: history starts at the prefix's ABC ids, so the sampler's
+    // step (history size), repetition window and min_tokens see what they
+    // would have seen had the planner reached this section by itself. The
+    // decoded text grows per token for the section stop rule.
     std::vector<std::vector<int32_t>> history((size_t) P);
+    std::vector<std::string>          text((size_t) P);
+    std::vector<size_t>               cut((size_t) P, std::string::npos);
+    if (req.plan_continue) {
+        for (int p = 0; p < P; p++) {
+            const Yue2SongState & sg = songs[(size_t) plan_idx[(size_t) p]];
+            history[(size_t) p] = sg.abc_ids;
+            text[(size_t) p]    = sg.abc_text;
+        }
+    }
     std::vector<bool>                 done((size_t) P, false);
     std::vector<int32_t>              next_ids((size_t) P, YUE2_ABC_END);
     std::vector<int32_t>              surv_ids;
@@ -404,7 +424,7 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
             }
             // The row is this step's scratch: the next decode overwrites it.
             const int64_t tok_id = base + yue2_sample_row(logits.data() + (size_t) p * (size_t) W, W, sp, YUE2_ABC_END, 0,
-                                                          YUE2_EOD, history[(size_t) p], step, /*legacy_off=*/false,
+                                                          YUE2_EOD, history[(size_t) p], (int64_t) history[(size_t) p].size(), /*legacy_off=*/false,
                                                           base, sg.rng, &surv_ids, &surv_vals);
             if (tok_id == YUE2_ABC_END) {
                 done[(size_t) p] = true;
@@ -414,6 +434,18 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
             }
             history[(size_t) p].push_back((int32_t) tok_id);
             next_ids[(size_t) p] = (int32_t) tok_id;
+            if (req.plan_continue) {
+                std::string & t    = text[(size_t) p];
+                const size_t  from = t.size();
+                t += yue2_bpe_decode(&tok, { (int32_t) tok_id });
+                cut[(size_t) p] = yue2_plan_section_cut(t, from);
+                if (cut[(size_t) p] != std::string::npos) {
+                    done[(size_t) p] = true;
+                    sg.stage_end_reason[YUE2_STAGE_PLAN] = "section_end";
+                    next_ids[(size_t) p] = YUE2_ABC_END;
+                    continue;
+                }
+            }
             n_active++;
         }
         if (progress) {
@@ -433,7 +465,10 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         const int       b  = plan_idx[(size_t) p];
         Yue2SongState & sg = songs[(size_t) b];
         sg.abc_ids   = history[(size_t) p];
-        sg.score_abc = yue2_bpe_decode(&tok, sg.abc_ids);
+        // plan_continue: the supplied prefix byte-for-byte plus the new
+        // section, cut before the next label (the cut can fall inside a token).
+        sg.score_abc = req.plan_continue ? text[(size_t) p].substr(0, cut[(size_t) p])
+                                         : yue2_bpe_decode(&tok, sg.abc_ids);
         if (!done[(size_t) p]) sg.stage_end_reason[YUE2_STAGE_PLAN] = "limit_hit";
         fprintf(stderr, "[YuE2-AR-Tokens] plan song=%d n=%zu hash=%016llx\n", b, sg.abc_ids.size(),
                 (unsigned long long) yue2_token_hash(sg.abc_ids));

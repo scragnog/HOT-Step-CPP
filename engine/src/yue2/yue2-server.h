@@ -125,6 +125,8 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
     yyjson_mut_obj_add_int(doc, root, "max_lm_batch", YUE2_MAX_LM_BATCH);
     yyjson_mut_obj_add_int(doc, root, "max_synth_batch", YUE2_MAX_SYNTH_BATCH);
     yyjson_mut_obj_add_int(doc, root, "max_plan_batch", YUE2_MAX_PLAN_BATCH);
+    // plan_only + plan_continue + abc plans one section on from a kept score.
+    yyjson_mut_obj_add_bool(doc, root, "plan_continue", true);
     // The checkpoint's own sampler defaults per stage, so the LM tab can show
     // and reset to them (yue2.sampling.<stage>.* in the GGUF).
     if (g_yue2.lm_file.probe_ok) {

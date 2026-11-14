@@ -479,7 +479,8 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `lyrics` | `""` | Lyrics |
 | `cot` | `"off"` | `off`, `melody` or `full`. `melody` and `full` run the ABC plan stage |
 | `abc` | none | ABC text to use instead of running the plan stage |
-| `plan_only` | false | Stop after the plan stage and return the ABC score. Needs `cot` other than `off`; cannot be combined with `abc` or `semantic_only` |
+| `plan_only` | false | Stop after the plan stage and return the ABC score. Needs `cot` other than `off`; cannot be combined with `abc` (unless `plan_continue`) or `semantic_only` |
+| `plan_continue` | false | With `plan_only`: plan one section on from a kept score. `abc` (or, with `songs`, every entry's `abc`) is the score so far, ending in the label line of the section to write and its newline (`"% chorus\n"`); anything else is a 400. The planner prefills it after `ABC_START`, samples on, and stops before the next line that starts with `%`. The result `abc` is the prefix byte-for-byte plus the new section, which keeps its last newline. `stage_end_reasons.plan` is `section_end`, `eos` (`ABC_END` first) or `limit_hit`. `plan_max_tokens` caps generated tokens only. `/yue2/props` reports `plan_continue: true` |
 | `semantic_only` | false | Stop after the semantic stage and return the codec ids |
 | `semantic_retries` | 0 | 0 to 20. Redraws per song whose semantic stage runs away, up to 4 side by side; the first to end cleanly wins |
 | `plan_cutoff` | 1.5 | 0 to 10. A stream past this x its plan's length + 20 s is a runaway (`limit_hit`); 0 = only the stage cap |

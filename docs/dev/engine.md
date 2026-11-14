@@ -1058,7 +1058,16 @@ and logs any disagreement. A failed YuE2 job logs its reason
 as `[YuE2-Job] <id>: FAILED: <error>`. A `plan_only` request takes up to
 `YUE2_MAX_PLAN_BATCH` (8) `songs` entries against 4 for a render, reported by `/yue2/props`
 as `max_plan_batch`; the server's auto-replan uses it to draw every batch member's plan
-attempts in one pass. During the semantic stage, `GET /job` carries `songs_done`, a bitmask
+attempts in one pass. With `plan_continue`, a song that brought an `abc` joins the plan batch
+instead of skipping the model: its prompt is the planning prefix plus the encoded `abc`, and
+`history` starts at the `abc` ids, so the sampler's step, repetition window and `min_tokens`
+match a planner that reached the section by itself (the sampler's step is `history.size()`,
+which equals the loop step on the old path). Each sampled token's bytes are appended to a
+per-song string and `yue2_plan_section_cut` (`yue2-request.h`) looks for a newline followed by `%` from the new
+bytes, the prefix's last newline included; a hit cuts the text there, even inside a token,
+and ends the row as `section_end`. The returned score is that text, never a re-decode, so
+the prefix comes back byte-for-byte. `engine/tests/test-yue2-plan-continue.cpp` covers the
+parse, the stop rule and the tokenizer prefix property (`YUE2_TOKENIZER_DIR`). During the semantic stage, `GET /job` carries `songs_done`, a bitmask
 of the batch's songs that have ended and are waiting on the rest (0 in every other stage and
 family). `POST /job?id=N&drop_songs=MASK` takes songs out of a running batch
 (`Job::songs_dropped`, read through `Yue2Request::songs_dropped`): the plan and semantic
