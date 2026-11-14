@@ -25,6 +25,7 @@
 // to stop being `static` first (drop `static`, or add an `inline` non-static
 // shim in mm3-model.h); that is a minimax/ change, out of scope here, and
 // NOT made by this patch (see APPLY.md).
+#include <filesystem>
 #include <string>
 
 // sa3_weights_present lives in its own header (sa3-families.h) rather than
@@ -51,6 +52,28 @@ struct HotStepFamily {
 // declaration here (a non-static one would conflict with yue2-model.h's own
 // `static` definition) — same reason mm3_weights_present has none either.
 
+// HeartMuLa/MuLaCover: filename scan only, same two dirs and name prefixes as
+// heartmula_discover (heartmula/pipeline.h), which this header cannot call
+// (that file is included later in the TU). Any heartmula-*.gguf LM file other
+// than the tokenizer counts; compatibility is checked per request, not at boot.
+static bool heartmula_weights_present(const char * models_dir) {
+    if (!models_dir || !models_dir[0]) {
+        return false;
+    }
+    namespace fs = std::filesystem;
+    for (const fs::path dir : { fs::path(models_dir) / "heartmula", fs::path(models_dir) }) {
+        std::error_code ec;
+        for (const auto & e : fs::directory_iterator(dir, ec)) {
+            const std::string n = e.path().filename().string();
+            if (e.is_regular_file(ec) && n.rfind("heartmula-", 0) == 0 && n.rfind("heartmula-tokenizer", 0) != 0 &&
+                e.path().extension() == ".gguf") {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // C++17 inline variable: exactly one definition across however many TUs end
 // up including this header (today: one), so g_hot_step_families itself is
 // never an ODR hazard even though the array is `constexpr` and one of its
@@ -62,6 +85,7 @@ inline constexpr HotStepFamily g_hot_step_families[] = {
     { "MiniMax-Music3", mm3_weights_present },
     { "YuE2", yue2_weights_present },
     { "StableAudio3", sa3_weights_present },
+    { "HeartMuLa", heartmula_weights_present },
 };
 
 inline bool hot_step_any_family_weights_present(const char * models_dir) {
