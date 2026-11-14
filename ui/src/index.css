@@ -322,6 +322,27 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 /* ========================================
+   react-toastify in dark mode
+   The container uses toastify's light theme; under the app's `dark` class
+   its variables switch to the suno palette, so toasts follow the theme
+   toggle live. `html.dark` outranks toastify's :root block, which is
+   injected at runtime after this file.
+   ======================================== */
+html.dark {
+  --toastify-color-light: #18181b;
+  --toastify-text-color-light: #e4e4e7;
+  --toastify-spinner-color: #a1a1aa;
+  --toastify-spinner-color-empty-area: #3f3f46;
+  --toastify-toast-shadow: 0px 4px 16px rgba(0, 0, 0, 0.5);
+}
+html.dark .Toastify__toast-theme--light {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+html.dark .Toastify__close-button--light {
+  color: #fff;
+}
+
+/* ========================================
    Toast Animation
    ======================================== */
 
