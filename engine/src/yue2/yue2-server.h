@@ -90,6 +90,7 @@ static void yue2_json_add_file(yyjson_mut_doc * doc, yyjson_mut_val * parent, co
 
 static void yue2_handle_props(const httplib::Request &, httplib::Response & res) {
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+    yue2_discover_missing_vae(&g_yue2);  // a VAE downloaded since startup
 
     yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
     yyjson_mut_val * root = yyjson_mut_obj(doc);

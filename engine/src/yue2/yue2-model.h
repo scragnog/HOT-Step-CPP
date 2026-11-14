@@ -934,6 +934,21 @@ static bool yue2_weights_present(const char * models_dir) {
 // type probed in turn (bf16 as reference, then each quantize.cpp output),
 // not always the best one on disk. nullptr/empty preserves the normal
 // best-first behavior for every other caller.
+// Probe every VAE variant slot that has no file yet. Header reads only, and a
+// slot already found is left alone, so it is safe while a VAE is resident:
+// GET /yue2/props calls it so a VAE downloaded after startup shows up without
+// an engine restart.
+static void yue2_discover_missing_vae(Yue2Model * m) {
+    for (int v = 0; v < YUE2_VAE_VARIANT_COUNT; v++) {
+        std::string path;
+        const std::string stem = std::string("vae-") + YUE2_VAE_VARIANT_NAME[v];
+        if (!m->vae_file[v].found && yue2_find_variant(m->search_dirs, stem, &path)) {
+            Yue2VaeConfig cfg;  // scratch — the model's own vae_cfg is filled at load time
+            yue2_probe_file(path, &m->vae_file[v], /*is_lm=*/false, nullptr, &cfg, &m->meta_errors);
+        }
+    }
+}
+
 static void yue2_discover(Yue2Model * m, const char * models_dir, const char * lm_type_override = nullptr) {
     m->lm_type_want = lm_type_override ? lm_type_override : "";
     m->models_dir = models_dir ? models_dir : "";
@@ -1005,14 +1020,7 @@ static void yue2_discover(Yue2Model * m, const char * models_dir, const char * l
         m->lm_variants.push_back({"convrot", m->convrot_path,
                                   yue2_basename(m->convrot_path), yue2_file_size(m->convrot_path)});
     }
-    for (int v = 0; v < YUE2_VAE_VARIANT_COUNT; v++) {
-        std::string path;
-        const std::string stem = std::string("vae-") + YUE2_VAE_VARIANT_NAME[v];
-        if (yue2_find_variant(m->search_dirs, stem, &path)) {
-            Yue2VaeConfig cfg;  // scratch — the model's own vae_cfg is filled at load time
-            yue2_probe_file(path, &m->vae_file[v], /*is_lm=*/false, nullptr, &cfg, &m->meta_errors);
-        }
-    }
+    yue2_discover_missing_vae(m);
 }
 
 static bool yue2_available(const Yue2Model & m) {
