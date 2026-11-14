@@ -2641,6 +2641,7 @@
     "library.createFirstTrack": "Create your first track to see it here",
     "library.selectTracks": "Select tracks",
     "library.select": "Select",
+    "library.cardSize": "Card size (double-click to reset)",
     "library.selected": "{{count}} selected",
     "library.deleteCount": "Delete {{count}}",
     "library.downloadCount": "Download {{count}}",

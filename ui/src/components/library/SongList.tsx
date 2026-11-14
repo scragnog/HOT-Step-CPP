@@ -29,6 +29,11 @@ import { formatRelativeDay } from '../../utils/dateUtils';
 import { applySelectClick } from '../../utils/rangeSelect';
 import { buildSongBadges, coverTag } from './songBadges';
 import { trackMetadata } from '../details/songFacts';
+import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
+
+/** Grid card size: the minimum card width in px, one saved setting for every song grid. */
+const CARD_SIZE_KEY = 'hs-songGridCardSize';
+const CARD_SIZE = { min: 120, max: 320, default: 150 };
 
 function SongParameterBadges({ song }: { song: Song }) {
   const { t } = useTranslation();
@@ -195,6 +200,7 @@ export const SongList: React.FC<SongListProps> = ({
 
   // Internal view mode — persisted per context (title), initialized from prop
   const storageKey = `hs-songlist-viewMode-${title}`;
+  const [cardSize] = usePersistedState<number>(CARD_SIZE_KEY, CARD_SIZE.default);
   const [activeViewMode, setActiveViewMode] = useState<'list' | 'grid' | 'table'>(() => {
     try { const v = localStorage.getItem(storageKey); if (v === 'list' || v === 'grid' || v === 'table') return v; } catch {}
     return viewMode ?? 'list';
@@ -447,6 +453,22 @@ export const SongList: React.FC<SongListProps> = ({
             </button>
           )}
 
+          {/* Card size, grid view only. writePersistedState keeps every mounted song grid in step. */}
+          {activeViewMode === 'grid' && (
+            <input
+              type="range"
+              min={CARD_SIZE.min}
+              max={CARD_SIZE.max}
+              step={10}
+              value={cardSize}
+              onChange={e => writePersistedState(CARD_SIZE_KEY, Number(e.target.value))}
+              onDoubleClick={() => writePersistedState(CARD_SIZE_KEY, CARD_SIZE.default)}
+              className="w-24 accent-pink-500 max-[640px]:hidden"
+              title={t('library.cardSize', 'Card size (double-click to reset)')}
+              aria-label={t('library.cardSize', 'Card size (double-click to reset)')}
+            />
+          )}
+
           {/* View mode toggle */}
           <div className="flex items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
             {([['grid', LayoutGrid], ['list', ListIcon], ['table', Table2]] as const).map(([mode, Icon]) => (
@@ -689,7 +711,7 @@ export const SongList: React.FC<SongListProps> = ({
       >
       {/* Grid View */}
       {activeViewMode === 'grid' && filteredSongs.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))] gap-3">
+        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${cardSize}px, 100%), 1fr))` }}>
           {pagedSongs.map(song => (
             <SongCard
               key={song.id}

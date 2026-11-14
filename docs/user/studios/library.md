@@ -31,6 +31,7 @@ disk.
 | Control | What it does |
 |---|---|
 | View toggle (grid / list / table) | Switches how the song list renders. Remembered per browser. |
+| Card size (grid view) | A slider beside the view toggle that makes grid cards bigger or smaller. One setting for every song grid, remembered per browser. Double-click it to reset. Hidden on phones. |
 | Source filter tabs | All, Custom-Gen, Auto-Gen, Lyric Studio, Cover Studio, Repaint, Stem Build, Song Builder, Imported. Each tab shows a count and filters client-side; only shown on the Library page, not on the Generations lists beside Custom-Gen and Auto-Gen. |
 | Select | Enters multi-select mode: check tracks, then Compare (two or more tracks, opens a new [Compare](compare-studio.md) session with them picked), Add to playlist, Zip (one zip of the selected tracks' original audio, up to 500 tracks and 256 MB), Download or Delete the selection. Select all / deselect all toggles from the checkbox at the left of the bulk action bar; Select all visible and Clear sit beside it. Shift+click selects the range from the last clicked track, Ctrl/Cmd+click toggles one. On touch, long-press a track to start selecting, tap to toggle, and long-press a second track to select the range between them. |
 | Per page | 20, 40 (the default), 60, 80, 100, or All. Remembered per browser. |
