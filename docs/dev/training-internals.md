@@ -525,8 +525,11 @@ recovers the trigger from the run's prepared styles instead.
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch
 calculations have documented rounding differences; audio quality still needs
-listening qualification. The ConvRot base requires a CUDA build and BF16-capable
-NVIDIA hardware (Ampere or newer); a GGUF base runs on Vulkan too (whole-song
+listening qualification. The ConvRot base requires a CUDA build. On BF16-capable
+NVIDIA hardware (Ampere or newer) its ConvRot8 nodes use the BF16 kernels; where a
+startup probe finds the backend refuses them (Turing), they and the head loss build
+on the F32 path instead (`bf16_convrot_supported()` in `yue2-aitk-graph.h`; that
+fallback has not yet been run on Turing hardware); a GGUF base runs on Vulkan too (whole-song
 steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
 ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
