@@ -241,10 +241,14 @@ empirically on the teacher. On 21 layers, 24 does not exist — the replay loop 
 teacher-specific and the timestamps are not to be trusted. Re-discovery
 (`MM3_ALIGN_DUMP=1`) would be needed per variant. Audio is unaffected.
 
-**Not yet judged by ear.** Renders staged in
-`_experiments/_LISTENING/2026-08-22_mm3-distilled-lm/`. Remember trap #10 before drawing any
-conclusion from them: this is a **planner** swap, so 02/03 are different takes, not degraded
-copies of 01, and a single seed proves nothing.
+**Judged by ear 2026-11-14 (HOTSTEP-1218/1220/1222): shelved, stay on the 8B.** q8_0 lr3e5 and
+lr6e5 arms vs stock, 3 captions x 2 seeds at 120 s: about 1.5x faster AR, but Rob did not rate
+the output. Single-row also drops the depth decoder's guidance (7 of 8 codebooks unguided);
+`MM3_DEPTH_CFG=1.5` (env, experiment; forces 2 rows, semantic draw stays at 1.0) helped
+(EOS endings 5/6 vs 3/6) but not enough. Renders in
+`_experiments/_LISTENING/2026-11-14_mm3-distilled-lm/`. Teacher adapters do NOT transfer
+(layer indices, PiSSA residuals, 36-layer trainer); see HOTSTEP-1218 for the options if this
+is ever reopened.
 
 ## Low step counts go THIN, not dull — and why (root-caused + fixed 2026-08-21)
 

@@ -120,6 +120,9 @@ struct MM3LmConfig {
 // identically, for every logit. The unconditional row is then computed, read
 // back, and algebraically cancelled: pure waste. Both stages therefore build
 // single-row graphs at 1.0 and the full pair at anything else.
+// Single-row vs a 2-row run at 1.0 is the same forward within kernel
+// numerics, not bit for bit: the batch-2 prefill moves the hidden ~0.35 %,
+// top-k sampling amplifies it, so a seed gives a different take (HOTSTEP-1222).
 //
 // Keyed on the arithmetic, never on a model name, so it is correct for any
 // checkpoint that ships this scale — and bit-identical to the old code path at
@@ -130,6 +133,22 @@ struct MM3LmConfig {
 // The scale to guide with, with the pre-KV-metadata fallback applied once.
 static inline float mm3_ar_cfg_scale(const MM3LmConfig & c) {
     return c.ar_cfg_scale > 0.0f ? c.ar_cfg_scale : 1.5f;
+}
+
+// EXPERIMENT: MM3_DEPTH_CFG=<scale> guides the depth decoder at its own scale,
+// leaving the semantic draw at mm3.ar.cfg_scale. For a guidance-distilled
+// composer (scale 1.0) whose depth decoder is still the stock CFG-1.5 one.
+// Needs the unconditional LM row, so mm3_cfg_rows returns 2 while it is set.
+static inline float mm3_depth_cfg_override() {
+    static const float v = [] {
+        const char * e = std::getenv("MM3_DEPTH_CFG");
+        return e && e[0] ? (float) atof(e) : 0.0f;
+    }();
+    return v;
+}
+
+static inline float mm3_depth_cfg_scale(const MM3LmConfig & c) {
+    return mm3_depth_cfg_override() > 0.0f ? mm3_depth_cfg_override() : mm3_ar_cfg_scale(c);
 }
 
 static inline int mm3_cfg_rows(const MM3LmConfig & c) {
@@ -149,6 +168,9 @@ static inline int mm3_cfg_rows(const MM3LmConfig & c) {
     }();
     if (forced) {
         return forced;
+    }
+    if (mm3_depth_cfg_override() > 0.0f) {
+        return MM3_LM_CFG_ROWS;
     }
     return std::fabs(mm3_ar_cfg_scale(c) - 1.0f) <= 1e-6f ? 1 : MM3_LM_CFG_ROWS;
 }

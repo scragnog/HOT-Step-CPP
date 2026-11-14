@@ -851,7 +851,7 @@ static bool mm3_depth_build_fused(const MM3Model & m, MM3DepthGraph * g, int top
         // Its own buffer either way: `guided` is clamped IN PLACE below (ggml_clamp
         // returns a view of its source), and at P = 1 lc3 aliases the logits we
         // still have to hand back.
-        ggml_tensor * guided = P > 1 ? ggml_add(ctx, lu3, ggml_scale(ctx, ggml_sub(ctx, lc3, lu3), cfg))
+        ggml_tensor * guided = P > 1 && cfg != 1.0f ? ggml_add(ctx, lu3, ggml_scale(ctx, ggml_sub(ctx, lc3, lu3), cfg))
                                      : ggml_cont(ctx, lc3);
         guided               = ggml_reshape_2d(ctx, guided, V, K);
 
@@ -1086,7 +1086,7 @@ static bool mm3_depth_decode_takes(const MM3Model & m, const float * lm_hidden_r
         out[t].logits_uncond.assign((size_t) (NC * V), 0.0f);
     }
 
-    const float cfg = mm3_ar_cfg_scale(lc);
+    const float cfg = mm3_depth_cfg_scale(lc);
     // Take-major, mirroring in_ac's layout: take t's codebook i sits at t*NC + i.
     // Reused as the running feedback across the seven steps.
     std::vector<int32_t> ac_rows((size_t) (K * NC), 0);
@@ -1287,7 +1287,7 @@ static bool mm3_depth_decode_takes(const MM3Model & m, const float * lm_hidden_r
                 // the identity, so the conditional row IS the guided distribution
                 // and the pass over V is skipped entirely.
                 float * guided = lc_row;
-                if (P > 1) {
+                if (P > 1 && cfg != 1.0f) {  // exact identity at 1.0, not u + (c - u)
                     guided = guided_buf.data();
                     for (int64_t i = 0; i < V; i++) {
                         const float u = lu_row[i];

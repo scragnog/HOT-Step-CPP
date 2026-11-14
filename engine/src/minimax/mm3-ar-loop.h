@@ -1189,7 +1189,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             // ── CFG, then the first top-k filter (ranked by the CONDITIONAL row) ──
             for (int64_t i = 0; i < NCAND; i++) {
                 const float u           = cand_unc[(size_t) i];
-                cand_guided[(size_t) i] = u + (cand_cond[(size_t) i] - u) * CFG;
+                // Exact at 1.0: u + (c - u) can round off c by an ulp when a 2-row
+                // pair is forced (MM3_AR_CFG_ROWS=2 / MM3_DEPTH_CFG) on a CFG-1.0 LM.
+                cand_guided[(size_t) i] = CFG == 1.0f ? cand_cond[(size_t) i] : u + (cand_cond[(size_t) i] - u) * CFG;
             }
             // Read before the conditional top-k below can mask it out.
             const float fs_guided = soft_it && fs_it >= 0 ? cand_guided[(size_t) (1 + fs_it)] : 0.0f;
