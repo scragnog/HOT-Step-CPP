@@ -273,3 +273,22 @@ static std::string yue2_sidecar_path(const std::string & audio) {
     }
     return audio.substr(0, dot) + ".txt";
 }
+
+// True when lyrics only SAY there are none: empty, section tags alone
+// ("[Instrumental]") or Genius's placeholder sentence. Any byte >= 0x80 counts
+// as a letter, so Cyrillic, Greek, CJK or Arabic lyrics are words: isalpha()
+// in the C locale knows A to Z only, and every non-Latin vocal track used to
+// come out instrumental (GH #355).
+static bool yue2_lyrics_say_instrumental(const std::string & lyrics) {
+    std::string words;
+    bool in_tag = false;
+    for (char ch : lyrics) {
+        const unsigned char u = (unsigned char) ch;
+        if (ch == '[') in_tag = true;
+        else if (ch == ']') in_tag = false;
+        else if (!in_tag && (u >= 0x80 || isalpha(u))) words += (char) tolower(u);
+        else if (!in_tag && !words.empty() && words.back() != ' ') words += ' ';
+    }
+    while (!words.empty() && words.back() == ' ') words.pop_back();
+    return words.empty() || words == "instrumental" || words == "this song is an instrumental";
+}

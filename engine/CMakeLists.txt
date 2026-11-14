@@ -1029,6 +1029,9 @@ if(BUILD_TESTING)
     add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
     add_test(NAME monitor-chain COMMAND test-monitor-chain)
 
+    add_executable(yue2-lyrics-instrumental-test tests/test-yue2-lyrics-instrumental.cpp)
+    add_test(NAME yue2-lyrics-instrumental COMMAND yue2-lyrics-instrumental-test)
+
     # DoRA norm-refresh freeze fixture (dora-common.h vs the pre-extraction
     # graphs). GGML_BACKEND picks the device; see the test's header.
     add_executable(dora-common-test tests/test-dora-common.cpp)
