@@ -489,6 +489,11 @@ else()
     target_link_libraries(ace-server PRIVATE acestep-core httplib supersep)
 endif()
 link_ggml_backends(ace-server)
+# Every backend's server is one translation unit; it outgrew MSVC's default
+# COFF section limit (C1128), as ace-train did. /bigobj lifts it.
+if(MSVC)
+  target_compile_options(ace-server PRIVATE /bigobj)
+endif()
 # CUDA runtime for GET /vram (cudaMemGetInfo)
 find_package(CUDAToolkit QUIET)
 if(CUDAToolkit_FOUND)

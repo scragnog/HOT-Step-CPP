@@ -149,6 +149,8 @@ export interface Yue2Props {
   max_synth_batch?: number;
   /** Songs per plan_only request ("songs" entries); absent on engines older than 2026-09-28. */
   max_plan_batch?: number;
+  /** plan_only + plan_continue + abc plans one section on from a kept score; absent on older engines. */
+  plan_continue?: boolean;
   nar_resident?: boolean;
   /** The checkpoint's sampler defaults per stage (GGUF yue2.sampling.*). */
   sampling?: { plan?: Yue2StageDefaults; semantic?: Yue2StageDefaults };
@@ -425,7 +427,7 @@ export interface Yue2SynthResponse {
 }
 
 /** Named per-stage end reason, per §7's Job result contract. */
-export type Yue2StageEndReason = 'eos' | 'limit_hit' | 'preview_limit' | 'skipped';
+export type Yue2StageEndReason = 'eos' | 'limit_hit' | 'preview_limit' | 'skipped' | 'section_end';
 export type Yue2JobEndReason = 'completed' | 'cancelled' | 'engine_failed' | 'limit_hit' | 'preview_limit' | 'failed';
 
 /** The additive extras this client reads OPTIMISTICALLY off the shared GET
