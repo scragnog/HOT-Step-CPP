@@ -189,7 +189,10 @@ const AppContent: React.FC = () => {
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
   const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState('ace-rightSidebarWidth', 360);
   const [activitySidebarWidth, setActivitySidebarWidth] = usePersistedState('hs-activitySidebarWidth', 420);
-  const [showRightSidebar, setShowRightSidebar] = useState(true);
+  // Song Details opens only from a track's i button (or a notification);
+  // once open it follows whichever track is clicked or played.
+  const [showRightSidebar, setShowRightSidebar] = useState(false);
+  const showDetails = useCallback((song: Song) => { setSelectedSong(song); setShowRightSidebar(true); }, []);
 
   // Assistant panel state (persisted)
   const [showAssistant, setShowAssistant] = usePersistedState('hs-showAssistant', false);
@@ -476,7 +479,6 @@ const AppContent: React.FC = () => {
       return;
     }
     setSelectedSong(song);
-    setShowRightSidebar(true);
     playFromList(songToTrack(song), songs.map(songToTrack), 'library');
   }, [currentTrack?.id, songs]);
 
@@ -970,7 +972,8 @@ const AppContent: React.FC = () => {
               onPlay={playSong}
               onDelete={handleDelete}
               onBulkDelete={handleBulkDelete}
-              onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
+              onSelect={setSelectedSong}
+              onShowDetails={showDetails}
               onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
               onRename={handleRename}
@@ -1073,7 +1076,8 @@ const AppContent: React.FC = () => {
                   showToast(t('library.exportZipFailed', 'Zip export failed: {{error}}', { error: (e as Error).message }), 'error');
                 }
               }}
-              onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
+              onSelect={setSelectedSong}
+              onShowDetails={showDetails}
               onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
               onDownload={handleDownload}
               onRename={handleRename}
@@ -1212,7 +1216,8 @@ const AppContent: React.FC = () => {
             onPlay={playSong}
             onDelete={handleDelete}
             onBulkDelete={handleBulkDelete}
-            onSelect={(s) => { setSelectedSong(s); setShowRightSidebar(true); }}
+            onSelect={setSelectedSong}
+            onShowDetails={showDetails}
             onReuse={handleReuse} onSendToCover={handleSendToCover} onEditMetadata={handleEditMetadata}
             onDownload={handleDownload}
             onRename={handleRename}

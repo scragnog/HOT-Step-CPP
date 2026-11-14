@@ -8,7 +8,7 @@ import {
   LayoutGrid, List as ListIcon, Table2, ArrowLeftRight, Loader2,
   Check, Columns3, ChevronLeft, ChevronRight, Radio, Upload,
   GitCompare,
-  FileArchive,
+  FileArchive, Info,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { moveFocus } from '../../utils/hotkeys';
@@ -153,6 +153,8 @@ interface SongListProps {
   /** Open the selected songs in a new Compare session (Library only). */
   onCompare?: (ids: string[]) => void;
   onSelect?: (song: Song) => void;
+  /** The i button: open the Song Details panel for this track. */
+  onShowDetails?: (song: Song) => void;
   onReuse?: (song: Song) => void;
   onDownload?: (song: Song) => void;
   onRename?: (song: Song, newTitle: string) => void;
@@ -176,7 +178,7 @@ interface SongListProps {
 }
 
 export const SongList: React.FC<SongListProps> = ({
-  songs, currentSongId, onPlay, onDelete, onBulkDelete, onCompare, onSelect, onReuse, onDownload, onRename, onAddToPlaylist, onExportZip,
+  songs, currentSongId, onPlay, onDelete, onBulkDelete, onCompare, onSelect, onShowDetails, onReuse, onDownload, onRename, onAddToPlaylist, onExportZip,
   onSendToCover, onEditMetadata, showFilters = true, showImport = false,
   viewMode = 'list', title = 'Library',
 }) => {
@@ -699,6 +701,7 @@ export const SongList: React.FC<SongListProps> = ({
               onToggleSelect={(e) => toggleSelection(song.id, e)}
               onPlay={() => onPlay(song)}
               onSelect={() => onSelect?.(song)}
+              onShowDetails={onShowDetails ? () => onShowDetails(song) : undefined}
               onDelete={() => onDelete(song)}
               onReuse={() => onReuse?.(song)}
               onDownload={() => onDownload?.(song)}
@@ -727,6 +730,7 @@ export const SongList: React.FC<SongListProps> = ({
               onToggleSelect={(e) => toggleSelection(song.id, e)}
               onPlay={() => onPlay(song)}
               onSelect={() => onSelect?.(song)}
+              onShowDetails={onShowDetails ? () => onShowDetails(song) : undefined}
               onDelete={() => onDelete(song)}
               onReuse={() => onReuse?.(song)}
               onDownload={() => onDownload?.(song)}
@@ -753,6 +757,7 @@ export const SongList: React.FC<SongListProps> = ({
           onToggleSelect={toggleSelection}
           onPlay={onPlay}
           onSelect={onSelect}
+          onShowDetails={onShowDetails}
           onDelete={onDelete}
           onReuse={onReuse}
           onDownload={onDownload}
@@ -869,6 +874,7 @@ interface SongItemProps {
   onToggleSelect: (e?: React.MouseEvent) => void;
   onPlay: () => void;
   onSelect?: () => void;
+  onShowDetails?: () => void;
   onDelete: () => void;
   onReuse?: () => void;
   onDownload?: () => void;
@@ -914,7 +920,7 @@ function useStreamingSong(song: Song): { isStreaming: boolean; frac: number; aud
 
 const SongItem: React.FC<SongItemProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata, showSourceBadge,
+  onPlay, onSelect, onShowDetails, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata, showSourceBadge,
   abTrackAId, abTrackBId,
 }) => {
   const { isStreaming, frac: streamFrac, audible: streamAudible } = useStreamingSong(song);
@@ -1097,6 +1103,10 @@ const SongItem: React.FC<SongItemProps> = ({
       {/* Actions (hidden in selection mode) */}
       {!selectionMode && (
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 relative">
+          {onShowDetails && (
+            <DetailsButton onClick={onShowDetails} size={15}
+              className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-pink-400 hover:bg-white/10 transition-colors" />
+          )}
           {onAddToPlaylist && (
             <button
               onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); }}
@@ -1131,6 +1141,7 @@ interface SongCardProps {
   onToggleSelect: (e?: React.MouseEvent) => void;
   onPlay: () => void;
   onSelect?: () => void;
+  onShowDetails?: () => void;
   onDelete: () => void;
   onReuse?: () => void;
   onDownload?: () => void;
@@ -1142,9 +1153,25 @@ interface SongCardProps {
   abTrackBId?: string | null;
 }
 
+/** The i button on a track: opens the Song Details panel. Playing or
+ *  clicking a track no longer does. */
+const DetailsButton: React.FC<{ onClick: () => void; size: number; className: string }> = ({ onClick, size, className }) => {
+  const { t } = useTranslation();
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={className}
+      title={t('library.songDetails', 'Song details')}
+      aria-label={t('library.songDetails', 'Song details')}
+    >
+      <Info size={size} />
+    </button>
+  );
+};
+
 const SongCard: React.FC<SongCardProps> = ({
   song, isActive, isPlaying, selectionMode, isSelected, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata,
+  onPlay, onSelect, onShowDetails, onDelete, onReuse, onDownload, onRename, onAddToPlaylist, onSendToCover, onEditMetadata,
   abTrackAId: _abTrackAId, abTrackBId: _abTrackBId,
 }) => {
   const { t } = useTranslation();
@@ -1339,6 +1366,12 @@ const SongCard: React.FC<SongCardProps> = ({
             </span>
           </div>
 
+          {!selectionMode && !isStreaming && onShowDetails && (
+            <DetailsButton onClick={onShowDetails} size={14}
+              className="ml-auto w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0
+                         text-zinc-400 dark:text-white/40 hover:text-zinc-800 dark:hover:text-white
+                         hover:bg-zinc-200/70 dark:hover:bg-white/10" />
+          )}
           {/* Hidden on a live render: every item on it (download, delete,
               send-to-cover, export) needs a file that does not exist yet. */}
           {!selectionMode && !isStreaming && (
@@ -1453,6 +1486,8 @@ interface SongTableProps {
   onToggleSelect: (id: string, e?: React.MouseEvent) => void;
   onPlay: (song: Song) => void;
   onSelect?: (song: Song) => void;
+  /** The i button: open the Song Details panel for this track. */
+  onShowDetails?: (song: Song) => void;
   onDelete: (song: Song) => void;
   onReuse?: (song: Song) => void;
   onDownload?: (song: Song) => void;
@@ -1560,7 +1595,7 @@ function baseName(p?: string): string {
 
 const SongTable: React.FC<SongTableProps> = ({
   songs, currentSongId, isPlaying, selectionMode, selectedIds, onToggleSelect,
-  onPlay, onSelect, onDelete, onReuse, onDownload, onRename, onSendToCover, showSourceBadge,
+  onPlay, onSelect, onShowDetails, onDelete, onReuse, onDownload, onRename, onSendToCover, showSourceBadge,
   abTrackAId: _abTrackAId, abTrackBId: _abTrackBId, topRight,
 }) => {
   const { t } = useTranslation();
@@ -1791,6 +1826,10 @@ const SongTable: React.FC<SongTableProps> = ({
               lmSeedType: <span className="text-zinc-500">{gp?.lmSeedFollowsDit === true ? 'Tied to DiT' : (gp?.lmSeedFollowsDit === false ? 'Fixed' : '—')}</span>,
               actions: (
                 <div className="flex items-center justify-end gap-0.5 flex-nowrap flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {onShowDetails && (
+                    <DetailsButton onClick={() => onShowDetails(song)} size={12}
+                      className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/10 transition-colors" />
+                  )}
                   {/* Edit stays out here as the one-click action; everything
                       else (download, send-to-cover, delete, A/B, and now
                       post-processing) is on the shared menu. */}

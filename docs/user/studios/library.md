@@ -19,8 +19,8 @@ disk.
 1. Open Library from the sidebar.
 2. Pick a view (grid, list, or table) and, optionally, a source filter tab to
    narrow the list to one studio's output.
-3. Click a track to open its details in the right sidebar, or hover it for
-   quick play/download/menu controls.
+3. Click a track's i button to open its details in the right sidebar, or
+   hover it for quick play/download/menu controls.
 4. Use the track's action menu (or the right sidebar) for edit, download,
    send-to-Cover-Studio, metadata, or delete.
 5. To bring in audio from outside the app, click Upload into Library and drop
@@ -242,7 +242,10 @@ the pending edit against the latest saved revision.
 
 ## Song details
 
-Click a track (outside of selection mode) to open the right sidebar.
+Click the i button on a track (on the grid card's footer, or among a list or
+table row's hover actions) to open the right sidebar. Playing or clicking a
+track does not open it. Once open, it follows the track you click or play,
+until you close it.
 
 - Cover art, inline-editable title, a backend chip (ACE-Step 1.5,
   MiniMax-Music3, YuE2 or Stable Audio 3), the artist name if set, and the

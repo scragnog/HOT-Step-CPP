@@ -2670,6 +2670,7 @@
     "library.download": "Download",
     "library.delete": "Delete",
     "library.rename": "Rename",
+    "library.songDetails": "Song details",
     "library.noDescription": "No description",
     "library.justNow": "Just now",
     "library.import": "Upload into Library",
