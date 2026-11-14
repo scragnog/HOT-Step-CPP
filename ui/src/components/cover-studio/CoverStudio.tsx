@@ -801,10 +801,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const result = done.result as CoverDraftResult;
       sourceHydratedRef.current = result.documentId;
       setCoverDraftRevision(result.revision); setLeadSheetSource(result.leadSheetSource ?? choice);
+      setApprovedSheet(null); setSheetAudioUrl('');
+      // An imported score (dataset or MusicXML) is the user's own notation: only the transcriber label moves.
+      if (sheetScoreSource === 'dataset' || sheetScoreSource === 'musicxml') return;
       const score = leadSheetScoreUpdate(result);
-      setApprovedSheet(score.approved); setSheetAbc(score.abc); setScoreSections([]);
+      setSheetAbc(score.abc); setScoreSections([]);
       setSheetScoreSource(score.scoreSource); setChordQuality(score.chordQuality);
-      setSheetAudioUrl('');
     } catch (err) { if (sourceLookupRef.current === lookup) setSheetError((err as Error).message); }
     finally { sourceChangeRef.current = false; setSourceChanging(false); }
   };

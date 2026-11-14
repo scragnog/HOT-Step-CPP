@@ -141,7 +141,7 @@ export function locateData(opts: { env?: NodeJS.ProcessEnv; checkoutRoot?: strin
 
   let root: string | null = null;
   let source: DataReport['source'] = 'none';
-  if (loc.mode === 'release' && env.HOT_STEP_DATA_ROOT) { root = path.resolve(env.HOT_STEP_DATA_ROOT); source = 'HOT_STEP_DATA_ROOT'; }
+  if (env.HOT_STEP_DATA_ROOT) { root = path.resolve(env.HOT_STEP_DATA_ROOT); source = 'HOT_STEP_DATA_ROOT'; }
   else if (ptr?.root) {
     // A transfer must finish before its effective root can be known.
     const selected = ptr.pending ? { root: path.resolve(ptr.root), staleRoot: null } : selectPointerRoot(loc, ptr.root);

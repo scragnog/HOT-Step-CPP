@@ -942,7 +942,7 @@ for (const mode of ['release', 'dev'] as const) {
       }
       const before = snapshot(f.base);
       const report = locateData({ env, checkoutRoot: f.app });
-      const expectedRoot = mode === 'release' && state === 'override' ? override
+      const expectedRoot = state === 'override' ? override
         : state === 'valid' ? saved : mode === 'release' ? f.sibling : null;
       assert.equal(report.root, expectedRoot);
       assert.deepEqual(snapshot(f.base), before, 'locator never writes, even when fallback does not exist');
@@ -1288,4 +1288,28 @@ test('versioned layout: a saved data folder that went missing falls back beside 
   assert.ok(r.ok, !r.ok ? r.error : '');
   assert.equal(r.runtime.dataRoot, f.sibling);
   assert.ok(!fs.existsSync(path.join(f.app, 'app', 'HOT-Step-Data')));
+});
+
+test('dev: HOT_STEP_DATA_ROOT beats a healthy dev pointer without rewriting it, must exist; unset, the pointer wins', async () => {
+  const f = fixture();
+  const co = path.join(f.base, 'co');
+  const saved = path.join(f.base, 'saved');
+  const override = path.join(f.base, 'with space', 'override');
+  initLayout(dataLayout(saved));
+  initLayout(dataLayout(override));
+  const ptrFile = devPointerFile(f.prof, co);
+  writePointer(ptrFile, { version: 1, root: saved, pending: null, checkout: co });
+  const before = fs.readFileSync(ptrFile, 'utf-8');
+  const env = { HOT_STEP_PROFILE_DIR: f.prof } as NodeJS.ProcessEnv;
+  const over = await resolveRuntime({ env: { ...env, HOT_STEP_DATA_ROOT: override }, log: quiet, checkoutRoot: co });
+  assert.ok(over.ok, !over.ok ? over.error : '');
+  assert.deepEqual([over.runtime.mode, over.runtime.dataRoot, over.runtime.override], ['dev', override, override]);
+  assert.equal(over.runtime.envPath, dataLayout(override).envPath);
+  assert.equal(fs.readFileSync(ptrFile, 'utf-8'), before);
+  assert.equal(locateData({ env: { ...env, HOT_STEP_DATA_ROOT: override }, checkoutRoot: co }).source, 'HOT_STEP_DATA_ROOT');
+  const missing = await resolveRuntime({ env: { ...env, HOT_STEP_DATA_ROOT: path.join(f.base, 'nope') }, log: quiet, checkoutRoot: co });
+  assert.ok(!missing.ok && /does not exist/.test(missing.error));
+  const plain = await resolveRuntime({ env, log: quiet, checkoutRoot: co });
+  assert.ok(plain.ok);
+  assert.deepEqual([plain.runtime.dataRoot, plain.runtime.override], [saved, null]);
 });

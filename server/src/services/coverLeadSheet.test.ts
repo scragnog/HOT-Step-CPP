@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { abcCoverLeadSheet, tryAbcCoverLeadSheet, coverRenderRolls, coverScoreEvents, nativeCoverLeadSheet } from './coverLeadSheet.js';
+import { abcCoverLeadSheet, tryAbcCoverLeadSheet, coverRenderRolls, coverScoreEvents, nativeCoverLeadSheet, clearCoverScore } from './coverLeadSheet.js';
 import { abcLeadSheetEvents, leadSheetRoll } from './leadSheetRoll.js';
 
 const abc = 'X:1\nM:4/4\nL:1/8\nQ:1/4=90\nK:C\nV:Vocal\n"C" C | D2 [Q:1/4=180] E2 F2 |';
@@ -62,4 +62,22 @@ test('native boundary rejects missing grid identity and invalid raw seconds', ()
     rawEvents: { melody: [], chords: [] } }), /grid identity/);
   assert.throws(() => nativeCoverLeadSheet(abc, { path: 'native', conversionVersion: 1, bpm: 120,
     grid: { identity: 'a', data: {} }, rawEvents: { melody: [{ onset: -1, offset: 0, pitch: 60 }], chords: [] } }), /Invalid/);
+});
+
+test('approval of ABC with trailing whitespace is unedited; a real edit is abc-edited', () => {
+  const sheet = abcCoverLeadSheet(`${abc}\n\n`, 'sheetsage2');
+  const draft = { assetId: 'a', sha256: 'h', approvedAbc: abc, leadSheet: sheet, leadSheetSource: 'sheetsage2' as const };
+  assert.equal(coverRenderRolls(draft).path, 'abc');
+  assert.equal(coverRenderRolls({ ...draft, approvedAbc: abc.replace('"C" C', '"C" D') }).path, 'abc-edited');
+});
+
+test('source change keeps an imported score and clears a transcribed one', () => {
+  for (const imported of ['musicxml', 'dataset'] as const) {
+    const sheet = abcCoverLeadSheet(abc, 'sheetsage2', imported);
+    const kept = clearCoverScore({ assetId: 'a', sha256: 'h', abc, approvedAbc: abc, scoreSource: imported, leadSheet: sheet }, 'muscriptor');
+    assert.deepEqual([kept.abc, kept.scoreSource, kept.leadSheetSource, kept.leadSheet?.scoreSource, kept.approvedAbc], [abc, imported, 'muscriptor', imported, '']);
+    assert.equal(clearCoverScore({ assetId: 'a', sha256: 'h', abc, scoreSource: imported }, 'muscriptor', true).abc, '', 'new audio clears it');
+  }
+  const cleared = clearCoverScore({ assetId: 'a', sha256: 'h', abc, scoreSource: 'sheetsage2' }, 'muscriptor');
+  assert.deepEqual([cleared.abc, cleared.scoreSource], ['', undefined]);
 });

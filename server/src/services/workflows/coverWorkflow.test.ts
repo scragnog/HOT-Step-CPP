@@ -331,7 +331,7 @@ test('changing source clears approval and rejects an in-flight transcription', a
   const s = setup({ transcribe: async () => { await gate; return { abc: 'X:1\nQ:1/4=120\nK:C\nC|' }; } });
   const opened = await s.open();
   s.documents.update(opened.documentId, 'owner', 1, { ...s.documents.get(opened.documentId, 'owner').data,
-    abc: 'old', approvedAbc: 'old', scoreSource: 'musicxml' });
+    abc: 'old', approvedAbc: 'old', scoreSource: 'sheetsage2' });
   const ref = { ...opened, revision: 2 };
   const pending = s.submit('cover-transcribe', 'pending', ref).job;
   await new Promise(resolve => setImmediate(resolve));

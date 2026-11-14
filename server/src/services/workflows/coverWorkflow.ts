@@ -24,7 +24,7 @@ import {
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
 import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
-import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
+import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore, sameAbc } from '../coverLeadSheet.js';
 import { sheetTranscriberSetting } from '../training/yue2Sheet.js';
 import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
 import { mm3PlankDir, mm3PlankSiblings, readMm3PlankMeta } from '../backends/minimax/plank.js';
@@ -210,7 +210,7 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     title: coverTitle(i), caption, style: caption, lyrics: i.instrumental ? '' : i.lyrics,
     ...(i.lyricsSource ? { lyricsSource: i.lyricsSource } : {}),
     ...scoreMetadata,
-    leadSheetRenderingPath: d.leadSheet && d.leadSheet.abc !== d.approvedAbc ? 'abc-edited' : 'abc',
+    leadSheetRenderingPath: d.leadSheet && !sameAbc(d.leadSheet.abc, d.approvedAbc) ? 'abc-edited' : 'abc',
     instrumental: i.instrumental, source: 'cover-studio', sourceAudioUrl: url,
     // The covering band names the saved file and tags it, as on the ACE path.
     artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
@@ -361,12 +361,13 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const selected = asset(input.assetId || data.assetId, ctx.userId);
     const changed = selected.sha256 !== data.sha256 || (input.assetId || data.assetId) !== data.assetId;
     const next = changed || input.leadSheetSource !== data.leadSheetSource
-      ? clearCoverScore(data, input.leadSheetSource) : data;
+      ? clearCoverScore(data, input.leadSheetSource, changed) : data;
     const updated = docs().update(input.documentId, ctx.userId, input.revision, {
       ...next, assetId: input.assetId || data.assetId, sha256: selected.sha256,
       ...(changed ? { sourceLabel: selected.filename, analysis: null, metadata: null } : {}),
     });
-    return { documentId: updated.id, revision: updated.revision, leadSheetSource: input.leadSheetSource };
+    return { documentId: updated.id, revision: updated.revision, leadSheetSource: input.leadSheetSource,
+      abc: next.abc, scoreSource: next.scoreSource, leadSheet: next.leadSheet };
   } }, { kind: 'cover-caption', input: captionInput, async run(ctx) {
     const input = ctx.input as z.infer<typeof captionInput>;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);

@@ -14,8 +14,8 @@ import { createStudioDraftsRouter } from '../routes/studioDrafts.js';
 // n=finite number inf=Infinity null o=object a=array; '-' = no studio.
 const RECORDED: Record<string, string[]> = {
   'cover|null,o,': ['cover-studio-analysis', 'cover-studio-metadata', 'cover-studio-selectedPreset', 'cover-studio-scoreTempoScale', 'cover-studio-approvedSheet', 'cover-studio-buildLyricsDraft', 'cover-studio-coverGuide',
-    'cover-studio-leadSheetSource', 'cover-studio-heartmulaTags', 'cover-studio-mm3Cover'],
-  'cover|null,': ['cover-studio-prepareV2'],
+    'cover-studio-heartmulaTags', 'cover-studio-mm3Cover'],
+  'cover|null,': ['cover-studio-prepareV2', 'cover-studio-leadSheetSource'],
   'cover|s,': ['cover-studio-artistCaption', 'cover-studio-coverNoiseMethod', 'cover-studio-coverTimbreOverride', 'cover-studio-coverVocalLanguage',
     'cover-studio-lyrics', 'cover-studio-songArtist', 'cover-studio-songTitle', 'cover-studio-sourceAssetId', 'cover-studio-sourceAudioUrl',
     'cover-studio-sourceFileName', 'cover-studio-sourceLatentUrl', 'cover-studio-sourceSongId',
@@ -157,12 +157,18 @@ test('drafts: field checks, stale revisions, studio lock, deleted source and sou
     assert.equal((await call('POST', '/drafts', { body: { ...body, fields: { 'cover-studio-noFsq': 'yes' } } })).status, 400);
     assert.equal((await call('POST', '/drafts', { body: { ...body, sourceAssetId: 'other' } })).status, 400, 'identity must agree with the fields');
     // Lead sheet, HeartMuLa and SA3 cover settings, as Cover Studio mirrors them: create, then a second save.
-    const studioFields = { 'cover-studio-leadSheetSource': { abc: 'X:1' }, 'cover-studio-sheetScoreSource': null, 'cover-studio-chordQuality': 'estimated',
+    const studioFields = { 'cover-studio-leadSheetSource': 'muscriptor', 'cover-studio-sheetScoreSource': null, 'cover-studio-chordQuality': 'estimated',
       'cover-studio-heartmulaTags': {}, 'cover-studio-heartmulaSeed': -1, 'cover-studio-sa3Transform': 0.3, 'cover-studio-sa3Seed': -1, 'cover-studio-sa3Adapter': '' };
     const full = await call('POST', '/drafts', { body: { studio: 'cover', fields: studioFields } });
     assert.equal(full.status, 201, JSON.stringify(full.body));
     assert.equal((await call('PUT', `/drafts/${full.body.document.id}`, { body: { studio: 'cover', fields: { ...studioFields, 'cover-studio-sa3Seed': 7 } },
       expectedRevision: 1 })).status, 200);
+    for (const v of ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet', null]) {
+      assert.equal((await call('POST', '/drafts', { body: { studio: 'cover', fields: { 'cover-studio-leadSheetSource': v } } })).status, 201, String(v));
+    }
+    for (const v of ['bogus', { abc: 'X:1' }]) {
+      assert.equal((await call('POST', '/drafts', { body: { studio: 'cover', fields: { 'cover-studio-leadSheetSource': v } } })).status, 400, JSON.stringify(v));
+    }
     const created = await call('POST', '/drafts', { body });
     assert.equal(created.status, 201);
     const doc = created.body.document;

@@ -36,10 +36,13 @@ export function nativeCoverLeadSheet(abc: string, timing: CoverLeadSheetResult['
   return { abc, scoreSource: 'yourmt3-chordnet', leadSheetSource: 'yourmt3-chordnet', chordQuality: 'transcribed', timing };
 }
 
+/** Approval stores trimmed ABC, so compare trimmed on both sides. */
+export const sameAbc = (a: string, b: string) => a.trim() === b.trim();
+
 export function coverRenderRolls(draft: CoverDraft): { rolls: HeartmulaCoverRolls; path: 'abc' | 'abc-edited' | 'native' } {
   if (!draft.approvedAbc) throw new Error('Review and approve the score first');
   const sheet = draft.leadSheet;
-  const unchanged = sheet?.abc === draft.approvedAbc && sheet.leadSheetSource === draft.leadSheetSource;
+  const unchanged = sheet && sameAbc(sheet.abc, draft.approvedAbc) && sheet.leadSheetSource === draft.leadSheetSource;
   const native = unchanged && sheet.timing.path === 'native';
   const r = native ? leadSheetRoll({ ...sheet.timing.rawEvents, bpm: sheet.timing.bpm, chordTiming: 'seconds' })
     : abcLeadSheetRoll(coverRollAbc(draft.approvedAbc));
@@ -49,7 +52,14 @@ export function coverRenderRolls(draft: CoverDraft): { rolls: HeartmulaCoverRoll
       drum_pianoroll: Array.from(r.drum_pianoroll), context_mask: Array.from(r.context_mask) } };
 }
 
-export function clearCoverScore(draft: CoverDraft, source: CoverLeadSheetSource): CoverDraft {
+/** A source switch drops the score, except an imported one (MusicXML or dataset sidecar):
+ *  that is the user's own notation, not a transcription, so only the transcriber label
+ *  moves. A change of audio (`audioChanged`) still clears everything. Approval is dropped either way. */
+export function clearCoverScore(draft: CoverDraft, source: CoverLeadSheetSource, audioChanged = false): CoverDraft {
+  if (!audioChanged && (draft.scoreSource === 'dataset' || draft.scoreSource === 'musicxml')) {
+    return { ...draft, leadSheetSource: source, approvedAbc: '',
+      ...(draft.leadSheet ? { leadSheet: { ...draft.leadSheet, leadSheetSource: source } } : {}) };
+  }
   const { leadSheet: _sheet, scoreSource: _score, ...rest } = draft;
   return { ...rest, leadSheetSource: source, abc: '', approvedAbc: '' };
 }

@@ -9,6 +9,7 @@
 
 import type { StudioKind } from './studioDrafts.js';
 import { prepareV2Problem } from './yue2Prepare.js';
+import { leadSheetSourceSchema } from './studioWorkflows.js';
 
 const keys = (list: string, prefix = '') => list.split(' ').map(x => `${prefix}${x}`);
 
@@ -24,8 +25,8 @@ export const CREATE_CAPTION_SOURCE_KEY = /^(hs-mm3CaptionSource:[^:]+|hs-mm3Capt
 const BOOLEAN = new Set(keys('hs-instrumental hs-beat-intro cover-studio-datasetAnalysis cover-studio-noFsq cover-studio-coverInstrumental cover-studio-advancedMode cover-studio-keepChords cover-studio-buildMode hs-storm-instrumental hs-storm-beat-intro'));
 const NUMBER = new Set(keys('hs-bpm hs-duration hs-intro-bars cover-studio-audioCoverStrength cover-studio-coverNoiseStrength cover-studio-tempoScale cover-studio-pitchShift cover-studio-bpmCorrection cover-studio-sepLevel cover-studio-coverBpm cover-studio-coverKeyShift cover-studio-coverCfgScale cover-studio-heartmulaSeed cover-studio-sa3Transform cover-studio-sa3Seed hs-repaint-regionStart hs-repaint-regionEnd hs-repaint-crossfadeFrames hs-storm-intro-bars hs-storm-bpm hs-storm-duration-v2 hs-storm-deck-a-bpm hs-storm-deck-b-bpm'));
 const NULLABLE_NUMBER = new Set(keys('cover-studio-selectedArtistId cover-studio-bpmOverride cover-studio-selectedYue2ArtistId cover-studio-selectedYue2LyricsSetId'));
-const NULLABLE_STRING = new Set(keys('cover-studio-lyricsSource cover-studio-keyOverride cover-studio-sheetScoreSource cover-studio-chordQuality'));
-const OBJECT = new Set(keys('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset cover-studio-scoreTempoScale cover-studio-approvedSheet cover-studio-prepareV2 cover-studio-buildLyricsDraft cover-studio-coverGuide cover-studio-leadSheetSource cover-studio-heartmulaTags cover-studio-mm3Cover hs-repaint-sourceSong hs-sb-sourceRef'));
+const NULLABLE_STRING = new Set(keys('cover-studio-lyricsSource cover-studio-keyOverride cover-studio-sheetScoreSource cover-studio-chordQuality cover-studio-leadSheetSource'));
+const OBJECT = new Set(keys('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset cover-studio-scoreTempoScale cover-studio-approvedSheet cover-studio-prepareV2 cover-studio-buildLyricsDraft cover-studio-coverGuide cover-studio-heartmulaTags cover-studio-mm3Cover hs-repaint-sourceSong hs-sb-sourceRef'));
 const ARRAY = new Set(keys('cover-studio-scoreSections cover-studio-scoreCuts'));
 
 /** Keys whose browser value is a raw string, not JSON (imports keep it as is). */
@@ -59,7 +60,9 @@ export function validDraftField(key: string, value: unknown): boolean {
     case 'boolean': return typeof value === 'boolean';
     case 'number': return typeof value === 'number' && Number.isFinite(value);
     case 'number|null': return value === null || (typeof value === 'number' && Number.isFinite(value));
-    case 'string|null': return value === null || typeof value === 'string';
+    case 'string|null':
+      if (key === 'cover-studio-leadSheetSource') return value === null || leadSheetSourceSchema.safeParse(value).success;
+      return value === null || typeof value === 'string';
     case 'object|null':
       // The Prepare document is checked whole (contracts/yue2Prepare.ts).
       if (key === 'cover-studio-prepareV2' && value !== null) return prepareV2Problem(value) === null;

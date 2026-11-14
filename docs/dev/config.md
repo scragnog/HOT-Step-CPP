@@ -373,7 +373,7 @@ The Workers panel calls `GET /api/workers`, which requests each worker's token-g
 | Variable | Default | Read in | Effect |
 |---|---|---|---|
 | `HOT_STEP_ROOT` | unset | `config.ts` | Project root. Setting it turns on portable mode, which among other things downloads the CUDA runtime DLLs on a Windows CUDA build's first launch. Set by the portable launchers `release/HOT-Step.bat` and `release/HOT-Step.sh`, and by the stable launcher to the selected `app/<id>` |
-| `HOT_STEP_DATA_ROOT` | unset | `dataroot/bootstrap.ts` | Release only. Use this data folder for this process, ignoring `data-location.json`. A scheduled move does not run while it is set |
+| `HOT_STEP_DATA_ROOT` | unset | `dataroot/bootstrap.ts` | Use this data folder for this process (release and dev; it must exist), ignoring `data-location.json`. A scheduled move does not run while it is set |
 | `HOT_STEP_PROFILE_DIR` | unset | `dataroot/paths.ts` | Replaces the profile folder that holds `data-location.json` and the dev pointers. Meant for test fixtures; the stable launcher also pins it |
 | `HOT_STEP_INSTALL_ROOT` | unset | `routes/updates.ts` | Set by the stable launcher (`release/updater/launcher.mjs`) to its install folder, the parent of `app/<id>/`. Updater state lives in its `updater/` folder |
 | `HOT_STEP_UPDATER_DIR` | unset | `services/updates/maintenance.ts` | Set by the stable launcher to `<install>/updater`. Startup reads the maintenance lease and `transaction.json` there before opening SQLite |

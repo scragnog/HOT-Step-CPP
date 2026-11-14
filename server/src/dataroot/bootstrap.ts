@@ -153,6 +153,17 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
   const { appRoot: checkout, profileDir: prof, pointerPath: ptrFile } = pointerLocation(env, opts.checkoutRoot ?? CHECKOUT_ROOT);
   const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
   try {
+    // HOT_STEP_DATA_ROOT follows the release rules: it must exist, beats the pointer,
+    // and the pointer is neither read nor rewritten.
+    if (env.HOT_STEP_DATA_ROOT) {
+      const root = path.resolve(env.HOT_STEP_DATA_ROOT);
+      if (!fs.existsSync(root)) return fail(`HOT_STEP_DATA_ROOT is ${root}, which does not exist.`);
+      const heldRoot = leaseRefusal(env, root, ptrFile);
+      if (heldRoot) return heldRoot;
+      initLayout(dataLayout(root));
+      log(`[Data] Using HOT_STEP_DATA_ROOT: ${root}`);
+      return { ok: true, runtime: { ...dev(checkout, prof, ptrFile, root), override: root } };
+    }
     let ptr: Pointer | null;
     try { ptr = readPointer(ptrFile); } catch (e: any) { return fail(`${e.message}. Fix or delete it, then restart.`); }
     if (!ptr || (!ptr.root && !ptr.pending)) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
