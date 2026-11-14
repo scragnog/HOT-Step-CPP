@@ -346,7 +346,8 @@ function TakeWave({ peaks, from, to, playhead, crop, canIn, colour, onSeek }: {
 }
 
 /** "vocal melody only, free tempo, source key, condition strength 1, AR strength 0.6" */
-export function settingsSummary(s: BuildSettings, keyLabel: string): string {
+export function settingsSummary(s: BuildSettings, keyLabel: string, cover = true): string {
+  if (!cover) return `condition strength ${s.cfgScale}, AR strength ${s.arStrength}`;
   const tempo = typeof s.tempo === 'number' ? `${s.tempo} BPM` : s.tempo === 'free' ? 'free tempo' : 'source tempo';
   const key = s.keyShift === 0 ? 'source key' : `${s.keyShift > 0 ? '+' : ''}${s.keyShift} st${keyLabel ? ` (${transposeKey(keyLabel, s.keyShift)})` : ''}`;
   return [s.voices === 'vocal' ? 'vocal melody only' : 'vocal + instrumental line', tempo, key,
@@ -357,8 +358,8 @@ export function settingsSummary(s: BuildSettings, keyLabel: string): string {
  *  Prepare page's and change at once. A build has its own: edits wait for
  *  Apply, which rebuilds the build's request before its first keep and starts
  *  a fresh build after it. */
-function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBpm }: {
-  value: BuildSettings; onApply: (settings: BuildSettings) => void; build: boolean; kept: boolean; disabled: boolean; keyLabel: string; sourceBpm: number;
+function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBpm, cover }: {
+  value: BuildSettings; onApply: (settings: BuildSettings) => void; build: boolean; kept: boolean; disabled: boolean; keyLabel: string; sourceBpm: number; cover: boolean;
 }) {
   const saved = JSON.stringify(value);
   const [draft, setDraft] = useState(value);
@@ -373,7 +374,7 @@ function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBp
   if (kept && !open) return (
     <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-white/10 px-4 py-2 text-xs text-zinc-500">
       <Lock className="w-3 h-3" />
-      <span className="min-w-0 flex-1">Settings locked: the kept sections were built with {settingsSummary(value, keyLabel)}. Changing them starts a fresh build.</span>
+      <span className="min-w-0 flex-1">Settings locked: the kept sections were built with {settingsSummary(value, keyLabel, cover)}. Changing them starts a fresh build.</span>
       <button type="button" onClick={() => setOpen(true)} disabled={disabled}
         className="flex items-center gap-1 text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Change<ChevronDown className="w-3 h-3" /></button>
     </div>
@@ -381,24 +382,24 @@ function SettingsRow({ value, onApply, build, kept, disabled, keyLabel, sourceBp
   return (
     <fieldset disabled={disabled} className="border-b border-zinc-200 dark:border-white/10 px-4 py-2 space-y-2">
       <div className="flex flex-wrap items-start gap-x-5 gap-y-3 [&>*]:min-w-[150px] [&>*]:flex-1" aria-label="Build settings">
-        <div className="space-y-2">
+        {cover && <div className="space-y-2">
           <ParamLabel label="Voices" info="Vocal melody alone gives the new style room to choose its instruments. Both keeps the transcribed instrumental line too." />
           <StyledSelect accent="pink" value={shown.voices} disabled={disabled} onChange={v => set({ voices: v as BuildSettings['voices'] })}
             options={[{ value: 'vocal', label: 'Vocal melody only' }, { value: 'both', label: 'Vocal + instrumental line' }]} />
-        </div>
-        <div className="space-y-2">
+        </div>}
+        {cover && <div className="space-y-2">
           <ParamLabel label="Tempo" info="Free removes the score tempo; Source retains it; Set writes a target BPM using the score's beat unit." />
           <StyledSelect accent="pink" value={tempoMode} disabled={disabled}
             onChange={v => set({ tempo: v === 'set' ? (typeof shown.tempo === 'number' ? shown.tempo : Math.max(20, Math.min(300, sourceBpm))) : v as 'free' | 'source' })}
             options={[{ value: 'free', label: 'Free (style decides)' }, { value: 'source', label: 'Source tempo' }, { value: 'set', label: 'Set BPM' }]} />
-        </div>
-        {typeof shown.tempo === 'number' && <EditableSlider label="Target BPM" value={shown.tempo} min={20} max={300} step={1} disabled={disabled}
+        </div>}
+        {cover && typeof shown.tempo === 'number' && <EditableSlider label="Target BPM" value={shown.tempo} min={20} max={300} step={1} disabled={disabled}
           onChange={v => set({ tempo: v })} helpText={`Source: ${sourceBpm} BPM`} />}
-        <EditableSlider label="Pitch Shift" value={shown.keyShift} min={-12} max={12} step={1} defaultValue={0} disabled={disabled || !keyLabel}
+        {cover && <EditableSlider label="Pitch Shift" value={shown.keyShift} min={-12} max={12} step={1} defaultValue={0} disabled={disabled || !keyLabel}
           onChange={v => set({ keyShift: v })}
           formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
           helpText={keyLabel ? `Source: ${keyLabel}.` : 'No supported score key found.'}
-          tooltip="Moves the score up or down by whole semitones, within twelve." />
+          tooltip="Moves the score up or down by whole semitones, within twelve." />}
         <EditableSlider label="Condition strength" value={shown.cfgScale} min={0.1} max={2} step={0.05} defaultValue={1} disabled={disabled}
           onChange={v => set({ cfgScale: v })} tooltip="Tightens style, lyrics and score together." />
         <CoverArStrength value={shown.arStrength} onChange={v => set({ arStrength: v })} disabled={disabled} />
@@ -440,6 +441,10 @@ interface PageProps {
   keyLabel: string;
   sourceBpm: number;
   title: string;
+  /** False for a build that is not a cover (Custom-Gen's): the voices, tempo and key shift controls do not show. Default true. */
+  coverSettings?: boolean;
+  /** The back button's label. Default "Prepare". */
+  backLabel?: string;
   /** The score in source order, and the source recording ('' when there is none or a cut means the
    *  score no longer follows it), for the source bar's playback popup. */
   scoreAbc: string;
@@ -670,7 +675,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       {/* Top bar: what is being built and how. */}
       <div className="flex flex-wrap items-center gap-3 border-b border-zinc-200 dark:border-white/10 px-4 py-2">
         <button type="button" onClick={p.onBack} className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300 hover:text-cyan-600">
-          <ArrowLeft className="w-3.5 h-3.5" />Prepare</button>
+          <ArrowLeft className="w-3.5 h-3.5" />{p.backLabel ?? 'Prepare'}</button>
         <p className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900 dark:text-white">{p.title}</p>
         <div className="relative">
           <button type="button" onClick={() => setMenu(m => !m)} disabled={!s} aria-label="Build actions"
@@ -691,7 +696,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
       </div>
 
       <SettingsRow value={p.settings} onApply={p.onSettings} build={!!s} kept={!!s?.kept.length} disabled={!editable}
-        keyLabel={p.keyLabel} sourceBpm={p.sourceBpm} />
+        keyLabel={p.keyLabel} sourceBpm={p.sourceBpm} cover={p.coverSettings !== false} />
 
       {/* Source bar: the score as it is. Song bar: what the output will be, kept occurrences first. */}
       <div className="border-b border-zinc-200 dark:border-white/10 px-4 py-3 space-y-2">

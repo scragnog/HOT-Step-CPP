@@ -1018,7 +1018,7 @@ export function setOccurrenceLyrics(id: string, userId: string, revision: unknow
   return view(stored);
 }
 
-/** Replaces a cover build's settings before its first keep: voices, tempo,
+/** Replaces a build's settings before its first keep. A cover build takes voices, tempo,
  *  key (with its keyShift), condition strength and AR strength, as the
  *  one-shot cover params carry them. `toRequest` rebuilds the request the way
  *  a render would and validates the params, so params (what Save song
@@ -1033,16 +1033,25 @@ export function applyBuildSettings(id: string, userId: string, revision: unknown
   if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
   if (stored.kept.length) throw new TakesError('The kept sections were built with these settings; start a fresh build to change them.', 409);
   const cover = stored.params.yue2Cover;
-  if (!cover || typeof cover !== 'object') throw new TakesError('Only a cover build has these settings.');
+  const isCover = !!cover && typeof cover === 'object';
   if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new TakesError('settings are required.');
   const { voices, tempo, key, keyShift, cfgScale, arStrength } = settings as Record<string, unknown>;
   if (typeof arStrength !== 'number' || !Number.isFinite(arStrength) || arStrength < 0 || arStrength > 10) {
     throw new TakesError('AR strength must be a number from 0 to 10.');
   }
-  const nextCover: Record<string, unknown> = { ...cover, voices, tempo, key, cfgScale };
-  if (keyShift === undefined) delete nextCover.keyShift; else nextCover.keyShift = keyShift;
-  const params = { ...stored.params, yue2Cover: nextCover, yue2CfgScale: cfgScale,
-    yue2Pick: { ...(stored.params.yue2Pick as Record<string, unknown> | undefined), lmAdapterArScale: arStrength } };
+  const pick = { ...(stored.params.yue2Pick as Record<string, unknown> | undefined), lmAdapterArScale: arStrength };
+  let params: Record<string, unknown>;
+  if (isCover) {
+    const nextCover: Record<string, unknown> = { ...(cover as Record<string, unknown>), voices, tempo, key, cfgScale };
+    if (keyShift === undefined) delete nextCover.keyShift; else nextCover.keyShift = keyShift;
+    params = { ...stored.params, yue2Cover: nextCover, yue2CfgScale: cfgScale, yue2Pick: pick };
+  } else {
+    // A Create build has no cover transforms: only condition strength and AR strength.
+    if (typeof cfgScale !== 'number' || !Number.isFinite(cfgScale) || cfgScale <= 0 || cfgScale > 25) {
+      throw new TakesError('Condition strength must be a number above 0, up to 25.');
+    }
+    params = { ...stored.params, yue2CfgScale: cfgScale, yue2Pick: pick };
+  }
   if (JSON.stringify(params) === JSON.stringify(stored.params)) return view(stored);
   const request = plainRequest(toRequest(params));
   const sections = scoreSections(request.abc ?? '').map(s => ({ label: s.label.trim(), startBar: s.startBar }));

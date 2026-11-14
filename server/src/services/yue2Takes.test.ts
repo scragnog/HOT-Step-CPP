@@ -1033,6 +1033,26 @@ test('cover settings: rebuilt into params and request before the first keep, loc
   });
 });
 
+test('a Create build (no cover block) takes CFG and AR strength before its first keep', async t => {
+  const { applyBuildSettings } = await import('./yue2Takes.js');
+  const previousDir = config.data.dir;
+  const dir = fs.mkdtempSync(path.resolve('.test-yue2-create-settings-'));
+  config.data.dir = dir;
+  t.after(() => { config.data.dir = previousDir; fs.rmSync(dir, { recursive: true, force: true }); });
+  const toRequest = (p: Record<string, unknown>) => ({ style: 'ambient', cot: 'full', lyrics: String(p.lyrics), abc: String(p.yue2Abc),
+    cfg_scale: p.yue2CfgScale, lm_adapter_scale: (p.yue2Pick as { lmAdapterArScale: number }).lmAdapterArScale } as Yue2SynthRequest);
+  const params = { lyrics, yue2Abc: score, yue2CfgScale: 1.5, yue2Pick: { lmAdapterAr: 'a.safetensors', lmAdapterArScale: 0.6 } };
+  const s = createBuildSession(params, toRequest(params), 'user');
+  const next = applyBuildSettings(s.id, 'user', 0, { cfgScale: 2, arStrength: 0.2 }, toRequest);
+  assert.equal(next.revision, 1);
+  assert.equal(next.params.yue2CfgScale, 2);
+  assert.deepEqual(next.params.yue2Pick, { lmAdapterAr: 'a.safetensors', lmAdapterArScale: 0.2 });
+  assert.equal(next.params.yue2Cover, undefined, 'no cover block appears');
+  assert.equal(applyBuildSettings(s.id, 'user', 1, { cfgScale: 2, arStrength: 0.2 }, toRequest).revision, 1, 'same settings change nothing');
+  assert.throws(() => applyBuildSettings(s.id, 'user', 1, { cfgScale: 0, arStrength: 0.2 }, toRequest), /Condition strength/);
+  assert.throws(() => applyBuildSettings(s.id, 'user', 1, { cfgScale: 2, arStrength: 11 }, toRequest), /AR strength/);
+});
+
 test('a build from a Prepare document checks it once and keeps the confirmed pair', async () => {
   const { structureHash } = await import('../contracts/yue2Prepare.js');
   const hash = structureHash(score);

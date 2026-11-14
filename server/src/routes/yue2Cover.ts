@@ -275,8 +275,8 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   // (o3...) to text, or null to sing the build's lyrics again.
   router.post('/build/:id/occurrence-lyrics', (req: Request, res: Response) =>
     takes(res, () => setOccurrenceLyrics(String(req.params.id), authenticate(req)!, req.body?.revision, req.body?.edits)));
-  // Before the first keep: `settings` holds the cover's voices, tempo, key,
-  // keyShift and cfgScale (as params.yue2Cover carries them) and arStrength.
+  // Before the first keep: `settings` holds a cover build's voices, tempo, key,
+  // keyShift and cfgScale (as params.yue2Cover carries them) and arStrength; a Create build takes cfgScale and arStrength only.
   router.post('/build/:id/settings', (req: Request, res: Response) => {
     const userId = authenticate(req)!;
     return takes(res, () => applyBuildSettings(String(req.params.id), userId, req.body?.revision, req.body?.settings,

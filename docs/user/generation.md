@@ -635,6 +635,18 @@ Leaving a status view stops that view's observation; use the job's explicit
 cancel control to stop server work. A completed server-queued render reaches
 the Library once, including when both the queue and its submitting view follow it.
 
+## Build by section (YuE2)
+
+Custom-Gen has two tabs when the engine is YuE2. **One-shot** is the usual page. **Build by section** builds the song one section at a time, the way Cover Studio's Build page does: pick the next sections, make several takes, keep one, move on. The tab is greyed out, with the reason in its tooltip, on other engines and when Chain of Thought is Off (the build follows a planned score).
+
+1. Fill in the style and lyrics on the One-shot tab, with a `[tag]` line for each section.
+2. Open Build by section and click **Plan the score**. The planner writes a score from your form. If its sections do not match your lyric tags, the tab says so; click **Re-plan with a new seed** until they pair. A lead sheet you pasted on the One-shot tab is used as it is.
+3. Click a section on the Source bar to add it to the song, then **Generate N takes**. Keep one take, then do the next section. A repeat (a second chorus) follows the score lines of the first. Takes differ in performance, not in chords.
+4. **Condition strength** and **AR strength** can be changed until you keep the first take; Apply rebuilds the build and drops the takes made before it. After a keep they are locked, and changing them starts a fresh build.
+5. **Render Final Song** saves the kept sections as a song in the Library, with the usual post-processing.
+
+Voices, tempo and key shift are cover settings and do not appear here. The open build is remembered across reloads, and is forgotten once its song is saved.
+
 ## Related
 
 - [Custom-Gen](studios/create.md)

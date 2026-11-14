@@ -61,9 +61,11 @@ interface CreatePanelProps {
   onGenerate: (params: Partial<GenerationParams>, intent?: CreateIntent) => void;
   activeJobCount: number;
   reuseData?: { song: Song; timestamp: number } | null;
+  /** Filled with a function returning the content params Generate would send, for the Build by section tab. */
+  paramsRef?: React.MutableRefObject<(() => Partial<GenerationParams>) | null>;
 }
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, paramsRef }) => {
   const { t } = useTranslation();
   const mm3Mode = useBackendStore(s => s.activeBackendId === 'minimax-m3'
     && (s.capabilities[s.activeBackendId]?.core.captionSource ?? 'mm3-tracks') === 'mm3-tracks');
@@ -495,7 +497,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     ? { autoExpand: false, loraTrigger: '', beatIntro: false, introBars }
     : { autoExpand, loraTrigger, beatIntro, introBars };
 
-  const handleGenerate = () => {
+  /** The content params a render would send, as Generate assembles them. */
+  const assembleParams = () => {
     // Wildcard auto-expand: reproducible from the DiT seed when it's locked,
     // fresh randomness when the seed is random anyway
     const wcSeed = gp.randomSeed ? randomWildcardSeed() : Number(gp.seed);
@@ -510,6 +513,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     }, { mm3Mode, yue2Active: activeBackendId === YUE2_BACKEND_ID,
       durationMax: useBackendStore.getState().capabilities[activeBackendId]?.core.duration.max,
       resolvedCaption, resolvedLyrics });
+    return params;
+  };
+  if (paramsRef) paramsRef.current = assembleParams;
+
+  const handleGenerate = () => {
+    const params = assembleParams();
     // A pasted lead sheet (#181) is the score; previewing would plan a new one
     // and throw it away.
     if (yue2Mode && !continuation && yue2PreviewScore && !yue2AbcSupplied) {

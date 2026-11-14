@@ -25,6 +25,7 @@ import { SONG_VIEWS, invalidateSongs, patchLibrary, patchSong, removeSongs, song
 import { waitForQuery } from './queries/wait';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { CreatePanel } from './components/create/CreatePanel';
+import { CreateBuildTab, CreateTabs } from './components/create/CreateBuildTab';
 import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
@@ -603,6 +604,25 @@ const AppContent: React.FC = () => {
   // Global params from context
   const globalParams = useGlobalParams();
 
+  // Content params (from CreatePanel) merged with the global engine params and the settings a render carries.
+  // The Build by section tab starts its session from the same params.
+  const createParamsRef = useRef<(() => Partial<GenerationParams>) | null>(null);
+  const enrichCreateParams = useCallback((contentParams: Partial<GenerationParams>) => ({
+    ...globalParams.getGlobalParams(),
+    ...contentParams,
+    source: 'create',
+    coResident: settings.coResident,
+    cacheLmCodes: settings.cacheLmCodes,
+    parallelWhisper: settings.parallelWhisper,
+    parallelQualityEval: settings.parallelQualityEval,
+    parallelCoverArt: settings.parallelCoverArt,
+  }), [globalParams, settings]);
+  const savedBuildSessions = useMemo(() => new Set(songs.flatMap(s => {
+    const id = ((s.generationParams ?? (s as any).generation_params) as any)?.yue2Build?.session;
+    return typeof id === 'string' ? [id] : [];
+  })), [songs]);
+  const [createTab, setCreateTab] = usePersistedState<'oneshot' | 'build'>('hs-createTab', 'oneshot');
+
   // Handle generation — merges content params (from CreatePanel) with global engine params (from context)
   const handleGenerate = useCallback((contentParams: Partial<GenerationParams>, contentIntent?: CreateIntent) => {
     if (!token) return;
@@ -610,16 +630,7 @@ const AppContent: React.FC = () => {
     void requestNotifyPermissionFromGesture();
     // Merge: global engine params + content-specific params + settings
     const engineParams = globalParams.getGlobalParams();
-    const enrichedParams = {
-      ...engineParams,
-      ...contentParams,
-      source: 'create',
-      coResident: settings.coResident,
-      cacheLmCodes: settings.cacheLmCodes,
-      parallelWhisper: settings.parallelWhisper,
-      parallelQualityEval: settings.parallelQualityEval,
-      parallelCoverArt: settings.parallelCoverArt,
-    };
+    const enrichedParams = enrichCreateParams(contentParams);
 
     enqueueSimpleGen(
       enrichedParams,
@@ -630,7 +641,7 @@ const AppContent: React.FC = () => {
         parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
         parallelCoverArt: settings.parallelCoverArt } } : undefined,
     );
-  }, [token, settings, globalParams, handleSongCreated]);
+  }, [token, settings, globalParams, enrichCreateParams, handleSongCreated]);
 
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
@@ -1146,15 +1157,24 @@ const AppContent: React.FC = () => {
       );
     }
 
-    // Default: create view
+    // Default: create view, a studio with two tabs: One-shot (the page below) and Build by section.
+    // The one-shot page stays mounted under the Build tab, since it holds the form the build starts from.
     // Layout: side-by-side on wide landscape, stacked vertically on narrow (<1024px)
     // and on portrait screens >= 1024px (e.g. 1080x1920 at 100%).
     return (
-      <div className="flex flex-1 min-w-0 min-h-0
+      <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+      <CreateTabs tab={createTab} onTab={setCreateTab} />
+      {createTab === 'build' && <CreateBuildTab token={token} getParams={() => {
+        const content = createParamsRef.current?.();
+        return content ? enrichCreateParams(content) as Record<string, unknown> : null;
+      }} onSave={(params) => { if (token) void enqueueSimpleGen(enrichCreateParams(params as Partial<GenerationParams>), token, handleSongCreated); }}
+        savedSessions={savedBuildSessions}
+        onOneShot={() => setCreateTab('oneshot')} />}
+      <div className={`flex flex-1 min-w-0 min-h-0
         min-[1024px]:flex-row max-[1023px]:flex-col
         min-[1024px]:overflow-clip max-[1023px]:overflow-visible
         portrait-wide:flex-col
-        portrait-wide:overflow-visible">
+        portrait-wide:overflow-visible ${createTab === 'build' ? 'hidden' : ''}`}>
         {/* Create Panel — resizable on wide landscape, full-width on narrow/portrait.
             Tailwind's ! prefix generates !important which overrides inline style. */}
         <DiscoPulseWrapper
@@ -1169,6 +1189,7 @@ const AppContent: React.FC = () => {
             onGenerate={handleGenerate}
             activeJobCount={activeJobCount}
             reuseData={reuseData}
+            paramsRef={createParamsRef}
           />
         </DiscoPulseWrapper>
 
@@ -1242,6 +1263,7 @@ const AppContent: React.FC = () => {
 
         {/* Right Sidebar — resizable; hidden on narrow / portrait stacked layout */}
         {renderSongDetails(true)}
+      </div>
       </div>
     );
   };
