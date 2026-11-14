@@ -2441,6 +2441,8 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
     baseline: p.baseline !== false,
     scaleMlp: flt('scaleMlp'),
     scaleAttn: flt('scaleAttn'),
+    ...(Array.isArray(p.rungs)
+      ? { rungs: p.rungs.map(Number).filter(n => Number.isInteger(n) && n > 0) } : {}),
   };
 }
 
@@ -3183,6 +3185,9 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
     }
     // Previews are a per-launch choice too. Absent = whatever the run used.
     if (b.preview !== undefined) opts.preview = parseMm3PreviewOptions(b.preview);
+    // A rung pick names steps of the step count it was made for; a continuation
+    // moves the final step, so an inherited pick would skip the new rungs.
+    else if (opts.preview?.rungs) opts.preview = { ...opts.preview, rungs: undefined };
     // attnBackend and prefixN are RECIPE knobs (which attention formulation
     // ran, how much trainable history), not adapter-identity ones — same
     // re-decidable status train-lm's own attnBackend has (aceTrain.ts). Every

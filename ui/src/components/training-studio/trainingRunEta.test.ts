@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatDuration, previewsFromRows, trainingRunEta } from './trainingRunEta.ts';
+import { checkpointRungs, formatDuration, previewsFromRows, trainingRunEta } from './trainingRunEta.ts';
 
 const take = (kind: string, step: number, renderMs: number | null, pauseMs: number | null) =>
   ({ kind, step, status: 'done', renderMs, pauseMs });
@@ -37,4 +37,12 @@ test('MM3 rows fold to one entry per checkpoint: renders add up, the pause rides
   const input = { step: 150, totalSteps: 500, msPerStep: 1000, everySteps: 100 };
   assert.equal(trainingRunEta({ ...input, previews: previews.slice(0, 1) })?.previewMs, 45_000);
   assert.equal(trainingRunEta({ ...input, previews })?.previewMs, 120_000);
+});
+
+test('checkpoint rungs: every multiple below the end, then the final; a rung pick trims the ETA', () => {
+  assert.deepEqual(checkpointRungs(900, 100), [100, 200, 300, 400, 500, 600, 700, 800, 900]);
+  assert.deepEqual(checkpointRungs(720, 100), [100, 200, 300, 400, 500, 600, 700, 720]);
+  assert.deepEqual(checkpointRungs(900, 0), []);
+  // Last two of nine picked, at step 150: two takes left, not eight.
+  assert.equal(trainingRunEta({ step: 150, totalSteps: 900, msPerStep: 1, everySteps: 100, rungs: [800, 900], previews: [] })?.previewsLeft, 2);
 });

@@ -12,6 +12,8 @@ export interface TrainingRunEtaInput {
   msPerStep: number | null;
   /** Steps between previews; 0 = previews off. */
   everySteps: number;
+  /** The rungs that render, when not all of them (checkpointRungs). */
+  rungs?: number[];
   previews: Array<{ kind: string; step: number; status: string; renderMs: number | null; pauseMs: number | null }>;
 }
 
@@ -30,10 +32,19 @@ export function trainingRunEta(i: TrainingRunEtaInput): TrainingRunEta | null {
   const base = done.find(p => p.kind === 'base' && p.renderMs);
   const previewMs = paused?.pauseMs ?? base?.renderMs ?? null;
   // Checkpoint takes at every multiple of everySteps after now and before the end, then the final take.
-  const previewsLeft = i.everySteps > 0
-    ? Math.max(0, Math.floor((i.totalSteps - 1) / i.everySteps) - Math.floor(i.step / i.everySteps)) + 1
-    : 0;
+  const previewsLeft = i.everySteps <= 0 ? 0
+    : i.rungs ? i.rungs.filter(r => r > i.step).length
+    : Math.max(0, Math.floor((i.totalSteps - 1) / i.everySteps) - Math.floor(i.step / i.everySteps)) + 1;
   return { ms: (i.totalSteps - i.step) * i.msPerStep + previewsLeft * (previewMs ?? 0), previewsLeft, previewMs };
+}
+
+/** The checkpoints a run with a step preview cadence renders at: every multiple
+ *  of `everySteps` below `steps`, then the final step. */
+export function checkpointRungs(steps: number, everySteps: number): number[] {
+  if (!(steps > 0) || !(everySteps > 0)) return [];
+  const out: number[] = [];
+  for (let s = everySteps; s < steps; s += everySteps) out.push(s);
+  return [...out, steps];
 }
 
 export function formatDuration(ms: number): string {

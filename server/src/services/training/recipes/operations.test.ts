@@ -75,3 +75,11 @@ test('built-in, stored and explicit default layers retain false, zero and proven
   assert.deepEqual(value.provenance, { steps: 'override', enabled: 'stored' });
   assert.deepEqual(value.stored, { steps: 250, enabled: false });
 });
+
+test('an MM3 rung pick reaches the preview block; no pick sends none', () => {
+  const mm3 = otherCases.find(c => c.family === 'mm3-lm' && (c.formerBody as { preview?: unknown }).preview)!;
+  const body = (rungs: unknown) => mm3ExecutionBody({ ...mm3.form, previewRungs: rungs }, mm3.activePreset!,
+    mm3.trainLaunder!, mm3.flashSupported!) as { preview: { rungs?: number[] } };
+  assert.deepEqual(body([800, 900]).preview.rungs, [800, 900]);
+  assert.equal('rungs' in body(null).preview, false);
+});

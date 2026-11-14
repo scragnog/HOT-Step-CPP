@@ -35,7 +35,7 @@ import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { TrainingEtaLine } from './TrainingEtaLine';
-import { previewsFromRows, trainingRunEta } from './trainingRunEta';
+import { checkpointRungs, previewsFromRows, trainingRunEta } from './trainingRunEta';
 import { TrainingPreviewSettings, TrainingPresetChoice } from './TrainingPreviewPanel';
 import { TrainingBatchCard, TrainingRunPanel } from './Yue2StageCard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
@@ -95,6 +95,9 @@ interface FormState {
   prefixN: number;
   /** '' = auto-pick (server-side ladder — see mm3Preview.ts). */
   previewSongId: string;
+  /** Checkpoint steps picked to render. null, or a pick that names a step the
+   *  current steps and cadence no longer have, = the last two rungs. */
+  previewRungs: number[] | null;
   gradAccum: number;
   seed: number;
   warmup: number;
@@ -141,7 +144,7 @@ const FORM_KEY = 'hs-mm3-form:';
 /** Named presets, MM3's own list; YuE2's live under their own key. */
 const PRESETS_KEY = 'hs-mm3-presets';
 /** Per-run or per-dataset values a preset must not carry. */
-const PRESET_EXCLUDED: ReadonlySet<string> = new Set(['previewSongId', 'trigger', 'regDatasetId']);
+const PRESET_EXCLUDED: ReadonlySet<string> = new Set(['previewSongId', 'previewRungs', 'trigger', 'regDatasetId']);
 const settingsOf = (f: FormState): Record<string, unknown> =>
   Object.fromEntries(Object.entries(f).filter(([k]) => !PRESET_EXCLUDED.has(k)));
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -283,6 +286,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     artistTokenLr: status.defaults.artistTokenLr ?? 0.005,
     prefixN: status.defaults.prefixN ?? 0,
     previewSongId: '',
+    previewRungs: null,
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
     warmup: status.defaults.warmup ?? 25,
@@ -352,12 +356,18 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   };
   const changedSettings = form && base
     ? Object.entries(settingsOf(form)).filter(([k, v]) => !same(v, (base as unknown as Record<string, unknown>)[k])) : [];
+  // The checkpoints the step cadence renders, and the ones picked to (the last two by default).
+  const rungs = form ? checkpointRungs(form.steps, form.previewEverySteps) : [];
+  const pick = form?.previewRungs;
+  const pickedRungs = pick?.length && pick.every(r => rungs.includes(r)) ? pick : rungs.slice(-2);
+  // Sent only when it leaves some out; absent = every rung, as before.
+  const rungPick = pickedRungs.length < rungs.length ? pickedRungs : null;
   // Time left: steps at the run's mean step time plus the checkpoint previews still to come.
   const mm3Eta = jobKind === 'mm3-train-lm' && jobStatus === 'running' && trainStepSeries.length > 0 ? (() => {
     const ms = trainStepSeries.map(p => p.stepMs).filter((v): v is number => !!v && v > 0);
     return trainingRunEta({ step: trainStepSeries[trainStepSeries.length - 1].step, totalSteps: activeJob?.total ?? 0,
       msPerStep: ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null,
-      everySteps: form?.previewEverySteps ?? 0, previews: previewsFromRows(trainPreviews) });
+      everySteps: form?.previewEverySteps ?? 0, rungs: rungPick ?? undefined, previews: previewsFromRows(trainPreviews) });
   })() : null;
 
   // Loss-target readings, from the same series the chart draws. Train loss: the trailing mean over
@@ -467,7 +477,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     setBusy(true);
     try {
       const recipe = await resolveTrainingRecipe<FormState>('mm3-lm', {
-        ...form, activePreset, trainLaunder, flashSupported,
+        ...form, previewRungs: rungPick, activePreset, trainLaunder, flashSupported,
       }, activePreset === 'custom' ? undefined : activePreset);
       const body = recipe.execution as Mm3TrainLmRequest;
       assertRecipeWorker(recipe);
@@ -950,6 +960,41 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     'How hard the adapter’s MLP delta is applied in previews only. '
                     + '1 = full, 0 = attention only.') as string} />
               </div>
+              {rungs.length > 2 && (
+                <div className="md:col-span-2 flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <ParamLabel
+                      label={t('trainingStudio.mm3.previewRungs', 'Checkpoints to render')}
+                      info={t('trainingStudio.mm3.previewRungsHint',
+                        'Which checkpoints render a preview. Each mid-run one pauses training for about '
+                        + 'a minute; the final one renders after training ends. Every checkpoint is '
+                        + 'still saved, and an unrendered one can be rendered later from the ladder. '
+                        + 'Defaults to the last two. Timed previews (every N minutes) and the '
+                        + 'no-adapter reference are not affected.')}
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      onReset={form.previewRungs ? () => reset('previewRungs') : undefined}
+                    />
+                    <span className="flex-1" />
+                    <button type="button" disabled={locked || !rungPick} onClick={() => set('previewRungs', rungs)}
+                      className="px-2 py-0.5 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
+                      {t('trainingStudio.mm3.previewRungsAll', 'Select all')}
+                    </button>
+                  </div>
+                  {/* ponytail: one switch per rung; a 1-step cadence on a long run lists every step. */}
+                  <div className="grid grid-cols-3 md:grid-cols-5 gap-x-4 gap-y-1.5">
+                    {rungs.map(r => {
+                      const on = pickedRungs.includes(r);
+                      return <Toggle key={r} accent="amber" size="sm" checked={on}
+                        // The last one stays: no checkpoint previews at all is the toggle above.
+                        disabled={locked || (on && pickedRungs.length === 1)}
+                        onChange={v => set('previewRungs', rungs.filter(x => x === r ? v : pickedRungs.includes(x)))}
+                        label={r === form.steps
+                          ? t('trainingStudio.mm3.previewRungFinal', { step: r, defaultValue: 'Step {{step}} (final)' })
+                          : t('trainingStudio.mm3.previewRung', { step: r, defaultValue: 'Step {{step}}' })} />;
+                    })}
+                  </div>
+                </div>
+              )}
               {/* Explicit song pick (2026-09-05): a select over the dataset's
                   usable rows, default = auto. Fixes the auto-pick landing on
                   a noise interlude (an album dataset's "instrumental_2",

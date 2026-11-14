@@ -217,6 +217,11 @@ export interface Mm3PreviewOptions {
   /** Companion to scaleMlp. Left at 1.0 by default: attention is where identity
    *  lives, and turning it down is a different experiment. */
   scaleAttn?: number;
+  /** The checkpoint steps that render, when not all of them: a multiple of
+   *  everySteps pauses only if it is listed, and the final checkpoint renders
+   *  only if the run's last step is listed. Absent = every rung. The minute
+   *  cadence and the baseline ignore it. */
+  rungs?: number[];
 }
 
 /** One rendered preview. The audio is served by

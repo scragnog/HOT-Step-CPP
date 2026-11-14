@@ -151,6 +151,7 @@ export function mm3ExecutionBody(form: Record<string, any>, activePreset: string
             ...(form.previewLyrics?.trim() ? { lyrics: form.previewLyrics?.trim() } : {}),
             ...(!form.previewCaption.trim() && form.previewSongId
               ? { previewSongId: form.previewSongId } : {}),
+            ...(Array.isArray(form.previewRungs) ? { rungs: form.previewRungs } : {}),
           },
         } : {}),
         attnBackend: flashSupported ? form.attnBackend : 'exact',

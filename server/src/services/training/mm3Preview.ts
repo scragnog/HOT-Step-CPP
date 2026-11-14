@@ -98,6 +98,8 @@ export interface Mm3PreviewPlan {
   seed: number;
   everySteps: number;
   everyMinutes: number;
+  /** Mm3PreviewOptions.rungs; absent = every rung. */
+  rungs?: number[];
   baseline: boolean;
   /** Adapter scales every preview in this run renders at. Fixed for the run so
    *  step-to-step comparison stays legible. */
@@ -306,6 +308,7 @@ export function planMm3Previews(o: {
     seed,
     everySteps,
     everyMinutes,
+    ...(p?.rungs ? { rungs: p.rungs } : {}),
     baseline: p?.baseline ?? MM3_PREVIEW_DEFAULTS.baseline,
     scaleMlp: clampScale(p?.scaleMlp, MM3_PREVIEW_DEFAULTS.scaleMlp),
     scaleAttn: clampScale(p?.scaleAttn, MM3_PREVIEW_DEFAULTS.scaleAttn),

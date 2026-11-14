@@ -678,7 +678,8 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
       const cadence = [
         plan.everySteps > 0 ? `every ${plan.everySteps} steps` : '',
         plan.everyMinutes > 0 ? `every ${plan.everyMinutes} min` : '',
-      ].filter(Boolean).join(' or ');
+      ].filter(Boolean).join(' or ')
+        + (plan.rungs ? ` (checkpoint renders only at step ${plan.rungs.join(', ') || 'none'})` : '');
       log(job, 'info',
         `Audio previews ${cadence}: ${plan.specs.map(s => s.kind).join(' + ')}, `
         + `${plan.seconds}s at seed ${plan.seed}. Each one pauses training for roughly a minute `
@@ -750,8 +751,9 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
         // with the engine already back up.
         if (step >= opts.steps) return;
         if (step >= nextStepTrigger) {
+          const rung = nextStepTrigger;
           nextStepTrigger += plan.everySteps;
-          askPause();
+          if (!plan.rungs || plan.rungs.includes(rung)) askPause();
         }
       };
 
@@ -794,7 +796,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
       // Not paused = the run is over. Render the final checkpoint now, while
       // the engine is up, so the last thing in the strip is the finished
       // adapter rather than the last preview point before it.
-      if (plan && st.lastCkpt && !isCancelled(job)) {
+      if (plan && st.lastCkpt && !isCancelled(job) && (!plan.rungs || plan.rungs.includes(opts.steps))) {
         await renderPreviewSet(job, plan, runName, st.lastCkpt, lastStep || opts.steps, opts.steps,
                                st.lastLoss);
       }
