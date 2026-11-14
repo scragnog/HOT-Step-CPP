@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { studioDraftsApi, type PlaylistDocument } from '../../services/studioDraftsApi';
+import { getPlaybackState, next } from '../../stores/playbackStore';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -163,8 +164,16 @@ function _persistPlaylistNow(): void {
   }
 }
 
+export const DELETE_CONFIRM_KEY = 'hs-playlist-delete-confirm-dismissed';
+
+/** Reset the "don't ask again" flag when the playlist becomes empty. */
+function maybeResetDeleteConfirm(items: PlaylistItem[]): void {
+  if (items.length === 0) localStorage.removeItem(DELETE_CONFIRM_KEY);
+}
+
 function write(items: PlaylistItem[], immediate = false, command?: unknown): void {
   _snapshot = items;
+  maybeResetDeleteConfirm(items);
   if (connected && command) { pending.push(command); void drain(); }
   else if (immediate) _persistPlaylistNow(); else _persistPlaylist();
   announce();
@@ -184,7 +193,22 @@ export function removeFromPlaylist(id: string): void {
   write(read().filter(i => i.id !== id), false, { operation: 'remove', id });
 }
 
-export function clearPlaylist(): void { write([], true, { operation: 'clear' }); }
+/**
+ * Delete a song from the playlist (library delete). If the deleted item is the
+ * currently playing track, skip to the next track so playback continues.
+ */
+export function deleteSongFromLibrary(id: string): void {
+  const list = read();
+  const exists = list.some(i => i.id === id);
+  if (!exists) return;
+  const wasPlaying = getPlaybackState().currentTrack?.id === id;
+  write(list.filter(i => i.id !== id), false, { operation: 'remove', id });
+  if (wasPlaying) next('delete-current');
+}
+
+export function clearPlaylist(): void {
+  write([], true, { operation: 'clear' });
+}
 
 export function isInPlaylist(id: string): boolean {
   return read().some(i => i.id === id);
@@ -240,12 +264,13 @@ export function usePlaylist() {
 
   const add = useCallback((item: PlaylistItem) => addToPlaylist(item), []);
   const remove = useCallback((id: string) => removeFromPlaylist(id), []);
+  const deleteSong = useCallback((id: string) => deleteSongFromLibrary(id), []);
   const clear = useCallback(() => clearPlaylist(), []);
   const isIn = useCallback((id: string) => items.some(i => i.id === id), [items]);
   const move = useCallback((id: string, dir: 'up' | 'down') => moveItem(id, dir), []);
   const reorder = useCallback((newItems: PlaylistItem[]) => reorderPlaylist(newItems), []);
 
-  return { items, add, remove, clear, isIn, move, reorder,
+  return { items, add, remove, deleteSong, clear, isIn, move, reorder,
     needsImport: currentStatus.needsImport, replacingServer: currentStatus.replacingServer,
     saveError: currentStatus.saveError, saving: currentStatus.saving,
     importBrowserPlaylist, retryPlaylistSave };

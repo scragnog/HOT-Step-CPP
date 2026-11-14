@@ -161,6 +161,18 @@ export function resolveGpuSelection(setting: string, gpus: NvidiaGpu[] = listGpu
     };
   }
 
+  // ── All GPUs ────────────────────────────────────────────────────────────
+  // "all" (case-insensitive) keeps every GPU visible: CUDA_VISIBLE_DEVICES is
+  // left unset so the engine sees the full device list. This lets an
+  // engine-level GGML_BACKEND=CUDA1 address a specific card by index.
+  if (raw.toLowerCase() === 'all') {
+    return {
+      visibleDevices: null,
+      forcePciOrder: false,
+      log: '[Server] GPU: all — keeping all GPUs visible; CUDA_VISIBLE_DEVICES unset',
+    };
+  }
+
   // ── Manual: already an order-independent device id ──────────────────────
   if (raw.split(',').every((p) => isDeviceId(p.trim()))) {
     const named = raw
