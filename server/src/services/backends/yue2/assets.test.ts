@@ -35,6 +35,11 @@ test('validates the selected VAE, including failed metadata probes and decoder v
   assert.doesNotThrow(() => yue2ValidateAssets(props, {}));
   assert.doesNotThrow(() => yue2ValidateAssets(props, { vae_variant: 'dec2x' }));
   assert.throws(() => yue2ValidateAssets(props, { vae_variant: 'legacy' }), /VAE \(legacy\) not installed/);
+  // rs-x3's props key is vae_rs_x3 (the engine's JSON key has no hyphen).
+  props.files!.vae_rs_x3 = { found: false };
+  assert.throws(() => yue2ValidateAssets(props, { vae_variant: 'rs-x3' }), /VAE \(rs-x3\) not installed/);
+  props.files!.vae_rs_x3 = { found: true, probe_ok: true };
+  assert.doesNotThrow(() => yue2ValidateAssets(props, { vae_variant: 'rs-x3' }));
   props.files!.vae_standard = { found: true, probe_ok: false, error: 'wrong architecture' };
   assert.throws(() => yue2ValidateAssets(props, {}), /metadata probe failed: wrong architecture/);
   assert.throws(() => yue2ValidateAssets(props, { vae_variant: 'unknown' }), /unknown YuE2 VAE variant/);

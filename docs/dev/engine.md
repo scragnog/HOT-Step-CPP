@@ -924,7 +924,7 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> semantic stage: the AR "composer" (yue2-lm-graph.h) samples codec ids
   -> NAR stage: mixture-of-transformers flow matching with a midpoint ODE solver
      (yue2-nar-graph.h), optionally chunked (nar_chunk_frames)
-  -> Oobleck VAE decode, "standard", "legacy" or local "dec2x" variant (yue2-vae-graph.h)
+  -> Oobleck VAE decode, "standard", "legacy", "rs-x3" or local "dec2x" variant (yue2-vae-graph.h)
   -> stitch; a track that peaks past full scale is scaled to -0.3 dBFS (yue2_peak_scale)
   -> 16-bit WAV (yue2-pipeline.h, yue2-job.h)
 ```
@@ -1019,7 +1019,24 @@ decoder's own unit list; the encoder keeps `res_dilations`) and a 40-frame decod
 because the extra units widen the receptive field to 29 frames. Build one with
 `tools/yue2-vae-train` (train, then `export.py`, then `convert-yue2.py --src-vae-dec2x`);
 `yue2-probe --vae-roundtrip <in.f32> <out.f32> --vae <variant>` measures what any VAE
-loses on real audio. The
+loses on real audio.
+
+`rs-x3` (`yue2-vae-rs-x3-f32.gguf`, on Hugging Face) is Ruach Studio's YuE2-VAE-RS x3
+decoder (goldhub/YuE2-VAE-RS-x3) with Standard's encoder. Its decoder adds three
+2048-wide units at the latent rate between `dec.conv_in` and the first block
+(`dec.pre.<i>.*`, listed by `yue2vae.dec_pre_dilations`) and has 6 units per block. Its
+receptive field is 60 frames, so the file sets a 60-frame halo; never lower it to save
+VRAM, lower the core instead. `yue2vae.strict_f32` marks every decoder GEMM with
+HOT-ggml's `GGML_HINT_STRICT_F32`: CUDA otherwise runs F32 products on TF32, about 1e-3
+off the reference, against the release's 1e-4 tolerance. Build it with
+`convert-yue2.py --src-vae <Standard dir> --src-vae-rs-x3 YuE2-VAE-RS-x3_v1.safetensors`.
+`yue2-probe --vae-parity <fixture> --variant rs-x3` checks a decode against a PyTorch
+fixture (`04_vae/input_latents.bin`, `04_vae/rs-x3/output_audio{,_full}_planar.bin`). The
+upstream kit's stride-5 transposed conv carries `output_padding=1`, so its output is
+1920·T samples against our 1920·T − 64; zero that padding when making the fixture. The
+release ships F32 only: weight-only F16 and BF16 copies miss its 1e-4 verify tolerance
+(5.9e-3 and 5.1e-2). `GET /yue2/props` header-probes any VAE slot that has no file
+yet, so a VAE downloaded after startup appears without an engine restart. The
 NAR stage can use Lua solvers and schedulers through `infer_method` and
 `scheduler`. A song's composer (semantic stage) stops at `plan_cutoff` (default 1.5)
 times its plan's length plus 20 s (`yue2_plan_cap_frames`, the bars x beats / tempo

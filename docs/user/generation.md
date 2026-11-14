@@ -118,7 +118,10 @@ engine falls back to BF16 and the generation log records the filename it loaded.
 | Text Encoder | Only shown when more than one text encoder is installed. |
 | Get More Models | Opens the Model Manager. |
 
-YuE2 keeps its standard and legacy VAE choices visible. Missing files or failed metadata
+YuE2 keeps its standard, legacy and rs-x3 VAE choices visible. rs-x3 is Ruach Studio's
+YuE2-VAE-RS x3 decoder: it removes Standard's 100 Hz ripple and the whistle at 6 and
+12 kHz, decodes the same songs, and needs about 0.8 GB more VRAM and a little more time
+(CC BY-NC 4.0, credit Ruach Studio). Missing files or failed metadata
 probes disable the affected choice and show the reason beneath it. Download the model
 in Model Manager or choose an installed VAE. Generation checks the captured model
 selection before planning starts, including files removed while a job was queued.

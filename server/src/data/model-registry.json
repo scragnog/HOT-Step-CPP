@@ -6639,6 +6639,28 @@
       "sha256": "0e790e2be7b6c5674b776df053d74da6fc65b13246a41210d82d836c5b26e6fa"
     },
     {
+      "id": "yue2-vae-rs-x3-f32",
+      "filename": "yue2-vae-rs-x3-f32.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "YuE2 VAE — RS x3 (Ruach Studio, F32)",
+      "scale": null,
+      "variant": "vae-rs-x3",
+      "quant": "F32",
+      "sizeBytes": 1067787712,
+      "repo": "scragnog/YuE2-GGUF",
+      "description": "Ruach Studio's YuE2-VAE-RS x3 decoder: Standard's decoder grown to three times the size and retrained on music, removing Standard's 100 Hz ripple and the whistle at its 6 and 12 kHz band seams. Same latents as Standard, so it decodes any YuE2 song; pick it as the VAE Decoder (rs-x3) in YuE2 mode. Carries Standard's encoder unchanged. F32 only, as released; slower and heavier than Standard (about 0.8 GB more VRAM). Credit: Viktor Zhuromskyy / Ruach Studio, goldhub/YuE2-VAE-RS-x3 (DOI 10.5281/zenodo.24167962), an adaptation of m-a-p's YuE2-Vae. Licensed CC BY-NC 4.0, as YuE2-Vae: non-commercial use; credit YuE2 and m-a-p, and Ruach Studio for VAE-RS. ~1.07 GB.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-YuE2-VAE-RS-x3",
+          "repoPath": "LICENSE-YuE2-VAE-RS-x3"
+        }
+      ],
+      "sha256": "bdb864875e952d0c9c162694888fce6ff1220faede44f7b93b8230430b1e86e9"
+    },
+    {
       "id": "yue2-tok-f16",
       "filename": "yue2-tok-f16.gguf",
       "role": "yue2",

@@ -513,7 +513,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
 | `render_from_frame` | 0 | 0 to 9000. The NAR and VAE start at this codec frame (clamped to the stream), so the audio covers only the frames from it to the end. The composer still reads every frame. Section takes send their lead-in |
-| `vae_variant` | `"standard"` | `standard`, `legacy`, or `dec2x` (a local fine-tuned decoder; only when `yue2-vae-dec2x-*.gguf` is present) |
+| `vae_variant` | `"standard"` | `standard`, `legacy`, `rs-x3` (Ruach Studio's YuE2-VAE-RS x3 decoder, `yue2-vae-rs-x3-*.gguf`), or `dec2x` (a local fine-tuned decoder; only when `yue2-vae-dec2x-*.gguf` is present) |
 | `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
 | `id` | `"yue2"` | Request label |
 

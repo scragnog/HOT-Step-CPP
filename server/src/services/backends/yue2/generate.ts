@@ -48,7 +48,7 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
-import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed, yue2SeedPlus } from './client.js';
+import { isYue2VaeVariant, yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail, type Yue2Seed, yue2Seed, yue2SeedPlus } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { applyYue2DurationCap, YUE2_TRIM_FADE_SEC } from './durationCap.js';
 import { buildYue2LyricSchedule } from './lyricSchedule.js';
@@ -560,7 +560,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // From the job's pick (#204): the model picker's VAE, captured at submit.
   // '' (never chosen) renders standard.
   const vae_variant: Yue2SynthRequest['vae_variant'] =
-    pick.vae_variant === 'legacy' || pick.vae_variant === 'dec2x' ? pick.vae_variant : 'standard';
+    isYue2VaeVariant(pick.vae_variant) ? pick.vae_variant : 'standard';
 
   // ── Duration: model-ended, same story as MM3 ──────────────────────────────
   // core.duration.auto = true / editable = false: the AR plan/semantic stages
