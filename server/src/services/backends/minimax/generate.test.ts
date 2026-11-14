@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, minimaxStageText, mm3LowStepShift,
+  mm3StripTagDescriptors,
 } from './generate.js';
 import { mm3PlankDir } from './plank.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
@@ -209,3 +210,20 @@ test('MM3 cover modes: state fix, product rule, guide trim and the state blend r
   assert.equal(Object.hasOwn(req({ mm3BlendPath: 'a.mm3hiddens', mm3BlendAmount: 0 }), 'lm_blend_file'), false);
   assert.equal(Object.hasOwn(req({ mm3BlendPath: '../x.mm3hiddens', mm3BlendAmount: 0.5 }), 'lm_blend_file'), false);
 });
+
+test('MM3 strips descriptors from section tags and leaves everything else alone', () => {
+  const sheet = [
+    '[Intro]', '[Verse 1: soft, breathy]', 'line one', '[Chorus - High Energy]', 'line two',
+    '[Pre-Chorus]', '[Bridge (half time)]', '[Female Vocal - airy]', '[Chorus]', '(oh - oh)',
+  ].join('\n');
+  const { lyrics, stripped } = mm3StripTagDescriptors(sheet);
+  assert.equal(lyrics, [
+    '[Intro]', '[Verse 1]', 'line one', '[Chorus]', 'line two',
+    '[Pre-Chorus]', '[Bridge]', '[Female Vocal - airy]', '[Chorus]', '(oh - oh)',
+  ].join('\n'));
+  assert.deepEqual(stripped, ['[Verse 1: soft, breathy]', '[Chorus - High Energy]', '[Bridge (half time)]']);
+  const m = mapMinimaxParams({ prompt: 'x', seed: 42, lyrics: '[Chorus - High Energy]\nla la' });
+  assert.equal(m.req.lyrics, '[Chorus]\nla la');
+  assert.ok(m.notes.some(n => n.includes('[Chorus - High Energy]')));
+});
+

@@ -54,6 +54,7 @@ import {
 } from './hiddens.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES, resolveMm3LmAdapterPath } from './lmAdapter.js';
 import { applyMm3Trigger, readMm3AdapterTrigger } from './trigger.js';
+import { classifyHeader } from '../../training/lyricTags.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import type { PostProcessParams } from '../../generation/postProcessing.js';
 import {
@@ -130,6 +131,25 @@ function mm3SungWords(lyrics: string): number {
     .split(/\s+/)
     .filter(w => /[\p{L}\p{N}]/u.test(w))
     .length;
+}
+
+/**
+ * "[Chorus - High Energy]" -> "[Chorus]". MM3 sings a descriptor inside a
+ * section tag as a lyric line ("High Energy!"), so it steers nothing. Only a
+ * tag whose head (before " - ", ":", "(", "," or "|") is a section is cut, and
+ * the head is kept verbatim ("[Verse 1: soft]" -> "[Verse 1]"). The descriptor
+ * still reaches the music through the caption: Lyric Studio's Arrangement
+ * timeline is built from the full tags (lireek/prompts.ts extractSectionTags).
+ */
+export function mm3StripTagDescriptors(lyrics: string): { lyrics: string; stripped: string[] } {
+  const stripped: string[] = [];
+  const out = lyrics.replace(/\[([^\]\n]+)\]/g, (tag, body: string) => {
+    const head = body.split(/\s+[-–—]\s+|\s*[:(,|]/)[0].trim();
+    if (head === body.trim() || !head || !classifyHeader(head)) return tag;
+    stripped.push(tag);
+    return `[${head}]`;
+  });
+  return { lyrics: out, stripped };
 }
 
 /** Shortest plausible length for these lyrics, in seconds. */
@@ -406,7 +426,11 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Instrumental: MM3's contract is blank lyrics → the engine substitutes its
   // own instrumental token. Do NOT send ACE's '[Instrumental]' sentinel; that
   // would be tokenized as literal lyric text.
-  const lyrics: string = params.instrumental ? '' : (params.lyrics || '');
+  const tagged = mm3StripTagDescriptors(params.instrumental ? '' : String(params.lyrics || ''));
+  const lyrics = tagged.lyrics;
+  if (tagged.stripped.length) {
+    notes.push(`section-tag descriptors removed from the lyrics (MM3 sings them): ${tagged.stripped.join(', ')}`);
+  }
 
   // ── Duration: ALWAYS auto on this backend ──────────────────────────────────
   //

@@ -95,7 +95,8 @@ things move the result more than any dial:
   `[Chorus - High Energy]`; use a dash, not a colon. An `[Intro]` or `[Outro]`
   with no lyric lines under it should say what plays there, such as
   `[Intro - Instrumental]`, or the model may fill it with an instrumental of any
-  length.
+  length. MiniMax-Music3 sings such descriptors, so on that backend the app sends
+  the tag without them ([Generation backends](backends.md#minimax-music3)).
 - Concrete genre and instrumentation. "Nylon guitar, brushed percussion,
   velvet crooning vocals, golden-age Latin romance" gives the model more to
   work with than "romantic ballad". Name the instruments, the playing style

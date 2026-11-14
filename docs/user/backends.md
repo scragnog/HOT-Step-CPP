@@ -112,6 +112,11 @@ What sets it apart:
   caption and lyrics share a 5,000-token budget. The Compose Caption button under the
   caption box turns a plain-English description into a Structured Caption with no AI
   model involved.
+- A section tag is sent as the section name alone: `[Chorus - High Energy]` becomes
+  `[Chorus]` and `[Verse 1: soft]` becomes `[Verse 1]`, because MiniMax-Music3 sings a
+  descriptor inside a tag as a lyric line. Put the direction in the caption's
+  Arrangement timeline instead; Lyric Studio already builds that timeline from the full
+  tags. The generation log lists every tag that was shortened.
 - The song decides its own length, up to 300 seconds, and there is no duration
   control. A very long prompt lowers that ceiling: prompt tokens plus 25 frames per
   second must fit the planner's 10,240-position context, so a 3,000-token prompt caps
