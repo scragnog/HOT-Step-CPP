@@ -1233,6 +1233,24 @@ const SongCard: React.FC<SongCardProps> = ({
           </div>
         )}
 
+        {/* Quick delete, same action as the menu's Delete. Shown on hover (always
+            on touch screens); hidden where the menu is, so it never sits under
+            the streaming badge or deletes a file that does not exist yet. */}
+        {!selectionMode && !isStreaming && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="absolute top-2 right-2 z-10 w-6 h-6 rounded-full
+                       bg-black/45 backdrop-blur-sm border border-white/20
+                       flex items-center justify-center text-white
+                       opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100
+                       transition-opacity hover:bg-red-500/80"
+            title={t('library.delete', 'Delete')}
+            aria-label={t('library.delete', 'Delete')}
+          >
+            <X size={13} />
+          </button>
+        )}
+
         {/* Duration badge */}
         <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[10px] font-mono text-white/85"
           style={selectionMode ? { left: '2rem' } : undefined}
