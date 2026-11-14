@@ -101,6 +101,7 @@ static volatile int * _hotstep_guard_ = &hotstep_sampler_linked_;
 // after minimax/mm3-server.h and yue2/yue2-model.h (see hot-step-families.h's
 // own comment on why).
 #include "hot-step-families.h"
+#include "hot-step-origin-guard.h"  // Host/Origin checks for browser-reachable requests
 
 #include <algorithm>   // std::sort (HOT-Step /sa3/props adapter list)
 #include <cctype>      // std::tolower (HOT-Step /sa3-synth synth_model guard)
@@ -3175,6 +3176,10 @@ static void usage(const char * prog) {
             "Server:\n"
             "  --host <addr>           Listen address (default: 127.0.0.1)\n"
             "  --port <N>              Listen port (default: 8080)\n"
+            "  --allow-origin <csv>    Extra browser origins allowed to call the server,\n"
+            "                          e.g. http://myhost:3001 (also env ACESTEPCPP_ALLOWED_ORIGINS)\n"
+            "  --allow-host <csv>      Extra hostnames accepted in the Host header, e.g. myhost\n"
+            "                          (case-insensitive, port ignored; also env ACESTEPCPP_ALLOWED_HOSTS)\n"
             "  --max-batch <N>         LM batch limit (default: %d)\n"
             "  --max-seq <N>           KV cache size (default: %d)\n"
             "\n"
@@ -3192,6 +3197,8 @@ int main(int argc, char ** argv) {
     ace_synth_default_params(&g_synth_params);
 
     const char * host         = "127.0.0.1";
+    std::string  allow_origin_csv;
+    std::string  allow_host_csv;
     int          port         = 8080;
     const char * models_dir         = nullptr;
     const char * adapters_dir       = nullptr;
@@ -3233,6 +3240,10 @@ int main(int argc, char ** argv) {
             host = argv[++i];
         } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
             port = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--allow-host") && i + 1 < argc) {
+            allow_host_csv = argv[++i];
+        } else if (!strcmp(argv[i], "--allow-origin") && i + 1 < argc) {
+            allow_origin_csv = argv[++i];
         } else if (!strcmp(argv[i], "--max-batch") && i + 1 < argc) {
             g_max_batch = atoi(argv[++i]);
 
@@ -3474,6 +3485,48 @@ int main(int argc, char ** argv) {
 
     // reject oversized bodies (256 MB: src + ref audio, up to 10min WAV each)
     svr.set_payload_max_length(256 * 1024 * 1024);
+
+    // Host and Origin guard. Refuses requests whose Host header is a
+    // non-IP hostname (DNS rebinding) or whose Origin is a web page other
+    // than the engine's own built-in UI. Extra hostnames: --allow-host or
+    // ACESTEPCPP_ALLOWED_HOSTS. Extra origins: --allow-origin or
+    // ACESTEPCPP_ALLOWED_ORIGINS (comma separated).
+    {
+        std::vector<std::string> allowed = origin_guard::parse_csv(allow_origin_csv);
+        if (const char * env = getenv("ACESTEPCPP_ALLOWED_ORIGINS")) {
+            for (auto & o : origin_guard::parse_csv(env)) {
+                allowed.push_back(o);
+            }
+        }
+        std::vector<std::string> allowed_hosts = origin_guard::parse_csv(allow_host_csv);
+        if (const char * env = getenv("ACESTEPCPP_ALLOWED_HOSTS")) {
+            for (auto & h : origin_guard::parse_csv(env)) {
+                allowed_hosts.push_back(h);
+            }
+        }
+        std::vector<int> trusted_ports = origin_guard::default_trusted_ports(port);
+        std::string      cfg_host      = host;
+        svr.set_pre_routing_handler([allowed, allowed_hosts, trusted_ports, cfg_host](const httplib::Request & req,
+                                                                       httplib::Response &      res) {
+            const char * why = nullptr;
+            if (req.has_header("Host") && !origin_guard::host_allowed(req.get_header_value("Host"), cfg_host, allowed_hosts)) {
+                why = "host";
+            } else if (req.has_header("Origin") &&
+                       !origin_guard::origin_allowed(req.get_header_value("Origin"), trusted_ports, allowed)) {
+                why = "origin";
+            }
+            if (!why) {
+                return httplib::Server::HandlerResponse::Unhandled;
+            }
+            res.status = 403;
+            res.set_content(std::string("{\"error\":\"forbidden ") + why +
+                                "; allow extra hosts with --allow-host or ACESTEPCPP_ALLOWED_HOSTS, extra origins with "
+                                "--allow-origin or ACESTEPCPP_ALLOWED_ORIGINS\"}",
+                            "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        });
+    }
+
 
     // all endpoints are always registered. handlers return 501 when the
     // backing pipeline has no models in the registry.

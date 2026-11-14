@@ -7,6 +7,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // Must stay the first local import: it picks (and if needed moves) the release
 // data folder before anything below reads a path.
 import { RUNTIME } from './dataroot/bootstrap.js';
+import { defaultServerHost } from './services/security/originPolicy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -329,7 +330,8 @@ export const config = {
   // Node.js server
   server: {
     port: parseInt(process.env.SERVER_PORT || '3001', 10),
-    host: process.env.SERVER_HOST || '0.0.0.0',
+    // Loopback by default; set SERVER_HOST=0.0.0.0 (or a LAN/Tailscale IP) to expose it.
+    host: defaultServerHost(process.env.SERVER_HOST),
   },
 
   // Data paths

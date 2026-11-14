@@ -855,6 +855,10 @@ Output:
 Server:
   --host <addr>           Listen address (default: 127.0.0.1)
   --port <N>              Listen port (default: 8080)
+  --allow-origin <csv>    Extra browser origins allowed to call the server,
+                          e.g. http://myhost:3001 (also env ACESTEPCPP_ALLOWED_ORIGINS)
+  --allow-host <csv>      Extra hostnames accepted in the Host header, e.g. myhost
+                          (case-insensitive, port ignored; also env ACESTEPCPP_ALLOWED_HOSTS)
   --max-batch <N>         LM batch limit (default: 1)
   --max-seq <N>           KV cache size (default: 8192)
 
@@ -865,6 +869,14 @@ Debug:
   --clamp-fp16            Clamp hidden states to FP16 range
   --backend-check         Load GGML backends without models, print a JSON report, exit
 ```
+
+The Host check refuses any Host header that is not loopback, an IP literal
+(IPv6 may include a %zone), or the --host value. If the engine is reached by
+hostname (a remote Node server with ACESTEPCPP_HOST=<name>, or a reverse
+proxy), start it with --allow-host <name> (or ACESTEPCPP_ALLOWED_HOSTS).
+When Node spawns the engine itself it passes ACESTEPCPP_HOST as --host, so a
+hostname set there is already accepted. Browser pages served from another
+origin also need --allow-origin.
 
 Notes the usage text does not cover:
 

@@ -7,7 +7,8 @@
 // 4. Optionally spawns ace-server as a managed child process
 
 import express from 'express';
-import cors from 'cors';
+import { isLoopbackHost } from './services/security/originPolicy.js';
+import { applySecurityGates } from './services/security/securityGates.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -140,7 +141,12 @@ maintenance.whenOpen(() => {
 const app = express();
 
 // Middleware
-app.use(cors());
+// Host allowlist (DNS rebinding), then Origin policy and CORS. See services/security/securityGates.ts.
+applySecurityGates(app, {
+  serverHost: config.server.host,
+  corsOrigins: process.env.CORS_ORIGINS,
+  allowedHosts: process.env.ALLOWED_HOSTS,
+});
 // Update maintenance gate: ahead of every feature and static route.
 app.use(maintenance.middleware);
 // Training on another PC: a worker checks its token first; the controller's
@@ -546,6 +552,12 @@ const server = app.listen(config.server.port, config.server.host, () => {
   if (LAUNCHER_PROTOCOL) process.send?.({ type: 'listening', port: (server.address() as { port: number }).port, host: config.server.host });
   console.log(`[Server] HOT-Step CPP v${APP_VERSION}`);
   console.log(`[Server] Listening on http://localhost:${config.server.port}`);
+  if (!isLoopbackHost(config.server.host)) {
+    console.warn(`[Server] WARNING: bound to ${config.server.host}, reachable from other machines on the network.`);
+    console.warn('[Server] Unset SERVER_HOST to keep it local. Browser origins other than this host need CORS_ORIGINS.');
+  } else if (config.workers.acceptToken) {
+    console.warn('[Server] WORKER_TOKEN is set but the server only listens on loopback. Set SERVER_HOST=0.0.0.0 so the controlling PC can reach this worker.');
+  }
   console.log(`[Server] ace-server URL: ${config.aceServer.url}`);
   if (DATA_ROOT) console.log(`[Server] Data folder: ${DATA_ROOT}`);
   console.log(`[Server] Data directory: ${config.data.dir}`);
