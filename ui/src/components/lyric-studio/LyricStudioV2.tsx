@@ -17,6 +17,7 @@ import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import type { AlbumPreset } from '../../services/lireekApi';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ChevronLeft } from 'lucide-react';
+import { notify } from '../shared/Toast';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
 import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
@@ -215,12 +216,8 @@ export const LyricStudioV2: React.FC = () => {
   useEffect(() => { if (token) void restoreLyricQueue(token).catch(console.error); }, [token]);
   const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
-  // ── Toast ──
-  const [toast, setToast] = useState<string | null>(null);
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3500);
-  }, []);
+  // ── Toast ── (the app-wide stack, top right)
+  const showToast = notify;
 
   // ── Initial artwork + URL restore from the artists observer ──
   const initialLoad = useRef({ path: window.location.pathname, artworkStarted: false, restored: false });
@@ -634,12 +631,6 @@ export const LyricStudioV2: React.FC = () => {
   // ── Render ──
   return (
     <div className="h-full w-full flex flex-col relative bg-white dark:bg-zinc-950">
-      {/* Toast */}
-      {toast && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-xl bg-zinc-100/90 dark:bg-zinc-800/90 backdrop-blur-sm border border-zinc-300 dark:border-white/10 text-sm text-white shadow-2xl ls2-slide-up">
-          {toast}
-        </div>
-      )}
 
       {/* Fetch-lyrics indicator */}
       {fetchingLyrics && (

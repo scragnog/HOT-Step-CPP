@@ -29,3 +29,27 @@ export function fadeGainAt(kind: FadeKind, curve: FadeCurve, length: number, dur
   const start = duration - length;
   return t <= start ? 1 : fadeInGain(curve, (duration - t) / length);
 }
+
+/** A pending crop and fade of both ends, in seconds on the current file. */
+export interface EndEdit {
+  cropIn: number;
+  /** null = keep the end of the track. */
+  cropOut: number | null;
+  fadeIn: number;
+  fadeOut: number;
+  curveIn: FadeCurve;
+  curveOut: FadeCurve;
+}
+
+/** Gain at time `t` under a pending edit: 0 where it is cut, the fade curve
+ *  inside each fade, 1 elsewhere. The waveform draws this and the player
+ *  previews it, so what you see is what you hear. */
+export function endEditGainAt(e: EndEdit, duration: number, t: number): number {
+  const a = e.cropIn;
+  const b = e.cropOut ?? duration;
+  if (t < a || t > b) return 0;
+  let g = 1;
+  if (e.fadeIn > 0 && t < a + e.fadeIn) g *= fadeInGain(e.curveIn, (t - a) / e.fadeIn);
+  if (e.fadeOut > 0 && t > b - e.fadeOut) g *= fadeInGain(e.curveOut, (b - t) / e.fadeOut);
+  return g;
+}

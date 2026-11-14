@@ -86,13 +86,12 @@ across every view, not just Library.
 | 48k / 44.1k | Previews how the 48 kHz render sounds clocked out at 44.1 kHz, pitched down about 1.47 semitones with tempo unchanged. A quick way to A/B a resample artifact without actually resampling. |
 | Variant switch (No Adapter / Unmastered / Mastered) | Only shown when a track has that variant. Each segment plays it and carries its own small download button for that exact render. |
 | A / B (after Play A/B) | Takes the variant switch's place: shows which pinned track is playing and flips to the other; the x beside it leaves A/B mode. |
-| Trim/crop | Toggles trim mode; the waveform below becomes clickable to set in/out points. |
-| Fade in / out | Toggles fade mode. Choose Intro or Outro, then press and drag on the waveform to set the fade length: an intro runs from the start to the pointer, an outro from the pointer to the end. Pick a curve (Linear, Exponential, Logarithmic, S-curve); the waveform shades the fade and draws its curve, and the player volume follows it so you can hear it before applying. Apply fade rewrites the audio file (and the mastered file, if there is one) and cannot be undone. Trim and fade modes are exclusive. |
+| Crop and fade | Toggles crop and fade mode. Pick Intro or Outro, then press and drag on the waveform to set where that end is cut; the cut part is dimmed and the start and end show as green and red lines. Set a fade length (0 to 30 s, measured inwards from the cut) and a curve (Linear, Exponential, Logarithmic, S-curve) for that end; the waveform shades the fade and draws its curve. Each end keeps its own settings, so set both before finishing. The player follows the edit while the mode is on (silent where it will be cut, faded where it will fade), so play the track to hear it first. Done writes the crop and both fades into the audio file (and the mastered file, if there is one) and cuts the lyric sidecars to match. There is no confirmation and it cannot be undone. |
 | Volume | Slider plus mute toggle. |
 | Edit / Download / Delete | Quick actions on the currently loaded track. |
 
 Above the transport, a collapsible area (only expands while something is
-playing, or trim or fade mode is on) holds section markers, the waveform, a
+playing, or crop and fade mode is on) holds section markers, the waveform, a
 synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
 On a phone, tap the song title or cover in the mini player to open the
@@ -373,7 +372,8 @@ editor instead.
 
 ## Tips and limits
 
-- Deleting one track from its menu happens immediately, with no
+- Deleting one track from its menu, or with the x in a grid card's top
+  right corner (shown on hover), happens immediately, with no
   confirmation. Bulk delete (via Select) does ask first.
 - The playlist queue's local pointer is per-browser, even though its order
   now saves to the server. It is not the place to keep a track safe. Use the

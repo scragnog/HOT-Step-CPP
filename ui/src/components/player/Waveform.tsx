@@ -17,20 +17,13 @@ import { useSyncExternalStore } from 'react';
 import {
   subscribe, getSnapshot, subscribeFrame, seekFraction,
 } from '../../audio/engine';
-import { fadeGainAt, type FadeCurve, type FadeKind } from '../../../../server/src/contracts/fade';
+import { endEditGainAt, type EndEdit } from '../../../../server/src/contracts/fade';
 
 interface WaveformProps {
   height?: number;
-  /** Trim mode's IN/OUT points, in seconds. The region outside them is dimmed
-   *  and the boundaries get a coloured edge. */
-  trimIn?: number | null;
-  trimOut?: number | null;
-  /** Takes over what a click means. Trim mode uses it to place IN/OUT points
-   *  instead of seeking. Without it, a click seeks. */
-  onClickTime?: (seconds: number) => void;
-  /** Fade mode's pending fade: the attenuated region is shaded and its curve
-   *  drawn. */
-  fade?: { kind: FadeKind; curve: FadeCurve; length: number } | null;
+  /** Crop and fade mode's pending edit: what would be cut is dimmed, each cut
+   *  gets a coloured edge, and the fades are shaded with their curve drawn. */
+  edit?: EndEdit | null;
   /** Press-and-drag reports the time under the pointer; replaces seeking. */
   onDragTime?: (seconds: number) => void;
 }
@@ -39,7 +32,7 @@ const BAR_W = 2;
 const BAR_GAP = 1;
 
 export const Waveform: React.FC<WaveformProps> = ({
-  height = 56, trimIn, trimOut, onClickTime, fade, onDragTime,
+  height = 56, edit, onDragTime,
 }) => {
   const state = useSyncExternalStore(subscribe, getSnapshot);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -119,7 +112,7 @@ export const Waveform: React.FC<WaveformProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peaks, height]);
 
-  // ── Composite: base, progress gradient, trim dimming, playhead ────────────
+  // ── Composite: base, progress gradient, crop and fade shading, playhead ────────────
   const paint = React.useCallback((timeOverride?: number) => {
     const canvas = canvasRef.current;
     const base = baseRef.current;
@@ -157,44 +150,35 @@ export const Waveform: React.FC<WaveformProps> = ({
       ctx.restore();
     }
 
-    // Trim mode: dim everything that would be cut, mark the boundaries.
-    if (dur > 0 && (trimIn != null || trimOut != null)) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-      if (trimIn != null && trimIn > 0) {
-        ctx.fillRect(0, 0, (trimIn / dur) * cssW, height);
+    // Crop and fade mode: darken each column by how much it is turned down
+    // (fully where it is cut), draw the gain curve inside the fades, and mark
+    // both cuts.
+    if (dur > 0 && edit) {
+      const a = edit.cropIn;
+      const b = edit.cropOut ?? dur;
+      const aX = (a / dur) * cssW;
+      const bX = (b / dur) * cssW;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fillRect(0, 0, aX, height);
+      ctx.fillRect(bX, 0, cssW - bX, height);
+      for (const [x0, x1] of [[aX, ((a + edit.fadeIn) / dur) * cssW], [((b - edit.fadeOut) / dur) * cssW, bX]]) {
+        if (x1 - x0 < 1) continue;
+        ctx.beginPath();
+        for (let x = Math.floor(x0); x <= Math.ceil(x1); x++) {
+          const g = endEditGainAt(edit, dur, Math.max(a, Math.min(b, (x / cssW) * dur)));
+          ctx.fillStyle = `rgba(0, 0, 0, ${(0.6 * (1 - g)).toFixed(3)})`;
+          ctx.fillRect(x, 0, 1, height);
+          const y = height - 1 - g * (height - 2);
+          if (x === Math.floor(x0)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
       }
-      if (trimOut != null && trimOut < dur) {
-        const x = (trimOut / dur) * cssW;
-        ctx.fillRect(x, 0, cssW - x, height);
-      }
-      if (trimIn != null) {
-        ctx.fillStyle = 'rgba(34, 197, 94, 0.9)';
-        ctx.fillRect((trimIn / dur) * cssW - 1, 0, 2, height);
-      }
-      if (trimOut != null) {
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
-        ctx.fillRect((trimOut / dur) * cssW - 1, 0, 2, height);
-      }
-    }
-
-    // Fade mode: darken by how much each column is turned down, and draw the
-    // gain curve over it.
-    if (dur > 0 && fade && fade.length > 0) {
-      const x0 = fade.kind === 'in' ? 0 : ((dur - fade.length) / dur) * cssW;
-      const x1 = fade.kind === 'in' ? (fade.length / dur) * cssW : cssW;
-      ctx.beginPath();
-      for (let x = Math.floor(x0); x <= Math.ceil(x1); x++) {
-        const g = fadeGainAt(fade.kind, fade.curve, fade.length, dur, (x / cssW) * dur);
-        ctx.fillStyle = `rgba(0, 0, 0, ${(0.65 * (1 - g)).toFixed(3)})`;
-        ctx.fillRect(x, 0, 1, height);
-        const y = height - 1 - g * (height - 2);
-        if (x === Math.floor(x0)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
-      ctx.fillRect((fade.kind === 'in' ? x1 : x0) - 1, 0, 2, height);
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.9)';
+      ctx.fillRect(aX - 1, 0, 2, height);
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
+      ctx.fillRect(bX - 1, 0, 2, height);
     }
 
     // Playhead.
@@ -210,8 +194,7 @@ export const Waveform: React.FC<WaveformProps> = ({
       ctx.fillStyle = 'rgba(168, 85, 247, 0.9)';
       ctx.fillRect(hx - 1, 0, 2, height);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, currentTime, height, trimIn, trimOut, fade]);
+  }, [duration, currentTime, height, edit]);
 
   // Repaint on any state the composite depends on.
   useEffect(() => { paint(); }, [paint]);
@@ -247,8 +230,7 @@ export const Waveform: React.FC<WaveformProps> = ({
         if (onDragTime) return;
         const t = timeAt(e.clientX);
         if (t == null) return;
-        if (onClickTime) onClickTime(t);
-        else seekFraction(t / duration);
+        seekFraction(t / duration);
       }}
       onPointerMove={onDragTime ? (e) => {
         if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;

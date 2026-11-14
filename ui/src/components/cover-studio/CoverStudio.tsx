@@ -79,6 +79,7 @@ import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, on
 import { barRanges } from '../../utils/abcSectionMove';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
+import { notify } from '../shared/Toast';
 import { ParamLabel } from '../shared/ParamLabel';
 import { AbcChart } from './AbcChart';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
@@ -342,7 +343,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [toast, setToast] = useState('');
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
 
 
@@ -634,7 +634,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     }
   };
 
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
+  const showToast = notify;
 
   const applyDatasetMetadata = (data: Yue2CoverDatasetMetadata, lyricEdit: number, instrumentalEdit: number): boolean => {
     if (!data.matched) return false;
@@ -2028,11 +2028,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     <BackendCapabilityGate feature="cover">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {/* Toast */}
-      {toast && (
-        <div className="absolute top-16 right-6 z-50 max-w-[500px] px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2 whitespace-normal break-words">
-          {toast}
-        </div>
-      )}
 
       {yue2Mode && <div className="flex items-center gap-1 border-b border-zinc-200 dark:border-white/10 px-4 pt-2">
         {([[false, 'Prepare'], [true, 'Build']] as const).map(([on, label]) =>

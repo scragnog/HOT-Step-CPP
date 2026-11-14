@@ -1,55 +1,19 @@
-// Toast.tsx — Slide-in notification component
-// Ported from hot-step-9000.
+// Toast.tsx — the app's one way to show a toast.
+//
+// Everything goes to the react-toastify stack mounted in main.tsx: top right,
+// stacked, auto-dismissing, paused on hover. Studios used to draw their own
+// toast boxes in assorted corners; call notify() instead.
 
-import React, { useEffect } from 'react';
-import { CheckCircle, AlertTriangle, Info, X, XCircle } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
-interface ToastProps {
-  message: string;
-  type: ToastType;
-  isVisible: boolean;
-  onClose: () => void;
-  duration?: number;
+// ponytail: a word match decides the colour for callers that pass no type,
+// so the studios' old string-only showToast calls keep working; pass a type
+// where the wording is ambiguous.
+const FAILURE = /\b(fail(ed|ure)?|error|not found|invalid|lost|not authenticated|could not|can't|cannot)\b/i;
+
+/** Show a toast. Without a type, a message that reads as a failure is shown as an error. */
+export function notify(message: string, type?: ToastType): void {
+  toast(message, { type: type ?? (FAILURE.test(message) ? 'error' : 'default') });
 }
-
-const icons: Record<ToastType, React.ReactNode> = {
-  success: <CheckCircle size={18} className="text-green-400" />,
-  error: <XCircle size={18} className="text-red-400" />,
-  warning: <AlertTriangle size={18} className="text-yellow-400" />,
-  info: <Info size={18} className="text-blue-400" />,
-};
-
-const borderColors: Record<ToastType, string> = {
-  success: 'border-green-500/30',
-  error: 'border-red-500/30',
-  warning: 'border-yellow-500/30',
-  info: 'border-blue-500/30',
-};
-
-export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose, duration = 4000 }) => {
-  useEffect(() => {
-    if (!isVisible) return;
-    const timer = setTimeout(onClose, duration);
-    return () => clearTimeout(timer);
-  }, [isVisible, duration, onClose]);
-
-  if (!isVisible) return null;
-
-  return (
-    <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100]">
-      <div className={`
-        toast-in flex items-center gap-3 px-4 py-3 rounded-xl
-        bg-white/95 dark:bg-zinc-900/95 backdrop-blur-lg border ${borderColors[type]}
-        shadow-xl min-w-[300px] max-w-[500px]
-      `}>
-        {icons[type]}
-        <span className="text-sm text-zinc-900 dark:text-white flex-1">{message}</span>
-        <button onClick={onClose} className="text-zinc-600 dark:text-zinc-400 hover:text-white transition-colors">
-          <X size={14} />
-        </button>
-      </div>
-    </div>
-  );
-};

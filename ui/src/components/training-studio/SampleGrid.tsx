@@ -13,7 +13,7 @@ import { CheckSquare, Columns3, RefreshCw, Square, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { sampleAudioUrl, type TrainingSample } from '../../services/trainingApi';
 import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
-import { Toast } from '../shared/Toast';
+import { toast } from 'react-toastify';
 import { SampleRow } from './SampleRow';
 import { SampleDrawer } from './SampleDrawer';
 
@@ -84,6 +84,15 @@ export const SampleGrid: React.FC = () => {
   const savingSampleIds = useTrainingStore(s => s.savingSampleIds);
   const saveError = useTrainingStore(s => s.saveError);
   const clearSaveError = useTrainingStore(s => s.clearSaveError);
+  // A failed save shows on the app's toast stack; the row stays marked until it closes.
+  useEffect(() => {
+    if (!saveError) return;
+    const id = toast.error(t('trainingStudio.grid.saveFailed', { message: saveError.message }), {
+      // Only clear the error this toast was for; a newer one keeps its own toast.
+      onClose: () => { if (useTrainingStore.getState().saveError === saveError) clearSaveError(); },
+    });
+    return () => toast.dismiss(id);
+  }, [saveError, clearSaveError, t]);
   const selectedSampleIds = useTrainingStore(s => s.selectedSampleIds);
   const toggleSampleSelected = useTrainingStore(s => s.toggleSampleSelected);
   const setSelectedSampleIds = useTrainingStore(s => s.setSelectedSampleIds);
@@ -379,12 +388,6 @@ export const SampleGrid: React.FC = () => {
 
       {openSampleId && <SampleDrawer sampleId={openSampleId} />}
 
-      <Toast
-        message={saveError ? t('trainingStudio.grid.saveFailed', { message: saveError.message }) : ''}
-        type="error"
-        isVisible={!!saveError}
-        onClose={clearSaveError}
-      />
     </div>
   );
 };

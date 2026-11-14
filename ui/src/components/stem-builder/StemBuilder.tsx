@@ -15,6 +15,7 @@ import { modelsOptions, songsOptions } from '../../queries/studios/shared';
 //   - Single track name required
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { notify } from '../shared/Toast';
 import { Upload, X, Loader2, Info, AlertTriangle, Layers, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
@@ -111,9 +112,8 @@ export const StemBuilder: React.FC = () => {
     if (completionCounter) void queryManager.invalidate(client, songsOptions().queryKey);
   }, [client, completionCounter]);
 
-  // ── Toast ──
-  const [toast, setToast] = useState('');
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
+  // ── Toast ── (the app-wide stack, top right)
+  const showToast = notify;
 
   // ── Persist source ──
   useEffect(() => { localStorage.setItem('hs-sb-sourceUrl', sourceAudioUrl); }, [sourceAudioUrl]);
@@ -316,12 +316,6 @@ export const StemBuilder: React.FC = () => {
     <BackendCapabilityGate feature="stems">
     <div className="flex flex-col w-full h-full overflow-hidden">
       {(modelsQuery.error) && <div role="alert" className="text-sm text-red-500">{(modelsQuery.error)?.message}</div>}
-      {/* Toast */}
-      {toast && (
-        <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
-          {toast}
-        </div>
-      )}
 
       {/* Narrow/portrait pane switcher — rendered below 1024px and on portrait >= 1024px */}
       <div className="max-[1279px]:flex min-[1280px]:hidden portrait-wide:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">

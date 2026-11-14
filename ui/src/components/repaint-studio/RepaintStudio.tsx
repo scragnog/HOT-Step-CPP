@@ -27,6 +27,7 @@ import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
+import { notify } from '../shared/Toast';
 
 // ── Persist helpers (same pattern as CoverStudio) ──
 function persist(key: string, value: unknown) {
@@ -89,7 +90,6 @@ export const RepaintStudio: React.FC = () => {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
   const submissionKeyRef = useRef<string | null>(null);
-  const [toast, setToast] = useState('');
   const [wipDismissed, setWipDismissed] = useState(false);
 
   // ── Sidebar resize ──
@@ -157,7 +157,7 @@ export const RepaintStudio: React.FC = () => {
     return () => { mounted = false; observation.abort(); };
   }, [token]);
 
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
+  const showToast = notify;
 
   const filteredSongs = useMemo(() => {
     if (!librarySearch.trim()) return librarySongs;
@@ -306,13 +306,7 @@ export const RepaintStudio: React.FC = () => {
     <BackendCapabilityGate feature="repaint">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {(lyricsQuery.error || libraryQuery.error) && <div role="alert" className="text-sm text-red-500">{(lyricsQuery.error || libraryQuery.error)?.message}</div>}
-      {/* Toast */}
       <StudioDraftPicker control={draft} textKey="hs-repaint-sourceName" apply={applyDraft} />
-      {toast && (
-        <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
-          {toast}
-        </div>
-      )}
 
       {/* WIP notice banner */}
       {!wipDismissed && (

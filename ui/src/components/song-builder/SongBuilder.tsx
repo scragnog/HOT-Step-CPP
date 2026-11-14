@@ -16,6 +16,7 @@ import { queryManager } from '../../queries/invalidation';
 // studio is the orchestration layer + bookkeeping (builder_projects/sections).
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { notify } from '../shared/Toast';
 import {
   Plus, Loader2, Play, Pause, Check, Trash2, Music, Layers,
   ChevronLeft, ArrowRightToLine, ArrowLeftToLine, Sparkles, MapPin, Pencil,
@@ -87,7 +88,6 @@ export const SongBuilder: React.FC = () => {
   const project = projectQuery.data?.project ?? null;
   const sections = projectQuery.data?.sections ?? [];
   const [, setLoading] = useState(false);
-  const [toast, setToast] = useState('');
 
   // New-project form
   const [newTitle, setNewTitle] = useState('');
@@ -174,7 +174,7 @@ export const SongBuilder: React.FC = () => {
   const [editLyrics, setEditLyrics] = useState('');
   const [editLabel, setEditLabel] = useState('');
 
-  const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 4000); };
+  const showToast = notify;
 
   // ── Derived: head (current full canvas) + the section being auditioned ──
   const chosenSections = useMemo(
@@ -544,7 +544,6 @@ export const SongBuilder: React.FC = () => {
   if (!project) {
     return (
       <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-y-auto p-6">
-        {toast && <Toast msg={toast} />}
         <div className="max-w-3xl mx-auto w-full">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-xl bg-violet-500/15 flex items-center justify-center">
@@ -660,7 +659,6 @@ export const SongBuilder: React.FC = () => {
   return (
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {(projectsQuery.error || projectQuery.error) && <div role="alert" className="text-sm text-red-500">{(projectsQuery.error || projectQuery.error)?.message}</div>}
-      {toast && <Toast msg={toast} />}
 
       {/* Header */}
       <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3 border-b border-white/5">
@@ -1080,12 +1078,6 @@ export const SongBuilder: React.FC = () => {
 };
 
 // ── Small presentational helpers ─────────────────────────────────────────────
-
-const Toast: React.FC<{ msg: string }> = ({ msg }) => (
-  <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-zinc-900 text-white text-sm shadow-xl border border-white/10">
-    {msg}
-  </div>
-);
 
 const DirBtn: React.FC<{ active: boolean; onClick: () => void; icon: React.ReactNode; label: string; disabled?: boolean }> =
   ({ active, onClick, icon, label, disabled }) => (

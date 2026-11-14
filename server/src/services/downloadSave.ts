@@ -66,3 +66,24 @@ export function saveIntoDir(dir: string, filename: string, sourcePath: string): 
   }
   throw new Error('Too many files with the same name in the download folder');
 }
+
+/**
+ * The OS command that shows the download folder, with `file` selected when it
+ * is an existing file directly inside that folder. `file` comes from a request,
+ * so anything else (another folder, a missing file) just opens the folder.
+ */
+export function revealCommand(
+  dir: string, file: string | undefined, platform: NodeJS.Platform = process.platform,
+): { cmd: string; args: string[] } {
+  const real = fs.realpathSync(dir);
+  let target: string | undefined;
+  if (file && path.isAbsolute(file)) {
+    try {
+      const realFile = fs.realpathSync(file);
+      if (path.dirname(realFile) === real && fs.statSync(realFile).isFile()) target = realFile;
+    } catch { /* missing: fall back to the folder */ }
+  }
+  if (platform === 'win32') return { cmd: 'explorer.exe', args: target ? ['/select,', target] : [real] };
+  if (platform === 'darwin') return { cmd: 'open', args: target ? ['-R', target] : [real] };
+  return { cmd: 'xdg-open', args: [real] };
+}

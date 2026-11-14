@@ -42,15 +42,15 @@ import { getElement as getPlayerElement, subscribeFrame } from './audio/engine';
 import { SectionMarkers } from './components/player/SectionMarkers';
 import { LyricTimelineMarks } from './components/player/LyricTimelineMarks';
 import { LyricsBar } from './components/player/LyricsBar';
-import { TrimControls } from './components/player/TrimControls';
-import { FadeControls } from './components/player/FadeControls';
+import { CropFadeControls } from './components/player/CropFadeControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
 import { StreamSpectrum } from './components/player/StreamSpectrum';
 import { RightSidebar } from './components/details/RightSidebar';
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
-import { Toast, type ToastType } from './components/shared/Toast';
+import { notify, type ToastType } from './components/shared/Toast';
+import { toast } from 'react-toastify';
 import { HotkeyHelpModal } from './components/shared/HotkeyHelpModal';
 import { CommandPalette, OPEN_PALETTE_EVENT } from './components/shared/CommandPalette';
 import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
@@ -84,11 +84,8 @@ import {
   cycleRepeat as pbCycleRepeat,
   setSpectrumEnabled as pbSetSpectrumEnabled,
   setPlaybackVariant as pbSetPlaybackVariant,
-  setTrimMode as pbSetTrimMode,
-  setFadeMode as pbSetFadeMode,
-  handleFadeDrag as pbHandleFadeDrag,
-  handleTrimClick as pbHandleTrimClick,
-  reloadCurrentTrack as pbReloadCurrentTrack,
+  setEditMode as pbSetEditMode,
+  setEndCrop as pbSetEndCrop,
   toggleAB as pbToggleAB,
   exitABMode as pbExitABMode,
   stop as pbStop,
@@ -226,18 +223,8 @@ const AppContent: React.FC = () => {
   const spectrumEnabled = usePlaybackSelector(s => s.spectrumEnabled);
   const shuffle = usePlaybackSelector(s => s.shuffle);
   const repeat = usePlaybackSelector(s => s.repeat);
-  const trimMode = usePlaybackSelector(s => s.trimMode);
-  const trimInPoint = usePlaybackSelector(s => s.trimInPoint);
-  const trimOutPoint = usePlaybackSelector(s => s.trimOutPoint);
-  const trimClickCount = usePlaybackSelector(s => s.trimClickCount);
-  const fadeMode = usePlaybackSelector(s => s.fadeMode);
-  const fadeKind = usePlaybackSelector(s => s.fadeKind);
-  const fadeLength = usePlaybackSelector(s => s.fadeLength);
-  const fadeCurve = usePlaybackSelector(s => s.fadeCurve);
-  const fadeOverlay = useMemo(
-    () => (fadeMode ? { kind: fadeKind, curve: fadeCurve, length: fadeLength } : null),
-    [fadeMode, fadeKind, fadeCurve, fadeLength],
-  );
+  const editMode = usePlaybackSelector(s => s.editMode);
+  const endEdit = usePlaybackSelector(s => s.endEdit);
   const abMode = usePlaybackSelector(s => s.abMode);
   const abActiveLabel = usePlaybackSelector(s => s.playMastered && s.abMode ? 'B' as const : 'A' as const);
   const discoMode = useDiscoMode();
@@ -328,11 +315,6 @@ const AppContent: React.FC = () => {
     syncStems('seek', time);
   }, []);
 
-  // Toast state
-  const [toast, setToast] = useState<{ message: string; type: ToastType; isVisible: boolean }>({
-    message: '', type: 'success', isVisible: false,
-  });
-
   // Confirm dialog state
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void;
@@ -410,17 +392,27 @@ const AppContent: React.FC = () => {
   // Direct download helper (reads settings from localStorage)
   const handleDownload = useCallback((song: Song) => downloadTrack(song), []);
 
-  const showToast = (message: string, type: ToastType = 'success') => {
-    setToast({ message, type, isVisible: true });
-  };
+  // App toasts share the react-toastify stack (top right, auto-dismiss) with the rest of the app.
+  const showToast = (message: string, type: ToastType = 'success') => notify(message, type);
 
   // downloadTrack.ts saves into the DOWNLOAD_DIR folder when one is set; say where it went.
   useEffect(() => {
     const onSaved = (e: Event) => {
       const { path, error } = (e as CustomEvent<{ path?: string; error?: string }>).detail;
-      setToast(error
-        ? { message: t('download.saveFailed', 'Download failed: {{error}}', { error }), type: 'error', isVisible: true }
-        : { message: t('download.savedTo', 'Saved to {{path}}', { path }), type: 'success', isVisible: true });
+      if (error) { toast.error(t('download.saveFailed', 'Download failed: {{error}}', { error })); return; }
+      toast.success(
+        <div className="flex flex-col gap-1">
+          <span className="break-all">{t('download.savedTo', 'Saved to {{path}}', { path })}</span>
+          <button
+            className="self-start text-sm font-medium text-pink-500 hover:text-pink-400 underline"
+            onClick={() => { void fetch('/api/download/reveal', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+            }); }}
+          >
+            {t('download.openFolder', 'Open folder')}
+          </button>
+        </div>,
+      );
     };
     window.addEventListener('hotstep:download-saved', onSaved);
     return () => window.removeEventListener('hotstep:download-saved', onSaved);
@@ -1370,8 +1362,8 @@ const AppContent: React.FC = () => {
             <div
               style={{
                 display: 'grid',
-                gridTemplateRows: (playerActive || trimMode || fadeMode) ? '1fr' : '0fr',
-                opacity: (playerActive || trimMode || fadeMode) ? 1 : 0,
+                gridTemplateRows: (playerActive || editMode) ? '1fr' : '0fr',
+                opacity: (playerActive || editMode) ? 1 : 0,
                 transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
               }}
             >
@@ -1387,19 +1379,8 @@ const AppContent: React.FC = () => {
                 isPlaying={isPlaying}
               />
               <StreamSpectrum visible={spectrumEnabled && playerActive && isStreamTrack} />
-              {trimMode && (
-                <TrimControls
-                  trimInPoint={trimInPoint}
-                  trimOutPoint={trimOutPoint}
-                  trimClickCount={trimClickCount}
-                  songId={currentTrack?.id ?? null}
-                  audioUrl={currentTrack?.audioUrl ?? null}
-                  onReload={pbReloadCurrentTrack}
-                  onCancel={() => pbSetTrimMode(false)}
-                />
-              )}
-              {fadeMode && (
-                <FadeControls
+              {editMode && (
+                <CropFadeControls
                   songId={currentTrack?.id ?? null}
                   audioUrl={currentTrack?.audioUrl ?? null}
                 />
@@ -1413,16 +1394,13 @@ const AppContent: React.FC = () => {
                 ) : (
                   <Waveform
                     height={56}
-                    trimIn={trimMode ? trimInPoint : null}
-                    trimOut={trimMode ? trimOutPoint : null}
-                    onClickTime={trimMode ? pbHandleTrimClick : undefined}
-                    fade={fadeOverlay}
-                    onDragTime={fadeMode ? pbHandleFadeDrag : undefined}
+                    edit={editMode ? endEdit : null}
+                    onDragTime={editMode ? pbSetEndCrop : undefined}
                   />
                 )}
                 {/* Where each syllable starts, over the bars. Clicks pass
                     through, so the waveform still owns seeking. */}
-                {!isStreamTrack && !trimMode && !fadeMode && (
+                {!isStreamTrack && !editMode && (
                   <LyricTimelineMarks
                     audioUrl={currentTrack?.audioUrl ?? undefined}
                     duration={duration}
@@ -1476,10 +1454,8 @@ const AppContent: React.FC = () => {
               onDownloadVariant={(v) => currentSong && downloadTrackVersion(currentSong as Song, v)}
               spectrumEnabled={spectrumEnabled}
               onToggleSpectrum={() => pbSetSpectrumEnabled(!spectrumEnabled)}
-              trimMode={trimMode}
-              onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
-              fadeMode={fadeMode}
-              onToggleFadeMode={() => pbSetFadeMode(!fadeMode)}
+              editMode={editMode}
+              onToggleEditMode={() => pbSetEditMode(!editMode)}
               abMode={abMode}
               abActiveLabel={abActiveLabel}
               onToggleAB={pbToggleAB}
@@ -1586,12 +1562,6 @@ const AppContent: React.FC = () => {
           }}
         />
       )}
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        isVisible={toast.isVisible}
-        onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
-      />
       <ConfirmDialog
         isOpen={confirmDialog !== null}
         title={confirmDialog?.title ?? ''}

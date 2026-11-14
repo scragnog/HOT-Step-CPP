@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { parse as dotenvParse } from 'dotenv';
 import { formatEnvValue, parseEnvValue } from '../config.js';
-import { safeFilename, saveIntoDir, validateDownloadDir } from './downloadSave.js';
+import { revealCommand, safeFilename, saveIntoDir, validateDownloadDir } from './downloadSave.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'dlsave-'));
 const source = (dir: string) => { const f = path.join(dir, 'src.bin'); fs.writeFileSync(f, 'audio'); return f; };
@@ -86,4 +86,18 @@ test('env values round-trip through the .env writer and dotenv', () => {
     assert.equal(parseEnvValue(formatEnvValue(v)), v);
   }
   assert.throws(() => formatEnvValue('a#`b'), /backtick/);
+});
+
+test('revealCommand selects a file inside the folder and ignores anything else', () => {
+  const dir = tmp();
+  const real = fs.realpathSync(dir);
+  const inside = path.join(real, 'song.flac');
+  fs.writeFileSync(inside, 'x');
+  const outside = source(tmp());
+  assert.deepEqual(revealCommand(dir, inside, 'win32'), { cmd: 'explorer.exe', args: ['/select,', inside] });
+  assert.deepEqual(revealCommand(dir, inside, 'darwin'), { cmd: 'open', args: ['-R', inside] });
+  assert.deepEqual(revealCommand(dir, outside, 'win32'), { cmd: 'explorer.exe', args: [real] });
+  assert.deepEqual(revealCommand(dir, path.join(real, 'missing.flac'), 'win32'), { cmd: 'explorer.exe', args: [real] });
+  assert.deepEqual(revealCommand(dir, 'song.flac', 'win32'), { cmd: 'explorer.exe', args: [real] });
+  assert.deepEqual(revealCommand(dir, undefined, 'linux'), { cmd: 'xdg-open', args: [real] });
 });

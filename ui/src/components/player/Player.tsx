@@ -7,7 +7,7 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Activity, Scissors, X, TrendingUp,
+  Activity, Scissors, X,
 } from 'lucide-react';
 import { DiscoIcon } from './DiscoIcon';
 import { useTranslation } from 'react-i18next';
@@ -49,10 +49,8 @@ interface PlayerProps {
   onDownloadVariant?: (v: 'noadapter' | 'original' | 'mastered') => void;
   spectrumEnabled: boolean;
   onToggleSpectrum: () => void;
-  trimMode: boolean;
-  onToggleTrimMode: () => void;
-  fadeMode: boolean;
-  onToggleFadeMode: () => void;
+  editMode: boolean;
+  onToggleEditMode: () => void;
   discoMode: boolean;
   onToggleDisco: () => void;
   abMode: boolean;
@@ -137,10 +135,8 @@ export const Player: React.FC<PlayerProps> = ({
   onDownloadVariant,
   spectrumEnabled,
   onToggleSpectrum,
-  trimMode,
-  onToggleTrimMode,
-  fadeMode,
-  onToggleFadeMode,
+  editMode,
+  onToggleEditMode,
   discoMode,
   onToggleDisco,
   abMode,
@@ -408,34 +404,19 @@ export const Player: React.FC<PlayerProps> = ({
           </>
         )}
 
-        {/* Trim / Crop toggle — hidden on mobile */}
+        {/* Crop & fade toggle — hidden on mobile */}
         <HintButton
-          label={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
-          info={t('player.trimInfo', 'Shows the trim controls above the waveform: click an in point and an out point, then crop. Cropping rewrites the audio file and cuts its lyric sidecars to the new timeline, so it cannot be undone.')}
-          onClick={onToggleTrimMode}
+          label={editMode ? t('cropFade.exit', 'Exit crop and fade') : t('player.cropFade', 'Crop and fade')}
+          info={t('player.cropFadeInfo', 'Shows the crop and fade controls above the waveform. Pick Intro or Outro, drag on the waveform to set where that end is cut, and set a fade length and curve for it. The player previews the edit while the controls are open. Done rewrites the audio file and cuts its lyric sidecars to match, so it cannot be undone.')}
+          onClick={onToggleEditMode}
           className={`p-1.5 rounded-lg transition-all max-[1023px]:hidden ${
-            trimMode
+            editMode
               ? 'text-cyan-400 bg-cyan-500/10 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
               : 'text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/5'
           }`}
-          ariaLabel={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
+          ariaLabel={editMode ? t('cropFade.exit', 'Exit crop and fade') : t('player.cropFade', 'Crop and fade')}
         >
           <Scissors size={15} />
-        </HintButton>
-
-        {/* Fade in / out — hidden on mobile */}
-        <HintButton
-          label={fadeMode ? t('fade.exit', 'Exit fade mode') : t('player.fade', 'Fade in / out')}
-          info={t('player.fadeInfo', 'Shows the fade controls above the waveform: choose intro or outro, drag the fade length on the waveform, pick a curve and apply. The player previews the fade while the controls are open. Applying rewrites the audio file, so it cannot be undone.')}
-          onClick={onToggleFadeMode}
-          className={`p-1.5 rounded-lg transition-all max-[1023px]:hidden ${
-            fadeMode
-              ? 'text-amber-400 bg-amber-500/10 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
-              : 'text-zinc-500 hover:text-amber-400 hover:bg-amber-500/5'
-          }`}
-          ariaLabel={fadeMode ? t('fade.exit', 'Exit fade mode') : t('player.fade', 'Fade in / out')}
-        >
-          <TrendingUp size={15} />
         </HintButton>
 
 

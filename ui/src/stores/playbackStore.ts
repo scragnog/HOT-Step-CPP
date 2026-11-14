@@ -1,7 +1,7 @@
 /**
  * playbackStore.ts — what is playing, and what plays next.
  *
- * Track list, navigation, shuffle and repeat, trim mode, A/B pairs, and the
+ * Track list, navigation, shuffle and repeat, crop and fade mode, A/B pairs, and the
  * preferences that persist. It decides WHAT to play. Making sound is
  * audio/engine.ts's job and this file does not reach past its front door.
  *
@@ -32,7 +32,7 @@ import {
 import { setPitchRatio } from '../audio/pitchShift';
 import { forgetPeaks } from '../audio/peaksClient';
 import * as engine from '../audio/engine';
-import { fadeGainAt, type FadeCurve, type FadeKind } from '../../../server/src/contracts/fade';
+import { endEditGainAt, type EndEdit, type FadeCurve, type FadeKind } from '../../../server/src/contracts/fade';
 import i18n from '../i18n';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
@@ -167,18 +167,11 @@ export interface PlaybackState {
   pitch441: boolean;
   spectrumEnabled: boolean;
 
-  // ── Trim Mode ──
-  trimMode: boolean;
-  trimInPoint: number | null;
-  trimOutPoint: number | null;
-  trimClickCount: number;  // 0 = waiting for IN, 1 = waiting for OUT, 2 = both set
-
-  // ── Fade Mode ──
-  fadeMode: boolean;
-  fadeKind: FadeKind;
-  /** Seconds; 0 until a length has been dragged out on the waveform. */
-  fadeLength: number;
-  fadeCurve: FadeCurve;
+  // ── Crop & fade mode ──
+  editMode: boolean;
+  /** Which end the waveform drag and the fade controls act on. */
+  editEnd: FadeKind;
+  endEdit: EndEdit;
 
   // ── A/B Comparison Mode ──
   abMode: boolean;
@@ -304,15 +297,9 @@ let _state: PlaybackState = {
   hasNoAdapter: false,
   currentAudioUrl: null,
 
-  trimMode: false,
-  trimInPoint: null,
-  trimOutPoint: null,
-  trimClickCount: 0,
-
-  fadeMode: false,
-  fadeKind: 'in',
-  fadeLength: 0,
-  fadeCurve: 'linear',
+  editMode: false,
+  editEnd: 'out',
+  endEdit: { cropIn: 0, cropOut: null, fadeIn: 0, fadeOut: 0, curveIn: 'linear', curveOut: 'linear' },
 
   abMode: false,
   abTrackA: null,
@@ -605,12 +592,8 @@ export function stop(): void {
     hasNoAdapter: false,
     playNoAdapter: false,
     currentAudioUrl: null,
-    trimMode: false,
-    trimInPoint: null,
-    trimOutPoint: null,
-    trimClickCount: 0,
-    fadeMode: false,
-    fadeLength: 0,
+    editMode: false,
+    endEdit: clearedEdit(_state.endEdit),
     abMode: false,
     abTrackA: null,
     abTrackB: null,
@@ -818,64 +801,61 @@ export function setSpectrumEnabled(v: boolean): void {
   persistPrefs();
 }
 
-// ── Trim Mode ────────────────────────────────────────────────────────────────
-
-export function setTrimMode(on: boolean): void {
-  setState({ trimMode: on, trimInPoint: null, trimOutPoint: null, trimClickCount: 0, ...(on ? { fadeMode: false } : {}) });
-}
-
-// ── Fade Mode ────────────────────────────────────────────────────────────────
+// ── Crop & fade mode ─────────────────────────────────────────────────────────
 //
-// Choose intro or outro, drag the length out on the waveform, pick a curve.
-// While the mode is on the player volume follows the fade, so it can be heard
-// before it is written; the engine reads this store's state every frame.
+// One mode for both ends of the track. Pick Intro or Outro; a drag on the
+// waveform sets where that end is cut, and a fade length and curve shape it
+// from the cut inwards. Each end keeps its own settings, so both can be set
+// before Done writes them. While the mode is on the player follows the edit:
+// silent where it would be cut, faded where it would fade.
+
+/** No crop and no fade, keeping the last curves picked. */
+function clearedEdit(e: EndEdit): EndEdit {
+  return { ...e, cropIn: 0, cropOut: null, fadeIn: 0, fadeOut: 0 };
+}
 
 engine.setGainShape((t, duration) => {
-  const { fadeMode, fadeKind, fadeCurve, fadeLength } = _state;
-  return fadeMode ? fadeGainAt(fadeKind, fadeCurve, fadeLength, duration, t) : 1;
+  const { editMode, endEdit } = _state;
+  return editMode ? endEditGainAt(endEdit, duration, t) : 1;
 });
 
-export function setFadeMode(on: boolean): void {
-  setState({ fadeMode: on, fadeLength: 0, ...(on ? { trimMode: false, trimInPoint: null, trimOutPoint: null, trimClickCount: 0 } : {}) });
+function currentDuration(): number {
+  return engine.getSnapshot().duration || _state.duration;
 }
 
-export function setFadeKind(kind: FadeKind): void {
-  setState({ fadeKind: kind, fadeLength: 0 });
+export function setEditMode(on: boolean): void {
+  setState({ editMode: on, endEdit: clearedEdit(_state.endEdit) });
 }
 
-export function setFadeCurve(curve: FadeCurve): void {
-  setState({ fadeCurve: curve });
+export function setEditEnd(end: FadeKind): void {
+  setState({ editEnd: end });
 }
 
-/** A click or drag on the waveform in fade mode: the fade runs from the track
- *  edge to the pointer. */
-export function handleFadeDrag(timeSec: number): void {
-  const { fadeKind } = _state;
-  const duration = engine.getSnapshot().duration || _state.duration;
-  const len = fadeKind === 'in' ? timeSec : duration - timeSec;
-  setState({ fadeLength: Math.max(0, Math.min(duration, len)) });
-}
-
-/** Handle a click on the waveform during trim mode */
-export function handleTrimClick(timeSec: number): void {
-  const { trimClickCount, trimInPoint, trimOutPoint, duration } = _state;
-  if (trimClickCount === 0) {
-    setState({ trimInPoint: timeSec, trimClickCount: 1 });
-  } else if (trimClickCount === 1) {
-    let inP = _state.trimInPoint ?? 0;
-    let outP = timeSec;
-    if (inP > outP) [inP, outP] = [outP, inP];
-    setState({ trimInPoint: inP, trimOutPoint: outP, trimClickCount: 2 });
+/** A click or drag on the waveform: move the active end's cut to the pointer.
+ *  At least a second is always kept between the two cuts. */
+export function setEndCrop(timeSec: number): void {
+  const { editEnd, endEdit: e } = _state;
+  const duration = currentDuration();
+  const MIN_KEEP = 1;
+  if (editEnd === 'in') {
+    const limit = (e.cropOut ?? duration) - MIN_KEEP;
+    setState({ endEdit: { ...e, cropIn: Math.max(0, Math.min(limit, timeSec)) } });
   } else {
-    // Subsequent clicks move whichever marker is nearer.
-    const inP = trimInPoint ?? 0;
-    const outP = trimOutPoint ?? duration;
-    const moveIn = Math.abs(timeSec - inP) <= Math.abs(timeSec - outP);
-    let newIn = moveIn ? timeSec : inP;
-    let newOut = moveIn ? outP : timeSec;
-    if (newIn > newOut) [newIn, newOut] = [newOut, newIn];
-    setState({ trimInPoint: newIn, trimOutPoint: newOut });
+    const out = Math.min(duration, Math.max(e.cropIn + MIN_KEEP, timeSec));
+    // Dragged to the very end means no cut there.
+    setState({ endEdit: { ...e, cropOut: out >= duration - 0.05 ? null : out } });
   }
+}
+
+export function setEndFade(lengthSec: number): void {
+  const e = _state.endEdit;
+  const v = Math.max(0, lengthSec);
+  setState({ endEdit: _state.editEnd === 'in' ? { ...e, fadeIn: v } : { ...e, fadeOut: v } });
+}
+
+export function setEndCurve(curve: FadeCurve): void {
+  const e = _state.endEdit;
+  setState({ endEdit: _state.editEnd === 'in' ? { ...e, curveIn: curve } : { ...e, curveOut: curve } });
 }
 
 /** Reload the current track's audio after it has been rewritten on disk (a
@@ -903,8 +883,7 @@ export function reloadCurrentTrack(newDuration?: number): void {
   );
 
   if (newDuration !== undefined) setState({ duration: newDuration });
-  setTrimMode(false);
-  setFadeMode(false);
+  setEditMode(false);
 }
 
 // ── React Hooks ──────────────────────────────────────────────────────────────

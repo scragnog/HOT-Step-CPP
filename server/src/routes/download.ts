@@ -9,12 +9,12 @@
 import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { config, getFFmpegPath } from '../config.js';
 import { getDb } from '../db/database.js';
 import { markDownloadedByAudioUrl } from '../db/lireekDb.js';
-import { saveIntoDir } from '../services/downloadSave.js';
+import { revealCommand, saveIntoDir } from '../services/downloadSave.js';
 import {
   gatherSongMetadata, buildMetadataArgs, buildCoverArtArgs,
   type AudioMetadata,
@@ -468,6 +468,23 @@ const lrcHandler = (save: boolean) => async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// POST /api/download/reveal { path? } — open the DOWNLOAD_DIR folder in the OS
+// file manager on this machine, selecting `path` when it is a file inside it.
+router.post('/reveal', (req: Request, res: Response) => {
+  if (!config.data.downloadDir) { res.status(409).json({ error: 'No download folder is set' }); return; }
+  try {
+    const file = typeof req.body?.path === 'string' ? req.body.path : undefined;
+    const { cmd, args } = revealCommand(config.data.downloadDir, file);
+    // explorer.exe exits 1 even when it worked, so the exit code is ignored.
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    child.on('error', err => console.warn('[Download] Reveal failed:', err.message));
+    child.unref();
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get('/:id/lrc', lrcHandler(false));
 router.post('/:id/lrc/save', lrcHandler(true));
