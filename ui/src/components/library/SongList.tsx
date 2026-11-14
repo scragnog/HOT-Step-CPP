@@ -2,6 +2,7 @@
 // Ported from hot-step-9000 visual design with Tailwind.
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Play, Pause, Trash2, RotateCcw, Music,
   Download, CheckSquare, Square, MinusSquare, X, Pencil, ListPlus,
@@ -201,6 +202,21 @@ export const SongList: React.FC<SongListProps> = ({
   // Internal view mode — persisted per context (title), initialized from prop
   const storageKey = `hs-songlist-viewMode-${title}`;
   const [cardSize] = usePersistedState<number>(CARD_SIZE_KEY, CARD_SIZE.default);
+  const gridRef = useRef<HTMLDivElement>(null);
+  // Cards only change size when the column count does (they stretch to fill
+  // the row), and then every card moves at once. A view transition animates
+  // that reflow; it starts only when the count actually changes, so slider
+  // steps that change nothing cannot cut a running animation short.
+  const setCardSize = useCallback((size: number) => {
+    const apply = () => flushSync(() => writePersistedState(CARD_SIZE_KEY, size));
+    const grid = gridRef.current;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!grid || reduce || !document.startViewTransition) { apply(); return; }
+    const GAP = 12; // gap-3
+    const cols = (min: number) => Math.max(1, Math.floor((grid.clientWidth + GAP) / (min + GAP)));
+    if (cols(size) === cols(cardSize)) { apply(); return; }
+    document.startViewTransition(apply);
+  }, [cardSize]);
   const [activeViewMode, setActiveViewMode] = useState<'list' | 'grid' | 'table'>(() => {
     try { const v = localStorage.getItem(storageKey); if (v === 'list' || v === 'grid' || v === 'table') return v; } catch {}
     return viewMode ?? 'list';
@@ -453,22 +469,6 @@ export const SongList: React.FC<SongListProps> = ({
             </button>
           )}
 
-          {/* Card size, grid view only. writePersistedState keeps every mounted song grid in step. */}
-          {activeViewMode === 'grid' && (
-            <input
-              type="range"
-              min={CARD_SIZE.min}
-              max={CARD_SIZE.max}
-              step={10}
-              value={cardSize}
-              onChange={e => writePersistedState(CARD_SIZE_KEY, Number(e.target.value))}
-              onDoubleClick={() => writePersistedState(CARD_SIZE_KEY, CARD_SIZE.default)}
-              className="w-24 accent-pink-500 max-[640px]:hidden"
-              title={t('library.cardSize', 'Card size (double-click to reset)')}
-              aria-label={t('library.cardSize', 'Card size (double-click to reset)')}
-            />
-          )}
-
           {/* View mode toggle */}
           <div className="flex items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
             {([['grid', LayoutGrid], ['list', ListIcon], ['table', Table2]] as const).map(([mode, Icon]) => (
@@ -694,7 +694,24 @@ export const SongList: React.FC<SongListProps> = ({
 
       {/* Top pagination — grid/list (table view renders it inline beside Columns) */}
       {activeViewMode !== 'table' && filteredSongs.length > 0 && (
-        <div className="flex flex-wrap justify-end gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 mb-3">
+          {/* Card size, grid view only. One saved setting for every song grid. */}
+          {activeViewMode === 'grid' && (
+            <input
+              type="range"
+              min={CARD_SIZE.min}
+              max={CARD_SIZE.max}
+              step={10}
+              value={cardSize}
+              onChange={e => setCardSize(Number(e.target.value))}
+              onDoubleClick={() => setCardSize(CARD_SIZE.default)}
+              // Inline width: the global input[type=range] rule (width 100%) outranks a class.
+              style={{ width: 72 }}
+              className="max-[640px]:hidden"
+              title={t('library.cardSize', 'Card size (double-click to reset)')}
+              aria-label={t('library.cardSize', 'Card size (double-click to reset)')}
+            />
+          )}
           <PaginationControls {...paginationProps} />
         </div>
       )}
@@ -711,7 +728,7 @@ export const SongList: React.FC<SongListProps> = ({
       >
       {/* Grid View */}
       {activeViewMode === 'grid' && filteredSongs.length > 0 && (
-        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${cardSize}px, 100%), 1fr))` }}>
+        <div ref={gridRef} className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${cardSize}px, 100%), 1fr))` }}>
           {pagedSongs.map(song => (
             <SongCard
               key={song.id}
@@ -1248,6 +1265,8 @@ const SongCard: React.FC<SongCardProps> = ({
         }
       `}
       data-sel-id={song.id}
+      // Named so the card-size slider's view transition can move and resize it.
+      style={{ viewTransitionName: `song-card-${song.id.replace(/[^a-zA-Z0-9_-]/g, '_')}` }}
       onClick={handleClick}
     >
       {/* ── Artwork ── inset with its own radius, so the card reads as a card
