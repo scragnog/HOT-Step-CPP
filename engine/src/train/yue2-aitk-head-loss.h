@@ -208,9 +208,9 @@ struct ChunkWorkspace {
             hidden_grad = yue2_aitk_graph::mm(tmp.ctx, request.head->dense_t, bf16 ? logit_grad : ggml_bf16_round(tmp.ctx, logit_grad));
         } else {
             adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
-                request.head->scales_f32, nullptr, request.head->rotation, true);
+                request.head->scales_f32, nullptr, request.head->rotation, yue2_aitk_graph::bf16_convrot_supported());
             base_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, base,
-                request.head->scales_f32, nullptr, request.head->rotation, true);
+                request.head->scales_f32, nullptr, request.head->rotation, yue2_aitk_graph::bf16_convrot_supported());
             hidden_grad = ggml_convrot8_back(tmp.ctx, logit_grad, adapted_logits);
         }
         // The loss kernel indexes these buffers by the global position offset;

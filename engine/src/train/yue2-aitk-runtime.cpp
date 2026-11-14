@@ -602,7 +602,7 @@ static int run_impl(Config config, std::string * error) {
     {
         // Fused training attention where the backend has it (CUDA, CPU); the
         // exact math attention elsewhere.
-        ggml_init_params ip = { 16 * ggml_tensor_overhead(), nullptr, true };
+        ggml_init_params ip = { 64 * ggml_tensor_overhead(), nullptr, true };
         ggml_context * probe = ggml_init(ip);
         ggml_tensor * q = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 16, 1);
         ggml_tensor * k = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 8, 1);
@@ -638,6 +638,25 @@ static int run_impl(Config config, std::string * error) {
 #else
             setenv("GGML_BACKWARD_MM", "1", 1);
 #endif
+        }
+        // ConvRot8's BF16 training kernels need Ampere tensor cores (sm_80+);
+        // on Turing (sm_75) the backward faults "backend does not support" and
+        // LoRA training on an int8 ConvRot base dies. Probe both
+        // directions at a production shape; where the backend refuses BF16 the
+        // ConvRot8 nodes keep the F32 path, which every backend runs.
+        {
+            ggml_tensor * cw = ggml_new_tensor_2d(probe, GGML_TYPE_I8, 2048, 256);
+            ggml_tensor * cx = ggml_new_tensor_2d(probe, GGML_TYPE_F32, 2048, 16);
+            ggml_tensor * cs = ggml_new_tensor_1d(probe, GGML_TYPE_F32, 256);
+            ggml_tensor * cfwd = ggml_convrot8(probe, cw, cx, cs, nullptr, 256, true);
+            ggml_tensor * cdy = ggml_new_tensor_2d(probe, GGML_TYPE_F32, 256, 16);
+            ggml_tensor * cbwd = cfwd ? ggml_convrot8_back(probe, cdy, cfwd) : nullptr;
+            yue2_aitk_graph::bf16_convrot_supported() =
+                cfwd && cbwd && ggml_backend_supports_op(backend.value, cfwd) &&
+                ggml_backend_supports_op(backend.value, cbwd);
+        }
+        if (!yue2_aitk_graph::bf16_convrot_supported()) {
+            std::fprintf(stderr, "[yue2-aitk] ConvRot8 BF16 unsupported on this backend; using the F32 path\n");
         }
         ggml_free(probe);
     }

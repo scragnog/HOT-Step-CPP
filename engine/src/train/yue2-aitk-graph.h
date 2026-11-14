@@ -47,6 +47,12 @@ inline bool & math_attention() { static bool on = false; return on; }
 // flash attention in both directions (S2c; CUDA sm_80+). Elsewhere the BF16
 // cast below never happens and the dispatch is the F32/TF32 one.
 inline bool & bf16_attention_supported() { static bool on = false; return on; }
+// Set once by the runner: true (the default) unless the backend refuses the
+// BF16 ConvRot8 training op. Its BF16 kernels need Ampere tensor cores
+// (sm_80+); on Turing (sm_75) the backward faults "backend does not support"
+// and LoRA training on an int8 ConvRot base dies. Where it is false the
+// ConvRot8 nodes build on the F32 path, which every backend runs.
+inline bool & bf16_convrot_supported() { static bool on = true; return on; }
 // Training precision (S2a, 2026-10-13). Default: every training GEMM is a
 // BF16 x BF16 tensor-core product with FP32 accumulation and F32 output. The
 // inputs are already BF16-rounded, so each product is exact and only the
@@ -176,7 +182,7 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
         base = round(ctx, base);
     } else {
         base = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32,
-                             bias ? f32(ctx, bias) : nullptr, w.rotation, true);
+                             bias ? f32(ctx, bias) : nullptr, w.rotation, bf16_convrot_supported());
     }
     if (w.frozen_a) {
         // Companion decoder LoRA: frozen, same boundaries as the trainable branch.
