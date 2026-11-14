@@ -120,7 +120,10 @@ dotenvConfig({ path: ENV_PATH });
 // all", and every child we spawn (ace-server, ace-train) inherits it and falls
 // back to CPU without saying why. The Settings GPU picker writes exactly that
 // line when the user selects Auto, so drop it here rather than propagate it.
-if (process.env.CUDA_VISIBLE_DEVICES !== undefined && process.env.CUDA_VISIBLE_DEVICES.trim() === '') {
+// "all" (keep every GPU visible) is a Settings value, not a CUDA one: CUDA reads
+// it as no GPUs, so it must not reach inherited child envs either.
+const GPU_SETTING_ALL = process.env.CUDA_VISIBLE_DEVICES?.trim().toLowerCase() === 'all' ? 'all' : undefined;
+if (process.env.CUDA_VISIBLE_DEVICES !== undefined && (process.env.CUDA_VISIBLE_DEVICES.trim() === '' || GPU_SETTING_ALL)) {
   delete process.env.CUDA_VISIBLE_DEVICES;
 }
 
@@ -232,7 +235,7 @@ export const config = {
     vaeChunk: parseInt(process.env.ACESTEPCPP_VAE_CHUNK || '1024', 10),
     vaeOverlap: parseInt(process.env.ACESTEPCPP_VAE_OVERLAP || '64', 10),
     /** GPU device selection — maps to CUDA_VISIBLE_DEVICES env var for the engine process */
-    cudaVisibleDevices: process.env.CUDA_VISIBLE_DEVICES || '',
+    cudaVisibleDevices: GPU_SETTING_ALL ?? (process.env.CUDA_VISIBLE_DEVICES || ''),
     /** Multi-GPU opt-in: comma-separated NVIDIA GPU UUIDs, one ace-server per
      *  card (services/engineWorkers.ts). Empty (the default) is the single
      *  engine above, launched exactly as before. Read once at boot. */
