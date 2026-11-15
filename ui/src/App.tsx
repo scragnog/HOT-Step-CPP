@@ -738,11 +738,17 @@ const AppContent: React.FC = () => {
   }, [token, selectedSong, queryClient]);
 
   // Reuse handler
-  const [reuseData, setReuseData] = useState<{ song: Song; timestamp: number } | null>(null);
-  const handleReuse = useCallback((song: Song) => {
-    setReuseData({ song, timestamp: Date.now() });
+  const [reuseData, setReuseData] = useState<{ song: Song; timestamp: number; scoreOnly?: boolean } | null>(null);
+  const handleReuse = useCallback((song: Song, scoreOnly?: boolean) => {
+    setReuseData({ song, timestamp: Date.now(), scoreOnly });
     navigateTo('create');
   }, [navigateTo]);
+  // "Reuse score" from the shared song menu (SongActionsMenu).
+  useEffect(() => {
+    const handler = (e: Event) => handleReuse((e as CustomEvent).detail.song, true);
+    window.addEventListener('song-reuse-score', handler);
+    return () => window.removeEventListener('song-reuse-score', handler);
+  }, [handleReuse]);
 
   // Send-to-Cover handler — loads a library track into Cover Studio (#61)
   const [coverSource, setCoverSource] = useState<{ song: Song; timestamp: number } | null>(null);

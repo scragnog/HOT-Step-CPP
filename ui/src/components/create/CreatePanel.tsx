@@ -60,7 +60,7 @@ const NO_DATASETS: TrainingDatasetSummary[] = [];
 interface CreatePanelProps {
   onGenerate: (params: Partial<GenerationParams>, intent?: CreateIntent) => void;
   activeJobCount: number;
-  reuseData?: { song: Song; timestamp: number } | null;
+  reuseData?: { song: Song; timestamp: number; scoreOnly?: boolean } | null;
   /** Filled with a function returning the content params Generate would send, for the Build by section tab. */
   paramsRef?: React.MutableRefObject<(() => Partial<GenerationParams>) | null>;
 }
@@ -440,7 +440,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       }
       // Older rows have these provenance flags but no explicit origin.
       // With neither, conservatively rerun the engine planner.
-      const scoreOrigin = gpData.yue2ScoreOrigin
+      // Reuse score: supply the stored ABC so the plan stage is skipped.
+      const scoreOrigin = reuseData.scoreOnly ? 'supplied' : gpData.yue2ScoreOrigin
         ?? (gpData.yue2?.abc_supplied || gpData.yue2?.abc_planned ? 'supplied' : 'engine');
       setBackendParamFor(YUE2_BACKEND_ID, 'yue2ScoreOrigin', scoreOrigin);
       setBackendParamFor(YUE2_BACKEND_ID, 'yue2AutoReplan', gpData.yue2AutoReplan !== false);

@@ -39,6 +39,7 @@ import { scoreAbcOptions, lrcOptions, lyricsJsonOptions } from '../../queries/sh
 import { downloadLyricsLrc } from '../../utils/downloadTrack';
 import { useRetranscribe } from '../../stores/retranscribeStore';
 import { BottomSheet, useIsMobile } from './BottomSheet';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -361,6 +362,9 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   };
   const act = (fn: () => void) => { fn(); close(); };
 
+  const gp = song.generationParams as any;
+  const hasStoredScore = (song.backend ?? gp?.backend) === YUE2_BACKEND_ID && !!(gp?.yue2Abc ?? gp?.yue2Request?.abc);
+
   const hasMastered = !!(song.masteredAudioUrl || (song as any).mastered_audio_url);
   // Only YuE2 renders have a lead sheet; probe for it once the menu opens.
   const audioUrl = song.audioUrl || song.audio_url || '';
@@ -469,6 +473,14 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
 
           {onReuse && (
             <Item icon={<RotateCcw size={14} />} label={t('library.edit')} onClick={() => act(onReuse)} />
+          )}
+          {onReuse && hasStoredScore && (
+            <Item
+              icon={<FileMusic size={14} />}
+              label={t('songActions.reuseScore', 'Reuse score')}
+              onClick={() => act(() => window.dispatchEvent(new CustomEvent('song-reuse-score', { detail: { song } })))}
+              title={t('songActions.reuseScoreHint', 'Open Create with the ABC score of this track, so a new prompt, genre or singer keeps the same score')}
+            />
           )}
           {onAddToPlaylist && (
             <Item
