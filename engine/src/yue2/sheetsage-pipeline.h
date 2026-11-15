@@ -334,6 +334,16 @@ inline bool sheetsage_transcribe(const SheetSageModel & m, const float * mono24,
             hard_failed = true;
         }
         stitched_so_far = std::move(rr.stitched);
+        // Refined writes the sung line (track 0) at sounding pitch, one octave
+        // below SheetSage2's lead-sheet register that YuE2 and the notation
+        // expect (measured on four songs, male and female: -12 throughout;
+        // the played line already matches). Shifted after the song loop so
+        // each window's overlap prefix keeps the model's own octave.
+        for (Yue2SheetEvent & e : stitched_so_far) {
+            for (Yue2SheetMelodyNote & note : e.melody) {
+                if (note.track == 0 && note.pitch + 12 <= 127) note.pitch += 12;
+            }
+        }
         out->windows    = rr.windows;
         out->window_ids = std::move(rr.window_ids);
         out->ms_encode  = rr.ms_encode;
