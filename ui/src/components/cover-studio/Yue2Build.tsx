@@ -58,7 +58,11 @@ export function buildNext(session: Yue2BuildSession | null): number {
 /** One occurrence of the output: a score section placed in the song. Kept ones are built and locked.
  *  `lyrics` is its own sung lines, when it has been given some. An improv has section -1 and
  *  `improv` bars: rests in the score, composed without it. */
-export interface PlanItem { id: string; section: number; kept: boolean; lyrics?: string; improv?: number }
+export interface PlanItem { id: string; section: number; kept: boolean; lyrics?: string; improv?: number; octave?: number }
+
+/** The vocal octave choices for an unbuilt section. */
+const VOCAL_OCTAVES = [{ value: -1, label: 'Vocal 8ve down' }, { value: 0, label: 'Vocal as written' }, { value: 1, label: 'Vocal 8ve up' }];
+const octaveTag = (octave?: number) => (octave ? ` · 8ve ${octave > 0 ? 'up' : 'down'}` : '');
 
 /** The bar counts the Improv button offers. */
 export const IMPROV_BARS = [2, 4, 8, 16];
@@ -70,7 +74,7 @@ export function planItems(session: Yue2BuildSession | null): PlanItem[] {
   if (!session) return [];
   const { sections, plan } = session.arrangement;
   return plan.map((o, i) => ({ id: o.id, section: sections.findIndex(s => s.id === o.section), kept: i < built,
-    ...(o.lyrics === undefined ? {} : { lyrics: o.lyrics }), ...(o.section === 'improv' ? { improv: o.bars } : {}) }));
+    ...(o.lyrics === undefined ? {} : { lyrics: o.lyrics }), ...(o.section === 'improv' ? { improv: o.bars } : {}), ...(o.octave ? { octave: o.octave } : {}) }));
 }
 
 /** The ids `POST /build/:id/plan` takes for the unbuilt part of the output after `edit`. */
@@ -213,6 +217,10 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     mutationFn: (v: { edits: Record<string, string | null> }) => yue2CoverApi.buildOccurrenceLyrics(live!.id, live!.revision, v.edits),
     onSuccess: commit, onError: fail,
   });
+  const occurrenceOctaveMut = useMutation({
+    mutationFn: (v: { edits: Record<string, number> }) => yue2CoverApi.buildOccurrenceOctave(live!.id, live!.revision, v.edits),
+    onSuccess: commit, onError: fail,
+  });
   const settingsMut = useMutation({
     mutationFn: (v: { settings: Record<string, unknown> }) => yue2CoverApi.buildSettings(live!.id, live!.revision, v.settings),
     onSuccess: commit, onError: fail,
@@ -270,7 +278,7 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
     onError: fail,
   });
 
-  const busy = [generateMut, occurrenceLyricsMut, settingsMut, planMut, keepMut, previewMut, trimMut, undoMut, removeMut, cancelMut, cropMut, applyLyricsMut, deleteBuildMut]
+  const busy = [generateMut, occurrenceLyricsMut, occurrenceOctaveMut, settingsMut, planMut, keepMut, previewMut, trimMut, undoMut, removeMut, cancelMut, cropMut, applyLyricsMut, deleteBuildMut]
     .some(m => m.isPending);
   return {
     session: live, loading: lyricsTarget(sessionId, live) === 'loading', error: error || snapshot.error?.message || '', busy,
@@ -280,6 +288,8 @@ export function useYue2Build(token: string | null, sessionId: string, setSession
       generateMut.mutateAsync({ params, to, count, caption, lyrics, newChords }).catch(() => null),
     /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
     occurrenceLyrics: (edits: Record<string, string | null>) => { void occurrenceLyricsMut.mutateAsync({ edits }).catch(() => null); },
+    /** Moves unbuilt occurrences' vocal line an octave (-1, 1) or back to the score's (0). */
+    occurrenceOctave: (edits: Record<string, number>) => { void occurrenceOctaveMut.mutateAsync({ edits }).catch(() => null); },
     /** Applies new cover settings to the session (before its first keep). */
     settings: (settings: Record<string, unknown>) => settingsMut.mutateAsync({ settings }).catch(() => null),
     /** Replaces the unbuilt part of the output, starting the session from `params` if there is none. */
@@ -459,6 +469,8 @@ interface PageProps {
   onGenerate: (to: number, count: number, caption: string, lyrics: Record<string, string>, newChords: boolean) => Promise<boolean>;
   /** Gives unbuilt occurrences their own lines, or (null) the build's again. */
   onOccurrenceLyrics: (edits: Record<string, string | null>) => void;
+  /** Unbuilt occurrences' vocal octave: -1, 0 or 1. */
+  onOccurrenceOctave?: (edits: Record<string, number>) => void;
   /** Sets what the unbuilt part of the output is: section ids (s0...) or upcoming occurrence ids (o3...). */
   onPlan: (upcoming: string[], finished: boolean) => void;
   onCancel: () => void;
@@ -766,7 +778,7 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
               className={`group relative min-w-0 cursor-pointer rounded-md border-t-4 px-1.5 py-1 ${picked ? 'ring-2 ring-pink-500' : ''} ${!item.kept && i > next && !picked ? 'opacity-60' : ''}`}>
               <p className="truncate text-[11px] font-semibold text-zinc-800 dark:text-zinc-100">
                 {item.kept ? '✓ ' : i === next ? '→ ' : ''}{nameOf(item)}</p>
-              <p className="truncate text-[10px] text-zinc-500">{item.kept ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${itemBars(item)} bars`}</p>
+              <p className="truncate text-[10px] text-zinc-500">{item.kept ? (start != null ? clock(start / FPS) : 'built') : i === next ? 'next' : `${itemBars(item)} bars`}{octaveTag(item.octave)}</p>
               {item.kept && <button type="button" onClick={e => { e.stopPropagation(); undo(i); }}
                 title={`Undo back to ${nameOf(item)}, to build it again`}
                 className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-500 hover:text-pink-500 group-hover:block"><RotateCcw className="w-3 h-3" /></button>}
@@ -810,6 +822,10 @@ export const Yue2BuildPage: React.FC<PageProps> = p => {
           {shown.map(({ item, lines }) => <div key={item.id} className="space-y-1">
             <div className="flex items-center gap-2">
               <p className="flex-1 text-xs font-semibold text-zinc-700 dark:text-zinc-200">{nameOf(item)}</p>
+              {p.onOccurrenceOctave && !item.improv && <div className="w-32" title="Sings this section's vocal line an octave up or down from the score. Other copies of the section keep theirs.">
+                <StyledSelect size="sm" aria-label={`Vocal octave for ${nameOf(item)}`} value={item.octave ?? 0} disabled={!editable}
+                  onChange={v => p.onOccurrenceOctave?.({ [item.id]: Number(v) })} options={VOCAL_OCTAVES} />
+              </div>}
               {lines !== null && (item.lyrics !== undefined || item.id in drafts) && <button type="button" disabled={!editable}
                 onClick={() => { setDrafts(d => Object.fromEntries(Object.entries(d).filter(([id]) => id !== item.id))); if (item.lyrics !== undefined) p.onOccurrenceLyrics({ [item.id]: null }); }}
                 title="Sing this build's lyrics for this section again"

@@ -183,7 +183,7 @@ export interface Yue2Arrangement {
   sections: Yue2SourceSection[];
   /** `lyrics`: the occurrence's own sung lines, when it has been given some. */
   /** section is a source section id, or 'improv' with its own bar count. */
-  plan: Array<{ id: string; section: string; lyrics?: string; bars?: number }>;
+  plan: Array<{ id: string; section: string; lyrics?: string; bars?: number; octave?: number }>;
   /** The plan ends the song; until then a take runs a few seconds into the source section after the last one. */
   finished: boolean;
 }
@@ -255,6 +255,9 @@ export const yue2CoverApi = {
   /** Unbuilt occurrences' own lines (occurrence id to text), or null to sing the build's again. */
   buildOccurrenceLyrics: (id: string, revision: number, edits: Record<string, string | null>) =>
     request<Yue2BuildSession>(`/build/${id}/occurrence-lyrics`, { method: 'POST', body: JSON.stringify({ revision, edits }) }, { silent: true }),
+  /** Unbuilt occurrences' vocal octave (occurrence id to -1, 0 or 1). */
+  buildOccurrenceOctave: (id: string, revision: number, edits: Record<string, number>) =>
+    request<Yue2BuildSession>(`/build/${id}/occurrence-octave`, { method: 'POST', body: JSON.stringify({ revision, edits }) }, { silent: true }),
   /** Before the first keep: the cover's voices, tempo, key, keyShift and cfgScale (as
    *  params.yue2Cover carries them) and AR strength. Takes made before it cannot be kept. */
   buildSettings: (id: string, revision: number, settings: Record<string, unknown>) =>

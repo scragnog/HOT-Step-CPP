@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, planDrawRefusal, planPrefix, revisionRefusal,
-  sourceSections, spliceSection, takeIdentity, type ArrangedSession, type LegacySession,
+  shiftOctave, sourceSections, spliceSection, takeIdentity, type ArrangedSession, type LegacySession,
 } from './coverArrangement.js';
 import { scoreSections } from './scoreSections.js';
 import { scoreBarClock } from './scoreClock.js';
@@ -33,6 +33,25 @@ function barLengths(abc: string): number[][] {
   return sections.map((s, i) => bars.slice(s.startBar - 1, (sections[i + 1]?.startBar ?? bars.length + 1) - 1)
     .map(b => b.end - b.start));
 }
+
+test('shiftOctave moves notes, leaves chords, accidentals and fields alone', () => {
+  assert.equal(shiftOctave('"Am"^C2c,4e\'|[K:G]!fermata!B,8z4', 1), '"Am"^c2c4e\'\'|[K:G]!fermata!B8z4');
+  assert.equal(shiftOctave('_E2c\'4C,|', -1), '_E,2c4C,,|');
+  assert.equal(shiftOctave(shiftOctave('A,B,Cdefg\'\'', 1), -1), 'A,B,Cdefg\'\'');
+});
+
+test('an occurrence octave moves only its own vocal lines', () => {
+  const plan = [INTRO, VERSE, CHORUS, CHORUS, OUTRO];
+  const plain = composeArrangement(score, lyrics, plan);
+  const out = composeArrangement(score, lyrics, plan, [], [undefined, undefined, undefined, 1]);
+  const a = plain.abc.split('\n'), b = out.abc.split('\n');
+  assert.equal(a.length, b.length);
+  const changed = a.flatMap((line, i) => (line === b[i] ? [] : [[line, b[i]]]));
+  // The second chorus's two vocal lines; its Ins rests and the first chorus are untouched.
+  assert.deepEqual(changed, [['c16|', "c'16|"], ['c8|', "c'8|"]]);
+  assert.ok(b.indexOf("c'16|") > b.lastIndexOf('c16|'));
+  assert.equal(out.lyrics, plain.lyrics);
+});
 
 test('source sections carry their bar counts and lyric blocks', () => {
   assert.deepEqual(sourceSections(score, lyrics).map(s => [s.id, s.label, s.startBar, s.bars, s.lyricBlock]), [

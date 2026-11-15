@@ -16,7 +16,7 @@ import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
-import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuild, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, renderBuildPreview, setBuildTrim, setOccurrenceLyrics, undoBuildKeep } from '../services/yue2Takes.js';
+import { TakesError, applyBuildLyrics, applyBuildSettings,cancelBuildTakes, createBuildSession, cropBuildTake, deleteBuild, deleteBuildTake, editBuildPlan, generateBuildTakes, getBuildSession, keepBuildTake, lyricsProblem, renderBuildPreview, setBuildTrim, setOccurrenceLyrics, setOccurrenceOctave, undoBuildKeep } from '../services/yue2Takes.js';
 import { buildSessionHasActiveJob } from './generate.js';
 import { buildEnvelope } from '../services/generation/envelope.js';
 import { yue2RequestForJob } from '../services/backends/yue2/generate.js';
@@ -278,6 +278,9 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   // (o3...) to text, or null to sing the build's lyrics again.
   router.post('/build/:id/occurrence-lyrics', (req: Request, res: Response) =>
     takes(res, () => setOccurrenceLyrics(String(req.params.id), authenticate(req)!, req.body?.revision, req.body?.edits)));
+  // Unbuilt occurrences' vocal octave: `edits` maps occurrence ids to -1, 0 or 1.
+  router.post('/build/:id/occurrence-octave', (req: Request, res: Response) =>
+    takes(res, () => setOccurrenceOctave(String(req.params.id), authenticate(req)!, req.body?.revision, req.body?.edits)));
   // Before the first keep: `settings` holds a cover build's voices, tempo, key,
   // keyShift and cfgScale (as params.yue2Cover carries them) and arStrength; a Create build takes cfgScale and arStrength only.
   router.post('/build/:id/settings', (req: Request, res: Response) => {

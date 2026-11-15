@@ -616,7 +616,12 @@ the top reads covering artist, then song, as the saved track is named.
    beside the takes. You don't have to decide what follows: until the song is
    marked as ending, each take runs a few seconds into the section that follows
    its last one in the source, so the next take has a seam to start from, and
-   that section is not added to your song. Tick **Ends the song** before building
+   that section is not added to your song. Each planned section's lyrics carry a
+   vocal octave choice: **Vocal 8ve up** or **Vocal 8ve down** moves that
+   section's vocal line an octave in the score its takes are sent, so a last
+   chorus can go up while the first stays as written. It applies to that entry
+   only, is refused while takes render, and is locked once the section is built.
+   The Song bar shows the choice as **8ve up** or **8ve down**. Tick **Ends the song** before building
    the last section so its take composes an ending instead. A take of the score's
    own last section ends there either way. Only a kept take that
    really composed an ending locks the song; one that ran on into the next source

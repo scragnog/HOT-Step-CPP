@@ -61,8 +61,10 @@ export interface SourceSection {
  *  without its tag), so a repeated chorus can sing other words than the first.
  *  An improv occurrence has section IMPROV and its own bar count instead of a
  *  source section: the score gets that many bars of rests, labelled Improv,
- *  and its take composes them without the score (yue2Takes' blind window). */
-export interface Occurrence { id: string; section: string; lyrics?: string; bars?: number }
+ *  and its take composes them without the score (yue2Takes' blind window).
+ *  `octave`, when set (-1 or 1), moves the occurrence's vocal line that many
+ *  octaves in the composed score, so one chorus can be sung higher than the last. */
+export interface Occurrence { id: string; section: string; lyrics?: string; bars?: number; octave?: number }
 
 export const IMPROV = 'improv';
 export const IMPROV_BARS = [2, 4, 8, 16];
@@ -160,8 +162,10 @@ export interface Composed {
  *  indexes; repeats allowed). The source order gives the source text back
  *  (lyrics gain a final newline if they lack one). `sing[k]`, when set, is
  *  sung by occurrence k in place of its block's lines; an unsung section has
- *  none to replace. */
-export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[], sing: Array<string | undefined> = []): Composed {
+ *  none to replace. `octaves[k]`, when set, moves occurrence k's vocal lines
+ *  that many octaves (shiftOctave). */
+export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[], sing: Array<string | undefined> = [],
+  octaves: Array<number | undefined> = []): Composed {
   abc = abc.replace(/\r\n?/g, '\n');
   lyrics = lyrics.replace(/\r\n?/g, '\n');
   const lines = abc.split('\n');
@@ -231,6 +235,9 @@ export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[
   const occurrences: ComposedOccurrence[] = [];
   let state = header, bar = 1, lyricAt = 0;
   const sections = sourceSections(abc, lyrics);
+  const vocalIds = vocalVoiceIds(abc);
+  // An unvoiced score is one melody line: the vocal.
+  const sung = (voice: string | null) => (voice === null ? !voiceIds.length : isScoreVocalVoice(`V: ${voice}`, vocalIds));
   for (const [k, s] of plan.entries()) {
     if (typeof s !== 'number') {
       const rests = `${restBar(state.fields)}|`.repeat(s.improv);
@@ -248,7 +255,7 @@ export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[
     const changed = Object.entries(want.fields).filter(([f, v]) => state.fields[f] !== v).map(([, v]) => v);
     const voices = new Set<string>();
     const abcStart = Array.from(out.join('\n')).length + (out.length ? 1 : 0);
-    let voiced = false;
+    let voiced = false, voice = want.voice;
     for (const raw of chunks[s]) {
       const line = raw.trim(), f = FIELD.exec(line);
       const music = !!line && !line.startsWith('%') && !f;
@@ -256,9 +263,10 @@ export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[
         out.push(`V: ${want.voice}`, ...changed);
         voices.add(want.voice);
       }
-      out.push(raw);
+      out.push(music && octaves[k] && sung(voice) ? shiftOctave(raw, octaves[k]!) : raw);
       if (f?.[1] === 'V') {
         const id = line.slice(2).trim().split(/\s+/)[0] ?? '';
+        voice = id;
         if (!voices.has(id)) { voices.add(id); out.push(...changed); }
       }
       voiced ||= music || f?.[1] === 'V';
@@ -300,6 +308,20 @@ export function composeArrangement(abc: string, lyrics: string, plan: PlanEntry[
   };
 }
 
+// Skipped whole: comments, chord symbols and annotations, inline fields, decorations.
+const NOTE = /%.*$|"[^"]*"|\[[A-Za-z]:[^\]]*\]|!.*?!|([A-Ga-g])([,']*)/g;
+
+/** One music line with every note moved `octaves` octaves (C -> c -> c' up,
+ *  C -> C, down). Accidentals stay as written: a whole line moves together,
+ *  so what a bar's accidental carries to moves with it. */
+export function shiftOctave(line: string, octaves: number): string {
+  return line.replace(NOTE, (token, letter: string | undefined, marks: string) => {
+    if (!letter) return token;
+    const o = (letter === letter.toLowerCase() ? 1 : 0) + [...marks].reduce((n, m) => n + (m === "'" ? 1 : -1), 0) + octaves;
+    return o >= 1 ? letter.toLowerCase() + "'".repeat(o - 1) : letter.toUpperCase() + ','.repeat(-o);
+  });
+}
+
 /** One bar of rest in the meter in force (M:, L:; ABC's defaults when absent). */
 function restBar(fields: Record<string, string>): string {
   const ratio = (text: string | undefined, fallback: [number, number]): [number, number] => {
@@ -330,6 +352,9 @@ export function occurrenceLabel(arrangement: Arrangement, i: number): string | u
 
 /** The plan's own lyrics per occurrence, for composeArrangement. */
 export const planLyrics = (arrangement: Arrangement): Array<string | undefined> => arrangement.plan.map(o => o.lyrics);
+
+/** The plan's vocal octave shift per occurrence, for composeArrangement. */
+export const planOctaves = (arrangement: Arrangement): Array<number | undefined> => arrangement.plan.map(o => o.octave);
 
 /** The source section a take's prompt adds after the last planned occurrence
  *  while the plan is open: the one that follows it in the score. The take

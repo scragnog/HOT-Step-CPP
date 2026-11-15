@@ -36,7 +36,7 @@ import { scoreSections } from './backends/yue2/scoreSections.js';
 import { scoreBarClock } from './backends/yue2/scoreClock.js';
 import { blindYue2Schedule } from './backends/yue2/lyricSchedule.js';
 import {
-  BUILD_SESSION_VERSION, IMPROV, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics,
+  BUILD_SESSION_VERSION, IMPROV, composeArrangement, editPlan, generateRefusal, keepRefusal, lookaheadSection, migrateLegacySession, nextOccurrence, planLyrics, planOctaves,
   occurrenceLabel, planDrawRefusal, planPrefix, planSections, revisionRefusal, spliceSection, sourceSections, takeIdentity, type ArrangedSession, type ArrangedTake, type LegacySession, type PlanEntry,
 } from './backends/yue2/coverArrangement.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
@@ -214,13 +214,13 @@ function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = f
   // A take of an open plan runs on into the section after it (lookaheadSection).
   const extra = lookahead ? lookaheadSection(stored.arrangement) : null;
   if (extra !== null) plan.push(extra);
-  const own = planLyrics(stored.arrangement);
-  const composed = composeArrangement(abc, lyrics, plan, own);
+  const own = planLyrics(stored.arrangement), octaves = planOctaves(stored.arrangement);
+  const composed = composeArrangement(abc, lyrics, plan, own, octaves);
   const request = { ...stored.request };
   // Lyric Timing (C6) is off for builds: with a resumed prefix the engine
   // replays it one frame per step, which made late sections crawl.
   delete request.lyric_schedule;
-  if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i) || own.some(text => text !== undefined)) {
+  if (plan.length !== stored.arrangement.sections.length || plan.some((s, i) => s !== i) || own.some(text => text !== undefined) || octaves.some(Boolean)) {
     request.abc = composed.abc;
     if (request.lyrics) request.lyrics = composed.lyrics;
   }
@@ -1142,6 +1142,34 @@ export function setOccurrenceLyrics(id: string, userId: string, revision: unknow
     if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new TakesError('Lyrics contain control characters.');
     if (text.split('\n').some(line => line.trim().startsWith('['))) throw new TakesError(`${name.label}'s lyrics cannot hold a section tag; edit one section at a time.`);
     plan[at].lyrics = text;
+  }
+  if (JSON.stringify(plan) === JSON.stringify(stored.arrangement.plan)) return view(stored);
+  const arrangement = { ...stored.arrangement, plan };
+  arranged({ request: stored.request, arrangement });
+  stored.arrangement = arrangement;
+  stored.revision++;
+  save(stored);
+  return view(stored);
+}
+
+/** Unbuilt occurrences' vocal octave: `edits` maps occurrence ids to -1, 0 or 1
+ *  (0 sings the score's own octave). Kept ones cannot change: their audio was
+ *  composed under the score as it was. */
+export function setOccurrenceOctave(id: string, userId: string, revision: unknown, edits: unknown): Yue2BuildSession {
+  const stored = load(id, userId);
+  checkRevision(stored, revision);
+  if (stored.pending.length) throw new TakesError('Wait for the pending takes or cancel them first.', 409);
+  if (!edits || typeof edits !== 'object' || Array.isArray(edits)) throw new TakesError('edits must map occurrence ids to octaves.');
+  const built = nextOccurrence(stored);
+  const plan = stored.arrangement.plan.map(o => ({ ...o }));
+  for (const [occurrence, value] of Object.entries(edits as Record<string, unknown>)) {
+    const at = plan.findIndex(o => o.id === occurrence);
+    if (at < 0) throw new TakesError(`No such occurrence: ${occurrence}`);
+    const label = occurrenceLabel(stored.arrangement, at) ?? 'That section';
+    if (at < built) throw new TakesError(`${label} is built; undo back to it to change its octave.`, 409);
+    if (value !== -1 && value !== 0 && value !== 1) throw new TakesError('An octave is -1, 0 or 1.');
+    if (plan[at].section === IMPROV) throw new TakesError('An improv has no score to move.');
+    if (value) plan[at].octave = value; else delete plan[at].octave;
   }
   if (JSON.stringify(plan) === JSON.stringify(stored.arrangement.plan)) return view(stored);
   const arrangement = { ...stored.arrangement, plan };

@@ -658,6 +658,28 @@ test('arrangements: takes and Save song follow the plan, by occurrence', async t
     assert.equal(setOccurrenceLyrics(s.id, 'user', 2, { [second.id]: null }).arrangement.plan[2].lyrics, undefined);
   });
 
+  await t.test('an unbuilt repeat sings an octave up; built ones and improvs are refused', async () => {
+    const { setOccurrenceOctave } = await import('./yue2Takes.js');
+    const s = start();
+    editBuildPlan(s.id, 'user', 0, ['s1', 's2', 's2', 'improv:2'], true);
+    const [verse] = await take(s.id, 0, 1);
+    keepBuildTake(s.id, 'user', verse.id, 1);
+    const [, , second, improv] = getBuildSession(s.id, 'user').arrangement.plan;
+    const edited = setOccurrenceOctave(s.id, 'user', 1, { [second.id]: 1 });
+    assert.equal(edited.revision, 2);
+    assert.equal(edited.arrangement.plan[2].octave, 1);
+    await take(s.id, 2, 2);
+    const plan = [1, 2, 2, { improv: 2 }];
+    const plain = composeArrangement(score, lyrics, plan).abc;
+    const sent = requests.at(-1)!.abc!;
+    assert.notEqual(sent, plain);
+    assert.equal(sent, composeArrangement(score, lyrics, plan, [], [undefined, undefined, 1]).abc);
+    assert.throws(() => setOccurrenceOctave(s.id, 'user', 2, { [verse.occurrences[0]]: 1 }), /is built/);
+    assert.throws(() => setOccurrenceOctave(s.id, 'user', 2, { [improv.id]: 1 }), /improv/);
+    assert.throws(() => setOccurrenceOctave(s.id, 'user', 2, { [second.id]: 2 }), /-1, 0 or 1/);
+    assert.equal(setOccurrenceOctave(s.id, 'user', 2, { [second.id]: 0 }).arrangement.plan[2].octave, undefined);
+  });
+
   await t.test('stale revisions, stale candidates and stale parents are refused', async () => {
     const s = start();
     const [a, b] = await take(s.id, 0, 0, 2);
