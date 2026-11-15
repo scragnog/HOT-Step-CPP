@@ -184,6 +184,7 @@ import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
 import { essentiaAvailable, essentiaTempoProfile } from '../services/training/essentiaClient.js';
+import { parsePipelineLabelOptions } from '../services/training/pipelineLabelOptions.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
 import { buildGpuEnv } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
@@ -667,19 +668,8 @@ router.post('/pipeline', (req: Request, res: Response) => {
     // Per-run label-stage overrides (bulk re-caption etc.) — validated field
     // by field; anything absent falls through to the stored label defaults.
     let labelOptions: PipelineLabelOptions | undefined;
-    if (body.labelOptions && typeof body.labelOptions === 'object') {
-      const lo = body.labelOptions as Record<string, unknown>;
-      labelOptions = {};
-      for (const k of ['useEssentia', 'useGenius', 'useCaption'] as const) {
-        if (typeof lo[k] === 'boolean') labelOptions[k] = lo[k] as boolean;
-      }
-      if (lo.scope === 'all' || lo.scope === 'unlabeled') labelOptions.scope = lo.scope;
-      const policies = ['fill_missing', 'overwrite_caption', 'overwrite_lyrics', 'overwrite_all'];
-      if (typeof lo.mergePolicy === 'string' && policies.includes(lo.mergePolicy)) {
-        labelOptions.mergePolicy = lo.mergePolicy as PipelineLabelOptions['mergePolicy'];
-      }
-      if (Object.keys(labelOptions).length === 0) labelOptions = undefined;
-    }
+    try { labelOptions = parsePipelineLabelOptions(body.labelOptions); }
+    catch (err) { res.status(400).json({ error: err instanceof Error ? err.message : String(err) }); return; }
 
     res.status(202).json({ pipeline: startPipeline(folders, stages, labelOptions) });
   } catch (err: any) {

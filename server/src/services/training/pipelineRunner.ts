@@ -610,14 +610,8 @@ async function runStage(
     // Per-run overrides ride ON TOP of the stored defaults — a bulk re-caption
     // skips Genius/Essentia and forces overwrite_caption without touching the
     // defaults every other run reads. Absent field = default decides.
-    const lo = state.labelOptions;
-    if (lo) {
-      if (lo.scope) body.scope = lo.scope;
-      if (typeof lo.useEssentia === 'boolean') body.useEssentia = lo.useEssentia;
-      if (typeof lo.useGenius === 'boolean') body.useGenius = lo.useGenius;
-      if (typeof lo.useCaption === 'boolean') body.useCaption = lo.useCaption;
-      if (lo.mergePolicy) body.mergePolicy = lo.mergePolicy;
-    }
+    // The route validated every field (parsePipelineLabelOptions).
+    if (state.labelOptions) Object.assign(body, state.labelOptions);
   }
   const url = `http://127.0.0.1:${config.server.port}`
     + `/api/training/datasets/${encodeURIComponent(item.datasetId)}/${STAGE_PATH[result.stage]}`;

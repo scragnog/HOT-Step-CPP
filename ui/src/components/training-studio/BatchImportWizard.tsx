@@ -23,6 +23,7 @@ import { FolderPicker } from './FolderPicker';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
+import { useLabelSteps } from './useLabelSteps';
 
 interface FolderRow {
   path: string;
@@ -84,12 +85,11 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
   const [loadingRoot, setLoadingRoot] = useState(false);
   const [rootError, setRootError] = useState<string | null>(null);
   const [stages, setStages] = useState<Record<PipelineStage, boolean>>(defaultStages);
-  // Label-stage step toggles, applied to EVERY dataset in the run (a bulk
-  // re-caption skips Genius/Essentia and needs overwrite_caption). All steps
-  // default on, mirroring the single-dataset LabelPanel.
-  const [labelEssentia, setLabelEssentia] = useState(true);
-  const [labelGenius, setLabelGenius] = useState(true);
-  const [labelCaption, setLabelCaption] = useState(true);
+  // Label-stage steps, applied to EVERY dataset in the run: the same controls
+  // and defaults as the single-dataset LabelPanel (a bulk re-caption skips
+  // Genius/BPM and needs overwrite_caption).
+  const labelSteps = useLabelSteps();
+  const resetLabelSteps = labelSteps.reset;
   const [labelMergePolicy, setLabelMergePolicy] = useState<MergePolicy>('fill_missing');
   // 'unlabeled' (default) only fills gaps; a re-caption run needs 'all' or an
   // already-labeled corpus yields zero targets and the stage silently no-ops.
@@ -112,8 +112,8 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
     if (!open) return;
     genRef.current++;
     setRootDir(''); setRows([]); setRootError(null); setSubmitError(null); setStages(defaultStages());
-    setLabelEssentia(true); setLabelGenius(true); setLabelCaption(true); setLabelMergePolicy('fill_missing'); setLabelScope('unlabeled');
-  }, [open]);
+    resetLabelSteps(); setLabelMergePolicy('fill_missing'); setLabelScope('unlabeled');
+  }, [open, resetLabelSteps]);
 
   /**
    * Folder → the dataset already importing it, looked up at RENDER time rather
@@ -243,7 +243,9 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
   const allSelected = selectableRows.length > 0 && selectableRows.every(r => r.checked);
   const selectedRows = rows.filter(r => r.checked && r.audioFiles !== 0);
   const selectedStages = PIPELINE_STAGES.filter(s => stages[s]);
-  const canSubmit = selectedRows.length > 0 && selectedStages.length > 0 && !submitting;
+  // A label stage with no step on would fail every dataset ("No labeling steps enabled").
+  const labelBlocked = stages.label && (!labelSteps.anyStep || labelSteps.invalidTempoBounds);
+  const canSubmit = selectedRows.length > 0 && selectedStages.length > 0 && !labelBlocked && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -256,9 +258,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
         ...(stages.label ? {
           labelOptions: {
             scope: labelScope,
-            useEssentia: labelEssentia,
-            useGenius: labelGenius,
-            useCaption: labelCaption,
+            ...labelSteps.options,
             mergePolicy: labelMergePolicy,
           },
         } : {}),
@@ -450,25 +450,8 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
             {stages.label && (
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.label.title')}</label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {([
-                    [labelEssentia, setLabelEssentia, 'trainingStudio.label.useEssentia', 'trainingStudio.label.useEssentiaInfo'],
-                    [labelGenius, setLabelGenius, 'trainingStudio.label.useGenius', 'trainingStudio.label.useGeniusInfo'],
-                    [labelCaption, setLabelCaption, 'trainingStudio.label.useCaption', 'trainingStudio.label.useCaptionInfo'],
-                  ] as Array<[boolean, (v: boolean) => void, string, string]>).map(([value, setValue, key, infoKey]) => (
-                    <div
-                      key={key}
-                      className="flex items-center px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300"
-                    >
-                      <Toggle
-                        accent="amber"
-                        checked={value}
-                        onChange={setValue}
-                        label={t(key)}
-                        info={t(infoKey)}
-                      />
-                    </div>
-                  ))}
+                {labelSteps.fields}
+                <div className="flex flex-wrap items-end gap-2 mt-1">
                   <div className="flex flex-col gap-1">
                     <ParamLabel
                       label={t('trainingStudio.label.scope')}

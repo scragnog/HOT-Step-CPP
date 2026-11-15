@@ -1510,8 +1510,13 @@ export interface PipelineLabelOptions {
    *  default scope finds zero targets and the stage silently no-ops. */
   scope?: 'all' | 'unlabeled';
   useEssentia?: boolean;
+  tempoSource?: LabelOptions['tempoSource'];
+  keySource?: LabelOptions['keySource'];
+  essentiaTempo?: LabelOptions['essentiaTempo'];
   useGenius?: boolean;
+  localLyrics?: boolean;
   useCaption?: boolean;
+  caption?: { provider?: string; model?: string };
   mergePolicy?: MergePolicy;
 }
 

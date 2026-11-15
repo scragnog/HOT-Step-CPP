@@ -3,20 +3,19 @@
 // 2026-07-27 pivot: ace-understand is out of the default flow (weak captions,
 // hallucinated lyrics). One button runs, per track: local BPM/key (Essentia,
 // parallel CPU lane) → Genius lyrics → audio-grounded LLM caption+genre.
-// No engine/GPU involvement at all. Each step degrades to disabled + an
-// explanation when its capability is missing.
+// The step controls live in useLabelSteps, shared with the batch import wizard.
 
 import React, { useState } from 'react';
 import { Loader2, Play } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MergePolicy } from '../../services/trainingApi';
 import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { EnhancePanel } from './EnhancePanel';
 import { JobProgress } from './JobProgress';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
+import { useLabelSteps } from './useLabelSteps';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
@@ -29,42 +28,12 @@ const MERGE_OPTIONS: Array<{ id: MergePolicy; labelKey: string }> = [
 
 export const LabelPanel: React.FC = () => {
   const { t } = useTranslation();
-  const caps = useTrainingStore(s => s.capabilities);
   const activeJob = useActiveTrainingJob();
   const startLabel = useTrainingStore(s => s.startLabel);
   const selectedSampleIds = useTrainingStore(s => s.selectedSampleIds);
 
-  const essentiaOk = caps?.essentia.available !== false;
-  const geniusOk = !!caps?.genius.configured;
-  // MOSS needs no API key, so an unconfigured cloud provider must not disable
-  // captioning outright — that hid the only offline option exactly when it was
-  // the only one available.
-  const mossOk = !!caps?.moss.available;
-  const flamingoOk = !!caps?.flamingo?.available;
-  const captionOk = !!caps?.llm.configured || mossOk || flamingoOk;
-  // The local default: MOSS first (the established captioner), else Flamingo.
-  const localDefault = mossOk ? 'moss' : flamingoOk ? 'flamingo' : '';
-
   const [scope, setScope] = useState<'unlabeled' | 'all' | 'selected'>('unlabeled');
-  const [useEssentia, setUseEssentia] = useState(true);
-  // beat_this and SheetSage2 beat Essentia on tempo and key (HOTSTEP-730);
-  // Essentia stays as the fallback for anything they cannot answer.
-  const [tempoSource, setTempoSource] = useState<'beat_this' | 'essentia'>('beat_this');
-  const [keySource, setKeySource] = useState<'sheetsage' | 'essentia'>('sheetsage');
-  const [minTempo, setMinTempo] = useState('');
-  const [maxTempo, setMaxTempo] = useState('');
-  // Off by default (2026-10-24): lyrics come from the audio (local lyrics below).
-  const [useGenius, setUseGenius] = useState(false);
-  const [useCaption, setUseCaption] = useState(true);
-  // Music Flamingo fills the lyrics Genius could not find (section-tagged).
-  const [localLyrics, setLocalLyrics] = useState(true);
-  // Default to MOSS when present: it is local, free, and describes what it hears
-  // rather than rewriting the local analysis. Cloud stays available via Enhance.
-  const [captionProvider, setCaptionProvider] = useState('');
-  // '' = the provider's default model (config-level). The server has always
-  // accepted caption.model; this panel just never offered it, which made the
-  // Settings-page default look hardcoded.
-  const [captionModel, setCaptionModel] = useState('');
+  const { fields, options, anyStep, needsEngine, invalidTempoBounds } = useLabelSteps();
   const [mergePolicy, setMergePolicy] = useState<MergePolicy>('fill_missing');
   const [starting, setStarting] = useState(false);
 
@@ -84,46 +53,14 @@ export const LabelPanel: React.FC = () => {
   const TRAINER_KINDS = ['train-lm', 'train-dit', 'mm3-train-lm', 'yue2-nar-train',
     'yue2-tokenize', 'yue2-align', 'yue2-ar-train', 'audition', 'lm-calibrate', 'dit-calibrate'];
   const trainerRunning = jobRunning && TRAINER_KINDS.includes(String(activeJob?.kind));
-  const effectiveEssentia = useEssentia && essentiaOk;
-  const effectiveGenius = useGenius && geniusOk;
-  const effectiveCaption = useCaption && captionOk;
-  const effectiveLocalLyrics = localLyrics && flamingoOk;
-  const anyStep = effectiveEssentia || effectiveGenius || effectiveCaption || effectiveLocalLyrics;
-  // What this run would need the card for: local captioning (MOSS, Flamingo) or
-  // local lyric transcription. (The legacy /understand step is not offered here.)
-  const chosenProvider = captionProvider || localDefault;
-  const needsEngine = effectiveLocalLyrics
-    || (effectiveCaption && (chosenProvider === 'moss' || chosenProvider === 'flamingo'));
   const blockedByJob = trainerRunning ? needsEngine : jobRunning;
-  const minBpm = minTempo ? Number(minTempo) : undefined;
-  const maxBpm = maxTempo ? Number(maxTempo) : undefined;
-  const invalidTempoBounds = effectiveEssentia && (
-    (minBpm !== undefined && (!Number.isInteger(minBpm) || minBpm < 40 || minBpm > 180)) ||
-    (maxBpm !== undefined && (!Number.isInteger(maxBpm) || maxBpm < 60 || maxBpm > 250)) ||
-    (minBpm !== undefined && maxBpm !== undefined && minBpm >= maxBpm)
-  );
 
   const handleStart = async () => {
     setStarting(true);
     try {
       await startLabel({
         ...(scope === 'selected' ? { sampleIds: Array.from(selectedSampleIds) } : { scope: scope === 'all' ? 'all' : 'unlabeled' }),
-        useEssentia: effectiveEssentia,
-        tempoSource,
-        keySource,
-        ...(minTempo || maxTempo ? { essentiaTempo: {
-          ...(minTempo ? { minTempo: Number(minTempo) } : {}),
-          ...(maxTempo ? { maxTempo: Number(maxTempo) } : {}),
-        } } : {}),
-        useGenius: effectiveGenius,
-        localLyrics: effectiveLocalLyrics,
-        useCaption: effectiveCaption,
-        // Without this the server falls back to config.lireek.defaultProvider,
-        // which is why labeling always went to Gemini even with MOSS installed.
-        caption: {
-          provider: captionProvider || localDefault || undefined,
-          ...(captionModel ? { model: captionModel } : {}),
-        },
+        ...options,
         mergePolicy,
       });
     } finally {
@@ -169,151 +106,7 @@ export const LabelPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* Steps */}
-        <div className="flex flex-col gap-2">
-          <Toggle
-            accent="amber"
-            checked={effectiveEssentia}
-            disabled={!essentiaOk}
-            onChange={setUseEssentia}
-            label={t('trainingStudio.label.useEssentia')}
-            info={t('trainingStudio.label.useEssentiaInfo')}
-            defaultValue={true}
-          />
-          {!essentiaOk && (
-            <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.caps.essentiaMissing')}</div>
-          )}
-          {effectiveEssentia && (
-            <div className="ml-6 flex flex-wrap items-end gap-3">
-              <div className="flex flex-col gap-1">
-                <ParamLabel label={t('trainingStudio.label.tempoSource')} info={t('trainingStudio.label.tempoSourceInfo')}
-                  className="text-[11px] text-zinc-500" />
-                <StyledSelect accent="amber" size="sm" className="w-auto" value={tempoSource} onChange={setTempoSource}
-                  options={[{ value: 'beat_this', label: 'beat_this' }, { value: 'essentia', label: 'Essentia' }]} />
-              </div>
-              <div className="flex flex-col gap-1">
-                <ParamLabel label={t('trainingStudio.label.keySource')} info={t('trainingStudio.label.keySourceInfo')}
-                  className="text-[11px] text-zinc-500" />
-                <StyledSelect accent="amber" size="sm" className="w-auto" value={keySource} onChange={setKeySource}
-                  options={[{ value: 'sheetsage', label: 'SheetSage2' }, { value: 'essentia', label: 'Essentia' }]} />
-              </div>
-            </div>
-          )}
-          {effectiveEssentia && (
-            <div className="ml-6 flex flex-wrap items-end gap-2">
-              {([['min', minTempo, setMinTempo, 40, 180], ['max', maxTempo, setMaxTempo, 60, 250]] as const).map(([kind, value, setValue, min, max]) => (
-                <label key={kind} className="flex flex-col gap-1 text-[11px] text-zinc-600 dark:text-zinc-400">
-                  {t(`trainingStudio.label.${kind}Tempo`, `${kind === 'min' ? 'Minimum' : 'Maximum'} tempo (optional)`)}
-                  <input type="number" min={min} max={max} step="1" value={value}
-                    onChange={e => setValue(e.target.value)}
-                    className="w-28 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-white/10 dark:bg-suno-card dark:text-white" />
-                </label>
-              ))}
-              <span className="text-[11px] text-zinc-500">{t('trainingStudio.label.tempoBoundsInfo', 'Leave blank for Essentia defaults.')}</span>
-              {invalidTempoBounds && <span className="text-[11px] text-red-500">{t('trainingStudio.label.tempoBoundsError', 'Use 40–180 for minimum, 60–250 for maximum, with minimum below maximum.')}</span>}
-            </div>
-          )}
-
-          <Toggle
-            accent="amber"
-            checked={effectiveGenius}
-            disabled={!geniusOk}
-            onChange={setUseGenius}
-            label={t('trainingStudio.label.useGenius')}
-            info={t('trainingStudio.label.useGeniusInfo')}
-            defaultValue={false}
-          />
-          {!geniusOk && (
-            <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.geniusMissing')}</div>
-          )}
-
-          <Toggle
-            accent="amber"
-            checked={effectiveLocalLyrics}
-            disabled={!flamingoOk}
-            onChange={setLocalLyrics}
-            label={t('trainingStudio.label.localLyrics', 'Transcribe missing lyrics locally (Music Flamingo)')}
-            info={t('trainingStudio.label.localLyricsInfo', 'Each track with no lyrics (after Genius, if that is on) is transcribed from its audio by Music Flamingo, with [Verse]/[Chorus] section tags. Tracks marked instrumental are left alone, and so are lyrics already in a sidecar unless the merge policy overwrites lyrics, which re-transcribes them (the way to move a dataset off Genius). A transcript that loops is redone once with a light repetition penalty. Runs on your GPU, about 5 seconds a track on a fast card.')}
-            defaultValue={true}
-          />
-          {!flamingoOk && caps?.flamingo?.missing && (
-            <div className="ml-6 text-[11px] text-zinc-500">
-              {t('trainingStudio.label.flamingoMissing', 'Music Flamingo (local) unavailable')}: {caps.flamingo.missing}
-            </div>
-          )}
-
-          <Toggle
-            accent="amber"
-            checked={effectiveCaption}
-            disabled={!captionOk}
-            onChange={setUseCaption}
-            label={t('trainingStudio.label.useCaption')}
-            info={t('trainingStudio.label.useCaptionInfo')}
-            defaultValue={true}
-          />
-          {effectiveCaption && (mossOk || flamingoOk || caps?.llm.configured) && (() => {
-            const cloud = caps?.llm.providers.filter(pr => pr.available) ?? [];
-            const sel = captionProvider || localDefault || caps?.llm.defaultProvider || '';
-            const active = cloud.find(pr => pr.id === sel);
-            return (
-              <div className="ml-6 flex flex-wrap items-center gap-2">
-                <ParamLabel
-                  label={t('trainingStudio.label.captioner')}
-                  info={t('trainingStudio.label.captionerInfo')}
-                  className="text-[11px] text-zinc-500"
-                />
-                <StyledSelect
-                  accent="amber"
-                  size="sm"
-                  value={sel}
-                  onChange={(v) => { setCaptionProvider(v); setCaptionModel(''); }}
-                  className="w-auto"
-                  /* Two independent facts, and the label used to get one of
-                     them wrong for everyone: WHERE the model runs, which the
-                     provider now declares rather than the UI inferring from
-                     `id === 'gemini'` (that called a local LM Studio server
-                     "cloud"), and WHETHER it receives the audio, which only
-                     Gemini and MOSS do. */
-                  options={[
-                    ...(mossOk ? [{ value: 'moss', label: 'MOSS — local, hears the audio' }] : []),
-                    ...(flamingoOk ? [{ value: 'flamingo', label: 'Music Flamingo — local, hears the audio' }] : []),
-                    ...cloud.map(pr => ({
-                      value: pr.id,
-                      label: `${pr.name} (${pr.local ? 'local' : 'cloud'}, ${pr.id === 'gemini' ? 'hears the audio' : 'text only'})`,
-                    })),
-                  ]}
-                />
-                {/* Model picker for cloud providers — Gemini's list is fetched
-                    live from the API, so new models appear by themselves. */}
-                {active && active.models.length > 0 && (
-                  <StyledSelect
-                    accent="amber"
-                    size="sm"
-                    value={captionModel || active.defaultModel}
-                    onChange={setCaptionModel}
-                    className="w-auto"
-                    options={active.models.map(m => ({ value: m, label: m }))}
-                  />
-                )}
-              </div>
-            );
-          })()}
-          {/* Say why MOSS is not on offer. The server already works out which
-              of the two causes it is — the binary is not there, or the weights
-              are not — because the user's next action is completely different
-              for each, and then the UI used to drop that on the floor and just
-              hide the option. Someone with 9.7 GB of MOSS weights correctly
-              installed had no way to discover that the missing piece was
-              ace-caption, which no release before v1.4 packaged at all. */}
-          {effectiveCaption && !mossOk && caps?.moss.missing && (
-            <div className="ml-6 text-[11px] text-zinc-500">
-              MOSS (local) unavailable: {caps.moss.missing}
-            </div>
-          )}
-          {!captionOk && (
-            <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.captionMissing')}</div>
-          )}
-        </div>
+        {fields}
 
         {/* Merge policy */}
         <div className="flex flex-col gap-1.5">
