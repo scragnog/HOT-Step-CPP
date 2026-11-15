@@ -96,7 +96,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
   const busy = active(job) || active(status?.activeJob);
   const mine = job?.kind === 'sa3-train';
   const [adapterName, setAdapterName] = useState(slug);
-  const [edits, setEdits] = useState<Partial<Sa3Recipe>>({});
+  const [edits, setEdits] = usePersistedState<Partial<Sa3Recipe>>(`hs-sa3-edits:${datasetId}`, {});
   const [resumeRun, setResumeRun] = useState('');
   const [resumeSteps, setResumeSteps] = useState<number | null>(null);
   const run = status?.runs.find(r => r.run === resumeRun);

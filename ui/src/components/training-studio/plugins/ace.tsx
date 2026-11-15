@@ -8,6 +8,7 @@ import {
   AlertTriangle, Check, Copy, Cpu, Database, FileCode2, Flag, Headphones, Layers, Loader2, PauseCircle, Target, Waves, XCircle,
 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { usePersistedState } from '../../../hooks/usePersistedState';
 import { useTranslation } from 'react-i18next';
 import { trainingQueries } from '../../../queries/training-data/queries';
 import { runQueries } from '../../../queries/training-runs/queries';
@@ -60,9 +61,13 @@ export const AceTrainingPage: React.FC = () => {
   const startTrainDit = useTrainingStore(s => s.startTrainDit);
   const trainingWorker = useTrainingStore(s => s.trainingWorker);
 
-  const [form, setForm] = useState<TrainLmFormState>(TRAIN_LM_DEFAULTS);
+  // Both forms survive a page load. Fields added since the save take their
+  // defaults; overwrite and resume are per run and start off again.
+  const [form, setForm] = usePersistedState<TrainLmFormState>('hs-ace-train-lm-form', TRAIN_LM_DEFAULTS,
+    saved => ({ ...TRAIN_LM_DEFAULTS, ...saved, overwrite: false, resumeFromLatest: false }));
   // LoKR remains the initial DiT recipe.
-  const [ditForm, setDitForm] = useState<TrainDitFormState>(TRAIN_DIT_LOKR_DEFAULTS);
+  const [ditForm, setDitForm] = usePersistedState<TrainDitFormState>('hs-ace-train-dit-form', TRAIN_DIT_LOKR_DEFAULTS,
+    saved => ({ ...TRAIN_DIT_LOKR_DEFAULTS, ...saved, overwrite: false }));
   const lmRecipeRef = useRef(TRAIN_LM_DEFAULTS);
   const lmRecipe = useQuery(runQueries.recipe<TrainLmFormState>(trainingWorker, 'ace-lm'));
   const ditRecipe = useQuery(runQueries.recipe<TrainDitFormState>(trainingWorker, 'ace-dit'));

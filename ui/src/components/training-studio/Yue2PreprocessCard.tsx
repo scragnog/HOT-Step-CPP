@@ -14,7 +14,7 @@ import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { NumField } from './TrainingNumberField';
 import { Yue2StageCard } from './Yue2StageCard';
-import { INPUT } from './yue2CardUi';
+import { INPUT, useStageEdits } from './yue2CardUi';
 
 // ── Preprocess: audio -> cached VAE latents ─────────────────────────────────
 
@@ -31,13 +31,13 @@ interface PreprocessForm {
   acknowledgeSidecarFormat: boolean;
 }
 
-export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; onDone: () => void }> = ({ status, done, onDone }) => {
+export const Yue2PreprocessCard: React.FC<{ datasetId: string; status: Yue2Status; done: boolean; onDone: () => void }> = ({ datasetId, status, done, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useActiveTrainingJob();
   const startYue2Preprocess = useTrainingStore(s => s.startYue2Preprocess);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [edits, setEdits] = useState<Partial<PreprocessForm>>({});
+  const [edits, setEdits] = useStageEdits<PreprocessForm>('preprocess', datasetId);
 
   const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
   const mine = activeJob?.kind === 'yue2-preprocess';

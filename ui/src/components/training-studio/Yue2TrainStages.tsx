@@ -306,8 +306,8 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
             {prepareRunAllControl}
             <Yue2ClearPreparedCard datasetId={datasetId} disabled={jobBusy || yue2RunAllActive} />
           </div>
-          {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
-          {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+          {yue2Status && <Yue2PreprocessCard datasetId={datasetId} status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
+          {arStatus && <Yue2TokenizeCard datasetId={datasetId} status={arStatus} onDone={reload} />}
           {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
           <div className={CARD}>
             <Toggle
@@ -321,8 +321,8 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
                 : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
             />
           </div>
-          {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
-          {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
+          {lyricTiming && arStatus && <Yue2StemsCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          {lyricTiming && arStatus && <Yue2AlignCard datasetId={datasetId} status={arStatus} onDone={reload} />}
           <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
         </div>
       );

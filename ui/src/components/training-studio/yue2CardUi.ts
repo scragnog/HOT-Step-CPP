@@ -1,6 +1,18 @@
 // yue2CardUi.ts — the shared card/field/button classes the YuE2 stage cards use.
 // These were copy-pasted per card; one home keeps the surfaces consistent.
 
+import { usePersistedState } from '../../hooks/usePersistedState';
+
+/** A stage card's edits, saved per dataset so they survive a page load. The
+ *  run-scoping fields (only, limit, force) are one-shot: a filter remembered
+ *  from last week would quietly run the stage on part of the album. */
+export function useStageEdits<T extends object>(stage: string, datasetId: string) {
+  return usePersistedState<Partial<T>>(`hs-yue2-${stage}-edits:${datasetId}`, {}, saved => {
+    const { only: _only, limit: _limit, force: _force, ...rest } = saved as Record<string, unknown>;
+    return rest as Partial<T>;
+  });
+}
+
 export const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 export const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
             + 'dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none '

@@ -6,23 +6,33 @@
 
 import { useState, useEffect } from 'react';
 
-export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: T | ((prev: T) => T)) => void] {
-  const [state, setState] = useState<T>(() => {
+/** `revive` adjusts what was read back (merge in defaults added since it was
+ *  saved, drop one-shot fields). A new `key` (another dataset, say) reads that
+ *  key's value instead of carrying the old one over and saving it there. */
+export function usePersistedState<T>(key: string, defaultValue: T, revive: (stored: T) => T = v => v): [T, (value: T | ((prev: T) => T)) => void] {
+  const read = (): T => {
     try {
       const stored = localStorage.getItem(key);
-      return stored !== null ? JSON.parse(stored) : defaultValue;
+      return stored !== null ? revive(JSON.parse(stored)) : defaultValue;
     } catch {
       return defaultValue;
     }
-  });
+  };
+  const [state, setState] = useState<T>(read);
+  const [stateKey, setStateKey] = useState(key);
+  if (stateKey !== key) {
+    setStateKey(key);
+    setState(read());
+  }
 
   useEffect(() => {
+    if (stateKey !== key) return;
     try {
       localStorage.setItem(key, JSON.stringify(state));
     } catch {
       // Storage full or unavailable
     }
-  }, [key, state]);
+  }, [key, stateKey, state]);
 
   // Listen for writes from other tabs or from non-React code (queue stores)
   useEffect(() => {

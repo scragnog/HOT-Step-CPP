@@ -56,7 +56,7 @@ import { JobProgress } from './JobProgress';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { Yue2StageCard } from './Yue2StageCard';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
-import { BTN_GO, BTN_SM, CARD, INPUT } from './yue2CardUi';
+import { BTN_GO, BTN_SM, CARD, INPUT, useStageEdits } from './yue2CardUi';
 
 const BTN_STAGE = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border '
                 + 'border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 '
@@ -127,13 +127,13 @@ interface TokenizeForm {
   force: boolean;
 }
 
-export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2TokenizeCard: React.FC<{ datasetId: string; status: Yue2ArStatus; onDone: () => void }> = ({ datasetId, status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useActiveTrainingJob();
   const startYue2Tokenize = useTrainingStore(s => s.startYue2Tokenize);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [edits, setEdits] = useState<Partial<TokenizeForm>>({});
+  const [edits, setEdits] = useStageEdits<TokenizeForm>('tokenize', datasetId);
   const tokenizerPick = useYue2Tokenizer();
 
   const stage = status.stages.tokenize;
@@ -334,7 +334,7 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
   const startYue2Sheet = useTrainingStore(s => s.startYue2Sheet);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [edits, setEdits] = useState<Partial<SheetForm>>({});
+  const [edits, setEdits] = useStageEdits<SheetForm>('sheet', datasetId);
 
   const stage = status.stages.sheet;
   const d = stage.defaults;
@@ -698,13 +698,13 @@ interface StemsForm {
   force: boolean;
 }
 
-export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2StemsCard: React.FC<{ datasetId: string; status: Yue2ArStatus; onDone: () => void }> = ({ datasetId, status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useActiveTrainingJob();
   const startYue2Stems = useTrainingStore(s => s.startYue2Stems);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [edits, setEdits] = useState<Partial<StemsForm>>({});
+  const [edits, setEdits] = useStageEdits<StemsForm>('stems', datasetId);
 
   const stage = status.stages.align;
   // 4 = SUPERSEP_VOCALS_ONLY. See the server's own note (yue2Stems.ts): level 0
@@ -841,13 +841,13 @@ interface AlignForm {
   cpu: boolean;
 }
 
-export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2AlignCard: React.FC<{ datasetId: string; status: Yue2ArStatus; onDone: () => void }> = ({ datasetId, status, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useActiveTrainingJob();
   const startYue2Align = useTrainingStore(s => s.startYue2Align);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
-  const [edits, setEdits] = useState<Partial<AlignForm>>({});
+  const [edits, setEdits] = useStageEdits<AlignForm>('align', datasetId);
 
   const stage = status.stages.align;
   const d = stage.defaults;

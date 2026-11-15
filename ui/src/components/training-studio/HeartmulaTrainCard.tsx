@@ -1,5 +1,6 @@
 import { Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import { useTranslation } from 'react-i18next';
 import type { HeartmulaPreviewListResponse, HeartmulaPreviewSettings, HeartmulaRecipe, HeartmulaStatusResponse, HeartmulaTrainRequest } from '../../../../server/src/contracts/heartmulaTraining';
 import { HEARTMULA_RECIPE_LEGACY, heartmulaDefaultSteps } from '../../../../server/src/contracts/heartmulaTraining';
@@ -47,15 +48,15 @@ const FIELDS: Array<{ key: NumericRecipeKey; label: string; info: string; min: n
 
 export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: takes, trainStarted, blockedReason, onTrain, onChain, onCheckpoint, onCancel }: HeartmulaTrainCardProps) {
   const { t } = useTranslation();
-  const [edits, setEdits] = useState<Partial<HeartmulaRecipe>>({});
+  const [edits, setEdits] = usePersistedState<Partial<HeartmulaRecipe>>(`hs-heartmula-edits:${datasetId}`, {});
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [name, setName] = useState(slug);
   const [resumeRun, setResumeRun] = useState<string | null>(null);
-  const [previewsOn, setPreviewsOn] = useState<boolean | null>(null);
-  const [previewEdits, setPreviewEdits] = useState<Partial<HeartmulaPreviewSettings>>({});
+  const [previewsOn, setPreviewsOn] = usePersistedState<boolean | null>(`hs-heartmula-previews-on:${datasetId}`, null);
+  const [previewEdits, setPreviewEdits] = usePersistedState<Partial<HeartmulaPreviewSettings>>(`hs-heartmula-preview-edits:${datasetId}`, {});
   const [manualResume, setManualResume] = useState('');
-  const [presetKey, setPresetKey] = useState('approved');
+  const [presetKey, setPresetKey] = usePersistedState(`hs-heartmula-preset:${datasetId}`, 'approved');
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
   const [cropDraft, setCropDraft] = useState(120);
