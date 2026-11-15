@@ -21,7 +21,7 @@ import { YUE2_JOINT_FIXED_RECIPE_DROPOUTS } from '../../contracts/trainingRecipe
 import { getDataset } from './datasetsRepo.js';
 import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
-import { availableYue2Bases, yue2ModelDir } from './yue2Train.js';
+import { availableYue2Bases, yue2AdapterHome, yue2ModelDir, yue2TrainCompanion } from './yue2Train.js';
 import { engineGpuBackend, type EngineGpuBackend } from './aceTrain.js';
 import { CALIBRATION_REFERENCE_MINUTES, type Yue2Calibration, archiveYue2TrainLogs, noteYue2TrainLog } from './datasetProfile.js';
 
@@ -876,12 +876,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   const error = opts ? validateOptions(opts) : 'job is missing joint-training options';
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;
-  // The tokenizer's companion decoder adapter is part of the decoder whenever
-  // it is installed: the engine merges it under every generation, so the
-  // adapter trains on the decoder it will render with (2026-09-25). Looked up
-  // in the same two places the engine searches (models/yue2, then models/).
-  const companion = [yue2ModelDir(), config.aceServer.models]
-    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
+  const companion = yue2TrainCompanion(o.checkpoint);
+  const baseVariant = yue2AdapterHome(o.checkpoint);
   if (o.resume && o.companion !== companion) log(job, 'warn', `Companion decoder adapter differs from the run being resumed: was ${o.companion ?? 'not installed'}, now ${companion ?? 'not installed'}`);
   o.companion = companion;
   if (o.plannerGate) {
@@ -895,7 +891,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     o.plannerGate.holdoutItems = items;
     log(job, 'info', `Planner gate: ${items.length} of ${ids.length} songs held out (${o.plannerGate.holdoutIds.join(', ')}); ${ids.length - items.length} to train on`);
   }
-  log(job, 'info', `Companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
+  log(job, 'info', `Companion decoder adapter: ${companion
+    ?? (baseVariant ? `not used on the ${baseVariant} fine-tune (it renders without it)` : 'not installed (training on the pristine decoder)')}`);
   // Training + a parallel render measured ~21 GB, before a 4-way recomposition
   // on top. On a 24 GB card WDDM spills into system RAM and both processes
   // stall until the hang watchdog kills the run (2026-10-01), so smaller or

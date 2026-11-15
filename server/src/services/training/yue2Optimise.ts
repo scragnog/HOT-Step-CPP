@@ -19,7 +19,7 @@ import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import type { ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
 import { getDataset } from './datasetsRepo.js';
 import { datasetDir } from './paths.js';
-import { yue2ModelDir } from './yue2Train.js';
+import { yue2TrainCompanion } from './yue2Train.js';
 import { config } from '../../config.js';
 
 export const OPTIMISATION_FILE = '_hotstep-optimisation.json';
@@ -79,8 +79,7 @@ export async function runYue2BaseLossJob(job: TrainingJob): Promise<void> {
   }
   if (!manifest || isCancelled(job) || job.status === 'failed') return;
   const out = path.join(datasetDir(ds.slug), `base-loss-${randomUUID()}`);
-  const companion = [yue2ModelDir(), config.aceServer.models]
-    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
+  const companion = yue2TrainCompanion(opts.checkpoint);
   const args = ['yue2-joint-train', '--checkpoint', opts.checkpoint, '--dataset', manifest, '--output', out,
     '--device', opts.device, '--seed', String(EVAL_SEED), '--cursor-weight', '0', '--ar-targets', 'base',
     '--nar-crop-frames', String(EVAL_NAR_WINDOW), ...(companion ? ['--companion', companion] : []), '--eval-base-loss'];

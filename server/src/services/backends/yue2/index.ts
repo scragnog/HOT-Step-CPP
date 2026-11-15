@@ -28,6 +28,7 @@ import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../.
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { listAllYue2AitkRuns, onYue2AitkSnapshotChange, yue2AitkWeightStamp, type Yue2AitkRunRecord } from '../../training/yue2AitkRuns.js';
 import { listDatasets } from '../../training/datasetsRepo.js';
+import { yue2AdapterHome, yue2LmVariant } from '../../training/yue2Train.js';
 import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
 import { EMPTY_COVER_SCORE_ERROR, hasSoundingScore, hasSoundingVocalBar } from './scoreHealth.js';
@@ -125,21 +126,8 @@ function yue2Rebase(raw: unknown): number {
   return Math.min(1, yue2Dial(raw, YUE2_REBASE_DEFAULT));
 }
 
-/** A YuE2 LM variant: the LM file's type minus its quant, '' for the base model
- *  ('q8_0' -> '', 'rs-4.0x0.7-Q6_K' -> 'rs-4.0x0.7'). Mirrors yue2_lm_variant
- *  in engine/src/yue2/yue2-adapter.h, which decides whether to re-base. */
-export function yue2LmVariant(type: string): string {
-  const t = type.replace(/-imat$/i, '');
-  const dash = t.lastIndexOf('-');
-  return dash < 0 ? '' : t.slice(0, dash);
-}
-
-/** The variant an adapter was trained on, from its base_sha (the training LM's
- *  path). An adapter recording none predates the variants: the base model. */
-export function yue2AdapterHome(baseSha: string | undefined): string {
-  const m = /^yue2-lm-(.+)\.gguf$/i.exec(path.basename(baseSha ?? ''));
-  return m ? yue2LmVariant(m[1]) : '';
-}
+// The LM variant rule (re-base decisions here, the companion in training).
+export { yue2LmVariant, yue2AdapterHome };
 
 function yue2ReadScales(key: string): Yue2AdapterScales {
   const base = yue2DefaultScales();

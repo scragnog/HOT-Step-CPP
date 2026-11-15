@@ -53,6 +53,34 @@ export function yue2ModelDir(): string {
   return path.join(config.aceServer.models, 'yue2');
 }
 
+/** A YuE2 LM variant: the LM file's type minus its quant, '' for the base model
+ *  ('q8_0' -> '', 'rs-4.0x0.7-Q6_K' -> 'rs-4.0x0.7'). Mirrors yue2_lm_variant
+ *  in engine/src/yue2/yue2-lm-name.h. */
+export function yue2LmVariant(type: string): string {
+  const t = type.replace(/-imat$/i, '');
+  const dash = t.lastIndexOf('-');
+  return dash < 0 ? '' : t.slice(0, dash);
+}
+
+/** The variant of an LM path (an adapter's base_sha, a training checkpoint).
+ *  Anything that is not a yue2-lm-*.gguf name is the base model: ''. */
+export function yue2AdapterHome(baseSha: string | undefined): string {
+  const m = /^yue2-lm-(.+)\.gguf$/i.exec(path.basename(baseSha ?? ''));
+  return m ? yue2LmVariant(m[1]) : '';
+}
+
+/** The tokenizer's companion decoder adapter to train over, looked up in the
+ *  same two places the engine searches (models/yue2, then models/). The
+ *  engine merges it under every base-model render, so an adapter trains on
+ *  the decoder it will render with (2026-09-25). Never on a fine-tune base:
+ *  the renderer skips it there (yue2_apply_companion), and the trainer drops
+ *  it too. */
+export function yue2TrainCompanion(checkpoint: string): string | undefined {
+  if (yue2AdapterHome(checkpoint)) return undefined;
+  return [yue2ModelDir(), config.aceServer.models]
+    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
+}
+
 export type Yue2VaeVariant = 'standard' | 'legacy';
 
 export interface Yue2TrainModels {

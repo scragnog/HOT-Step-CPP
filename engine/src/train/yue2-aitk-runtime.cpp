@@ -13,6 +13,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include "yue2-aitk-resume.h"
 #include "yue2-aitk-embedding-dequant.h"
 #include "yue2-aitk-fixture-replay.h"
+#include "../yue2/yue2-lm-name.h"
 
 #include <cstring>
 #include <csignal>
@@ -518,6 +519,14 @@ static int run_impl(Config config, std::string * error) {
         std::fprintf(stderr, "[yue2-aitk] codes from %s render without the companion: --companion ignored\n", codec_tokenizer.c_str());
         config.companion.clear();
     }
+    // The companion was trained on the base model's decoder, and the renderer
+    // skips it on every fine-tune (yue2_apply_companion). Training a fine-tune
+    // over it would fit the adapter to a decoder it never renders with.
+    const std::string base_variant = yue2_lm_variant(yue2_lm_type_of(config.checkpoint));
+    if (!base_variant.empty() && !config.companion.empty()) {
+        std::fprintf(stderr, "[yue2-aitk] fine-tune base (variant %s) renders without the companion: --companion ignored\n", base_variant.c_str());
+        config.companion.clear();
+    }
     // What a render needs to know about this adapter travels in its own
     // header: the CoT modes it trained (an item with a lead sheet trains full
     // unless --abc-dropout drops every one; off comes from the dropout or an
@@ -532,9 +541,16 @@ static int run_impl(Config config, std::string * error) {
         if (!cot.empty()) adapter_meta.push_back({"cot", cot});
         if (!config.style_norms.empty()) adapter_meta.push_back({"style_norms", config.style_norms});
         if (!dataset.trigger.empty()) adapter_meta.push_back({"style_template", dataset.style_template});
+        // The LM it trained on, as the NAR and AR trainers record it: the
+        // renderer reads its variant from this name (yue2_lm_type_of) and
+        // re-bases an adapter it believes came from another variant.
+        adapter_meta.push_back({"base_sha", config.checkpoint});
         if (companion_off) {
             adapter_meta.push_back({"decoder_companion", "off"});  // yue2_adapter_wants_companion
             adapter_meta.push_back({"codec_tokenizer", codec_tokenizer});
+        } else if (!base_variant.empty()) {
+            // Trained without it, so a re-based render on the base model goes without it too.
+            adapter_meta.push_back({"decoder_companion", "off"});
         }
     }
     yue2_aitk::Yue2NativeSampler sampler(config.seed);

@@ -322,3 +322,23 @@ test('planner gate preview works before any stage ran, from the current audio fi
   assert.match(yue2PlannerGatePreview([], 42).error ?? '', /no included audio/);
   assert.match(yue2PlannerGatePreview(samples.slice(0, 3), 42).error ?? '', /at least one more/);
 });
+
+test('the companion decoder trains on the base model only, never on a fine-tune', async () => {
+  const { config } = await import('../../config.js');
+  const { yue2TrainCompanion } = await import('./yue2Train.js');
+  const prev = config.aceServer.models;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-companion-'));
+  try {
+    config.aceServer.models = root;
+    fs.mkdirSync(path.join(root, 'yue2'));
+    const v9 = path.join(root, 'yue2', 'nar_lora_joint_v9.safetensors');
+    fs.writeFileSync(v9, '');
+    assert.equal(yue2TrainCompanion(path.join(root, 'yue2', 'yue2-lm-bf16.gguf')), v9);
+    assert.equal(yue2TrainCompanion(path.join(root, 'yue2', 'yue2-lm-Q6_K-imat.gguf')), v9);
+    assert.equal(yue2TrainCompanion('C:\ckpt\convrot.safetensors'), v9);
+    assert.equal(yue2TrainCompanion(path.join(root, 'yue2', 'yue2-lm-rs-tw-2.0x0.75-bf16.gguf')), undefined);
+  } finally {
+    config.aceServer.models = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
