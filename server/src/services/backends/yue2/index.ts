@@ -284,9 +284,13 @@ export function yue2StackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedS
 }
 
 /** The stack a plan_only job loads: each slot's planner strength in place of
- *  its master. Equal to yue2StackFrom when no slot sets one. */
+ *  its master. Equal to yue2StackFrom when no slot sets one. A slot planning
+ *  at 0 is left out: the engine refuses an adapter that merges no tensors, and
+ *  the replan fallback would then plan at the master strength instead. */
 export function yue2PlanStackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedSlot>): Yue2AdapterRef[] {
-  return yue2StackFrom(adapters).map(a => ({ ...a, scales: { ...a.scales, global: a.scales.plan ?? a.scales.global } }));
+  return yue2StackFrom(adapters)
+    .map(a => ({ ...a, scales: { ...a.scales, global: a.scales.plan ?? a.scales.global } }))
+    .filter(a => a.scales.global !== 0);
 }
 
 /** Does planning need its own load? Only when some slot's planner strength

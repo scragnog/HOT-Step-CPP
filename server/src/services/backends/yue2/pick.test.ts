@@ -87,6 +87,9 @@ test('planner strength: travels with the pick, plans at its own strength, and cl
   assert.equal(cleared.adapters.nar.scales.plan, undefined);
   assert.equal(yue2PlanScaleDiffers(defaults.adapters), false);
   assert.equal(yue2PlanStackFrom(defaults.adapters)[0].scales.global, 0.8);
+  // Planner strength 0 plans on the base model, not an adapter merging nothing.
+  const zero = yue2ResolvePick({ yue2Pick: { lmAdapterNarScalePlan: 0 } }, defaults);
+  assert.deepEqual(yue2PlanStackFrom(zero.adapters), []);
 });
 
 test('basin re-base: the variant rule, an adapter\'s home, and beta travelling with the pick', () => {
