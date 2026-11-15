@@ -5,6 +5,7 @@
 // need to materialize a multi-gigabyte model or cache file.
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -172,12 +173,74 @@ inline digest bytes(const void *data, std::size_t size) noexcept {
     return state.final();
 }
 
+namespace detail {
+
+// Files this big are model weights and latent caches: one costs a minute or
+// more to hash on every run, and they are replaced, never edited in place.
+// Their digest is kept in the temp folder, keyed by absolute path, size and
+// modification time; anything that changes one of the three is hashed again.
+// ponytail: size+mtime trusts the filesystem clock, fine for provenance; hash
+// in full (drop the cache) if a digest ever has to stand as a security check.
+inline constexpr std::uintmax_t cache_min_bytes = 64ull << 20;
+
+inline std::filesystem::path cache_entry(const std::filesystem::path &path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec || size < cache_min_bytes) return {};
+    const auto mtime = std::filesystem::last_write_time(path, ec);
+    if (ec) return {};
+    const auto absolute = std::filesystem::absolute(path, ec);
+    if (ec) return {};
+    const auto dir = std::filesystem::temp_directory_path(ec);
+    if (ec) return {};
+    const std::string key = absolute.u8string() + '|' + std::to_string(size) + '|' +
+                            std::to_string(mtime.time_since_epoch().count());
+    return dir / "hot-step-sha256" / bytes(key.data(), key.size()).hex();
+}
+
+inline bool cache_read(const std::filesystem::path &entry, digest &result) {
+    std::ifstream in(entry, std::ios::binary);
+    std::string hex;
+    if (!(in >> hex) || hex.size() != 64) return false;
+    auto nibble = [](char c) -> int {
+        return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+    };
+    for (std::size_t i = 0; i < 32; ++i) {
+        const int hi = nibble(hex[2 * i]), lo = nibble(hex[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        result.bytes[i] = static_cast<std::uint8_t>(hi << 4 | lo);
+    }
+    return true;
+}
+
+// Best effort: a cache that cannot be written only costs the next run a rehash.
+// Written to a unique temp name and renamed, so concurrent runs never read half
+// an entry.
+inline void cache_write(const std::filesystem::path &entry, const digest &value) {
+    std::error_code ec;
+    std::filesystem::create_directories(entry.parent_path(), ec);
+    if (ec) return;
+    auto tmp = entry;
+    tmp += "." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << value.hex();
+        if (!out) { std::filesystem::remove(tmp, ec); return; }
+    }
+    std::filesystem::rename(tmp, entry, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
+}
+
+} // namespace detail
+
 inline bool file(const std::filesystem::path &path, digest &result,
                  std::string *error = nullptr) {
     if (path.empty()) {
         if (error) *error = "empty path";
         return false;
     }
+    const auto entry = detail::cache_entry(path);
+    if (!entry.empty() && detail::cache_read(entry, result)) return true;
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         if (error) *error = "cannot open file: " + path.string();
@@ -195,6 +258,7 @@ inline bool file(const std::filesystem::path &path, digest &result,
         return false;
     }
     result = state.final();
+    if (!entry.empty()) detail::cache_write(entry, result);
     return true;
 }
 
