@@ -6,10 +6,12 @@
 // built-in loader-hooks API. Not used by the app or the Vite build.
 export async function resolve(specifier, context, nextResolve) {
   if (specifier.endsWith('.css')) return { url: 'css-stub:' + specifier, shortCircuit: true };
+  // Vite's `?url` asset imports (the pitch-shift worklet) resolve to an empty URL.
+  if (specifier.endsWith('?url')) return { url: 'css-stub:' + specifier, shortCircuit: true };
   return nextResolve(specifier, context);
 }
 
 export async function load(url, context, nextLoad) {
-  if (url.startsWith('css-stub:')) return { format: 'module', source: 'export default {};', shortCircuit: true };
+  if (url.startsWith('css-stub:')) return { format: 'module', source: url.endsWith('?url') ? "export default '';" : 'export default {};', shortCircuit: true };
   return nextLoad(url, context);
 }

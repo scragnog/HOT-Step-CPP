@@ -71,7 +71,7 @@ test('a YuE2 pick taken while a picker save is in flight carries the new values,
   const save = useBackendStore.getState().selectModels({ lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.5' }, 'yue2');
   // The store still holds the old defaults; the pick must not.
   assert.equal(useBackendStore.getState().models.yue2.defaults?.lmAdapterAr, 'C:/a/old.safetensors');
-  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.5' });
+  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: 0.5 });
   release();
   assert.equal(await save, true);
   assert.deepEqual(pendingSelection('yue2'), {});
@@ -111,7 +111,7 @@ test('a failed save does not drop an overlapping save that carries the same valu
   gates.get('0.5')!.release(false);
   assert.equal(await first, false);
   // The second save is still in flight and owns the same path.
-  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.6' });
+  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: 0.6 });
   gates.get('0.6')!.release(true);
   assert.equal(await second, true);
   assert.deepEqual(pendingSelection('yue2'), {});

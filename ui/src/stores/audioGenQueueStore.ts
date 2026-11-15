@@ -1486,6 +1486,20 @@ async function _probeAudioDuration(itemId: string, url: string): Promise<void> {
 
 // ── Simple generation API (for Create page) ─────────────────────────────────
 
+/** A Create render's YuE2 pick, captured now (#319): the picker's defaults
+ *  with any save still in flight, so a Generate clicked mid-save renders what
+ *  the picker shows. A one-shot Generate (it always carries an intent) takes
+ *  the picker over a pick its params inherited by reusing a song, since the
+ *  picker is Create's only adapter control. A build save keeps its session's
+ *  own dials and fills the rest from the picker. */
+export function withCreateYue2Pick(request: Record<string, unknown>, oneShot: boolean): Record<string, unknown> {
+  const backend = typeof request.backend === 'string' ? request.backend : useBackendStore.getState().activeBackendId;
+  if (backend !== YUE2_BACKEND_ID) return request;
+  const own = request.yue2Pick as Record<string, string | number> | undefined;
+  const live = yue2PickAtEnqueue(null);
+  return { ...request, yue2Pick: oneShot || !own ? live : { ...live, ...own } };
+}
+
 /**
  * Enqueue a simple generation from the Create page.
  * Submits to the generate API, tracks progress in the shared queue,
@@ -1520,7 +1534,7 @@ export async function enqueueSimpleGen(
   if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
   if (queueOwner() === 'server') {
     const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
-    const request = (preview?.request ?? params) as Record<string, unknown>;
+    const request = withCreateYue2Pick((preview?.request ?? params) as Record<string, unknown>, !!intent);
     await audioQueueApi.enqueue(id, request, { view: item });
     _lastToken = token;
     await refreshServerProjection();
@@ -1553,7 +1567,8 @@ export async function enqueueSimpleGen(
   try {
     const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
     if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit((preview?.request ?? params) as GenerationParams);
+    const res = await generateApi.submit(withCreateYue2Pick(
+      (preview?.request ?? params) as Record<string, unknown>, !!intent) as unknown as GenerationParams);
     item.jobId = res.jobId;
     item.stage = 'Queued…';
     _emit(true);

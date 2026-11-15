@@ -457,7 +457,8 @@ export function yue2PickAtEnqueue(
   const pick: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(defaults)) {
     if (YUE2_PICK_KEY.test(k) && (typeof v === 'string' || typeof v === 'number')) {
-      pick[k] = v;
+      // A pending picker POST holds its dials as strings; send them as the numbers they are.
+      pick[k] = typeof v === 'string' && /Scale|Rebase/.test(k) && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : v;
     }
   }
   if (preset) {
