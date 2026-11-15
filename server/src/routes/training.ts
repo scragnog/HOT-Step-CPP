@@ -3827,7 +3827,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     if (gateRequested) b = { ...b, narExtraSteps: gateNarExtraSteps };
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
-    const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
+    const prepResolved = automatic ? yue2AitkPrepareDefaults(ds) : undefined;
+    const prepDefaults = prepResolved?.options;
     // A resume carries its run's checkpoint path; a new run names a base id.
     let checkpoint = str('checkpoint');
     if (!checkpoint) {
@@ -3866,8 +3867,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     if (prepDefaults) {
       const overrides = b.preparation && typeof b.preparation === 'object' ? b.preparation as Record<string, unknown> : {};
       const prepString = (key: string, fallback: string): string => typeof overrides[key] === 'string' && (overrides[key] as string).trim() ? (overrides[key] as string).trim() : fallback;
-      const models = overrides.models === undefined ? prepDefaults.models : parseYue2AitkModels(overrides.models, undefined);
-      if (!models) { res.status(400).json({ error: 'Preparation requires vae, semantic and sheetsage model paths' }); return; }
+      const asked = overrides.models === undefined ? prepDefaults.models : parseYue2AitkModels(overrides.models, undefined);
+      if (!asked) { res.status(400).json({ error: 'Preparation requires vae, semantic and sheetsage model paths' }); return; }
+      const models = { ...asked, ...prepResolved!.recorded };
       preparation = { ...prepDefaults, checkpoint, models,
         legacyManifest: prepString('legacyManifest', prepDefaults.legacyManifest),
         tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
@@ -4261,6 +4263,10 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   options: ResolvedYue2AitkPrepareOptions;
   missing: string[];
   provenance: Record<string, string>;
+  /** The models the cache itself names as its makers. A request cannot
+   *  override these: preparation runs none of them, it only records them, so a
+   *  stale path saved in the form would mislabel the run. */
+  recorded: Partial<Record<'vae' | 'semantic' | 'sheetsage', string>>;
 } {
   const legacyManifest = yue2PreprocessManifest(ds.slug);
   const semanticModel = resolveYue2TokenizerModel();
@@ -4281,18 +4287,27 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
       if (parsed && typeof parsed === 'object') manifestFields = parsed;
     }
   } catch { /* readiness reports the unresolved defaults below */ }
-  const existingPath = (key: string, fallback: string): string => {
-    const value = manifestFields[key];
-    if (typeof value !== 'string' || !value.trim()) return fallback;
+  const existingFile = (value: string, fallback: string): string => {
     const candidates = path.isAbsolute(value) ? [value]
       : [path.resolve(path.dirname(legacyManifest), value), path.resolve(yue2ModelDir(), value)];
     return candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) || fallback;
   };
-  const models = {
-    vae: existingPath('vae_path', existingPath('vae_file', trainModels.vae)),
-    semantic: existingPath('codec_ids_tokenizer', semanticModel),
-    sheetsage: existingPath('abc_model', sheetModel),
+  const existingPath = (key: string, fallback: string): string => {
+    const value = manifestFields[key];
+    return typeof value !== 'string' || !value.trim() ? fallback : existingFile(value, fallback);
   };
+  // yue2-sheet tags each source it transcribes, e.g. "sheetsage2-f16.gguf +
+  // sheetsage2-refined-f16.gguf key_mode exact cuda0": the last file named is
+  // the transcriber (the Refined overlay when there is one).
+  const sheetTag = (Array.isArray(manifestFields.sources) ? manifestFields.sources as Array<Record<string, unknown>> : [])
+    .map(s => s?.abc_producer).find((t): t is string => typeof t === 'string' && /\.gguf/i.test(t));
+  const sheetFile = sheetTag?.match(/[^\s+]+\.gguf/gi)?.pop();
+  const recorded = Object.fromEntries(Object.entries({
+    vae: existingPath('vae_path', existingPath('vae_file', '')),
+    semantic: existingPath('codec_ids_tokenizer', ''),
+    sheetsage: sheetFile ? existingFile(sheetFile, '') : '',
+  }).filter(([, file]) => file)) as Partial<Record<'vae' | 'semantic' | 'sheetsage', string>>;
+  const models = { vae: trainModels.vae, semantic: semanticModel, sheetsage: sheetModel, ...recorded };
   const abcProducer = typeof manifestFields.abc_producer === 'string' ? manifestFields.abc_producer : '';
   const output = path.join(path.dirname(legacyManifest), `aitk-prepared-${Date.now()}`);
   const options: ResolvedYue2AitkPrepareOptions = { legacyManifest, checkpoint, tokenizer, output, models, trigger: ds.customTag || ds.slug };
@@ -4304,7 +4319,7 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   if (!models.semantic || !fs.existsSync(models.semantic)) missing.push('YuE2 semantic tokenizer GGUF');
   if (!models.sheetsage || !fs.existsSync(models.sheetsage)) missing.push('YuE2 SheetSage model');
   return {
-    options, missing,
+    options, missing, recorded,
     provenance: {
       latentManifest: legacyManifest,
       vae: models.vae || 'missing',
@@ -4357,11 +4372,12 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
     const defaults = yue2AitkPrepareDefaults(ds);
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const rawModels = b.models ?? b.model;
-    const models = rawModels === undefined ? defaults.options.models : parseYue2AitkModels(b.models, b.model);
-    if (!models) {
+    const asked = rawModels === undefined ? defaults.options.models : parseYue2AitkModels(b.models, b.model);
+    if (!asked) {
       res.status(400).json({ error: 'models must provide exactly vae=FILE, semantic=FILE, and sheetsage=FILE (repeat model fields are accepted)' });
       return;
     }
+    const models = { ...asked, ...defaults.recorded };
     const fixedBase = b.captionGrammar === 'fixed-recipe' ? resolveYue2JointBase(str('base') || 'bf16') : undefined;
     if (fixedBase && 'error' in fixedBase) { res.status(400).json({ error: fixedBase.error }); return; }
     const options: ResolvedYue2AitkPrepareOptions = {

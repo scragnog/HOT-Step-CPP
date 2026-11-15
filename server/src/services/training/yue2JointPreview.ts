@@ -13,7 +13,7 @@ import { aceClient } from '../aceClient.js';
 import { getFFmpegPath } from '../../config.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2LmOverrides } from '../backends/yue2/generate.js';
-import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, type Yue2Selection } from '../backends/yue2/client.js';
+import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, isYue2VaeVariant, type Yue2Selection } from '../backends/yue2/client.js';
 import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, yue2StyleNormsForRun, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
@@ -288,7 +288,7 @@ export async function renderYue2JointPreview(input: {
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
         { path: input.arAdapter, scales: { ...unity, global: input.options.arScale ?? YUE2_JOINT_PREVIEW_DEFAULTS.arScale! } }, { path: input.narAdapter, scales: unity },
-      ], vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard' };
+      ], vae_variant: isYue2VaeVariant(base.vae_variant) ? base.vae_variant : 'standard' };
       await api.select(selected);
       await api.warm({ vae_variant: selected.vae_variant });
       const records: Yue2JointPreviewRecord[] = seeds.map(seed => ({ id: randomUUID(), step: input.step, kind, status: 'rendering',
@@ -441,7 +441,7 @@ export async function renderYue2JointPreview(input: {
     if (last && last.status === 'rendering') { last.status = 'failed'; last.error = err?.message || String(err); last.updatedAt = Date.now(); recordYue2JointPreview(input.output, last); }
     throw err;
   } finally {
-    const restore: Yue2Selection = { lm: base.lm, vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard', lm_adapter: [] };
+    const restore: Yue2Selection = { lm: base.lm, vae_variant: isYue2VaeVariant(base.vae_variant) ? base.vae_variant : 'standard', lm_adapter: [] };
     let cleanupError: unknown;
     if (activeJob && !activeTerminal) {
       try { await api.cancel(activeJob); } catch { /* bounded polling below */ }

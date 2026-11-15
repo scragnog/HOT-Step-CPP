@@ -92,6 +92,18 @@ test('renderer uses selected style/lyrics, writes audio, and restores selection'
   assert.ok(fs.readdirSync(path.join(f.output, 'previews')).some(n => n.startsWith(`step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}`) && n.endsWith('.wav')));
 });
 
+test('previews decode with the picked VAE (rs-x3), not a forced Standard, and restore it', async () => {
+  const f = previewFixture();
+  const { deps, calls } = mockDeps();
+  const persisted = deps.persisted();
+  deps.persisted = () => ({ ...persisted, vae_variant: 'rs-x3' });
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true }, arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+  const picks = calls.filter(c => c.name === 'select' || c.name === 'warm').map(c => (c.value as any).vae_variant);
+  assert.ok(picks.length >= 3);
+  assert.deepEqual([...new Set(picks)], ['rs-x3']);
+});
+
 test('previews render with the sampler snapshot, and junk keys are dropped', async () => {
   const opts = parseYue2JointPreviewOptions({ sampler: { yue2PlanTemperature: 0.7, yue2SemRepPenalty: 1.1,
     yue2CfgScale: '1.5', ditModel: 'x', yue2SemTopK: Infinity } }, 50);

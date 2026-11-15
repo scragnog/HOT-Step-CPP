@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection } from '../backends/yue2/index.js';
-import { yue2SelectModel, yue2Synth, yue2FinalDetail, yue2Unload, type Yue2Selection } from '../backends/yue2/client.js';
+import { yue2SelectModel, yue2Synth, yue2FinalDetail, yue2Unload, isYue2VaeVariant, type Yue2Selection } from '../backends/yue2/client.js';
 import { classifyYue2Score } from '../backends/yue2/scoreHealth.js';
 
 export interface Yue2PlanCheckOptions {
@@ -60,7 +60,7 @@ async function planOnce(style: string, lyrics: string, seed: number, signal?: Ab
  *  afterwards; the caller owns the engine being up. */
 export async function runYue2PlanCheck(arAdapter: string, step: number, o: Yue2PlanCheckOptions, output: string, signal?: AbortSignal): Promise<Yue2PlanCheck> {
   const base = yue2PersistedSelection();
-  const sel: Yue2Selection = { lm: base.lm, vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard',
+  const sel: Yue2Selection = { lm: base.lm, vae_variant: isYue2VaeVariant(base.vae_variant) ? base.vae_variant : 'standard',
     lm_adapter: arAdapter ? [{ path: arAdapter, scales: { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 } }] : [] };
   await yue2SelectModel(sel);
   const plans: Yue2PlanResult[] = [];

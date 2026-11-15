@@ -678,7 +678,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setPrepare(previous => ({
         ...previous,
         ...Object.fromEntries(Object.entries(defaults).filter(([key, value]) => key !== 'models' && takeDefault(previous[key as keyof PrepareForm], value))),
-        models: { ...previous.models, ...Object.fromEntries(Object.entries(defaults.models ?? {}).filter(([key, value]) => takeDefault(previous.models[key as keyof PrepareForm['models']], value))) },
+        // The model paths are provenance only (preparation runs none of them),
+        // and the server names what made the cache: show its answer, never a
+        // path saved before the cache was re-made.
+        models: { ...previous.models, ...defaults.models },
       }));
   }, [datasetId, trainingWorker, prepareQuery.data]);
 
