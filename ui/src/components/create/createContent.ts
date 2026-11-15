@@ -20,7 +20,7 @@ export function createYue2Replay(saved: Record<string, unknown>): {
   return {
     continuation: saved.yue2Continuation as Yue2Continuation | undefined,
     shared: Object.fromEntries(Object.entries(saved).filter(([key]) => key.startsWith('yue2')
-      && !['yue2', 'yue2Request', 'yue2Adapters', 'yue2Continuation'].includes(key))),
+      && !['yue2', 'yue2Request', 'yue2Adapters', 'yue2Continuation', 'yue2Build'].includes(key))),
   };
 }
 

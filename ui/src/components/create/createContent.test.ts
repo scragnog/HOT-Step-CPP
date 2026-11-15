@@ -193,3 +193,8 @@ test('Create Edit restores a continuation without passing it to shared controls 
   // Editing an ordinary song clears the previous per-song continuation.
   assert.equal(createYue2Replay({ yue2Cot: 'full' }).continuation, undefined);
 });
+
+test('Create Edit does not carry a Build session marker into one-shot Generate', () => {
+  const replay = createYue2Replay({ yue2Build: { session: 'abc' }, yue2Cot: 'full' });
+  assert.deepEqual(replay.shared, { yue2Cot: 'full' });
+});
