@@ -135,13 +135,28 @@ export function assembleYue2FromFields(raw: string): string {
  * genre — on a dataset of lounge covers of rock songs they wrote "garage punk",
  * "synth-pop" and "hip-hop"; with it they describe the piano, brushed drums and
  * crooned vocal actually on the recording (measured 2026-10-24, both models).
+ *
+ * The hint used to add "which may be a cover in a different style from the
+ * song's original". Music Flamingo took that as fact on an album of originals
+ * and called 13 of 20 tracks "a cover ... capturing the spirit of the original"
+ * (HOTSTEP-1241), so the tag alone carries the steer now.
  */
 export function genreHint(genre: string | undefined | null): string {
   const g = (genre ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-  return g
-    ? `The file is tagged with the genre "${g}". Describe the arrangement you actually hear, `
-      + "which may be a cover in a different style from the song's original."
-    : '';
+  return g ? `The file is tagged with the genre "${g}". Describe the arrangement you actually hear.` : '';
+}
+
+/**
+ * The singer the YuE2 `vocal:` field names, when the prose caption from the same
+ * encode calls the track instrumental and never mentions a voice; else null.
+ * Music Flamingo did exactly this on 16 of 20 sung tracks (HOTSTEP-1241).
+ */
+export function instrumentalContradiction(prose: string | undefined, yue2Raw: string | undefined): string | null {
+  const vocal = (/^\s*vocal\s*:\s*(.+)$/im.exec(yue2Raw ?? '')?.[1] ?? '').replace(/[\s.]+$/, '').trim();
+  if (!vocal || /^(?:n\/a|none|no vocals?|instrumental)\b/i.test(vocal)) return null;
+  const text = (prose ?? '').replace(/\b(?:no|without)\s+(?:lead\s+)?vocals?\b|\bvocal-?less\b/gi, ' ');
+  if (!/\binstrumental\b/i.test(text)) return null;
+  return /\b(?:vocals?|vocalist|singer|singing|sung|voice)\b/i.test(text) ? null : vocal;
 }
 
 /**
@@ -1158,6 +1173,21 @@ export async function captionWithMoss(
   });
 
   const out: MossCaptionResult = { prose: raw.prose, lyrics: raw.lyrics };
+  // A sung track captioned "instrumental": decode the prose again, told which
+  // voice the YuE2 answer heard. ponytail: one extra encode per flagged track,
+  // queued behind any running batch; batch it if a dataset flags many.
+  const singer = instrumentalContradiction(raw.prose, raw.yue2);
+  if (singer) {
+    const name = LOCAL_CAPTIONER_NAMES[opts.model ?? 'moss'];
+    opts.log?.('warn', `${name} called a sung track instrumental (vocal: ${singer}); captioning it again`);
+    const redo = await runMossCaption(audioPath, {
+      model: opts.model, modes: ['prose'],
+      hint: [opts.hint, `The track has a lead vocal: ${singer}.`].filter(Boolean).join(' '),
+      prompts: { prose: CAPTION_INSTRUCTIONS },
+      maxSeconds: opts.maxSeconds, signal: opts.signal, log: opts.log,
+    }).catch(() => ({} as Partial<Record<MossMode, string>>));
+    if (redo.prose && !instrumentalContradiction(redo.prose, raw.yue2)) out.prose = redo.prose;
+  }
   if (raw.yue2?.trim()) {
     const bpm = Number(facts.bpm);
     const body = assembleYue2FromFields(raw.yue2);
@@ -1171,7 +1201,7 @@ export async function captionWithMoss(
     // answer sat in raw.prose: on ABR's The Blinding Light the new prose said
     // "thrash and groove metal" (sidecar genre: Metal) while the MM3 line
     // scanned only its own body ("rock beat") and landed Rock (2026-08-19).
-    const observed = [raw.prose, facts.observedCaption]
+    const observed = [out.prose, facts.observedCaption]
       .filter(v => (v ?? '').trim()).join('\n');
     out.mm3 = applyFactSubstitution(raw.mm3, { ...facts, observedCaption: observed });
   }

@@ -51,7 +51,10 @@ import { parseLooseObject } from './sidecarIO.js';
 export const CAPTION_DIMENSIONS: readonly string[] = [
   'genre and subgenre, named plainly',
   'the instruments actually present, named concretely',
-  'vocal character (or state that the track is instrumental and name what carries the lead line)',
+  // Asked directly (HOTSTEP-1241). Worded "vocal character (or state that the
+  // track is instrumental ...)", Music Flamingo called 16 of 20 sung tracks
+  // instrumental while its MM3 and YuE2 captions off the same encode named the singer.
+  'the lead vocal: gender, register and delivery (call the track instrumental only if no voice is heard anywhere in it, and then name what carries the lead line)',
   'mood and atmosphere',
   'production style and sonic character',
 ];
@@ -104,7 +107,7 @@ export const CAPTION_INSTRUCTIONS: string =
   '- Name things concretely: `808 bass`, `brushed snare`, `detuned saw lead`, `palm-muted guitar`, `upright piano` — not `interesting textures` or `lush soundscapes`.\n' +
   "- No vague imagery or stacked adjectives ('neon skies, electric hearts'), no marketing copy, and no listener-reaction language ('keeps you moving', 'emotionally resonant').\n" +
   "- Avoid generic openings like 'This track is' when more specific wording can be used immediately.\n" +
-  '- If the track is instrumental, say so and name the instrument carrying the lead line.\n' +
+  '- Describe the lead vocal. Call the track instrumental only if no voice is heard anywhere in it, and then name the instrument carrying the lead line.\n' +
   '- Start `genre:` on line 1, `caption:` on line 2, `bpm:` on line 3, `key:` on line 4, and `signature:` on line 5.\n' +
   '- Do not merge fields together. For example, do not output `genre: ... bpm: ... key: ...` on one line.\n' +
   '- Do not use markdown, bullets, numbering, code fences, labels before the template, or commentary after the template.\n' +

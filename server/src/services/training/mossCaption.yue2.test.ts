@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { arbitrateSidecarGenre, assembleYue2FromFields, genreHint, scanGenreHints } from './mossCaption.js';
+import { arbitrateSidecarGenre, assembleYue2FromFields, genreHint, instrumentalContradiction, scanGenreHints } from './mossCaption.js';
 
 test('Local YuE2 fields assemble in order from labelled (Flamingo) answers, dropping parentheticals', () => {
   const raw = [
@@ -46,4 +46,16 @@ test('Genre hints: lounge beats the song it covers, coffee-house is not House', 
 test('genreHint is empty without a tag and single-line with one', () => {
   assert.equal(genreHint(''), '');
   assert.match(genreHint('Lounge;\tParody\n'), /^The file is tagged with the genre "Lounge; Parody"\./);
+  assert.doesNotMatch(genreHint('Rock'), /cover|original/);
+});
+
+test('instrumentalContradiction flags a sung track captioned instrumental', () => {
+  const sung = 'language: English\nvocal: Male, mid-range, shouted.  \ninstruments: guitars';
+  const flagged = 'This track is an instrumental rock piece. No vocals are present; a clean guitar carries the lead.';
+  assert.equal(instrumentalContradiction(flagged, sung), 'Male, mid-range, shouted');
+  // A caption that describes the voice is fine, even with an instrumental break.
+  assert.equal(instrumentalContradiction('Punk rock with a shouted male vocal and an instrumental bridge.', sung), null);
+  // No contradiction when YuE2 heard no singer, or gave no answer.
+  assert.equal(instrumentalContradiction(flagged, 'vocal: instrumental, lead guitar'), null);
+  assert.equal(instrumentalContradiction(flagged, undefined), null);
 });
