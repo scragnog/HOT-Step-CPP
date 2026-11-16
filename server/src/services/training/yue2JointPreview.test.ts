@@ -102,6 +102,10 @@ test('previews decode with the picked VAE (rs-x3), not a forced Standard, and re
   const picks = calls.filter(c => c.name === 'select' || c.name === 'warm').map(c => (c.value as any).vae_variant);
   assert.ok(picks.length >= 3);
   assert.deepEqual([...new Set(picks)], ['rs-x3']);
+  // The render request itself names it: the engine decodes a request without one on Standard.
+  const renders = calls.filter(c => c.name === 'synth' && !(c.value as any).plan_only).map(c => (c.value as any).vae_variant);
+  assert.ok(renders.length >= 1);
+  assert.deepEqual([...new Set(renders)], ['rs-x3']);
 });
 
 test('previews render with the sampler snapshot, and junk keys are dropped', async () => {

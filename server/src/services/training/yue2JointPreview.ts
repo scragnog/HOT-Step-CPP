@@ -351,15 +351,16 @@ export async function renderYue2JointPreview(input: {
         for (const r of records) recordYue2JointPreview(input.output, r);
       }
       const requested = shared && supplied ? [supplied.seed, records[1].seed] : [supplied ? supplied.seed : seeds[0]];
-      const draft = { ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
+      // vae_variant on the request itself: the engine decodes a request without
+      // one on Standard, whatever select/warm made resident.
+      const draft = { vae_variant: selected.vae_variant, ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) };
       const sub = shared && supplied
         ? await api.synth({ cot: 'full', semantic_retries: PREVIEW_REPLAN_ATTEMPTS, ...draft, ...sampler,
             songs: records.map((_, i) => ({ style: caption, lyrics, abc: takeAbc[i]!, seed: requested[i] })) } as Parameters<typeof api.synth>[0])
         : await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: requested[0], ...sampler,
         ...(supplied ? { abc: supplied.abc, semantic_retries: PREVIEW_REPLAN_ATTEMPTS } : { preview_max_frames: input.options.previewMaxFrames }),
-        ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
-        ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
+        ...draft });
       activeJob = sub.job_id;
       activeTerminal = false;
       const renderDeadline = Date.now() + 30 * 60_000;

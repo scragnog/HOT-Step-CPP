@@ -459,7 +459,7 @@ optional stages and the cursor objective. Base-matched forces the cursor weight 
 0 and `fixed-recipe` forces lyric timing off, so only the tuned recipe trains the
 cursor. The timing weight is configurable and recorded with the run.
 
-Checkpoint previews select the AR adapter at `preview.arScale`, default 0.6, and the NAR adapter at 1.0. The joint form and batch ladder defaults carry the same AR scale. Manual renders accept `arScale`, falling back to the run's saved preview scale and then 0.6. Baseline previews select no adapters.
+Checkpoint previews select the AR adapter at `preview.arScale`, default 0.6, and the NAR adapter at 1.0. The joint form and batch ladder defaults carry the same AR scale. Manual renders accept `arScale`, falling back to the run's saved preview scale and then 0.6. Baseline previews select no adapters. Previews decode with the VAE picked in YuE2 mode, and every render request names it in `vae_variant`: the engine decodes a `/yue2/synth` request without that field on Standard, whatever select-model or warm made resident.
 
 Checkpoint previews are optional. The route leaves them off when a request omits
 the `preview` block; the joint card sends the parallel ladder block above (one
