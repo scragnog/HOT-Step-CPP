@@ -39,6 +39,8 @@ export interface RePostProcessJob {
   /** Set on success — the URL now stored in songs.mastered_audio_url. */
   masteredAudioUrl?: string;
   createdAt: number;
+  /** Set when the job reaches a terminal state; the TTL runs from here. */
+  finishedAt?: number;
 }
 
 const jobs = new Map<string, RePostProcessJob>();
@@ -48,15 +50,14 @@ registerJobsBusyCheck('post-processing', jobs);
 const inFlight = new Set<string>();
 
 // Terminal jobs are only kept long enough for the browser to poll the result.
-const JOB_TTL_MS = 30 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [id, job] of jobs) {
-    if ((job.status === 'succeeded' || job.status === 'failed') && now - job.createdAt > JOB_TTL_MS) {
-      jobs.delete(id);
-    }
+export const JOB_TTL_MS = 30 * 60 * 1000;
+/** Drops terminal jobs older than the TTL, counted from when they finished. */
+export function pruneJobs(map: Map<string, RePostProcessJob>, now = Date.now()): void {
+  for (const [id, job] of map) {
+    if (job.finishedAt !== undefined && now - job.finishedAt > JOB_TTL_MS) map.delete(id);
   }
-}, 5 * 60 * 1000).unref();
+}
+setInterval(() => pruneJobs(jobs), 5 * 60 * 1000).unref();
 
 export function getRePostProcessJob(jobId: string): RePostProcessJob | undefined {
   return jobs.get(jobId);
@@ -337,6 +338,7 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
     failGenerationLog(jobId, msg, 'postprocess');
     console.error(`[PostProcess] Song ${song.id} failed: ${msg}`);
   }).finally(() => {
+    job.finishedAt = Date.now();
     inFlight.delete(song.id);
   }));
 

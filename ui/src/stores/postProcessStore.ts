@@ -134,7 +134,7 @@ function startPolling(songId: string, jobId: string): void {
       return;
     }
     const status = result.data;
-    if (!status) return; // job aged out of the server's map — keep the last state
+    if (!status) { stopPolling(songId); clearRun(songId); return; } // job pruned (404): nothing left to poll
     setRun(songId, {
       status: status.status,
       stage: status.stage,
