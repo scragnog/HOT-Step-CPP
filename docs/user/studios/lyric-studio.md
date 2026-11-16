@@ -16,7 +16,10 @@ and captioning need at least one LLM provider configured. See
 [Controls > LLM providers](#llm-providers) and
 [Getting started](../getting-started.md) for API keys. Fetching lyrics from
 Genius needs a Genius access token, set with the API keys under Settings > AI
-Services. None of this is required to type lyrics in by hand and send them to
+Services. Genius's lyrics pages turn away the app's own web client, so the app
+downloads them with `curl`, which ships with Windows 10 and later and with
+macOS. If Genius still blocks the download, the fetch fails with a message
+saying so. None of this is required to type lyrics in by hand and send them to
 Custom-Gen.
 
 An external agent (Claude Code, Codex) can also drive Lyric Studio through the

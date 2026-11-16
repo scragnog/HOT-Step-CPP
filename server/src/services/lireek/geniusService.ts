@@ -3,8 +3,12 @@
 // Port of Python genius_service.py.
 // Uses fetch() for the Genius REST API and cheerio for HTML parsing.
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
+
+const execFileP = promisify(execFile);
 
 const API_ROOT = 'https://api.genius.com';
 
@@ -53,19 +57,67 @@ function cleanLyrics(raw: string): string {
   return text.trim();
 }
 
+/** genius.com pages are behind a Cloudflare bot check that Node can't pass. */
+export class GeniusBlockedError extends Error {
+  constructor() {
+    super('Genius is blocking lyric page downloads (Cloudflare bot check). The API key works; '
+      + 'the lyrics pages are refused. Make sure curl is installed and on PATH.');
+  }
+}
+
+type Page = { ok: boolean; status: number; text: string; blocked: boolean };
+
+const isChallenge = (status: number, text: string) => status === 403 && text.includes('challenge-platform');
+
+/** Set once Node's own fetch has been challenged, so later pages go straight to curl. */
+let nodeChallenged = false;
+
+/** GET a page with the system curl. Null when curl is missing or fails. */
+async function curlPage(url: string): Promise<Page | null> {
+  const args = ['-sSL', '--max-time', '30', '-w', '\n%{http_code}'];
+  for (const [k, v] of Object.entries(BROWSER_HEADERS)) args.push('-H', `${k}: ${v}`);
+  try {
+    const { stdout } = await execFileP('curl', [...args, url], { maxBuffer: 32 << 20, windowsHide: true });
+    const cut = stdout.lastIndexOf('\n');
+    const status = Number(stdout.slice(cut + 1));
+    const text = stdout.slice(0, cut);
+    return { ok: status >= 200 && status < 300, status, text, blocked: isChallenge(status, text) };
+  } catch (err) {
+    console.warn(`[Genius] curl fallback failed for ${url}:`, (err as Error).message);
+    return null;
+  }
+}
+
+/**
+ * GET a genius.com HTML page (lyrics, album, artist).
+ *
+ * Since 2026-11 Cloudflare answers Node's TLS client on genius.com with a 403
+ * JS challenge whatever the headers; api.genius.com is unaffected. Windows
+ * curl (Schannel) still gets the page with a browser User-Agent, so a
+ * challenged page is retried through the system curl. An OpenSSL curl on Linux
+ * was still challenged when this was written, so `blocked` can stay true.
+ */
+async function fetchPage(url: string): Promise<Page> {
+  if (!nodeChallenged) {
+    const resp = await fetch(url, { headers: BROWSER_HEADERS, redirect: 'follow' });
+    const text = await resp.text();
+    if (!isChallenge(resp.status, text)) return { ok: resp.ok, status: resp.status, text, blocked: false };
+    nodeChallenged = true;
+    console.warn('[Genius] Node fetch is being challenged by Cloudflare; using curl for genius.com pages');
+  }
+  return await curlPage(url) ?? { ok: false, status: 403, text: '', blocked: true };
+}
+
 async function scrapeLyrics(songUrl: string): Promise<string | null> {
   try {
-    const resp = await fetch(songUrl, {
-      headers: BROWSER_HEADERS,
-      redirect: 'follow',
-    });
+    const resp = await fetchPage(songUrl);
+    if (resp.blocked) throw new GeniusBlockedError();
     if (!resp.ok) {
       console.warn(`[Genius] Failed to scrape ${songUrl}: ${resp.status}`);
       return null;
     }
 
-    const html = await resp.text();
-    const $ = cheerio.load(html.replace(/<br\/?>/gi, '\n'));
+    const $ = cheerio.load(resp.text.replace(/<br\/?>/gi, '\n'));
 
     // Modern Genius layout: data-lyrics-container divs
     const containers = $('div[data-lyrics-container="true"]');
@@ -82,6 +134,7 @@ async function scrapeLyrics(songUrl: string): Promise<string | null> {
     console.warn(`[Genius] No lyrics div found on: ${songUrl}`);
     return null;
   } catch (err) {
+    if (err instanceof GeniusBlockedError) throw err;
     console.warn(`[Genius] Scrape error for ${songUrl}:`, err);
     return null;
   }
@@ -169,9 +222,9 @@ async function apiGetArtistDetails(artistId: number): Promise<any> {
 
 async function getArtistIdFromUrl(url: string): Promise<number | null> {
   try {
-    const resp = await fetch(url, { headers: BROWSER_HEADERS, redirect: 'follow' });
+    const resp = await fetchPage(url);
     if (!resp.ok) return null;
-    const html = await resp.text();
+    const html = resp.text;
     const match = html.match(/\\?"artist_id\\?":\s*(\d+)/) ?? html.match(/content="genius:\/\/artists\/(\d+)"/);
     return match ? parseInt(match[1], 10) : null;
   } catch { return null; }
@@ -203,10 +256,9 @@ async function findAlbumIdByPage(albumName: string, artistName: string): Promise
   const artistLower = artistName.toLowerCase();
 
   try {
-    const resp = await fetch(url, { headers: BROWSER_HEADERS, redirect: 'follow' });
+    const resp = await fetchPage(url);
     if (!resp.ok) return null;
-    const html = await resp.text();
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(resp.text);
     const links = $('div.chart_row a.u-display_block').toArray();
     if (!links.length) return null;
 
@@ -292,10 +344,10 @@ async function scrapeAlbumPageTracks(
     url = `https://genius.com/albums/${slug}`;
   }
   try {
-    const resp = await fetch(url, { headers: BROWSER_HEADERS, redirect: 'follow' });
+    const resp = await fetchPage(url);
+    if (resp.blocked) throw new GeniusBlockedError();
     if (!resp.ok) return [];
-    const html = await resp.text();
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(resp.text);
 
     const tracks: { title: string; url: string }[] = [];
     $('div.chart_row a.u-display_block').each((_, el) => {
@@ -308,7 +360,10 @@ async function scrapeAlbumPageTracks(
       if (title) tracks.push({ title, url: href });
     });
     return tracks;
-  } catch { return []; }
+  } catch (err) {
+    if (err instanceof GeniusBlockedError) throw err;
+    return [];
+  }
 }
 
 
@@ -379,6 +434,7 @@ export async function fetchLyrics(
           const raw = await scrapeLyrics(url);
           if (raw) songs.push({ title, album: albumName, lyrics: cleanLyrics(raw) });
         } catch (err) {
+          if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${title}':`, err);
         }
       }
@@ -392,6 +448,7 @@ export async function fetchLyrics(
           const raw = await scrapeLyrics(pt.url);
           if (raw) songs.push({ title: pt.title, album: albumName, lyrics: cleanLyrics(raw) });
         } catch (err) {
+          if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${pt.title}':`, err);
         }
       }
@@ -416,6 +473,7 @@ export async function fetchLyrics(
         const raw = await scrapeLyrics(url);
         if (raw) songs.push({ title, album: songAlbum, lyrics: cleanLyrics(raw) });
       } catch (err) {
+        if (err instanceof GeniusBlockedError) throw err;
         console.warn(`[Genius] Failed to scrape '${title}':`, err);
       }
     }
