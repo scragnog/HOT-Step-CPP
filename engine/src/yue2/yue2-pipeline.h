@@ -801,6 +801,20 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     Yue2SamplingParams sp = yue2_stage_params(m.lm_cfg.semantic, req.semantic);
     const bool preview_capped = req.preview_max_frames > 0 && req.preview_max_frames < sp.max_tokens;
     if (preview_capped) sp.max_tokens = req.preview_max_frames;
+    // A long cap plus a long prompt can pass the trained context: past it the
+    // RoPE positions are ones the model never saw. Shorten the song instead,
+    // the way the reference node does, and say so.
+    const int64_t ctx_room = (int64_t) m.lm_cfg.context_length - max_prefix - 4;
+    if (ctx_room < sp.max_tokens) {
+        if (ctx_room <= sp.min_tokens) {
+            if (err) *err = "prompt too long: " + std::to_string(max_prefix) + " tokens leave no room for a song in the model context of " +
+                            std::to_string(m.lm_cfg.context_length);
+            return false;
+        }
+        fprintf(stderr, "[YuE2] music budget reduced to %lld frames (%.0f s) to fit the %lld-token prompt in the %u-token context\n",
+                (long long) ctx_room, (double) ctx_room / 25.0, (long long) max_prefix, m.lm_cfg.context_length);
+        sp.max_tokens = (int) ctx_room;
+    }
     const bool legacy_off  = (req.cot == YUE2_COT_OFF);
     const int64_t legal_lo = YUE2_CODEC_OFFSET;
     const int64_t legal_hi = YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE;

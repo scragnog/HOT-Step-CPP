@@ -282,9 +282,9 @@ to shut down first. See [building.md](building.md#engine-rebuild-rules).
    server polls `GET /job?id=<id>` and fetches the result with `GET /job?id=<id>&result=1`.
    The polling loop is `services/generation/pollUntilDone.ts`, which also holds the stall
    and wall-clock watchdogs. YuE2 supplies the submitted NAR chunk frame cap,
-   or 9000 frames for an uncapped song. During NAR and the completed semantic
+   else the song's frame cap (9000 frames when Max Song Length is untouched). During NAR and the completed semantic
    handoff, the silence allowance is 400 ms per frame plus 2 minutes, with a
-   15-minute floor and a 9000-frame ceiling. Actual phase/step changes reset
+   15-minute floor and a 22500-frame ceiling. Actual phase/step changes reset
    the timer; repeated running responses do not. YuE2 decode and output phases
    (`vae_decode`, legacy `vae`, and `encoding_output`) can be silent for a whole
    batch, so they use the user-configured wall-clock timeout alone. Downstream

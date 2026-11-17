@@ -55,7 +55,7 @@ Pick the backend from the Generation engine box at the top of the sidebar; it ap
 |---|---|
 | Native port | AR composer and NAR renderer halves plus a VAE decoder, in C++/GGML, producing 48 kHz stereo. |
 | Freeform prompt | A plain style sentence plus lyrics; language comes from the lyrics. Include BPM/key in caption (on by default) ends the sentence with the trained BPM and key tail, taken from Song Info or the dataset caption. |
-| Model-ended songs | The composer decides the length, up to six minutes. |
+| Model-ended songs | The composer decides the length, up to a Max Song Length of 6 minutes by default and 15 at most. |
 | Chain of Thought | Full lead sheet (default), Melody only, or Off. Off skips the lead sheet but runs guidance, so it is the slowest mode. |
 | Lead sheet preview | Plans the score only and shows it as staff notation with playback and a health verdict; continue, re-plan or cancel. You can also paste your own ABC lead sheet. |
 | Cover Studio | Transcribes a source into a reviewed ABC lead sheet, or accepts pasted ABC or imported MusicXML with a lyric verse fallback, then composes from that score. SheetSage2 is optional when you provide the score. |

@@ -55,9 +55,9 @@ import type {
 import type { GenerationJob } from '../../generation/jobTypes.js';
 
 /** Mirrors capabilities().core.duration.max — the plan/semantic stages end on
- *  their own terminator; this is the honest v1 ceiling (§7 request fields:
- *  "duration ... max: 360, auto: true"). */
-const YUE2_MAX_DURATION_SEC = 360;
+ *  their own terminator; this is the most the Max Song Length knob
+ *  (yue2MaxMinutes) can ask for. The checkpoint default stays 6 min. */
+const YUE2_MAX_DURATION_SEC = 900;
 
 /** CC BY-NC 4.0, with the authors' individual-use carve-out. See the header
  *  note above and the Model Manager entry for the same text. */
@@ -702,12 +702,6 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: sd('semantic', 'min_tokens', 200), min: 0, max: 3000, step: 25,
       },
       {
-        key: 'yue2SemMaxTokens', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Max Frames',
-        hint: 'Cap on the song in codec frames (25 per second; 9000 = 6 min). A render that hits it '
-            + `reports limit_hit. Checkpoint: ${sd('semantic', 'max_tokens', 9000)}.`,
-        default: sd('semantic', 'max_tokens', 9000), min: 200, max: 9000, step: 100,
-      },
-      {
         key: 'yue2SemMinP', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'Composer Min-P',
         hint: 'After Top-P, drop every codec frame candidate whose probability is under this fraction of the '
             + 'top candidate\'s. Trims the long tail that produces stray noises without flattening the '
@@ -749,7 +743,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       {
         key: 'yue2EndBiasFrom', group: 'lm', section: 'Composer (song)', type: 'slider', label: 'End Bias From (s)',
         hint: 'Seconds of song before the bias starts applying.',
-        default: 0, min: 0, max: 360, step: 5,
+        default: 0, min: 0, max: YUE2_MAX_DURATION_SEC, step: 5,
         visible_when: { key: 'yue2EndBias', not_equals: '0' },
       },
       {
@@ -757,6 +751,21 @@ async function capabilities(): Promise<BackendCapabilities> {
         hint: 'Seconds over which the bias ramps from 0 to full strength.',
         default: 0, min: 0, max: 120, step: 5,
         visible_when: { key: 'yue2EndBias', not_equals: '0' },
+      },
+      {
+        key: 'yue2MaxMinutes',
+        type: 'slider',
+        label: 'Max Song Length (min)',
+        hint: 'The longest the composer may run before the song is cut off. The model still ends '
+            + 'the song on its own when the lyrics and lead sheet are done, so this is a ceiling, not '
+            + 'a target. 6 minutes is the checkpoint default. Up to 15 minutes fits the model context '
+            + 'only with a short prompt: long lyrics or a dense lead sheet shorten the budget, and the '
+            + 'log says by how much. Longer songs take longer and need more VRAM, most of all with '
+            + 'several songs per batch.',
+        default: Math.round(sd('semantic', 'max_tokens', 9000) / 25 / 60 * 2) / 2,
+        min: 1,
+        max: YUE2_MAX_DURATION_SEC / 60,
+        step: 0.5,
       },
       {
         key: 'yue2Cot',
@@ -1057,7 +1066,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         hint: 'A healthy lead sheet can still be composed into a runaway: the composer (semantic '
             + 'stage) runs well past the length the lead sheet asks for instead of ending the song. '
             + 'A song counts as a runaway once it passes 1.5x its lead sheet\'s length plus 20 s, or '
-            + 'six minutes. The engine then composes it again with new seeds, up to this many extra '
+            + 'the Max Song Length. The engine then composes it again with new seeds, up to this many extra '
             + 'tries, several side by side, and keeps the first one that ends properly. This all '
             + 'happens before any audio is rendered. 0 = render whatever came out.',
         default: 2,

@@ -4,7 +4,7 @@ import { currentWorker } from '../engineWorkers.js';
 import type { GenerationJob } from './jobTypes.js';
 
 export interface PollWatchdogOptions {
-  /** Submitted YuE2 chunk cap, bounded by the 9000-frame song ceiling.
+  /** Submitted YuE2 chunk cap, bounded by the 22500-frame (15 min) song ceiling.
    *  Used only during NAR, including the completed semantic handoff. */
   narChunkFrames?: number;
   /** Completion phases with no guaranteed intermediate ticks. These use the
@@ -42,7 +42,7 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   // clock. Current engines reset the timer on every real ODE step.
   const frames = options.narChunkFrames;
   const narQuietMs = typeof frames === 'number' && Number.isFinite(frames) && frames > 0
-    ? Math.max(STALE_TIMEOUT_QUIET_MS, Math.min(frames, 9000) * 400 + 120_000)
+    ? Math.max(STALE_TIMEOUT_QUIET_MS, Math.min(frames, 22500) * 400 + 120_000)
     : STALE_TIMEOUT_QUIET_MS;
   let inNar = false;
   let acePhase: string | undefined;

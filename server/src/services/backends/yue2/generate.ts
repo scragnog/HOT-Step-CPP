@@ -134,8 +134,8 @@ export function yue2TrackReplayParams(
   };
 }
 
-/** Mirrors the capability manifest's core.duration (max 360, auto: true). */
-const YUE2_MAX_DURATION_SEC = 360;
+/** Mirrors the capability manifest's core.duration (max 900, auto: true). */
+const YUE2_MAX_DURATION_SEC = 900;
 
 const DETAIL_POLL_MS = 1_500;
 
@@ -330,7 +330,7 @@ export function yue2LmOverrides(params: Record<string, unknown>, notes: string[]
     ['yue2PlanMaxTokens', 'plan_max_tokens'],
     ['yue2SemTemperature', 'semantic_temperature'], ['yue2SemTopP', 'semantic_top_p'], ['yue2SemTopK', 'semantic_top_k'],
     ['yue2SemRepPenalty', 'semantic_repetition_penalty'], ['yue2SemRepWindow', 'semantic_penalty_window'],
-    ['yue2SemMinTokens', 'semantic_min_tokens'], ['yue2SemMaxTokens', 'semantic_max_tokens'],
+    ['yue2SemMinTokens', 'semantic_min_tokens'],
     ['yue2SemMinP', 'semantic_min_p'], ['yue2CfgMinP', 'cfg_min_p'], ['yue2CfgRescale', 'cfg_rescale'],
     ['yue2EndThreshold', 'end_threshold'], ['yue2EndBias', 'end_bias'],
     ['yue2EndBiasFrom', 'end_bias_from_sec'], ['yue2EndBiasRamp', 'end_bias_ramp_sec'],
@@ -557,6 +557,13 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const chunkRaw = Number(params.yue2NarChunkSeconds);
   const nar_chunk_frames = Number.isFinite(chunkRaw) && chunkRaw > 0 ? Math.round(Math.min(chunkRaw, 600) * 25) : undefined;
 
+  // Generation dropdown's Max Song Length (index.ts's yue2MaxMinutes): the
+  // composer's frame cap. Unset keeps the checkpoint's own 9000 frames (6 min).
+  // The engine shortens it further when the prompt leaves less model context.
+  const maxMinRaw = Number(params.yue2MaxMinutes);
+  const semantic_max_tokens = Number.isFinite(maxMinRaw) && maxMinRaw > 0
+    ? Math.round(Math.min(maxMinRaw * 60, YUE2_MAX_DURATION_SEC) * 25) : undefined;
+
   // From the job's pick (#204): the model picker's VAE, captured at submit.
   // '' (never chosen) renders standard.
   const vae_variant: Yue2SynthRequest['vae_variant'] =
@@ -666,6 +673,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     lyrics: lyrics || undefined,
     cot,
     ...(lmOverrides as Partial<Yue2SynthRequest>),
+    ...(semantic_max_tokens !== undefined ? { semantic_max_tokens } : {}),
     ...(params.yue2CfgLogprob === true ? { cfg_logprob: true } : {}),
     ...(lm_batch_size > 1 ? { lm_batch_size } : {}),
     ...(synth_batch_size > 1 ? { synth_batch_size } : {}),
@@ -1369,8 +1377,8 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 
     try {
       await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes, {
-        // No chunk cap means the engine can render the full 360 s song at 25 fps.
-        narChunkFrames: req.nar_chunk_frames || 9000,
+        // No chunk cap means the engine can render the whole song at 25 fps.
+        narChunkFrames: req.nar_chunk_frames || req.semantic_max_tokens || 9000,
         // Decode and output can stay silent while processing a whole batch.
         // Keep the wall-clock deadline, rather than cancelling at 15 minutes.
         quietCompletionPhases: ['vae_decode', 'vae', 'encoding_output'],

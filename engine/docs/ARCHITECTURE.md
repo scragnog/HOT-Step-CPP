@@ -489,7 +489,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `lm_batch_size` | 1 | Songs per request, 1 to 4 |
 | `songs` | none | A batch of different songs: an array of 1 to 4 objects (up to 8 with `plan_only`), each with its own `style` (required), `lyrics`, `abc`, `seed` and `noise_seed`. Everything else comes from the request. Sets the batch size and cannot be combined with `lm_batch_size` above 1. Song i without a `seed` uses the request seed plus i. Tracks come back song-major in array order |
 | `synth_batch_size` | 1 | Noise variations per song, 1 to 9 |
-| `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens`, `max_tokens` or `min_p`. `min_p` (0 to 1, default 0 = off) is not a checkpoint field: after top-p it drops every token under that fraction of the top token's probability |
+| `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens`, `max_tokens` or `min_p`. `semantic_max_tokens` goes up to 22500 (15 min); when the prompt leaves less of the model context, the stage shortens it and logs `music budget reduced`. `min_p` (0 to 1, default 0 = off) is not a checkpoint field: after top-p it drops every token under that fraction of the top token's probability |
 | `cfg_min_p`, `cfg_logprob`, `cfg_rescale` | 0, false, 0 | Opt-in refinements of the semantic stage's logit CFG, as `lm_cfg_*` above. All off keeps the reference BF16 blend |
 | `cfg_scale` | 1.01 with `cot: "off"`, else 1.0 | NAR CFG |
 | `ode_steps` | checkpoint | NAR ODE steps |
@@ -513,7 +513,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Without continuation, single song and single variation only |
 | `continue_codec_ids` | false | Treat `codec_ids` as a shared prefix for 1 to 4 songs and keep sampling after it, at any `cfg_scale`. No `semantic_retries` |
 | `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
-| `render_from_frame` | 0 | 0 to 9000. The NAR and VAE start at this codec frame (clamped to the stream), so the audio covers only the frames from it to the end. The composer still reads every frame. Section takes send their lead-in |
+| `render_from_frame` | 0 | 0 to 22500. The NAR and VAE start at this codec frame (clamped to the stream), so the audio covers only the frames from it to the end. The composer still reads every frame. Section takes send their lead-in |
 | `vae_variant` | `"standard"` | `standard`, `legacy`, `rs-x3` (Ruach Studio's YuE2-VAE-RS x3 decoder, `yue2-vae-rs-x3-*.gguf`), or `dec2x` (a local fine-tuned decoder; only when `yue2-vae-dec2x-*.gguf` is present) |
 | `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
 | `id` | `"yue2"` | Request label |

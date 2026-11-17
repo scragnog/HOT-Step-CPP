@@ -39,6 +39,11 @@
 
 enum Yue2NoiseSource { YUE2_NOISE_NATIVE = 0, YUE2_NOISE_FIXTURE = 1 };
 
+// Longest song a request may ask for: 15 min at 25 frames/s. The checkpoint's
+// own default stays 9000 (6 min); the model context (24576) is the real limit
+// and the semantic stage clamps to it per prompt.
+static constexpr int YUE2_MAX_SONG_FRAMES = 22500;
+
 // Batch ceilings. Songs decode in lockstep, so B multiplies every AR step's
 // KV traffic; variations solve in one NAR graph, so M multiplies the latent
 // block. Same caps upstream ships (--max-batch 4, variations 9).
@@ -517,7 +522,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         { "temperature", 0.0, 5.0, false },   { "top_p", 0.0, 1.0, false },
         { "top_k", 0.0, 200000.0, true },     { "repetition_penalty", 0.5, 3.0, false },
         { "penalty_window", 0.0, 16384.0, true }, { "min_tokens", 0.0, 16384.0, true },
-        { "max_tokens", 1.0, 16384.0, true }, { "min_p", 0.0, 1.0, false },
+        { "max_tokens", 1.0, (double) YUE2_MAX_SONG_FRAMES, true }, { "min_p", 0.0, 1.0, false },
     };
     struct StageSlot {
         const char *        prefix;
@@ -736,8 +741,8 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc); return false;
     }
     if (present) {
-        if (!std::isfinite(num) || num < 0 || num > 9000 || std::floor(num) != num) {
-            if (err) *err = "render_from_frame must be an integer in [0,9000]";
+        if (!std::isfinite(num) || num < 0 || num > YUE2_MAX_SONG_FRAMES || std::floor(num) != num) {
+            if (err) *err = "render_from_frame must be an integer in [0," + std::to_string(YUE2_MAX_SONG_FRAMES) + "]";
             yyjson_doc_free(doc); return false;
         }
         out->render_from_frame = static_cast<int>(num);

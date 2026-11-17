@@ -923,7 +923,9 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> plan stage: ABC lead sheet, only when cot is "melody" or "full"
      (server wait: inactivity timeout 5 min on phase/phase_step/adapter_progress, 60 min cap; on
      timeout or cancel the job is cancelled and confirmed terminal, 30 s grace, before any fallback)
-  -> semantic stage: the AR "composer" (yue2-lm-graph.h) samples codec ids
+  -> semantic stage: the AR "composer" (yue2-lm-graph.h) samples codec ids, up to
+     semantic_max_tokens (checkpoint 9000, request at most 22500), shortened to fit the
+     prompt in the 24576-token context
   -> NAR stage: mixture-of-transformers flow matching with a midpoint ODE solver
      (yue2-nar-graph.h), optionally chunked (nar_chunk_frames)
   -> Oobleck VAE decode, "standard", "legacy", "rs-x3" or local "dec2x" variant (yue2-vae-graph.h)

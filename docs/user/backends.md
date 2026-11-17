@@ -226,7 +226,12 @@ What sets it apart:
   adapter trained without BPM and key: Song Info BPM and key are left out, and a
   "<bpm> BPM, key of <key>." tail already on the caption (from a dataset caption) is
   removed. Training captions are unchanged.
-- The song decides its own length, up to six minutes, and there is no duration control.
+- The song decides its own length. Max Song Length (Generation cluster, 6 minutes by
+  default, 1 to 15) is the ceiling, not a target: the model still ends the song when the
+  lyrics and lead sheet are done. The model's context holds about 16 minutes including the
+  prompt, so long lyrics or a dense lead sheet shorten a 15-minute budget, and the engine
+  log says by how much (`music budget reduced to ...`). Longer songs take longer and need
+  more VRAM, most of all with several songs per batch.
 - Chain of Thought (Generation cluster) sets how much the planner writes before audio:
   Full (the default), Melody only, or Off. Off skips the lead sheet but runs guidance,
   which makes it the slowest mode, not the fastest.
@@ -299,7 +304,7 @@ What sets it apart:
   Generation panel.
 - Recompose runaway songs (2 by default) handles a good lead sheet composed into a
   runaway. A song counts as one once its composition passes 1.5 times the lead sheet's own
-  length plus 20 seconds, or six minutes. The engine composes it again with new seeds, up to
+  length plus 20 seconds, or the Max Song Length. The engine composes it again with new seeds, up to
   4 at a time, and keeps the first attempt that ends properly. All of it happens before any
   audio is rendered. Songs of a batch that have finished composing stop costing GPU time
   while the others carry on.
@@ -466,7 +471,7 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Text to music | Yes | Yes | Yes | Yes |
 | Lyrics | Yes | Yes | Yes | No |
 | Caption format | Free text, plus BPM, key and time signature fields | Structured Caption | Free text; BPM and key folded into the style | Free text, up to 256 tokens |
-| Duration | Set by you, 10 to 600 s | Model-ended, ceiling 300 s | Model-ended, up to 360 s, no control | Set by you, up to 600 s; Auto gives 30 s |
+| Duration | Set by you, 10 to 600 s | Model-ended, ceiling 300 s | Model-ended, up to 6 min by default, ceiling settable to 15 min | Set by you, up to 600 s; Auto gives 30 s |
 | Songs per request | Up to 9 | 1, or up to 4 with Variations Per Render | Up to 4 with Batch Size | 1 |
 | Cover Studio | Yes, source-audio conditioning | Yes, planner code forcing and source-audio blend | Yes, reviewed ABC composition conditioning | Yes, source-audio refine |
 | Repaint | Yes (Repaint) | No | No | No |

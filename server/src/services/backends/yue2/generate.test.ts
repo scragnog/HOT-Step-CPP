@@ -105,6 +105,17 @@ test('empty style and lyrics remain empty on the wire', () => {
   assert.equal(req.lyrics, undefined);
 });
 
+test('Max Song Length sets the composer frame cap, clamped to 15 min', () => {
+  const cap = (p: Record<string, unknown>) => mapYue2Params({ caption: 'folk', ...p }, pick).req.semantic_max_tokens;
+  assert.equal(cap({}), undefined); // checkpoint default (6 min) stays in the engine
+  assert.equal(cap({ yue2MaxMinutes: 10 }), 15000);
+  assert.equal(cap({ yue2MaxMinutes: 15 }), 22500);
+  assert.equal(cap({ yue2MaxMinutes: 40 }), 22500);
+  assert.equal(cap({ yue2MaxMinutes: '' }), undefined);
+  // The retired LM-tab knob no longer reaches the wire from a stale preset.
+  assert.equal(cap({ yue2SemMaxTokens: 4000 }), undefined);
+});
+
 test('batch member metadata replays its own score and exact semantic and noise seeds', () => {
   const firstAbc = 'X:1\nK:C\nC4|';
   const secondAbc = 'X:2\nK:C\nD4|';
