@@ -1037,6 +1037,10 @@ if(BUILD_TESTING)
     add_executable(yue2-lyrics-instrumental-test tests/test-yue2-lyrics-instrumental.cpp)
     add_test(NAME yue2-lyrics-instrumental COMMAND yue2-lyrics-instrumental-test)
 
+    # MM3 planning-stage VRAM ladder (mm3-vram-fit.h): pure arithmetic.
+    add_executable(mm3-vram-fit-test tests/test-mm3-vram-fit.cpp)
+    add_test(NAME mm3-vram-fit COMMAND mm3-vram-fit-test)
+
     # DoRA norm-refresh freeze fixture (dora-common.h vs the pre-extraction
     # graphs). GGML_BACKEND picks the device; see the test's header.
     add_executable(dora-common-test tests/test-dora-common.cpp)
