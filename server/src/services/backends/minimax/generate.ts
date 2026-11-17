@@ -978,6 +978,16 @@ function mapMinimaxSamplerPlugins(
 
 // ── Progress ─────────────────────────────────────────────────────────────────
 
+/** The engine's VRAM fit may plan with a Q8_0 cache, or fewer ending candidates
+ *  for one song, than the request asked for. Write what ran back onto the
+ *  request before it is stored, so a reproduce does not depend on how much
+ *  VRAM happened to be free. */
+export function applyMm3VramFit(req: Mm3SynthRequest, d: Mm3JobDetail | null | undefined): void {
+  if (d?.lm_kv_type === 'q8_0') req.lm_kv_q8 = true;
+  const fit = Number(d?.fit_takes ?? 0);
+  if (fit > 0 && fit < (req.takes ?? 1)) req.takes = fit;
+}
+
 /** MM3 stage → user-facing text + progress %.
  *
  *  `elapsedSec` is appended ONLY for stages the engine cannot report progress
@@ -1236,10 +1246,18 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     // GET /job (polled by pollUntilDone) gives the ACE-phase mapping; this adds
     // MM3's own vocabulary and keeps the stall watchdog fed.
     const runStart = Date.now();
+    // The engine's VRAM fit note joins the job notes once, as soon as it shows.
+    let vramNoted = false;
+    const noteVramFit = (d: Mm3JobDetail | null | undefined) => {
+      if (vramNoted || !d?.vram_note) return;
+      vramNoted = true;
+      log('WARNING', `[MM3] ${d.vram_note}`);
+    };
     detailTimer = setInterval(() => {
       void (async () => {
         const d = await mm3JobDetail(sub.job_id);
         if (!d || job.status === 'cancelled') return;
+        noteVramFit(d);
         const elapsed = Math.round((Date.now() - runStart) / 1000);
         const { stage, progress } = minimaxStageText(d, elapsed);
         job.stage = stage;
@@ -1294,6 +1312,8 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
     const saveStart = performance.now();
     // Final MM3 detail: shape + per-stage timings, straight from the engine.
     const finalDetail = await mm3JobDetail(sub.job_id);
+    noteVramFit(finalDetail);
+    applyMm3VramFit(req, finalDetail);
     if (finalDetail?.result) {
       const r = finalDetail.result;
       log('INFO',

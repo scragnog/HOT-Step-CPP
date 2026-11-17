@@ -4,11 +4,28 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, minimaxStageText, mm3LowStepShift,
-  mm3StripTagDescriptors,
+  MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, applyMm3VramFit, mapMinimaxParams, minimaxStageText,
+  mm3LowStepShift, mm3StripTagDescriptors,
 } from './generate.js';
 import { mm3PlankDir } from './plank.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
+
+test('MM3 stores the KV type and candidate count the engine VRAM fit ran, not what was sent', () => {
+  const detail = (over: object) => ({ lm_kv_type: 'f16', fit_takes: 3, ...over }) as any;
+  const req: any = { takes: 3, stop_after_first_eos: true };
+  applyMm3VramFit(req, detail({}));
+  assert.equal(req.lm_kv_q8, undefined);
+  assert.equal(req.takes, 3);
+  applyMm3VramFit(req, detail({ lm_kv_type: 'q8_0', fit_takes: 1 }));
+  assert.equal(req.lm_kv_q8, true);
+  assert.equal(req.takes, 1);
+  // Queued (fit_takes 0) or missing detail changes nothing.
+  const plain: any = { takes: 2 };
+  applyMm3VramFit(plain, detail({ fit_takes: 0 }));
+  applyMm3VramFit(plain, undefined);
+  assert.equal(plain.lm_kv_q8, undefined);
+  assert.equal(plain.takes, 2);
+});
 
 test('MM3 sends the shared runtime DoRA opt-in without changing legacy requests', () => {
   const params = { prompt: 'Instrumental ambient', seed: 42 };

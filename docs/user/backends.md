@@ -140,6 +140,16 @@ What sets it apart:
   each variation as its own row inside one batch box, as it does for a YuE2 batch, and
   each finished variation is saved and listed as its own song (and sent to the playlist
   as its own track when that option is on).
+- On a card short of VRAM, the planner is fitted before anything loads. If the render
+  does not fit as asked, planner memory switches to 8 bits; then, for a one-song render
+  with Require Natural Ending on, fewer ending candidates are planned per round, down to
+  one. The generation log says what changed, and the seed renders differently in that
+  shape. If one candidate at 8 bits still does not fit, the job fails before loading
+  weights with the shortfall in its error: ask for fewer variations (offered when that
+  alone would fit), pick a smaller LM quant, or close other apps using the GPU. The song
+  is never shortened to fit. By the arithmetic, an 8 GB card with the Q4_K_M pack fits
+  one candidate at 8 bits; that is not yet confirmed on a real 8 GB card. Only CUDA
+  builds check. Mac, Vulkan and CPU builds render as before.
 - Flow Steps (default 20, range 2 to 60) is the main speed control. The checkpoint's
   own value is 30; an ear test heard no difference at 20. Below 30, Low-Step
   Compensation reshapes the schedule so short renders keep their low end and stereo

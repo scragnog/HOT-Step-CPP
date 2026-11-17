@@ -190,6 +190,9 @@ export interface Mm3SynthRequest {
    *  With `require_eos` this is the number of CANDIDATES planned per round, not
    *  the number of songs — see below. */
   takes?: number;
+  /** Planner KV cache at Q8_0. The engine may also switch it on itself when the
+   *  card is short of VRAM (GET /mm3/job `lm_kv_type`). */
+  lm_kv_q8?: boolean;
 
   // ── Natural endings (engine: the require_eos arbitration) ─────────────────
   /** Render only candidates whose plan reached EOS. The engine plans `takes`
@@ -435,6 +438,14 @@ export interface Mm3JobDetail {
    *  the longest capped plan anyway rather than failing the job. The audio is
    *  real, but it stops at the duration cap instead of ending. */
   eos_fallback?: boolean;
+  /** VRAM fit, decided when the job starts: the planner's KV type ("f16" or
+   *  "q8_0") and candidates per round as run (0 while queued). On a card short
+   *  of VRAM the engine may switch to Q8_0 and, for one song, cut candidates;
+   *  `vram_note` then says what changed. A job that cannot fit at all fails
+   *  before loading, with the reason in `error`. */
+  lm_kv_type?: string;
+  fit_takes?: number;
+  vram_note?: string;
   /** Per-take summary. Present whenever there is more than one take, and —
    *  since the ending arbitration — whenever `require_eos` was set, even for a
    *  single surviving take. Take t's audio is at
