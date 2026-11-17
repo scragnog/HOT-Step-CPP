@@ -403,6 +403,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
     // PP-VAE and Spectral Lifter are ACE-coupled and stay off. StableStep
     // (refine with SA3) is off in this backend's manifest.
     let masteredUrl = '';
+    let ppQuality: { unmastered?: unknown; mastered?: unknown } | undefined;
     try {
       const ppParams: PostProcessParams = {
         ...job.params,
@@ -421,6 +422,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
           log, (stage) => { job.stage = stage; },
         );
         masteredUrl = ppResult.masteredUrls?.[0] || '';
+        ppQuality = ppResult.qualityScores?.[0];
         const ppMs = Math.round(performance.now() - ppStart);
         if (masteredUrl) log('INFO', `[SA3] Post-processing produced ${masteredUrl} in ${ppMs} ms`);
         timing.push({ name: 'Post-processing', ms: ppMs });
@@ -441,7 +443,7 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       songId, job.userId, title, '', caption, caption,
       audioUrl, duration, 0, '', '',
       JSON.stringify([]), 'sa3', JSON.stringify(trackParams),
-      masteredUrl, '', '',
+      masteredUrl, '', (q => (q?.unmastered || q?.mastered) ? JSON.stringify(q) : '')(ppQuality),
       '', 'sa3',
     );
 

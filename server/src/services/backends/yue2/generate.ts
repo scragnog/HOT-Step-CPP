@@ -1559,6 +1559,7 @@ async function finishYue2Job(
     // Spectral Lifter stay excluded regardless — both are ACE-VAE-coupled,
     // not rate-coupled.
     let masteredUrls: string[] = [];
+    let ppQualityScores: Array<{ unmastered?: unknown; mastered?: unknown }> = [];
     try {
       const ppParams: PostProcessParams = {
         ...job.params,
@@ -1574,6 +1575,7 @@ async function finishYue2Job(
           log, (stage) => { job.stage = stage; },
         );
         masteredUrls = ppResult.masteredUrls ?? [];
+        ppQualityScores = ppResult.qualityScores ?? [];
         const ppMs = Math.round(performance.now() - ppStart);
         if (masteredUrls.some(Boolean)) log('INFO', `[YuE2] Post-processing produced ${masteredUrls.filter(Boolean).length} file(s) in ${ppMs} ms`);
         timing.push({ name: 'Post-processing', ms: ppMs });
@@ -1714,7 +1716,7 @@ async function finishYue2Job(
         songId, job.userId, trackTitle, req.lyrics || '', style, req.style,
         audioUrls[i], duration, 0, '', '',
         JSON.stringify([]), 'yue2', JSON.stringify(trackParams),
-        masteredUrls[i] || '', '', '',
+        masteredUrls[i] || '', '', (q => (q?.unmastered || q?.mastered) ? JSON.stringify(q) : '')(ppQualityScores[i]),
         '', 'yue2',
       );
       songIds.push(songId);

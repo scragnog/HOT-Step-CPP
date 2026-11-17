@@ -1601,6 +1601,7 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
       // ACE VAE — wrong model and rate) and Spectral Lifter (tuned for the ACE
       // 48 kHz output). Those are model-coupled, not merely rate-coupled.
       let masteredUrl = '';
+      let ppQuality: { unmastered?: unknown; mastered?: unknown } | undefined;
       try {
         const ppParams: PostProcessParams = {
           ...job.params,
@@ -1631,6 +1632,7 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
             log, (stage) => { job.stage = stage; },
           );
           masteredUrl = ppResult.masteredUrls?.[0] || '';
+          ppQuality = ppResult.qualityScores?.[0];
           const ppMs = Math.round(performance.now() - ppStart);
           if (masteredUrl) {
             log('INFO', `[MM3] Post-processing produced ${masteredUrl} in ${ppMs} ms`);
@@ -1702,7 +1704,7 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         songId, job.userId, title, req.lyrics || '', style, req.caption,
         audioUrl, duration, 0, '', '',
         JSON.stringify([]), 'mm3', JSON.stringify(trackParams),
-        masteredUrl, '', '',
+        masteredUrl, '', (q => (q?.unmastered || q?.mastered) ? JSON.stringify(q) : '')(ppQuality),
         '', 'minimax-m3',
       );
 

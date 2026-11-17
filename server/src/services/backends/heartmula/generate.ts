@@ -205,12 +205,14 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     job.stage = 'HeartMuLa: saving audio...';
     job.progress = 95;
     let masteredUrl = '';
+    let ppQuality: { unmastered?: unknown; mastered?: unknown } | undefined;
     if (job.params.postProcessingEnabled !== false) {
       try {
         const pp = await runPostProcessingChain([audioUrl], {
           ...job.params, ppVaeReencode: false, spectralLifterEnabled: false,
         }, 1, job.id, log, stage => { job.stage = stage; });
         masteredUrl = pp.masteredUrls?.[0] || '';
+        ppQuality = pp.qualityScores?.[0];
       } catch (err) { checkCancelled(); log('WARNING', `Post-processing failed: ${err instanceof Error ? err.message : String(err)}`); }
     }
     checkCancelled();
@@ -222,11 +224,11 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     };
     getDb().prepare(`INSERT INTO songs
       (id, user_id, title, lyrics, style, caption, audio_url, duration, tags,
-       dit_model, generation_params, mastered_audio_url, backend)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+       dit_model, generation_params, mastered_audio_url, quality_scores, backend)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       songId, job.userId, job.params.title || wire.tags.slice(0, 60), wire.lyrics,
       wire.tags, wire.tags, audioUrl, duration, JSON.stringify([]), 'heartmula',
-      JSON.stringify(trackParams), masteredUrl, 'heartmula',
+      JSON.stringify(trackParams), masteredUrl, (q => (q?.unmastered || q?.mastered) ? JSON.stringify(q) : '')(ppQuality), 'heartmula',
     );
     if (masteredUrl) {
       const mastered = { kind: 'mastered', trackIndex: 0, url: masteredUrl };

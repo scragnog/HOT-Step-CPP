@@ -142,6 +142,72 @@ test('SA3 cover submits refine then saves its source duration and rate through t
   assert.equal(params.sa3Request.strength, 0.7);
 });
 
+test('SA3 keeps the Quality Evaluator score on the saved song', async t => {
+  const { config } = await import('../../../config.js');
+  const { initDb, closeDb, getDb } = await import('../../../db/database.js');
+  const { sa3Backend } = await import('./index.js');
+  const { TokenizerLoader } = await import('@lenml/tokenizers');
+  const root = fs.mkdtempSync(path.resolve('.tmp-sa3-cover-run-'));
+  const previous = { dir: config.data.dir, models: config.aceServer.models };
+  const realFetch = globalThis.fetch;
+  t.after(() => {
+    closeDb();
+    config.data.dir = previous.dir;
+    config.aceServer.models = previous.models; globalThis.fetch = realFetch;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  config.data.dir = root;
+  config.aceServer.models = path.join(root, 'models');
+  const tokenizerDir = path.join(config.aceServer.models, 'onnx', 'sa3');
+  fs.mkdirSync(tokenizerDir, { recursive: true });
+  fs.writeFileSync(path.join(tokenizerDir, 'tokenizer.json'), '{}');
+  fs.writeFileSync(path.join(tokenizerDir, 'tokenizer_config.json'), '{}');
+  let prompt = '';
+  t.mock.method(TokenizerLoader, 'fromPreTrained', () => Object.assign((text: string) => {
+    prompt = text;
+    return { input_ids: [1, 2], attention_mask: [1, 1] };
+  }, { pad_token_id: 0 }));
+  initDb();
+  getDb().prepare('INSERT INTO users (id, username) VALUES (?, ?)').run('cover-user', 'cover-user');
+  assert.ok(sa3Backend.operations.includes('cover'));
+  assert.equal(sa3Backend.resolveRequest({ taskType: 'cover', style: 'piano' }).operation, 'cover');
+  assert.equal(sa3Backend.resolveRequest({ style: 'piano' }).operation, 'text2music');
+  const wav = sourceWav(8000, 2);
+  for (let n = 0; n < 16000; n++) wav.writeInt16LE(Math.round(8000 * Math.sin(n * 0.3)), 44 + n * 2);
+  const source = path.join(root, 'source.wav');
+  fs.writeFileSync(source, wav);
+  const calls: URL[] = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url));
+    calls.push(u);
+    if (u.pathname === '/mm3/unload') return Response.json({ unloaded: false });
+    assert.equal(u.pathname, '/sa3-refine');
+    assert.deepEqual(Buffer.from(init!.body as Uint8Array), wav);
+    assert.equal(u.searchParams.get('strength'), '0.7');
+    assert.equal(u.searchParams.get('seed'), '47');
+    assert.equal(u.searchParams.get('adapters'), 'texture:0.6');
+    assert.equal(u.searchParams.get('steps'), '12');
+    assert.equal(u.searchParams.get('sampler'), 'pingpong');
+    assert.equal(u.searchParams.get('out_sr'), '8000');
+    return new Response(new Uint8Array(wav));
+  }) as typeof fetch;
+  const job: GenerationJob = { id: 'sa3-cover-test', userId: 'cover-user', status: 'pending',
+    attempts: [], createdAt: Date.now(),
+    params: { taskType: 'cover', sourceAudioUrl: source, style: 'stale global caption',
+      caption: '  soft vocals, piano\n[Verse]  ', seed: 47, randomSeed: false, duration: 30,
+      sa3Steps: 12, stableStepSteps: 32, stableStepOn: true, postProcessingEnabled: true, qualityEvalEnabled: true, qualityEvalTarget: 'unmastered',
+      sa3Cover: { transform: 0.7, adapters: 'texture:0.6' } },
+    envelope: { models: { dit: 'sa3-dit-BF16.gguf' } } as unknown as GenerationJob['envelope'],
+  };
+  await runSa3Generation(job, { signal: new AbortController().signal });
+  assert.equal(job.status, 'succeeded', job.error);
+  const row = getDb().prepare('SELECT quality_scores FROM songs WHERE id = ?')
+    .get(job.result!.songIds[0]) as { quality_scores: string };
+  const scores = JSON.parse(row.quality_scores);
+  assert.equal(typeof scores.unmastered.score, 'number');
+});
+
+
 test('SA3 sends the captured DiT and reports the response filename, including fallback', async () => {
   const { aceClient } = await import('../../aceClient.js');
   const originalFetch = globalThis.fetch;
