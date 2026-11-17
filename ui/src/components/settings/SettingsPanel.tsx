@@ -327,8 +327,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <ParamLabel
                     label="Keep Models in VRAM"
                     className="setting-label"
-                    meta="default off · holds ~13 GB VRAM"
-                    info="Keeps the DiT, adapter, and VAE resident in VRAM between generations, instead of loading them fresh each time. On: skips the one-time ~17s adapter precompute on every render, so repeat generations are much faster, at the cost of ~13 GB of VRAM held continuously. Off: frees that VRAM between renders, better on VRAM-tight GPUs. Requires a restart to take effect."
+                    meta="default off · holds the loaded models in VRAM"
+                    info="Keeps the loaded models (the DiT, adapters and VAE, and the YuE2 composer and its adapters, also on Mac Metal) resident between generations instead of loading them fresh each time. A repeat job with the same models and adapter settings then loads nothing; changing an adapter strength, clearing an adapter or switching quantisation reloads what changed, and an explicit unload clears everything. The cost is the VRAM those models hold, which depends on the model and quantisation you use. Off: frees that VRAM between renders, better on VRAM-tight GPUs. Requires a restart to take effect."
                   />
                 </div>
                 <Toggle

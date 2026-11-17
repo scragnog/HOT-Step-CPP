@@ -914,7 +914,7 @@ export function yue2ReplanSeed(base: Yue2Seed, k: number): Yue2Seed {
 }
 
 /** @internal exported for tests */
-export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
+export async function planYue2Jobs(members: Yue2PreparedJob[], signal?: AbortSignal, wait: Yue2PlanWaitOpts = {}): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
     once: boolean; sheets: string[]; done: boolean; seedBase?: Yue2Seed;
@@ -980,8 +980,15 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     try {
       plans = await runYue2PlanBatch(live[0].m.req, jobPick(live[0].m.job), draws.map(d => ({
         style: d.p.m.req.style, ...(d.p.m.req.lyrics ? { lyrics: d.p.m.req.lyrics } : {}), seed: d.seed,
-      })));
+      })), {
+        // One song's X leaves the rest planning; the whole stage stops only when nobody is left.
+        signal, cancelled: () => pending.every(p => (p.m.job.status as string) === 'cancelled'), ...wait,
+      });
     } catch (err: any) {
+      // A planner that will not stop would hold the engine: no fallback render behind it.
+      if (err instanceof Yue2PlanStuckError) throw err;
+      // Cancelled (not a failure): the caller sees the status and winds the batch down.
+      if (err?.message === 'Cancelled') break;
       for (const p of live) {
         p.m.log('WARNING', `[YuE2] Auto-replan round ${round} failed (${err?.message || err}); `
           + (p.m.autoReplan!.attempts.length ? 'picking from the plans already drawn' : "rendering with the engine's own plan"));
@@ -1189,7 +1196,13 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   };
 
   // ── Plan ── every member at once (planYue2Jobs)
-  await planYue2Jobs(members);
+  try {
+    await planYue2Jobs(members, deps.signal);
+  } catch (err: any) {
+    // Planner stuck: fail every member (followers too, they would queue behind it).
+    for (const m of members) failYue2Job(m.job, err);
+    return;
+  }
   if ((job.status as string) === 'cancelled') {
     releaseFollowers('The batch lead was cancelled while planning');
     failYue2Job(job, new Error('Cancelled'));
@@ -1818,7 +1831,7 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
   delete planReq.abc;
 
   const sub = await yue2Synth(planReq);
-  await waitYue2PlanJob(sub.job_id, signal);
+  await waitYue2PlanJob(sub.job_id, { signal, cancelMessage: 'Score preview cancelled' });
   const detail = await yue2FinalDetail(sub.job_id);
   const abc = (detail.abc ?? '').trim();
   if (!abc) throw new Error('YuE2 returned no score for the plan stage');
@@ -1832,38 +1845,68 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
   return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? '', activeStyleNorms(pick)), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }
 
-async function waitYue2PlanJob(jobId: string, signal?: AbortSignal): Promise<void> {
+/** The planner could not be confirmed stopped after a cancel or timeout. The
+ *  engine is single-threaded, so a render submitted now would queue behind it:
+ *  callers fail instead of falling back. */
+export class Yue2PlanStuckError extends Error {}
+
+/** Plan-stage waits. The stage is seconds warm, but a cold load of the LM and
+ *  its adapters can run for many minutes with the phase and its counters
+ *  moving, so the limit is silence, not total time; the hard cap only stops a
+ *  planner that keeps moving forever. */
+export const YUE2_PLAN_WAIT = { inactivityMs: 5 * 60_000, hardCapMs: 60 * 60_000, graceMs: 30_000, pollMs: 750 };
+
+export interface Yue2PlanWaitOpts extends Partial<typeof YUE2_PLAN_WAIT> {
+  signal?: AbortSignal;
+  /** True once nobody wants the result (every batch member cancelled). */
+  cancelled?: () => boolean;
+  /** Message thrown on a confirmed cancel. */
+  cancelMessage?: string;
+}
+
+/** @internal exported for tests */
+export async function waitYue2PlanJob(jobId: string, opts: Yue2PlanWaitOpts = {}): Promise<void> {
+  const o = { ...YUE2_PLAN_WAIT, ...opts };
   const started = Date.now();
-  // ponytail: 10-minute ceiling on a stage that takes seconds; the shared
-  // pollUntilDone watchdog is built around a GenerationJob this call has none of.
+  let lastKey = '', lastMove = started;
+  let why: string;
   for (;;) {
-    if (signal?.aborted) {
-      await aceClient.cancelJob(jobId).catch(() => {});
-      throw new Error('Score preview cancelled');
-    }
+    if (o.signal?.aborted || o.cancelled?.()) { why = 'cancel'; break; }
     const status = await aceClient.pollJob(jobId);
     if (status.status === 'done') return;
     if (status.status === 'failed' || status.status === 'cancelled') {
       const detail = (status as { error?: string }).error;
       throw new Error(`YuE2 plan ${status.status}${detail ? `: ${detail}` : ''}`);
     }
-    if (Date.now() - started > 10 * 60_000) {
-      await aceClient.cancelJob(jobId).catch(() => {});
-      throw new Error('YuE2 plan stage timed out after 10 minutes');
-    }
-    await new Promise(r => setTimeout(r, 750));
+    // Only a changed phase or advancing counter is life; the same answer twice is not.
+    const key = [status.phase, status.phase_step, status.phase_total, status.adapter_progress].join('|');
+    const now = Date.now();
+    if (key !== lastKey) { lastKey = key; lastMove = now; }
+    if (now - started > o.hardCapMs) { why = `timed out after ${Math.round(o.hardCapMs / 60_000)} minutes`; break; }
+    if (now - lastMove > o.inactivityMs) { why = `stalled: no progress for ${Math.round(o.inactivityMs / 60_000)} minutes`; break; }
+    await new Promise(r => setTimeout(r, o.pollMs));
   }
+  // Stop it and see it stop before anyone submits more work behind it.
+  let cancelErr = '';
+  try { await aceClient.cancelJob(jobId); } catch (e: any) { cancelErr = ` (cancel request failed: ${e?.message || e})`; }
+  const deadline = Date.now() + o.graceMs;
+  for (;;) {
+    try { if ((await aceClient.pollJob(jobId)).status !== 'running') break; } catch { /* retry until the grace ends */ }
+    if (Date.now() >= deadline) throw new Yue2PlanStuckError(`YuE2 plan stage ${why === 'cancel' ? 'cancelled' : why}, but the planner did not stop within ${Math.round(o.graceMs / 1000)} s${cancelErr}; not rendering behind it`);
+    await new Promise(r => setTimeout(r, Math.min(o.pollMs, 250)));
+  }
+  throw new Error(why === 'cancel' ? (o.cancelMessage ?? 'Cancelled') : `YuE2 plan stage ${why}`);
 }
 
 /** One plan_only pass over several songs (up to props.max_plan_batch), each
  *  with its own prompt and seed, sharing `req`'s settings. Scores come back
  *  in entry order. */
-async function runYue2PlanBatch(req: Yue2SynthRequest, pick: Yue2PersistedSelection, songs: NonNullable<Yue2SynthRequest['songs']>): Promise<Array<{ abc: string; end_reason: string }>> {
+async function runYue2PlanBatch(req: Yue2SynthRequest, pick: Yue2PersistedSelection, songs: NonNullable<Yue2SynthRequest['songs']>, wait: Yue2PlanWaitOpts = {}): Promise<Array<{ abc: string; end_reason: string }>> {
   // Planner strength: the score is written under its own adapter load.
   const planReq: Yue2SynthRequest = { ...req, plan_only: true, songs, lm_adapter: yue2AdapterWire(yue2PlanStackFrom(pick.adapters)) };
   for (const k of ['lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'synth_batch_size'] as const) delete planReq[k];
   const sub = await yue2Synth(planReq);
-  await waitYue2PlanJob(sub.job_id);
+  await waitYue2PlanJob(sub.job_id, wait);
   const tracks = (await yue2FinalDetail(sub.job_id)).tracks ?? [];
   if (tracks.length !== songs.length) throw new Error(`YuE2 returned ${tracks.length} plan(s) for ${songs.length} song(s)`);
   return tracks.map(t => {

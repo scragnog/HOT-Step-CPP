@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, yue2TrackReplayParams, type Yue2PreparedJob } from './generate.js';
+import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, waitYue2PlanJob, Yue2PlanStuckError, yue2PlanMode, yue2TrackReplayParams, type Yue2PreparedJob } from './generate.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -461,4 +461,100 @@ test('YuE2 handoff waits for other families and tolerates absent callbacks', asy
       releaseLane: () => false, nextLaneFamily: () => 'yue2',
     }), false);
   } finally { config.aceServer.keepLoaded = saved; }
+});
+
+// ── GH #222: plan-stage inactivity timeout, cancel, no fallback behind a live planner ──
+
+const fast = { inactivityMs: 60, hardCapMs: 5_000, graceMs: 120, pollMs: 5 };
+const planScore = ['X:1', 'T:', 'M:4/4', 'L:1/32', 'Q:1/4=90', 'V: Vocal clef=treble name="Vocal Melody" snm="Vocal"',
+  'V: Ins clef=treble name="Ins Melody" snm="Inst."', 'K:C', '% verse', 'V: Vocal', '"C"c16"G"d16|', 'V: Ins', 'Z|', ''].join('\n');
+
+/** Fake engine: status(n) answers the nth GET /job; cancels counts POST cancel=1. */
+function fakePlanEngine(t: any, status: (n: number, cancelled: boolean) => Record<string, unknown>) {
+  const log = { polls: 0, cancels: 0, synths: 0 };
+  let cancelled = false;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 4 });
+    if (url.pathname === '/yue2/synth') { log.synths++; return Response.json({ id: 'p1' }); }
+    if (url.searchParams.get('cancel')) { log.cancels++; cancelled = true; return Response.json({}); }
+    return Response.json(status(log.polls++, cancelled));
+  });
+  return log;
+}
+
+test('plan wait: a cold load past the inactivity limit survives while the phase and counters advance', async t => {
+  fakePlanEngine(t, n => n < 40 ? { status: 'running', phase: 'plan', phase_step: n, phase_total: 100 } : { status: 'done' });
+  await waitYue2PlanJob('p1', fast);   // 40 polls x 5 ms = 200 ms of life against a 60 ms silence limit
+});
+
+test('plan wait: identical status answers do not reset the clock (a real stall)', async t => {
+  const log = fakePlanEngine(t, (_n, cancelled) => ({ status: cancelled ? 'cancelled' : 'running', phase: 'plan', phase_step: 3, phase_total: 100 }));
+  await assert.rejects(waitYue2PlanJob('p1', fast), /stalled/);
+  assert.equal(log.cancels, 1);
+});
+
+test('plan wait: cancel is confirmed terminal before it throws', async t => {
+  const ac = new AbortController();
+  const log = fakePlanEngine(t, (n, cancelled) => { if (n === 2) ac.abort(); return { status: cancelled ? 'cancelled' : 'running', phase: 'plan', phase_step: n }; });
+  await assert.rejects(waitYue2PlanJob('p1', { ...fast, signal: ac.signal }), /^Error: Cancelled$/);
+  assert.equal(log.cancels, 1);
+});
+
+test('plan wait: a planner that will not stop after the cancel is a Yue2PlanStuckError', async t => {
+  fakePlanEngine(t, () => ({ status: 'running', phase: 'plan', phase_step: 1 }));
+  await assert.rejects(waitYue2PlanJob('p1', fast), (e: unknown) => e instanceof Yue2PlanStuckError && /did not stop/.test((e as Error).message));
+});
+
+test('plan wait: a failed cancel request is reported, not swallowed', async t => {
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (new URL(String(input)).searchParams.get('cancel')) throw new Error('engine unreachable');
+    return Response.json({ status: 'running', phase: 'plan' });
+  });
+  await assert.rejects(waitYue2PlanJob('p1', fast), /cancel request failed: engine unreachable/);
+});
+
+function planMember(params: Record<string, unknown> = {}) {
+  const p = { caption: 'folk', lyrics: 'la', yue2ReplanAttempts: 1, ...params };
+  const { req } = mapYue2Params(p, pick);
+  const job = { ...fakeJob(undefined, p), envelope: { backendId: 'yue2', models: {}, options: {} }, status: 'running' };
+  return { job, req, log: () => {} } as unknown as Yue2PreparedJob;
+}
+
+test('planYue2Jobs: a stuck planner throws, so no fallback render is queued behind it', async t => {
+  const log = fakePlanEngine(t, () => ({ status: 'running', phase: 'plan', phase_step: 1 }));
+  const m = planMember();
+  await assert.rejects(planYue2Jobs([m], undefined, fast), Yue2PlanStuckError);
+  assert.equal(log.synths, 1, 'only the plan was submitted');
+});
+
+test('planYue2Jobs: an engine failure still falls back to the engine plan', async t => {
+  fakePlanEngine(t, () => ({ status: 'failed', error: 'boom' }));
+  const m = planMember();
+  await planYue2Jobs([m], undefined, fast);
+  assert.equal(m.autoReplan, undefined);
+  assert.equal(m.req.abc, undefined, 'the render keeps no app plan');
+});
+
+test('planYue2Jobs: one cancelled song leaves the survivor planned; all cancelled stops the stage', async t => {
+  const tracks = (songs: number) => Array.from({ length: songs }, (_, song) => ({ song, seed: 1, abc: planScore, end_reason: 'completed' }));
+  let sent = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 4 });
+    if (url.pathname === '/yue2/synth') { sent = JSON.parse(String(init?.body)).songs.length; return Response.json({ id: 'p1' }); }
+    return Response.json({ status: 'done', tracks: tracks(sent) });
+  });
+  const [a, b] = [planMember(), planMember()];
+  (a.job.status as string) = 'cancelled';
+  await planYue2Jobs([a, b], undefined, fast);
+  assert.ok(b.req.abc, 'the surviving member got its plan');
+
+  const log = fakePlanEngine(t, (_n, cancelled) => ({ status: cancelled ? 'cancelled' : 'running', phase: 'plan', phase_step: _n }));
+  const [c, d] = [planMember(), planMember()];
+  const poll = setTimeout(() => { (c.job.status as string) = 'cancelled'; (d.job.status as string) = 'cancelled'; }, 30);
+  await planYue2Jobs([c, d], undefined, fast);   // returns, the caller sees the cancelled status
+  clearTimeout(poll);
+  assert.equal(log.cancels, 1);
+  assert.equal(c.req.abc, undefined);
 });

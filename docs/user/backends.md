@@ -307,6 +307,14 @@ What sets it apart:
   batch carries on. That holds for the song whose job started the batch too. Batched decoding rounds
   differently from solo decoding, so a seed rendered in a batch can differ from the same
   seed rendered alone; the Batch Size setting has always had the same property.
+- The plan stage (the app's score pass before the render, and Score preview) waits as long
+  as the engine's phase or progress keeps moving, so a cold load of the composer and its
+  adapters can take longer than ten minutes. It gives up after five minutes with no change
+  (or an hour in all), cancels the planner and waits up to 30 seconds for it to stop. If it
+  stops, the render falls back to the engine's own plan as before; if it does not, the job
+  fails with that reason instead of queueing a render behind a planner that is still running.
+  Cancelling every song of a batch while it plans stops the stage; cancelling one leaves
+  the others planning.
 - With Keep Models in VRAM on (Settings, Environment tab), a composed song renders on a
   second engine lane while the next queued YuE2 song starts composing. The output is
   identical to a solo render. The two lanes share one GPU, so composing slows while a
