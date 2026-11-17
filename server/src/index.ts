@@ -78,6 +78,7 @@ import exportImportRoutes from './routes/exportImport.js';
 import compareRoutes from './routes/compare.js';
 import dawV1Routes from './routes/dawV1.js';
 import { dawBodyErrorHandler } from './routes/dawV1.js';
+import { apiErrorHandler } from './routes/apiErrorHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -219,6 +220,7 @@ app.use('/api/v1/daw', dawBodyErrorHandler);
 // sub-paths (/backends, /backends/active, /capabilities) per the plan's
 // top-level /api/capabilities path (docs/plans/multi-backend-architecture.md §4.2).
 app.use('/api', backendsRoutes);
+app.use('/api', apiErrorHandler);
 
 // Serve audio files from data/audio/
 app.use('/audio', express.static(config.data.audioDir, {

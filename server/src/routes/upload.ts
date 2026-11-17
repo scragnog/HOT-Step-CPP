@@ -20,7 +20,8 @@ const ALLOWED_EXTENSIONS = ['.mp3', '.wav', '.flac', '.m4a', '.mp4', '.ogg', '.o
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
+  // A hi-res FLAC of one long track passes 200 MB; 500 MB matches the library import cap.
+  limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if (ALLOWED_EXTENSIONS.includes(ext) || file.mimetype.startsWith('audio/') || file.mimetype === 'application/octet-stream') {
