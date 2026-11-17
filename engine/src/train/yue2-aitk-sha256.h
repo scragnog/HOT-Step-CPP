@@ -194,7 +194,7 @@ inline std::filesystem::path cache_entry(const std::filesystem::path &path) {
     const auto dir = std::filesystem::temp_directory_path(ec);
     if (ec) return {};
     const std::string key = absolute.u8string() + '|' + std::to_string(size) + '|' +
-                            std::to_string(mtime.time_since_epoch().count());
+                            std::to_string(static_cast<long long>(mtime.time_since_epoch().count()));
     return dir / "hot-step-sha256" / bytes(key.data(), key.size()).hex();
 }
 
