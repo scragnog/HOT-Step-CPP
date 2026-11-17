@@ -558,3 +558,56 @@ test('planYue2Jobs: one cancelled song leaves the survivor planned; all cancelle
   assert.equal(log.cancels, 1);
   assert.equal(c.req.abc, undefined);
 });
+
+// ── review round: poll failure, lead-signal cancel, cancel diagnostics ──
+test('review: a rejected status poll must not authorize fallback with a live planner', async t => {
+  let polls = 0, cancels = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 4 });
+    if (url.pathname === '/yue2/synth') return Response.json({ id: 'p1' });
+    if (url.searchParams.get('cancel')) { cancels++; return Response.json({}); }
+    if (++polls === 2) throw new DOMException('status poll timed out', 'TimeoutError');
+    return Response.json({ status: 'running', phase: 'plan', phase_step: 1 });
+  });
+  await assert.rejects(planYue2Jobs([planMember()], undefined, fast), Yue2PlanStuckError,
+    'must confirm the existing planner stopped before permitting fallback');
+  assert.equal(cancels, 1);
+});
+
+test('review: cancelling the lead through its signal must keep a surviving member planning', async t => {
+  const [lead, survivor] = [planMember(), planMember()];
+  const ac = new AbortController();
+  let polls = 0, cancels = 0, sent = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 4 });
+    if (url.pathname === '/yue2/synth') { sent = JSON.parse(String(init?.body)).songs.length; return Response.json({ id: 'p1' }); }
+    if (url.searchParams.get('cancel')) { cancels++; return Response.json({}); }
+    if (++polls === 1) { lead.job.status = 'cancelled'; ac.abort(); }
+    return Response.json(cancels ? { status: 'cancelled' } : polls < 4
+      ? { status: 'running', phase: 'plan', phase_step: polls }
+      : { status: 'done', tracks: Array.from({ length: sent }, (_, song) => ({ song, abc: planScore, end_reason: 'completed' })) });
+  });
+  await planYue2Jobs([lead, survivor], ac.signal, fast);
+  assert.equal(cancels, 0, 'survivor still needs the planner');
+  assert.ok(survivor.req.abc, JSON.stringify(survivor.autoReplan));
+});
+
+test('review: a rejected cancellation must remain in the error even if the planner later stops', async t => {
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (new URL(String(input)).searchParams.get('cancel')) throw new Error('cancel transport failed');
+    return Response.json({ status: 'done' });
+  });
+  const ac = new AbortController(); ac.abort();
+  await assert.rejects(waitYue2PlanJob('p1', { ...fast, signal: ac.signal }), /cancel request failed: cancel transport failed/);
+});
+
+test('review: a non-success cancel response must be named in the stuck-planner error', async t => {
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    if (new URL(String(input)).searchParams.get('cancel')) return Response.json({ error: 'cancel denied' }, { status: 500 });
+    return Response.json({ status: 'running', phase: 'plan' });
+  });
+  const ac = new AbortController(); ac.abort();
+  await assert.rejects(waitYue2PlanJob('p1', { ...fast, signal: ac.signal }), /cancel request failed.*500/);
+});

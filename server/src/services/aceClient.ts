@@ -661,11 +661,14 @@ export const aceClient = {
   },
 
   /** POST /job?id=N&cancel=1 — cancel a running job */
-  async cancelJob(jobId: string): Promise<void> {
-    await aceFetch(`${base()}/job?id=${jobId}&cancel=1`, {
+  async cancelJob(jobId: string, strict = false): Promise<void> {
+    const res = await aceFetch(`${base()}/job?id=${jobId}&cancel=1`, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_POLL),
     });
+    // strict: a caller that must know the cancel landed (YuE2 plan wait). The
+    // others stay best-effort, as before.
+    if (strict && !res.ok) throw new Error(`HTTP ${res.status}`);
   },
 
   /** Queue the deterministic MM3 latent refiner. Audio mixing and resampling

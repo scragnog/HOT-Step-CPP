@@ -914,7 +914,7 @@ export function yue2ReplanSeed(base: Yue2Seed, k: number): Yue2Seed {
 }
 
 /** @internal exported for tests */
-export async function planYue2Jobs(members: Yue2PreparedJob[], signal?: AbortSignal, wait: Yue2PlanWaitOpts = {}): Promise<void> {
+export async function planYue2Jobs(members: Yue2PreparedJob[], _leadSignal?: AbortSignal, wait: Yue2PlanWaitOpts = {}): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
     once: boolean; sheets: string[]; done: boolean; seedBase?: Yue2Seed;
@@ -981,8 +981,9 @@ export async function planYue2Jobs(members: Yue2PreparedJob[], signal?: AbortSig
       plans = await runYue2PlanBatch(live[0].m.req, jobPick(live[0].m.job), draws.map(d => ({
         style: d.p.m.req.style, ...(d.p.m.req.lyrics ? { lyrics: d.p.m.req.lyrics } : {}), seed: d.seed,
       })), {
-        // One song's X leaves the rest planning; the whole stage stops only when nobody is left.
-        signal, cancelled: () => pending.every(p => (p.m.job.status as string) === 'cancelled'), ...wait,
+        // The lead's signal is one song's X (the cancel route sets its status too): the rest keep
+        // planning, and the stage stops only when nobody is left.
+        cancelled: () => pending.every(p => (p.m.job.status as string) === 'cancelled'), ...wait,
       });
     } catch (err: any) {
       // A planner that will not stop would hold the engine: no fallback render behind it.
@@ -1872,7 +1873,11 @@ export async function waitYue2PlanJob(jobId: string, opts: Yue2PlanWaitOpts = {}
   let why: string;
   for (;;) {
     if (o.signal?.aborted || o.cancelled?.()) { why = 'cancel'; break; }
-    const status = await aceClient.pollJob(jobId);
+    let status: Awaited<ReturnType<typeof aceClient.pollJob>>;
+    try { status = await aceClient.pollJob(jobId); } catch (e: any) {
+      // The planner may still be running: stop it and see it stop before anyone falls back.
+      why = `status poll failed: ${e?.message || e}`; break;
+    }
     if (status.status === 'done') return;
     if (status.status === 'failed' || status.status === 'cancelled') {
       const detail = (status as { error?: string }).error;
@@ -1888,13 +1893,15 @@ export async function waitYue2PlanJob(jobId: string, opts: Yue2PlanWaitOpts = {}
   }
   // Stop it and see it stop before anyone submits more work behind it.
   let cancelErr = '';
-  try { await aceClient.cancelJob(jobId); } catch (e: any) { cancelErr = ` (cancel request failed: ${e?.message || e})`; }
+  try { await aceClient.cancelJob(jobId, true); } catch (e: any) { cancelErr = ` (cancel request failed: ${e?.message || e})`; }
   const deadline = Date.now() + o.graceMs;
   for (;;) {
     try { if ((await aceClient.pollJob(jobId)).status !== 'running') break; } catch { /* retry until the grace ends */ }
     if (Date.now() >= deadline) throw new Yue2PlanStuckError(`YuE2 plan stage ${why === 'cancel' ? 'cancelled' : why}, but the planner did not stop within ${Math.round(o.graceMs / 1000)} s${cancelErr}; not rendering behind it`);
     await new Promise(r => setTimeout(r, Math.min(o.pollMs, 250)));
   }
+  // Stopped, but a failed cancel request is still worth telling.
+  if (cancelErr) throw new Error(`YuE2 plan stage ${why === 'cancel' ? 'cancelled' : why}${cancelErr}`);
   throw new Error(why === 'cancel' ? (o.cancelMessage ?? 'Cancelled') : `YuE2 plan stage ${why}`);
 }
 
