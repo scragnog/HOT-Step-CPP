@@ -777,9 +777,24 @@ function yue2JobParams(job: GenerationJob): any {
     ...(captured.cover.cfgScale !== undefined ? { yue2CfgScale: captured.cover.cfgScale } : {}) } : job.params;
 }
 
+/** Plans finished for a follower whose batch lead was cancelled mid-plan. The
+ *  follower goes back to the queue and its request is rebuilt from its params,
+ *  so the chosen score and seed wait here (a re-plan could draw another seed). */
+const yue2RetainedPlans = new WeakMap<GenerationJob, { abc: string; seed: Yue2SynthRequest['seed']; autoReplan?: Yue2AutoReplan }>();
+
+function applyRetainedPlan(job: GenerationJob, req: Yue2SynthRequest): boolean {
+  const kept = yue2RetainedPlans.get(job);
+  if (!kept || req.abc) return false;
+  req.abc = kept.abc;
+  req.seed = kept.seed;
+  return true;
+}
+
 /** The /yue2/synth request a job would send, without sending it. */
 export function yue2RequestForJob(job: GenerationJob): Yue2SynthRequest {
-  return mapYue2Params(yue2JobParams(job), jobPick(job)).req;
+  const { req } = mapYue2Params(yue2JobParams(job), jobPick(job));
+  applyRetainedPlan(job, req);
+  return req;
 }
 
 async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt, signal?: AbortSignal): Promise<Yue2PreparedJob> {
@@ -860,7 +875,10 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt, s
   log('INFO', `[YuE2] Style sent: ${req.style}`);
   if (req.lyrics) log('DEBUG', `[YuE2] Lyrics sent (${req.lyrics.length} chars):\n${req.lyrics}`);
 
-  return { job, req, abcSupplied: section ? false : abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover, trimStart };
+  const retained = applyRetainedPlan(job, req);
+  const autoReplan = retained ? yue2RetainedPlans.get(job)!.autoReplan : undefined;
+  yue2RetainedPlans.delete(job);
+  return { job, req, abcSupplied: section ? false : abcSupplied, ...(retained ? { abcPlanned: true } : {}), ...(autoReplan ? { autoReplan } : {}), caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover, trimStart };
 }
 
 // ── Auto-replan ──
@@ -1186,7 +1204,8 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   const releaseFollowers = (reason: string) => {
     for (const m of members.slice(1)) {
       if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
-      m.log('WARNING', `[YuE2] ${reason}; this song goes back to the queue to render on its own`);
+      if (m.abcPlanned && m.req.abc) yue2RetainedPlans.set(m.job, { abc: m.req.abc, seed: m.req.seed, autoReplan: m.autoReplan });
+      m.log('WARNING', `[YuE2] ${reason}; this song goes back to the queue to render on its own${m.abcPlanned ? ', keeping its finished plan' : ''}`);
       m.job.coalescedInto = undefined;
       deps.assignFollower?.(m.job, null);
       m.job.status = 'pending';
