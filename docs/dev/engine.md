@@ -1400,12 +1400,14 @@ Other adapter paths:
   splitting into 8-row matrix-vector matmuls (`MM3_LM_ROW_SPLIT=1`): 31.5 against 38.2 ms
   per AR iteration at 16 rows on a 5090. The request's `lm_kv_q8` stores the KV cache at
   Q8_0 so 4 takes fit. The depth decoder and flow stage only see the adapter rows.
-- VRAM fit (`mm3-vram-fit.h`, called from `mm3_synth_worker` before the AR cache key): stage-1
+- VRAM fit (`mm3-vram-fit.h`, `mm3_vram_admit` in `mm3_synth_worker` after the AR cache lookup;
+  a valid hit as sent is admitted unfitted, a changed KV type is looked up again): stage-1
   weights (LM + depth when staged, every role file under keep-loaded) + this request's KV +
   0.5 GiB against CUDA free + evictable ACE bytes + reused MM3 parts and KV. If it does not
   fit, the KV goes to Q8_0, then with `stop_after_first_eos` candidates per round drop to 1;
   otherwise the job fails before `mm3_load_parts`. Frames are never capped. No CUDA
-  measurement (Metal, Vulkan, CPU) or a saved-plan replay means no gate.
+  measurement (Metal, Vulkan, CPU) or a valid AR hit means no gate; a saved plan the worker
+  ignores or rejects plans fresh and is gated.
   `MM3_VRAM_BUDGET_GB` replaces the measured budget for tests. `mm3_vram_need` stays the
   eviction and interleave figure. Unit check: `engine/tests/test-mm3-vram-fit.cpp`.
 - Natural endings (`require_eos`, `mm3-pipeline.h`): the first round with an ending wins.

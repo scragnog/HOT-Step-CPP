@@ -327,13 +327,13 @@ plans over the adapter's acoustic codes, which is not the base's own song.
     reverse on backend switch and before ACE gens. ~600 MB stays in the CUDA pool after unload
     (returns on process exit — not a leak). That sum (`mm3_vram_need`) decides eviction only;
     as a gate it would refuse 24 GB cards that work. **Admission is `mm3_vram_fit`**
-    (`mm3-vram-fit.h`, called in `mm3_synth_worker` before the AR key, since the KV type is in
-    it): stage-1 weights by residency (LM + depth staged, every file under keep-loaded) + this
+    (`mm3-vram-fit.h`, `mm3_vram_admit` in `mm3_synth_worker` where `ar_hit` is decided: a valid
+    hit as sent is never fitted, and a changed KV type is looked up again under its own key): stage-1 weights by residency (LM + depth staged, every file under keep-loaded) + this
     request's KV + 0.5 GiB, against CUDA free + evictable ACE + reused MM3 parts and KV. Stage 1
     measured 0.118 GiB over weights + KV (Q8_0 LM, 1 take, q8 KV, 7680 positions, 4090,
     HOTSTEP-1255). Ladder: as sent, then Q8_0 KV, then (`stop_after_first_eos`) candidates per
     round down to 1; no fit is `fail(2)` before any load. Never caps frames. No gate without a
-    CUDA measurement or on a saved-plan replay. `MM3_VRAM_BUDGET_GB` replaces the budget for
+    CUDA measurement or on a valid AR hit (a saved plan the worker rejects is gated). `MM3_VRAM_BUDGET_GB` replaces the budget for
     tests. Job JSON: `lm_kv_type`, `fit_takes`, `vram_note`; the server logs the note and writes
     the effective `lm_kv_q8` and `takes` into the stored `mm3Request`. Unit check:
     `engine/tests/test-mm3-vram-fit.cpp` (GH #324 numbers, the 13 Nov 4090 f16 case).

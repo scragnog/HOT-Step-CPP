@@ -43,6 +43,36 @@ int main() {
     expect("4090 f16, 13 Nov", mm3_vram_fit(b4090, w4090, ROW_7680, 4, 2, false, true, true), true, false, 2);
     // A q8 request that fits stays as sent.
     expect("q8 asked, fits", mm3_vram_fit(b4090, w4090, ROW_7680, 4, 2, true, true, true), true, true, 2);
+
+    // ── Admission order (mm3_vram_admit), the AR cache decisions ──
+    auto admit = [&](const char * name, bool hit_as_sent, bool hit_q8_1, bool measured, size_t budget,
+                     MM3Admit want, bool q8, int takes) {
+        int  asked = 0;
+        auto slot  = [&](bool sq8, int st) {
+            asked++;
+            return (hit_as_sent && !sq8 && st == 3) || (hit_q8_1 && sq8 && st == 1);
+        };
+        const MM3AdmitResult r = mm3_vram_admit(slot, measured, budget, w, ROW_7680, 2, 3, false, true, true);
+        const bool pass = r.what == want && r.fit.q8 == q8 && r.fit.takes == takes;
+        printf("%s: %s - what=%d q8=%d takes=%d fitted=%d slot lookups=%d\n", pass ? "PASS" : "FAIL", name,
+               (int) r.what, r.fit.q8, r.fit.takes, r.fitted, asked);
+        fails += pass ? 0 : 1;
+    };
+    // A plan already in the slot skips stage 1: admitted as sent, even at a
+    // budget no planning shape fits (review P2). Real hits are one take; the
+    // fake slot answers for 3 only to prove admission does not look at bytes.
+    admit("hit as sent, budget 1 GiB", true, false, true, GiB, MM3Admit::HIT, false, 3);
+    // No hit (in-memory miss, or a saved plan ignored or rejected): fitted and
+    // refused before loading (review P1).
+    admit("miss, budget 1 GiB", false, false, true, GiB, MM3Admit::REFUSE, true, 1);
+    // No measurement: runs as sent, as before.
+    admit("miss, unmeasured", false, false, false, 0, MM3Admit::RUN, false, 3);
+    // Miss as sent, but an earlier degraded run of this request left its plan:
+    // found under the degraded key.
+    admit("degraded plan cached", false, true, true, b, MM3Admit::HIT, true, 1);
+    // Miss everywhere: run degraded.
+    admit("miss, degrade", false, false, true, b, MM3Admit::RUN, true, 1);
+
     printf("%s\n", fails ? "MM3 VRAM FIT: FAIL" : "MM3 VRAM FIT: PASS");
     return fails ? 1 : 0;
 }

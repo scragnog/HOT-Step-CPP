@@ -65,3 +65,48 @@ static inline MM3VramFit mm3_vram_fit(size_t budget, size_t weights, size_t kv_r
     f.ok = false;
     return f;
 }
+
+// Admission for one job, in the order the worker must take the decisions.
+//
+// A valid AR cache hit (in-memory, or a saved plan that loaded into the slot)
+// never runs stage 1, so it is admitted as sent before any fit: refusing it
+// for LM and KV bytes it will not allocate would be wrong. Anything else plans
+// fresh and is fitted, including a saved plan the worker ignored or rejected.
+// When the fit changes the shape, the slot is asked again under that shape,
+// because the KV type is part of the AR key and an earlier degraded run of the
+// same request may have left its plan there.
+//
+// `slot_hit(q8, takes)`: does the AR slot hold this request's plan for that
+// KV type and take count. `measured`: a budget exists (CUDA, or the override).
+enum class MM3Admit { HIT, RUN, REFUSE };
+
+struct MM3AdmitResult {
+    MM3Admit   what = MM3Admit::RUN;
+    MM3VramFit fit;          // the shape to run; as sent unless the fit ran and changed it
+    bool       fitted = false;  // the fit ran (a budget existed and there was no hit as sent)
+};
+
+template <class SlotHit>
+static inline MM3AdmitResult mm3_vram_admit(SlotHit slot_hit, bool measured, size_t budget, size_t weights,
+                                            size_t kv_row_f16, int rows_per_take, int takes, bool q8, bool can_q8,
+                                            bool one_song) {
+    MM3AdmitResult r;
+    r.fit.q8    = q8;
+    r.fit.takes = takes < 1 ? 1 : takes;
+    r.fit.need  = mm3_fit_need(weights, kv_row_f16, rows_per_take * r.fit.takes, q8);
+    if (slot_hit(q8, r.fit.takes)) {
+        r.what = MM3Admit::HIT;
+        return r;
+    }
+    if (!measured) {
+        return r;
+    }
+    r.fitted = true;
+    r.fit    = mm3_vram_fit(budget, weights, kv_row_f16, rows_per_take, takes, q8, can_q8, one_song);
+    if (!r.fit.ok) {
+        r.what = MM3Admit::REFUSE;
+    } else if ((r.fit.q8 != q8 || r.fit.takes != takes) && slot_hit(r.fit.q8, r.fit.takes)) {
+        r.what = MM3Admit::HIT;
+    }
+    return r;
+}
