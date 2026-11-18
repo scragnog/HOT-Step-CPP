@@ -10,6 +10,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { Fold } from '../shared/Fold';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { StylePresetSelect } from './StylePresetSelect';
+import { StyleGenreSelect } from './StyleGenreSelect';
 import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 
@@ -134,6 +135,7 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
             {!yue2Mode && !tagsMode && autoExpandBtn}
             {/* Style presets write an ensemble description straight into the caption. */}
             {!captionReadOnly && <StylePresetSelect caption={caption} onCaptionChange={onCaptionChange} />}
+            {!captionReadOnly && !tagsMode && <StyleGenreSelect caption={caption} onCaptionChange={onCaptionChange} />}
           </div>
         </div>
         <textarea
