@@ -40,6 +40,7 @@ import { downloadLyricsLrc } from '../../utils/downloadTrack';
 import { useRetranscribe } from '../../stores/retranscribeStore';
 import { BottomSheet, useIsMobile } from './BottomSheet';
 import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
+import { MeasureMetadataDialog } from '../library/MeasureMetadataDialog';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
 
@@ -333,6 +334,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
 }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [measureSongId, setMeasureSongId] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const btnRef = useRef<HTMLButtonElement>(null);
   const abTrackAId = useABCompareSelector(s => s.trackA?.id);
@@ -538,6 +540,13 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
             />
           )}
 
+          <Item
+            icon={<Tags size={14} />}
+            label={t('metadata.measure', 'Measure BPM and key')}
+            onClick={() => act(() => setMeasureSongId(song.id))}
+            disabled={!audioUrl}
+          />
+
           {extraItems}
 
           {!compact && (
@@ -612,6 +621,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
           )}
         </PortalMenu>
       )}
+      {measureSongId && <MeasureMetadataDialog key={measureSongId} songId={measureSongId} onClose={() => setMeasureSongId(null)} />}
     </>
   );
 };

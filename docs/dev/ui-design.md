@@ -1,5 +1,9 @@
 # UI design rules
 
+The track menu's **Measure BPM and key** dialog compares saved metadata with
+CPU estimates before its explicit **Replace saved values** action. Analysis
+alone never saves; failed or unavailable estimates cannot clear fields.
+
 Read this before adding or changing any control under `ui/src/`. It exists because the same three
 mistakes kept coming back: a native `<select>` that renders as a grey OS widget with white text, a
 native checkbox where the app uses a toggle everywhere else, and a knob with no explanation. Each

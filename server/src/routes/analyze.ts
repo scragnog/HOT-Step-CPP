@@ -56,6 +56,13 @@ router.post('/', async (req: Request, res: Response) => {
         return;
     }
 
+    try {
+        await fs.access(config.essentia.bin);
+    } catch {
+        res.status(503).json({ error: 'Essentia is not installed. No metadata was saved.' });
+        return;
+    }
+
     const audioPath = resolveAudioPath(audioUrl);
 
     // Verify the file exists

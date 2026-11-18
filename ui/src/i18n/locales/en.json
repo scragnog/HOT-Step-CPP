@@ -1,5 +1,17 @@
 {
   "translation": {
+    "metadata.measure": "Measure BPM and key",
+    "metadata.measuring": "Measuring...",
+    "metadata.measureAgain": "Measure again",
+    "metadata.measureSaved": "Saved",
+    "metadata.measureNew": "Measured",
+    "metadata.measureReplace": "Replace saved values",
+    "metadata.measureUnknown": "Not available",
+    "metadata.measureHint": "Essentia measures the original audio on the CPU. Review its estimates before replacing saved metadata. Planned tempo is unchanged.",
+    "metadata.measureConfirmHint": "Replace saved values also replaces manual edits. Unavailable measurements keep the saved value. Cancel saves nothing.",
+    "metadata.measureNoAudio": "This track has no audio to measure.",
+    "metadata.measureNoResult": "No BPM or key could be measured. No metadata was saved.",
+    "metadata.measureChanged": "This track changed during measurement. Measure again to review its current values.",
     "trainingStudio.replace.title": "Find and replace in captions",
     "trainingStudio.replace.saveFirst": "Save pending grid edits, then preview again before applying.",
     "trainingStudio.replace.scope": "Edits captions for the {{count}} tracks selected when opened. Matches are case-sensitive plain text in .txt caption fields and .yue2.txt files. Build again afterward to update dataset.json.",

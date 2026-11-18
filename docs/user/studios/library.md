@@ -306,6 +306,22 @@ year, and comment are embed-only overrides: they get written into the
 audio file's tags on download without changing what the library displays
 for the track.
 
+### Measure BPM and key
+
+Choose **Measure BPM and key** in a track's menu, then start the measurement
+in the dialog. Essentia estimates tempo and key from the original audio on
+the CPU, including tracks made with YuE2 or MM3. It uses the existing
+Essentia extractor, with no Beat This! or SheetSage2 download or GPU work.
+If Essentia is missing, the dialog reports it and saves nothing.
+
+The dialog shows the saved values beside the measured estimates. Only
+**Replace saved values** writes the result, through the same metadata save
+path as Edit Metadata. This confirmation can replace manual BPM and key
+edits. Cancel saves nothing; an unavailable BPM or key keeps the saved value.
+If the track changes during measurement, measure again before saving.
+Saved results appear in lists and exports. Planned generation tempo stays
+unchanged, and nothing runs automatically after a render.
+
 ## Download and export
 
 A track's Download action uses the format, bitrate, and preferred version

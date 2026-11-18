@@ -189,6 +189,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Track menu | Run or remove post-processing, edit in Custom-Gen, playlist, download, the ABC lead sheet of a YuE2 track, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
 | Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
 | Metadata editor | Title, artist, album, year, genre, BPM, key, comment, lyrics and cover image; some fields are embed-only. |
+| Measure BPM and key | Estimate a track's original audio with Essentia on the CPU, compare saved and measured values, and confirm before replacing metadata. [Details](docs/user/studios/library.md#measure-bpm-and-key) |
 | Editable cover-art prompt | Generate or regenerate cover art from a pre-filled, editable prompt. |
 | A/B compare | Pin two tracks, play them against each other, and open a parameter diff. |
 | Song details | Backend chip, per-backend "How it was made" breakdown, prompt and lyrics. |
