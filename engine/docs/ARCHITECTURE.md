@@ -923,7 +923,14 @@ the work on the single GPU queue.
 
 ```
 POST /lm[?keep_loaded=1]         LM job. Body: AceRequest JSON. lm_mode picks
-                                 generate, inspire or format.
+                                 generate, inspire or format. An array of
+                                 requests is a mixed batch: several jobs' songs
+                                 in one pass (generate only). They must agree on
+                                 the LM and every sampling setting, carry no
+                                 audio_codes, and their lm_batch_size total must
+                                 fit --max-batch, or the call is a 400 naming the
+                                 field. Each song gets the tokens it gets alone,
+                                 seed for seed; results come back in request order.
 POST /synth[?format=mp3|wav16|wav24|wav32][&keep_loaded=1]
                                  Synth job. Body: AceRequest JSON, or an array of
                                  them, or multipart/form-data with parts:

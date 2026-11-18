@@ -477,9 +477,11 @@ export const aceClient = {
   /** POST /lm — submit LM generation job, returns job ID.
    *  mode: 'inspire' (Phase 1 only, no codes) | 'format' (reformat, no codes)
    *  keepLoaded: flip store to EVICT_NEVER before LM loads, so the LM stays
-   *  cached for subsequent gens instead of being freed under STRICT. */
-  async submitLm(request: AceRequest, mode?: 'inspire' | 'format', keepLoaded = false): Promise<string> {
-    const body = mode ? { ...request, lm_mode: mode } : request;
+   *  cached for subsequent gens instead of being freed under STRICT.
+   *  An array is a mixed batch: several jobs' songs in one LM pass (generate
+   *  mode only; the engine checks they share the LM settings). */
+  async submitLm(request: AceRequest | AceRequest[], mode?: 'inspire' | 'format', keepLoaded = false): Promise<string> {
+    const body = mode && !Array.isArray(request) ? { ...request, lm_mode: mode } : request;
     const params = new URLSearchParams();
     if (keepLoaded) params.set('keep_loaded', '1');
     const qs = params.toString();

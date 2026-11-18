@@ -62,6 +62,13 @@ export interface GenerationJob {
   coalescedInto?: string;
   /** On the lead of a coalesced batch: every member's id, itself first. */
   coalescedMembers?: string[];
+  /** ACE LM coalescing: another job planned this one in its LM pass. The
+   *  request is the one that pass used; plans resolve to this job's slice, or
+   *  null when the pass failed or was cancelled (the job then plans alone).
+   *  Taken, and cleared, by the job's own turn. */
+  aceLmShare?: { lead: string; req: AceRequest; plans: Promise<AceRequest[] | null> };
+  /** ACE jobs planned in one LM pass, lead first, on every member (queue box). */
+  aceLmBatch?: string[];
   /** MiniMax-Music3 "play while rendering": true once the engine has confirmed
    *  it will serve this job's audio on GET /mm3/stream. The ENGINE's answer,
    *  not the request's — it may decline, and the UI must then behave exactly

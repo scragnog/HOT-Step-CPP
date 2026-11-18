@@ -386,3 +386,28 @@ test('re-import after a rollback pause runs new work; held items stay held (any 
     assert.equal(h.queue.state().paused, false, `${choice} replay`);
   }
 });
+
+test('ACE songs that go up together tell the generation queue how many are coming', async () => {
+  const h = harness();
+  try {
+    h.setActive('ace');
+    for (const k of ['a', 'b', 'c']) h.queue.enqueue({ idempotencyKey: k, request: req({ expectedBackend: 'ace' }), meta: {} }, 'u');
+    await h.queue.tick();
+    assert.deepEqual(h.submits.map(s => s.body.lmBatchWave), [3, 3, 3]);
+    // The captured request itself is untouched.
+    assert.ok(!('lmBatchWave' in h.queue.list()[0].request));
+  } finally { h.db.close(); }
+});
+
+test('a lone ACE song and other engines carry no wave hint', async () => {
+  const h = harness();
+  try {
+    h.setActive('ace');
+    h.queue.enqueue({ idempotencyKey: 'solo', request: req({ expectedBackend: 'ace' }), meta: {} }, 'u');
+    await h.queue.tick();
+    h.setActive('yue2');
+    for (const k of ['y1', 'y2']) h.queue.enqueue({ idempotencyKey: k, request: req(), meta: {} }, 'u');
+    await h.queue.tick();
+    assert.deepEqual(h.submits.map(s => s.body.lmBatchWave), [undefined, undefined, undefined]);
+  } finally { h.db.close(); }
+});

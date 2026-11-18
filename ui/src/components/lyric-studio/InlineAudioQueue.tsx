@@ -204,8 +204,9 @@ function fmtRatio(audioSec: number, elapsedSec: number): string {
 
 type QueueRow = { kind: 'item'; item: AudioQueueItem } | { kind: 'batch'; id: string; items: AudioQueueItem[] };
 
-/** Items that rendered in one server batch (YuE2 queue coalescing) sit in
- *  one box, in list order; a batch that only has one item here is a row. */
+/** Items that rendered in one server batch (YuE2 queue coalescing), or were
+ *  planned in one ACE LM pass, sit in one box, in list order; a batch that
+ *  only has one item here is a row. */
 function groupBatches(list: AudioQueueItem[]): QueueRow[] {
   const rows: QueueRow[] = [];
   const boxes = new Map<string, { kind: 'batch'; id: string; items: AudioQueueItem[] }>();
@@ -236,7 +237,11 @@ const QueueRows: React.FC<RowsProps> = ({ rows, isPlaying, onPlay, onDownload })
 /** One box per batch: the time the whole batch took, the audio it produced
  *  in total and the ratio of the two. Members show only their own length. */
 const BatchBox: React.FC<Omit<RowsProps, 'rows'> & { items: AudioQueueItem[] }> = ({ items, isPlaying, onPlay, onDownload }) => {
-  const elapsed = Math.max(0, ...items.map(i => i.elapsed || 0));
+  // An ACE LM batch only shared its planning pass; its songs render one by one.
+  const planned = items.some(i => i.batchKind === 'lm');
+  const elapsed = planned
+    ? items.reduce((n, i) => n + (i.elapsed || 0), 0)
+    : Math.max(0, ...items.map(i => i.elapsed || 0));
   const done = items.filter(i => i.status === 'succeeded');
   const total = done.reduce((n, i) => n + (i.audioDuration || 0), 0);
   const running = items.some(i => i.status === 'generating' || i.status === 'loading-adapter');
@@ -245,7 +250,7 @@ const BatchBox: React.FC<Omit<RowsProps, 'rows'> & { items: AudioQueueItem[] }> 
     <div className={`rounded-lg border ${running ? 'border-pink-500/30' : 'border-green-500/30'} bg-white/[0.03] p-1 space-y-1`}>
       <div className="flex items-center justify-between px-2 pt-0.5">
         <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">
-          Batch of {items.length}{running ? ' · rendering together' : ''}
+          Batch of {items.length}{planned ? ' · planned together' : running ? ' · rendering together' : ''}
         </span>
         <span className="flex items-center gap-1.5 text-[10px] font-mono">
           {elapsed > 0 && <span className="text-zinc-500" title="Time the whole batch took">⏱{fmtClock(elapsed)}</span>}

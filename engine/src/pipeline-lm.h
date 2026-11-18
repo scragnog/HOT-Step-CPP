@@ -48,6 +48,22 @@ int ace_lm_generate(AceLm *            ctx,
                     void * cancel_data     = nullptr,
                     int    mode            = LM_MODE_GENERATE);
 
+// Mixed batch: several requests (each lm_batch_size songs) in one LM pass,
+// generate mode only. Every song gets the tokens it would get run alone, seed
+// for seed. Requests must agree on the LM and its sampling settings (see
+// ace_lm_batch_mismatch) and carry no audio_codes; lm_seed must be resolved.
+// out holds the sum of lm_batch_size, in request order.
+int ace_lm_generate_multi(AceLm *            ctx,
+                          const AceRequest * reqs,
+                          int                n_reqs,
+                          AceRequest *       out,
+                          bool (*cancel)(void *) = nullptr,
+                          void * cancel_data     = nullptr);
+
+// Name of the first LM setting that differs between two requests, or NULL
+// when they can share one mixed batch.
+const char * ace_lm_batch_mismatch(const AceRequest * a, const AceRequest * b);
+
 void ace_lm_free(AceLm * ctx);
 
 // Read the LM ModelKey the context builds for store_require_lm. Used by

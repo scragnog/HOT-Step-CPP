@@ -17,6 +17,7 @@ import { readAdapterTrigger } from '../../adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../../generation/lmCache.js';
 import { degeneratePlanReason } from '../../generation/planGuard.js';
 import { aceLmSongsPerPass, planLmPasses } from './lmBatch.js';
+import { claimLmFollowers, runSharedLmPass, songsOf, type LmFollower } from './lmCoalesce.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../../generation/sourceAudio.js';
 import { runPostProcessingChain, normalizePpParams } from '../../generation/postProcessing.js';
 import { getCachedLatent, saveCachedLatent } from '../../generation/sourceLatentCache.js';
@@ -24,9 +25,34 @@ import { releaseMinimaxVramForAce } from '../minimax/generate.js';
 import { pollUntilDone as importedPoller } from '../../generation/pollUntilDone.js';
 import { type GenerationJob, type StageTiming } from '../../generation/jobTypes.js';
 
+/** The engine request for a job, with its random seeds resolved and written
+ *  back into job.params so the DB stores the values used: critical for
+ *  reproducibility when randomSeed is true, or when lmSeedFollowsDit is on
+ *  (lm_seed isn't sent to the engine at all in that case, the engine ties it
+ *  to seed itself, so mirror that here rather than leaving a stale "fixed"
+ *  value in job.params). */
+export function prepareAceRequest(job: GenerationJob): AceRequest {
+  // Experimental engine request field; intentionally has no UI control yet.
+  const aceReq = { ...translateParams(job.params), timbre_reference_window: job.params.timbreReferenceWindow === true };
+  if (aceReq.seed !== undefined) {
+    job.params.seed = aceReq.seed;
+  }
+  if (aceReq.lm_seed !== undefined) {
+    job.params.lmSeed = aceReq.lm_seed;
+  } else if (job.params.lmSeedFollowsDit !== false) {
+    job.params.lmSeed = aceReq.seed;
+  }
+  return aceReq;
+}
+
+/** A lone job with lmBatchWave > 1 waits this long for the rest of its wave
+ *  before planning, when nothing is queued yet: songs submitted together land
+ *  milliseconds apart. Same reasoning as YuE2's coalescing wait. */
+const ACE_COALESCE_WAIT_MS = 750;
+
 export async function runAceGeneration(
   job: GenerationJob,
-  deps: { pollUntilDone: typeof importedPoller; signal: AbortSignal },
+  deps: { pollUntilDone: typeof importedPoller; signal: AbortSignal; pendingJobs?: () => GenerationJob[] },
 ): Promise<void> {
   const { pollUntilDone } = deps;
   const pipelineStart = performance.now();
@@ -49,22 +75,10 @@ export async function runAceGeneration(
   // never stall an ACE generation.
   await releaseMinimaxVramForAce();
 
-  // Experimental engine request field; intentionally has no UI control yet.
-  const aceReq = { ...translateParams(job.params), timbre_reference_window: job.params.timbreReferenceWindow === true };
-
-  // Write the resolved seeds back into job.params so the DB stores the actual
-  // values used — critical for reproducibility when randomSeed is true, or
-  // when lmSeedFollowsDit is on (lm_seed isn't sent to the engine at all in
-  // that case — the engine ties it to seed itself — so mirror that here
-  // rather than leaving a stale/unused "fixed" value in job.params).
-  if (aceReq.seed !== undefined) {
-    job.params.seed = aceReq.seed;
-  }
-  if (aceReq.lm_seed !== undefined) {
-    job.params.lmSeed = aceReq.lm_seed;
-  } else if (job.params.lmSeedFollowsDit !== false) {
-    job.params.lmSeed = aceReq.seed;
-  }
+  // A job another job planned in its LM pass uses the request that pass used.
+  const share = job.aceLmShare;
+  job.aceLmShare = undefined;
+  const aceReq = share?.req ?? prepareAceRequest(job);
 
   console.log(`[Generate] Job ${job.id} — ditModel=${job.params.ditModel || '(none)'}, synth_model=${aceReq.synth_model || '(none)'}, emb_model=${aceReq.emb_model || '(auto)'}, seed=${aceReq.seed ?? '(engine default)'}, lm_seed=${aceReq.lm_seed ?? `(tied to seed: ${aceReq.seed ?? 'engine default'})`}, source=${job.params.source || 'create'}`);
   try {
@@ -169,17 +183,66 @@ export async function runAceGeneration(
         logGeneration(job.id, 'INFO', `[LM Phase] Submitting to ace-server... (cache key=${cacheKey})`);
 
         const coResident = job.params.coResident === true;
-        // One plan per song: the batch goes to the LM, split into passes the
-        // engine's --max-batch allows.
-        lmResults = [];
-        for (const pass of planLmPasses(aceReq, job.params.batchSize || 1, aceLmSongsPerPass(coResident))) {
-          const lmJobId = await aceClient.submitLm(pass, undefined, coResident);
+        const songs = songsOf(job);
+        // Songs one pass may hold on this card (lmBatch.ts).
+        const cap = aceLmSongsPerPass(coResident);
+        // One LM job; its result is an array of enriched AceRequests.
+        const runPass = async (body: AceRequest | AceRequest[]): Promise<AceRequest[]> => {
+          const lmJobId = await aceClient.submitLm(body, undefined, coResident);
           job.aceJobId = lmJobId;
           await pollUntilDone(lmJobId, job, deps.signal, timeoutMinutes);
-          // Fetch LM results (array of enriched AceRequests)
-          const resultRes = await aceClient.getJobResult(lmJobId);
-          const out = await resultRes.json() as AceRequest[];
-          if (Array.isArray(out)) lmResults.push(...out);
+          const out = await (await aceClient.getJobResult(lmJobId)).json() as AceRequest[];
+          return Array.isArray(out) ? out : [];
+        };
+        // One plan per song: the batch goes to the LM, split into passes
+        // that fit the card.
+        const planAlone = async (): Promise<AceRequest[]> => {
+          const all: AceRequest[] = [];
+          for (const pass of planLmPasses(aceReq, songs, cap)) all.push(...await runPass(pass));
+          return all;
+        };
+
+        const sharedPlans = share ? await share.plans : null;
+        if (share) {
+          logGeneration(job.id, sharedPlans ? 'INFO' : 'WARNING', sharedPlans
+            ? `[LM Phase] Plans came from job ${share.lead}'s LM pass`
+            : `[LM Phase] Job ${share.lead}'s shared LM pass did not finish; planning alone`);
+          if (!sharedPlans) job.aceLmBatch = undefined;
+        }
+
+        // Coalescing: plan compatible ACE jobs queued behind this one in the
+        // same pass. Plain GGML LM only: a draft LM (speculative decode) runs
+        // one song at a time, and so does TensorRT, which the engine handles
+        // by running a mixed batch one request at a time.
+        let followers: LmFollower[] = [];
+        if (!sharedPlans && deps.pendingJobs && !config.aceServer.draftLm && songs < cap) {
+          if (Number(job.params.lmBatchWave) > 1 && deps.pendingJobs().length === 0) {
+            await new Promise(r => setTimeout(r, ACE_COALESCE_WAIT_MS));
+          }
+          followers = claimLmFollowers(job, aceReq, {
+            pending: deps.pendingJobs(),
+            cap,
+            translate: j => translateParams(j.params),
+            prepare: prepareAceRequest,
+            cached: (j, r) => j.params.cacheLmCodes !== false && !!getLmCache(computeLmCacheKey(r)),
+          });
+        }
+
+        if (sharedPlans) {
+          lmResults = sharedPlans;
+        } else if (followers.length) {
+          logGeneration(job.id, 'INFO',
+            `[LM Phase] Planning ${followers.length} queued job(s) in the same LM pass: ${followers.map(f => f.job.id).join(', ')}`);
+          try {
+            lmResults = await runSharedLmPass(aceReq, songs, followers, runPass);
+          } catch (err: any) {
+            for (const j of [job, ...followers.map(f => f.job)]) j.aceLmBatch = undefined;
+            if (deps.signal.aborted || (job.status as string) === 'cancelled') throw err;
+            logGeneration(job.id, 'WARNING', `[LM Phase] Shared LM pass failed (${err?.message || err}); planning alone`);
+            lmResults = await planAlone();
+          }
+        } else {
+          lmResults = await planAlone();
         }
 
         // A COMPLETED LM job with zero parseable results is a failure, not an

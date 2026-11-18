@@ -220,7 +220,7 @@ export const aceBackend: EngineBackend = {
   operations: ACE_OPERATIONS,
   resolveRequest,
   async generate(job: GenerationJob, ctx: GenerationContext): Promise<GenerationOutcome> {
-    await runAceGeneration(job, { pollUntilDone: ctx.pollUntilDone, signal: ctx.signal });
+    await runAceGeneration(job, { pollUntilDone: ctx.pollUntilDone, signal: ctx.signal, pendingJobs: ctx.pendingJobs });
     return outcomeFromJob(job);
   },
   arbitratesResidencyInEngine: false,

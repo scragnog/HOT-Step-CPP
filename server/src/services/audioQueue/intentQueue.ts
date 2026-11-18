@@ -447,13 +447,18 @@ export class AudioIntentQueue {
     const pending = this.db.prepare(`SELECT * FROM audio_intents WHERE status = 'pending' AND (owner_copy IS NULL OR owner_copy = ?) ORDER BY created_at, rowid`)
       .all(copyId()) as Row[];
     const active = this.deps.activeEngine();
+    // ACE songs that go up in this pass reach the generation queue
+    // milliseconds apart; telling the first how many follow lets it wait for
+    // them and plan them all in one LM pass (backends/ace/lmCoalesce.ts).
+    const wave = active === 'ace'
+      ? Math.min(MAX_IN_FLIGHT - inFlight(), pending.filter(r => r.engine === active).length) : 1;
     for (const r of pending) {
       if (inFlight() >= MAX_IN_FLIGHT) break;
       if (r.engine !== active) {
         this.setWaiting(r.id, `Waiting for the ${r.engine} engine; ${active} is active`);
         continue;
       }
-      const stop = await this.submitOne(r);
+      const stop = await this.submitOne(r, wave);
       if (stop) break;
     }
   }
@@ -465,7 +470,7 @@ export class AudioIntentQueue {
 
   /** Claim, submit, record. Returns true when submission should stop for this
    *  pass (the engine is not taking work, or the queue was paused meanwhile). */
-  private async submitOne(r: Row): Promise<boolean> {
+  private async submitOne(r: Row, wave = 1): Promise<boolean> {
     // The pause check is part of the claim itself: a pause that lands while
     // an earlier submit in this pass is awaiting stops every later claim.
     const claim = this.db.prepare(`UPDATE audio_intents SET status = 'submitting', waiting = NULL, owner_instance = ?, updated_at = ?
@@ -474,7 +479,8 @@ export class AudioIntentQueue {
     if (claim.changes !== 1) return this.paused();
     let result: Awaited<ReturnType<AudioQueueDeps['submit']>>;
     try {
-      result = await this.deps.submit(JSON.parse(r.request), r.user_id);
+      const request = JSON.parse(r.request);
+      result = await this.deps.submit(wave > 1 ? { ...request, lmBatchWave: wave } : request, r.user_id);
     } catch (err) {
       result = { ok: false, status: 500, body: { error: err instanceof Error ? err.message : String(err) } };
     }

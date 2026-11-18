@@ -575,6 +575,14 @@ re-runs from the Library wait in the same line.
   the first track you queue in Lyric Studio goes up with the ones queued right after it
   rather than starting alone; the engine takes at most four songs per batch (a compiled
   limit, not a setting), and songs that have been waiting longer than that are sent at once.
+- ACE-Step songs waiting behind the one about to plan, with the same LM model, LM adapter
+  and LM settings, are planned in the same LM pass, as many as one pass holds on your card
+  (see [Batch size](#batch-size)), so a card that plans one track per pass never does this. Each still renders on
+  its own turn and gets the same plan it would have got alone; only the planning is
+  shared, which saves an LM load and a pass for each song that joins. Songs with the LM
+  switched off, cover and repaint tasks, and songs whose plans are already cached never
+  join. The Lyric Studio queue boxes them as "planned together", with the time the songs
+  took between them. If the shared pass fails or is cancelled, each song plans alone.
 - Every finished row shows a ratio next to its length: audio seconds per second of
   generation, so 3.0 means a minute of music took twenty seconds.
 - The queue survives a page reload and a full restart of the app, because the server keeps

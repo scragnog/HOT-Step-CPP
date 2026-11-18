@@ -540,12 +540,16 @@ router.get('/status/:id', (req, res) => {
     ace_phase: job.acePhase ?? null,
     ace_phase_progress: job.acePhaseProgress ?? null,
     // YuE2 queue coalescing: the jobs rendered together in one engine batch,
-    // so the queue can box them and show one time for the lot.
+    // so the queue can box them and show one time for the lot. ACE jobs
+    // planned in one LM pass box the same way, with kind 'lm'.
     batch: job.coalescedMembers
       ? { lead: job.id, members: job.coalescedMembers }
       : job.coalescedInto
         ? { lead: job.coalescedInto, members: jobs.get(job.coalescedInto)?.coalescedMembers ?? [job.coalescedInto, job.id] }
-        : null,
+        // ACE: planned in one LM pass, rendered one after another.
+        : job.aceLmBatch
+          ? { lead: job.aceLmBatch[0], members: job.aceLmBatch, kind: 'lm' }
+          : null,
     // MM3 live-audio stream: GET /api/generate/mm3/stream/:id is worth opening
     // only once this is true. Absent/false on every other backend and on every
     // render that did not ask for it.

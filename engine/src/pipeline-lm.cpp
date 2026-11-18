@@ -552,7 +552,10 @@ static void apply_code_rep_penalty(float *                  compact_logits,
 // Batched Phase 2: N sequences with potentially different prompts.
 // aces.size() == N: each element gets its own lyrics/metadata.
 // aces.size() == 1: single prompt replicated for all N (prefill once, copy KV).
-// Returns N code strings. Seeds = base_seed + 0, 1, ..., N-1.
+// Returns N code strings. Seeds = base_seed + 0, 1, ..., N-1, and every
+// element shares the largest token budget. A mixed batch (requests from
+// different jobs) passes `seeds` and `budgets`: each element then keeps the
+// seed, token budget and CFG cutoff it would have run alone.
 static std::vector<std::string> run_phase2_batch(Qwen3LM *                      m,
                                                  BPETokenizer &                 bpe,
                                                  const std::vector<AcePrompt> & aces,
@@ -568,13 +571,16 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
                                                  bool (*cancel)(void *),
                                                  void * cancel_data,
                                                  const CodeRepPenalty & rep = CodeRepPenalty(),
-                                                 const LmCodeSampling & cs  = LmCodeSampling()) {
+                                                 const LmCodeSampling & cs  = LmCodeSampling(),
+                                                 const std::vector<uint32_t> * seeds   = nullptr,
+                                                 const std::vector<int> *      budgets = nullptr) {
     int  V             = lm_vocab_size(m);
     bool use_cfg       = cfg_scale > 1.0f;
     bool shared_prompt = ((int) aces.size() == 1);
 
     // Build per-element prompts
     std::vector<std::vector<int>> prompts(N), unconds(N);
+    std::vector<int>              budget(N);
     int                           max_tokens = 0;
     for (int i = 0; i < N; i++) {
         const AcePrompt & a   = shared_prompt ? aces[0] : aces[i];
@@ -588,12 +594,28 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
             unconds[i] = build_lm_prompt_uncond_with_cot(bpe, a, negative_prompt);
         }
         int mt = (int) (a.duration * 5) + 100;
+        budget[i] = mt;
         if (mt > max_tokens) {
             max_tokens = mt;
         }
     }
-    fprintf(stderr, "[LM-Phase2] max_tokens: %d, CFG: %.2f, seeds: %u..%u\n", max_tokens, cfg_scale, base_seed,
-            base_seed + N - 1);
+    if (budgets) {
+        budget     = *budgets;
+        max_tokens = *std::max_element(budget.begin(), budget.end());
+    } else {
+        std::fill(budget.begin(), budget.end(), max_tokens);
+    }
+    auto seed_of = [&](int i) -> uint32_t { return seeds ? (*seeds)[i] : base_seed + i; };
+    if (seeds) {
+        fprintf(stderr, "[LM-Phase2] max_tokens: %d, CFG: %.2f, mixed batch, seeds:", max_tokens, cfg_scale);
+        for (int i = 0; i < N; i++) {
+            fprintf(stderr, " %u", seed_of(i));
+        }
+        fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr, "[LM-Phase2] max_tokens: %d, CFG: %.2f, seeds: %u..%u\n", max_tokens, cfg_scale, base_seed,
+                base_seed + N - 1);
+    }
     if (cfg_cutoff_ratio < 1.0f) {
         fprintf(stderr, "[LM-Phase2] CFG cutoff: ratio=%.2f (CFG for first %d/%d tokens)\n",
                 cfg_cutoff_ratio, (int)(max_tokens * cfg_cutoff_ratio), max_tokens);
@@ -659,7 +681,7 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
 
     // Sample first token from per-element prefill logits (N different seeds)
     for (int i = 0; i < N; i++) {
-        seqs[i].rng.seed(base_seed + i);
+        seqs[i].rng.seed(seed_of(i));
         seqs[i].done = false;
 
         std::vector<float> lg(prefill_logits_vec[i]);  // copy
@@ -720,6 +742,8 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
 
     // This array maps the compact "active" index back to the original sequence index (0 to N-1)
     std::vector<int> active_to_orig(N);
+    // Slot of each active element's uncond row, or -1 when it skips CFG this step.
+    std::vector<int> unc_slot(N);
 
     // Tiny array for CPU sampling (EOS token + Audio Codes) to prevent sorting 150,000 text logits
     int                compact_V = AUDIO_CODE_COUNT + 1;
@@ -737,44 +761,55 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
             fprintf(stderr, "[LM-Phase2] Cancelled at step %d\n", step);
             return {};
         }
+        // An element past its own budget stops here. With a shared budget
+        // this never fires: the loop itself ends at max_tokens.
+        for (int i = 0; i < N; i++) {
+            if (!seqs[i].done && step >= budget[i]) {
+                seqs[i].done = true;
+                n_active--;
+            }
+        }
+        if (n_active == 0) {
+            break;
+        }
+
+        // 1. DYNAMIC COMPACTION: cond rows for every active sequence first,
+        // then uncond rows for those still under their CFG cutoff. With a
+        // shared budget the cutoff is the same for all, so the uncond row of
+        // active slot a sits at n_active + a, as it always has.
         int current_active = 0;
-
-        // CFG cutoff: stop doing CFG after this ratio of steps
-        bool do_cfg_this_step = use_cfg && (cfg_cutoff_ratio >= 1.0f || step < (int)(max_tokens * cfg_cutoff_ratio));
-
-        // 1. DYNAMIC COMPACTION: Loop through all N sequences, but only gather the active ones!
         for (int i = 0; i < N; i++) {
             if (!seqs[i].done) {
                 active_to_orig[current_active] = i;  // Remember that this slot belongs to sequence 'i'
-
-                if (do_cfg_this_step) {
-                    // Place the Cond token/set in the first half
-                    batch_tokens[current_active] = seqs[i].last_token;
-                    batch_sets[current_active]   = cond_sets[i];
-
-                    // Place the Uncond token/set exactly n_active elements later
-                    batch_tokens[n_active + current_active] = seqs[i].last_token;
-                    batch_sets[n_active + current_active]   = uncond_sets[i];
-                } else {
-                    batch_tokens[current_active] = seqs[i].last_token;
-                    batch_sets[current_active]   = cond_sets[i];
-                }
+                batch_tokens[current_active]   = seqs[i].last_token;
+                batch_sets[current_active]     = cond_sets[i];
                 current_active++;
+            }
+        }
+        int n_unc = 0;
+        for (int a = 0; a < n_active; a++) {
+            int i = active_to_orig[a];
+            // CFG cutoff: stop doing CFG after this ratio of the element's steps
+            bool cfg_i = use_cfg && (cfg_cutoff_ratio >= 1.0f || step < (int) (budget[i] * cfg_cutoff_ratio));
+            unc_slot[a] = cfg_i ? n_active + n_unc : -1;
+            if (cfg_i) {
+                batch_tokens[n_active + n_unc] = seqs[i].last_token;
+                batch_sets[n_active + n_unc]   = uncond_sets[i];
+                n_unc++;
             }
         }
 
         // 2. FORWARD PASS: GPU only computes attention for n_active sequences
-        if (do_cfg_this_step && !use_batch_cfg) {
-            // Two separate N=1 forwards (cond, then uncond).
+        if (n_unc > 0 && !use_batch_cfg) {
+            // Two separate forwards (cond, then uncond).
             // Workaround for backends where batched multi-sequence attention
             // produces wrong results (e.g. ROCm/gfx1201). Same logit layout.
             lm_forward_batch(m, batch_tokens.data(), batch_sets.data(), n_active, batch_logits.data(), lm_offset,
                                 lm_count);
-            lm_forward_batch(m, batch_tokens.data() + n_active, batch_sets.data() + n_active, n_active,
+            lm_forward_batch(m, batch_tokens.data() + n_active, batch_sets.data() + n_active, n_unc,
                                 batch_logits.data() + (size_t) n_active * out_V, lm_offset, lm_count);
         } else {
-            int actual_batch_size = do_cfg_this_step ? (2 * n_active) : n_active;
-            lm_forward_batch(m, batch_tokens.data(), batch_sets.data(), actual_batch_size, batch_logits.data(),
+            lm_forward_batch(m, batch_tokens.data(), batch_sets.data(), n_active + n_unc, batch_logits.data(),
                                 lm_offset, lm_count);
         }
 
@@ -784,14 +819,15 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
 
             // Pointer to the conditional logits for THIS active sequence
             float * lc = batch_logits.data() + (size_t) a * out_V;
+            bool do_cfg_this_step = unc_slot[a] >= 0;
 
             if (do_cfg_this_step && cs.cfg.any()) {
-                const float * lu = batch_logits.data() + (size_t) (n_active + a) * out_V;
+                const float * lu = batch_logits.data() + (size_t) unc_slot[a] * out_V;
                 lm_cfg_compact_extras(lc, lu, eos_idx, code_offset, cfg_scale, cs.cfg, compact_logits.data());
             } else {
                 if (do_cfg_this_step) {
-                    // Pointer to the unconditional logits (offset by n_active)
-                    float * lu = batch_logits.data() + (size_t) (n_active + a) * out_V;
+                    // Pointer to the unconditional logits for this sequence
+                    float * lu = batch_logits.data() + (size_t) unc_slot[a] * out_V;
 
                     // Targeted CFG Math: Only apply it to EOS + Audio Codes. Skip the 150,000 text tokens!
                     lc[eos_idx] = lu[eos_idx] + cfg_scale * (lc[eos_idx] - lu[eos_idx]);  // EOS token
@@ -852,7 +888,7 @@ static std::vector<std::string> run_phase2_batch(Qwen3LM *                      
     std::vector<std::string> results(N);
     for (int i = 0; i < N; i++) {
         results[i] = codes_to_string(seqs[i].audio_codes);
-        fprintf(stderr, "[LM-Phase2 Batch%d] seed=%u, %zu codes\n", i, base_seed + i, seqs[i].audio_codes.size());
+        fprintf(stderr, "[LM-Phase2 Batch%d] seed=%u, %zu codes\n", i, seed_of(i), seqs[i].audio_codes.size());
     }
     return results;
 }
@@ -1454,16 +1490,20 @@ AceLm * ace_lm_load(ModelStore * store, const AceLmParams * params) {
     return ctx;
 }
 
-int ace_lm_generate(AceLm *            ctx,
-                    const AceRequest * req,
-                    int                lm_batch_size,
-                    AceRequest *       out,
-                    const char *       dump_logits,
-                    const char *       dump_tokens,
-                    bool (*cancel)(void *),
-                    void * cancel_data,
-                    int    mode) {
-    if (!ctx || !req || !out || lm_batch_size < 1) {
+// phase1_out: stop after phase 1 and hand back the enriched prompts (one per
+// batch element, or one shared). Used by ace_lm_generate_multi; out may be
+// null then.
+static int lm_generate_impl(AceLm *                  ctx,
+                            const AceRequest *       req,
+                            int                      lm_batch_size,
+                            AceRequest *             out,
+                            const char *             dump_logits,
+                            const char *             dump_tokens,
+                            bool (*cancel)(void *),
+                            void *                   cancel_data,
+                            int                      mode,
+                            std::vector<AcePrompt> * phase1_out) {
+    if (!ctx || !req || (!out && !phase1_out) || lm_batch_size < 1) {
         return -1;
     }
     if (lm_batch_size > ctx->params.max_batch) {
@@ -1779,6 +1819,10 @@ int ace_lm_generate(AceLm *            ctx,
     if (aces.empty()) {
         aces = { ace };
     }
+    if (phase1_out) {
+        *phase1_out = std::move(aces);
+        return 0;
+    }
 
     // Debug: dump tokens/logits
     if (!user_has_codes && (dump_logits || dump_tokens)) {
@@ -1914,6 +1958,187 @@ int ace_lm_generate(AceLm *            ctx,
     }
 
     fprintf(stderr, "[Ace-LM] Total %.0fms | seed=%lld\n", t_total.ms(), dit_seed);
+    return 0;
+}
+
+int ace_lm_generate(AceLm *            ctx,
+                    const AceRequest * req,
+                    int                lm_batch_size,
+                    AceRequest *       out,
+                    const char *       dump_logits,
+                    const char *       dump_tokens,
+                    bool (*cancel)(void *),
+                    void * cancel_data,
+                    int    mode) {
+    return lm_generate_impl(ctx, req, lm_batch_size, out, dump_logits, dump_tokens, cancel, cancel_data, mode,
+                            nullptr);
+}
+
+const char * ace_lm_batch_mismatch(const AceRequest * a, const AceRequest * b) {
+#define LM_SAME(f)         \
+    if (!(a->f == b->f)) { \
+        return #f;         \
+    }
+    LM_SAME(lm_mode)
+    LM_SAME(lm_model)
+    LM_SAME(lm_adapter)
+    LM_SAME(lm_adapter_scale)
+    LM_SAME(lm_temperature)
+    LM_SAME(lm_cfg_scale)
+    LM_SAME(lm_cfg_cutoff_ratio)
+    LM_SAME(lm_top_p)
+    LM_SAME(lm_top_k)
+    LM_SAME(lm_min_p)
+    LM_SAME(lm_cfg_min_p)
+    LM_SAME(lm_cfg_logprob)
+    LM_SAME(lm_cfg_rescale)
+    LM_SAME(lm_rep_penalty)
+    LM_SAME(lm_rep_window)
+    LM_SAME(lm_rep_mode)
+    LM_SAME(lm_dry_base)
+    LM_SAME(lm_dry_min_len)
+    LM_SAME(lm_negative_prompt)
+#undef LM_SAME
+    return nullptr;
+}
+
+int ace_lm_generate_multi(AceLm *            ctx,
+                          const AceRequest * reqs,
+                          int                n_reqs,
+                          AceRequest *       out,
+                          bool (*cancel)(void *),
+                          void * cancel_data) {
+    if (!ctx || !reqs || !out || n_reqs < 1) {
+        return -1;
+    }
+    std::vector<int> per(n_reqs);
+    int              N = 0;
+    for (int r = 0; r < n_reqs; r++) {
+        per[r] = std::max(1, reqs[r].lm_batch_size);
+        N += per[r];
+        if (const char * f = ace_lm_batch_mismatch(&reqs[0], &reqs[r])) {
+            fprintf(stderr, "[Ace-LM] ERROR: mixed batch request %d differs in %s\n", r, f);
+            return -1;
+        }
+        if (!reqs[r].audio_codes.empty() || reqs[r].caption.empty()) {
+            fprintf(stderr, "[Ace-LM] ERROR: mixed batch request %d has audio_codes or no caption\n", r);
+            return -1;
+        }
+    }
+    if (n_reqs == 1) {
+        return ace_lm_generate(ctx, reqs, per[0], out, NULL, NULL, cancel, cancel_data, LM_MODE_GENERATE);
+    }
+    if (N > ctx->params.max_batch) {
+        fprintf(stderr, "[Ace-LM] ERROR: mixed batch of %d > max_batch %d\n", N, ctx->params.max_batch);
+        return -1;
+    }
+
+    // TensorRT LMs and speculative decode only run one song at a time: run
+    // each request on its own there, so it keeps the path it takes alone.
+    bool one_by_one = ctx->draft_loaded;
+#ifdef HOT_STEP_TRT
+    one_by_one = one_by_one || ctx->use_trt;
+#endif
+#ifdef HOT_STEP_TRTLLM
+    one_by_one = one_by_one || ctx->use_trtllm;
+#endif
+    if (one_by_one) {
+        fprintf(stderr, "[Ace-LM] Mixed batch of %d requests runs one by one (TensorRT or draft LM)\n", n_reqs);
+        for (int r = 0, o = 0; r < n_reqs; o += per[r], r++) {
+            if (ace_lm_generate(ctx, &reqs[r], per[r], out + o, NULL, NULL, cancel, cancel_data, LM_MODE_GENERATE)) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    // Hold the LM across both phases: each phase-1 call requires it again,
+    // and under EVICT_STRICT a release to zero would unload it in between.
+    Qwen3LM * model = store_require_lm(ctx->store, ctx->lm_key);
+    if (!model) {
+        fprintf(stderr, "[Ace-LM] ERROR: store_require_lm failed\n");
+        return -1;
+    }
+    ModelHandle lm_guard(ctx->store, model);
+    Timer       t_total;
+
+    // Phase 1 runs per request, through the same code a request takes alone.
+    // ponytail: phase 1 is serial (about 1.5 s a song on a 3090 with lyrics
+    // given); batch it too if songs without lyrics make it dominate.
+    std::vector<AcePrompt> aces;
+    std::vector<uint32_t>  seeds;
+    std::vector<int>       budgets;  // each request's own token budget, as run_phase2_batch sets it alone
+    std::vector<int64_t>   dit_seeds(n_reqs);
+    for (int r = 0; r < n_reqs; r++) {
+        std::vector<AcePrompt> a;
+        if (lm_generate_impl(ctx, &reqs[r], per[r], NULL, NULL, NULL, cancel, cancel_data, LM_MODE_GENERATE, &a)) {
+            return -1;
+        }
+        dit_seeds[r] = reqs[r].seed;
+        if (dit_seeds[r] < 0) {
+            std::random_device rd;
+            dit_seeds[r] = (int64_t) rd();
+        }
+        int budget = 0;
+        for (const AcePrompt & e : a) {
+            budget = std::max(budget, (int) (e.duration * 5) + 100);
+        }
+        for (int b = 0; b < per[r]; b++) {
+            aces.push_back(a[b < (int) a.size() ? b : 0]);
+            seeds.push_back((uint32_t) reqs[r].lm_seed + (uint32_t) b);
+            budgets.push_back(budget);
+        }
+    }
+
+    BPETokenizer * bpe = store_bpe(ctx->store, ctx->params.model_path);
+    if (!bpe) {
+        return -1;
+    }
+    const AceRequest & q = reqs[0];
+    LmCodeSampling     cs;
+    cs.min_p       = q.lm_min_p;
+    cs.cfg.min_p   = q.lm_cfg_min_p;
+    cs.cfg.logprob = q.lm_cfg_logprob;
+    cs.cfg.rescale = q.lm_cfg_rescale;
+    CodeRepPenalty rep;
+    rep.penalty     = q.lm_rep_penalty;
+    rep.window      = q.lm_rep_window;
+    rep.mode        = lm_rep_mode_from_name(q.lm_rep_mode);
+    rep.dry_base    = q.lm_dry_base;
+    rep.dry_min_len = q.lm_dry_min_len;
+
+    fprintf(stderr, "[LM-Generate] mixed batch: %d requests, %d songs\n", n_reqs, N);
+    std::vector<std::string> codes =
+        run_phase2_batch(model, *bpe, aces, q.lm_temperature, q.lm_top_p, q.lm_top_k, seeds[0], N, q.lm_cfg_scale,
+                         q.lm_cfg_cutoff_ratio, q.lm_negative_prompt.c_str(), ctx->params.use_batch_cfg, cancel,
+                         cancel_data, rep, cs, &seeds, &budgets);
+    if (codes.empty()) {
+        return -1;
+    }
+
+    // The same outputs ace_lm_generate writes for each request alone.
+    for (int r = 0, o = 0; r < n_reqs; o += per[r], r++) {
+        for (int b = 0; b < per[r]; b++) {
+            AceRequest &      x = out[o + b];
+            const AcePrompt & a = aces[o + b];
+            x                   = reqs[r];
+            x.caption           = a.caption;
+            x.lyrics            = a.lyrics;
+            x.bpm               = a.bpm;
+            x.duration          = a.duration;
+            x.keyscale          = a.keyscale;
+            x.timesignature     = a.timesignature;
+            x.vocal_language    = a.vocal_language;
+            if (!codes[o + b].empty()) {
+                x.audio_codes = codes[o + b];
+            }
+            x.seed          = dit_seeds[r] + b;
+            x.seed_b        = reqs[r].seed_b >= 0 ? reqs[r].seed_b + b : -1;
+            x.lm_seed       = reqs[r].lm_seed + b;
+            x.lm_batch_size = 1;
+        }
+    }
+    fprintf(stderr, "[Ace-LM] Total %.0fms | mixed batch of %d\n", t_total.ms(), N);
     return 0;
 }
 

@@ -84,6 +84,10 @@ export interface AudioQueueItem {
   /** Lead job id of the server batch this item rendered in (YuE2 queue
    *  coalescing); the queue boxes items sharing one. */
   batchId?: string;
+  /** 'lm' when the batch only shared an ACE LM pass and rendered one by one. */
+  batchKind?: string;
+  /** Items in the submit wave this item went up with (ACE coalescing hint). */
+  lmWave?: number;
   error?: string;
   audioUrl?: string;
   songId?: string;
@@ -707,7 +711,7 @@ async function applyServerItemsNow(items: AudioIntentItem[]): Promise<void> {
         item.progress = job.progress === undefined ? item.progress : Math.min(100, (job.progress > 1 ? job.progress / 100 : job.progress) * 100);
         item.stage = job.stage || item.stage;
         _captureMm3Stream(item, job);
-        if (job.batch?.lead) item.batchId = job.batch.lead;
+        if (job.batch?.lead) { item.batchId = job.batch.lead; item.batchKind = job.batch.kind; }
         _syncTakeSiblings(item, job);
       } catch { /* server queue owns retry and interruption state */ }
     }
@@ -1587,7 +1591,7 @@ export async function enqueueSimpleGen(
         item.stage = status.stage || 'Generating…';
         item.elapsed = t.elapsed;
         _captureMm3Stream(item, status);
-    if (status.batch?.lead) item.batchId = status.batch.lead;
+    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
         _syncTakeSiblings(item, status);
         _emit();  // progress tick — debounced persistence
 
@@ -1898,14 +1902,23 @@ const YUE2_QUEUE_WAVE = 4;
 const YUE2_QUEUE_HOLD_MS = 5_000;
 let _lastEnqueueAt = 0;
 
+/** ACE: songs queued together go up together so the server can plan them in
+ *  one LM pass (backends/ace/lmCoalesce.ts). 4 = the songs one pass holds. */
+const ACE_QUEUE_WAVE = 4;
+
 function _submitWave(next: AudioQueueItem, pending: AudioQueueItem[]): AudioQueueItem[] {
-  if (useBackendStore.getState().activeBackendId !== YUE2_BACKEND_ID) return [next];
+  const backend = useBackendStore.getState().activeBackendId;
+  if (backend !== YUE2_BACKEND_ID && backend !== 'ace') return [next];
+  const size = backend === 'ace' ? ACE_QUEUE_WAVE : YUE2_QUEUE_WAVE;
   const wave = [next];
   for (const item of pending) {
-    if (wave.length >= YUE2_QUEUE_WAVE) break;
-    if (item === next || item.jobId || item.lyricsSetId !== next.lyricsSetId) continue;
+    if (wave.length >= size) break;
+    if (item === next || item.jobId) continue;
+    if (backend === YUE2_BACKEND_ID && item.lyricsSetId !== next.lyricsSetId) continue;
     wave.push(item);
   }
+  // Tells the ACE server a lone first song that the rest are on the way.
+  for (const item of wave) item.lmWave = wave.length;
   return wave;
 }
 
@@ -2098,7 +2111,7 @@ async function _tryReconnect(item: AudioQueueItem): Promise<boolean> {
     // Still running — resume polling
     console.log(`[AudioQueue] Reconnected to job ${jobId} — resuming poll (status=${status.status})`);
     _captureMm3Stream(item, status);
-    if (status.batch?.lead) item.batchId = status.batch.lead;
+    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
     item.status = 'generating';
     item.stage = status.stage || 'Reconnected…';
     item.progress = status.progress;
@@ -2209,7 +2222,10 @@ async function _executeItem(item: AudioQueueItem): Promise<void> {
     item.stage = 'Submitting to audio engine…';
     _emit(true);
     if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit(preview.request as unknown as GenerationParams);
+    const res = await generateApi.submit({
+      ...(preview.request as Record<string, unknown>),
+      ...((item.lmWave ?? 1) > 1 ? { lmBatchWave: item.lmWave } : {}),
+    } as unknown as GenerationParams);
     item.jobId = res.jobId;
     _emit(true);
     if (res.jobId) await lireekApi.linkAudio(gen.id, res.jobId, item.lyricsSetId);
@@ -2469,7 +2485,7 @@ async function _pollUntilDone(item: AudioQueueItem): Promise<void> {
       item.stage = status.stage || 'Generating…';
       item.elapsed = t.elapsed;
       _captureMm3Stream(item, status);
-    if (status.batch?.lead) item.batchId = status.batch.lead;
+    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
       _syncTakeSiblings(item, status);
       _emit();  // progress tick — debounced persistence
 

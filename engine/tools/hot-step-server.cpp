@@ -1135,7 +1135,10 @@ static void lm_fit_resident_kv(int batch) {
 }
 
 // LM worker: generates metadata + lyrics + codes, stores JSON result in job.
-static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode) {
+// `more` holds the other requests of a mixed batch (POST /lm with an array);
+// lm_batch_size is then the songs across all of them.
+static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode,
+                      std::vector<AceRequest> more = {}) {
     if (job->cancel.load()) {
         job_set_phase(*job, JobPhase::CANCELLED);
         job->status.store(3);
@@ -1204,8 +1207,21 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     }
     request_resolve_lm_seed(&ace_req);
     std::vector<AceRequest> out(lm_batch_size);
-    int rc = ace_lm_generate(ctx, &ace_req, lm_batch_size, out.data(), NULL, NULL, server_cancel_job,
+    int                     rc;
+    if (more.empty()) {
+        rc = ace_lm_generate(ctx, &ace_req, lm_batch_size, out.data(), NULL, NULL, server_cancel_job,
                              (void *) &job->cancel, mode);
+    } else {
+        more.insert(more.begin(), ace_req);
+        for (size_t i = 1; i < more.size(); i++) {
+            if (more[i].lm_seed < 0) {
+                more[i].lm_seed = more[i].seed;
+            }
+            request_resolve_lm_seed(&more[i]);
+        }
+        rc = ace_lm_generate_multi(ctx, more.data(), (int) more.size(), out.data(), server_cancel_job,
+                                   (void *) &job->cancel);
+    }
     ace_lm_free(ctx);
 
     if (rc != 0) {
@@ -1240,6 +1256,44 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     fprintf(stderr, "[Server] Job %s done (LM, %d results)\n", job->id.c_str(), lm_batch_size);
 }
 
+// POST /lm with a JSON array: requests from several jobs in one LM pass
+// (generate mode only). Each must agree on the LM and its sampling settings
+// and carry no audio_codes; the songs across them (lm_batch_size each) must
+// fit --max-batch. The result is one array, in request order.
+static void handle_lm_mixed(const httplib::Request & req, httplib::Response & res) {
+    std::vector<AceRequest> reqs;
+    if (!request_parse_json_array(req.body.c_str(), &reqs)) {
+        json_error(res, 400, "Invalid JSON");
+        return;
+    }
+    int songs = 0;
+    for (size_t i = 0; i < reqs.size(); i++) {
+        const AceRequest & r = reqs[i];
+        if (r.caption.empty() || !r.audio_codes.empty() || r.lm_mode != LM_MODE_NAME_GENERATE) {
+            json_error(res, 400, "Mixed LM batch: each request needs a caption, no audio_codes and lm_mode generate");
+            return;
+        }
+        if (const char * f = ace_lm_batch_mismatch(&reqs[0], &r)) {
+            json_error(res, 400, (std::string("Mixed LM batch: requests differ in ") + f).c_str());
+            return;
+        }
+        songs += r.lm_batch_size < 1 ? 1 : r.lm_batch_size;
+    }
+    if (songs > g_max_batch) {
+        json_error(res, 400, ("Mixed LM batch: " + std::to_string(songs) + " songs exceed --max-batch " +
+                              std::to_string(g_max_batch)).c_str());
+        return;
+    }
+
+    auto job = job_create();
+    fprintf(stderr, "[Server] Job %s created (LM, mixed batch of %zu requests, %d songs)%s\n", job->id.c_str(),
+            reqs.size(), songs, g_keep_loaded ? " [keep-loaded]" : "");
+    AceRequest              lead = reqs[0];
+    std::vector<AceRequest> more(reqs.begin() + 1, reqs.end());
+    work_push([job, lead, songs, more]() { lm_worker(job, lead, songs, LM_MODE_GENERATE, more); });
+    res.set_content("{\"id\":\"" + job->id + "\"}", "application/json");
+}
+
 // POST /lm
 // accepts: AceRequest JSON (lm_mode in the body selects the generation mode).
 // returns: JSON {"id":"N"} immediately. result is a JSON array of enriched
@@ -1263,6 +1317,13 @@ static void handle_lm(const httplib::Request & req, httplib::Response & res) {
         g_keep_loaded = true;
         store_set_policy(g_store, EVICT_NEVER);
         fprintf(stderr, "[Server] Co-resident mode activated (from /lm)\n");
+    }
+
+    // An array is a mixed batch: other jobs' songs share this LM pass.
+    size_t first = req.body.find_first_not_of(" \t\r\n");
+    if (first != std::string::npos && req.body[first] == '[') {
+        handle_lm_mixed(req, res);
+        return;
     }
 
     // parse request
