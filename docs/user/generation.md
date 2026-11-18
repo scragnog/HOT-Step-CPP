@@ -292,7 +292,12 @@ plan per track, then the DiT renders them one after another, each as its own son
 Library. How many tracks one LM pass plans depends on the card's memory, since each track in
 a pass costs about 2.3 GB on the 4B LM: 4 on a 24 GB card, 2 on a 16 GB card, 1 on a smaller
 card, a non-NVIDIA GPU, or a 24 GB card with Keep models in VRAM on. More tracks run as further
-passes, so every track still gets its own plan. With the LM
+passes, so every track still gets its own plan. Track *n* is planned with LM seed and
+Generation Seed both raised by *n* - 1, and saves those two seeds. A plan made in a batch
+is not quite the plan the same seeds give alone: songs planned together match their solo
+plan for roughly the first 30 seconds of music, then go their own way, like a fresh take.
+So re-rendering one track of a batch on its own from its saved seeds gives the same
+opening and a different rest. The same seeds in the same batch give the same plans again. With the LM
 switched off, and for cover and repaint tasks, the extra tracks reuse the same plan with a
 different random DiT seed each. The generation timeout in Settings applies per track, not
 per batch.
@@ -578,8 +583,10 @@ re-runs from the Library wait in the same line.
 - ACE-Step songs waiting behind the one about to plan, with the same LM model, LM adapter
   and LM settings, are planned in the same LM pass, as many as one pass holds on your card
   (see [Batch size](#batch-size)), so a card that plans one track per pass never does this. Each still renders on
-  its own turn and gets the same plan it would have got alone; only the planning is
-  shared, which saves an LM load and a pass for each song that joins. Songs with the LM
+  its own turn; only the planning is
+  shared, which saves an LM load and a pass for each song that joins. As with a batch
+  (see [Batch size](#batch-size)), a song's plan then differs from its solo plan after
+  roughly the first 30 seconds. Songs with the LM
   switched off, cover and repaint tasks, and songs whose plans are already cached never
   join. The Lyric Studio queue boxes them as "planned together", with the time the songs
   took between them. If the shared pass fails or is cancelled, each song plans alone.

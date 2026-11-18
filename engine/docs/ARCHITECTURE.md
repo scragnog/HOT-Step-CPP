@@ -929,8 +929,12 @@ POST /lm[?keep_loaded=1]         LM job. Body: AceRequest JSON. lm_mode picks
                                  the LM and every sampling setting, carry no
                                  audio_codes, and their lm_batch_size total must
                                  fit --max-batch, or the call is a 400 naming the
-                                 field. Each song gets the tokens it gets alone,
-                                 seed for seed; results come back in request order.
+                                 field. Results come back in request order, each
+                                 song with its own seeds. Batched decode is not
+                                 batch-invariant: a song's codes match its solo
+                                 run for roughly the first 160 codes, as in a
+                                 uniform batch, and the same batch and seeds
+                                 repeat exactly. Phase 1 output matches solo.
 POST /synth[?format=mp3|wav16|wav24|wav32][&keep_loaded=1]
                                  Synth job. Body: AceRequest JSON, or an array of
                                  them, or multipart/form-data with parts:

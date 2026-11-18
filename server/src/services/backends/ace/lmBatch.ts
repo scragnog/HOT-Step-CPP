@@ -1,12 +1,12 @@
-import type { AceRequest } from '../../aceClient.js';
+import { aceKeepLoadedLatched, type AceRequest } from '../../aceClient.js';
 import { config } from '../../../config.js';
 import { listGpusSync } from '../../gpuDevices.js';
 
 /** Split a batch of N songs into LM passes of at most `cap`. Pass k starts at
  *  song `offset`, so its seeds are shifted by `offset`: the engine gives song b
- *  of a pass lm_seed + b, and every song keeps the LM seed it would get in one
- *  pass of N. A seed the engine resolves itself (absent or negative) stays
- *  unset, and those passes draw their own. */
+ *  of a pass seed + b and lm_seed + b, and every song keeps the seeds it would
+ *  get in one pass of N. A seed the engine resolves itself (absent or negative)
+ *  stays unset, and those passes draw their own. */
 export function planLmPasses(req: AceRequest, n: number, cap: number): AceRequest[] {
   const total = Math.max(1, Math.floor(n) || 1);
   const size = Math.max(1, Math.floor(cap) || 1);
@@ -16,8 +16,8 @@ export function planLmPasses(req: AceRequest, n: number, cap: number): AceReques
     const pass: AceRequest = { ...req, lm_batch_size: Math.min(size, total - offset) };
     if (offset > 0) {
       // lm_seed absent = the engine ties it to seed, so shifting seed shifts both.
+      pass.seed = shift(req.seed, offset);
       if (req.lm_seed !== undefined) pass.lm_seed = shift(req.lm_seed, offset);
-      else pass.seed = shift(req.seed, offset);
     }
     passes.push(pass);
   }
@@ -48,5 +48,33 @@ export function aceLmSongsPerPass(coResident: boolean): number {
     const mb = listGpusSync().map(g => g.memoryMB).filter(n => n > 0);
     smallestCardMb = mb.length ? Math.min(...mb) : null;
   }
-  return lmSongsPerPass(smallestCardMb, coResident || config.aceServer.keepLoaded, config.aceServer.lmMaxBatch);
+  // The engine's keep-loaded policy latches: a job without co-residence still
+  // finds the synth stack resident after any earlier job that asked for it.
+  const resident = coResident || config.aceServer.keepLoaded || aceKeepLoadedLatched();
+  return lmSongsPerPass(smallestCardMb, resident, config.aceServer.lmMaxBatch);
+}
+
+/** LM output fields a track takes, from an engine result or the LM cache. */
+export type LmPlan = Pick<AceRequest, 'audio_codes' | 'caption' | 'lyrics' | 'bpm' | 'duration'
+  | 'keyscale' | 'timesignature' | 'lm_seed' | 'seed'>;
+
+/** The request a track renders from: the job's current request (every DiT,
+ *  adapter and sideband field) with only the LM's fields from the plan, plus
+ *  the seed pair the engine planned it with: lm_seed + i beside seed + i, so
+ *  each track saves the pair it was planned with. A replay alone still drifts
+ *  from the batched plan after its opening (docs/user/generation.md). `seed`
+ *  overrides the DiT seed, for a plan-guard resample that keeps its slot's. */
+export function trackFromPlan(base: AceRequest, plan: Partial<LmPlan>, seed = plan.seed ?? base.seed): AceRequest {
+  return {
+    ...base,
+    audio_codes: plan.audio_codes,
+    caption: plan.caption ?? base.caption,
+    lyrics: plan.lyrics,
+    bpm: plan.bpm,
+    duration: plan.duration,
+    keyscale: plan.keyscale,
+    timesignature: plan.timesignature,
+    lm_seed: plan.lm_seed,
+    seed,
+  };
 }

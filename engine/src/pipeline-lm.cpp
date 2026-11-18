@@ -2015,6 +2015,12 @@ int ace_lm_generate_multi(AceLm *            ctx,
     int              N = 0;
     for (int r = 0; r < n_reqs; r++) {
         per[r] = std::max(1, reqs[r].lm_batch_size);
+        // Checked before adding, so a huge count cannot wrap the sum below the cap.
+        if (per[r] > ctx->params.max_batch - N) {
+            fprintf(stderr, "[Ace-LM] ERROR: mixed batch exceeds max_batch %d at request %d\n",
+                    ctx->params.max_batch, r);
+            return -1;
+        }
         N += per[r];
         if (const char * f = ace_lm_batch_mismatch(&reqs[0], &reqs[r])) {
             fprintf(stderr, "[Ace-LM] ERROR: mixed batch request %d differs in %s\n", r, f);
@@ -2027,10 +2033,6 @@ int ace_lm_generate_multi(AceLm *            ctx,
     }
     if (n_reqs == 1) {
         return ace_lm_generate(ctx, reqs, per[0], out, NULL, NULL, cancel, cancel_data, LM_MODE_GENERATE);
-    }
-    if (N > ctx->params.max_batch) {
-        fprintf(stderr, "[Ace-LM] ERROR: mixed batch of %d > max_batch %d\n", N, ctx->params.max_batch);
-        return -1;
     }
 
     // TensorRT LMs and speculative decode only run one song at a time: run

@@ -49,8 +49,11 @@ int ace_lm_generate(AceLm *            ctx,
                     int    mode            = LM_MODE_GENERATE);
 
 // Mixed batch: several requests (each lm_batch_size songs) in one LM pass,
-// generate mode only. Every song gets the tokens it would get run alone, seed
-// for seed. Requests must agree on the LM and its sampling settings (see
+// generate mode only. Each song keeps its own seeds, token budget and CFG
+// cutoff, and phase 1 runs exactly as alone. Phase 2 decode is batched and not
+// batch-invariant: codes match a solo run for roughly the first 160, like a
+// uniform batch, then drift; the same batch repeats exactly.
+// Requests must agree on the LM and its sampling settings (see
 // ace_lm_batch_mismatch) and carry no audio_codes; lm_seed must be resolved.
 // out holds the sum of lm_batch_size, in request order.
 int ace_lm_generate_multi(AceLm *            ctx,

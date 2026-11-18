@@ -1277,11 +1277,16 @@ static void handle_lm_mixed(const httplib::Request & req, httplib::Response & re
             json_error(res, 400, (std::string("Mixed LM batch: requests differ in ") + f).c_str());
             return;
         }
-        songs += r.lm_batch_size < 1 ? 1 : r.lm_batch_size;
+        // Check each count before adding it, so no sum can overflow past the cap.
+        int n = r.lm_batch_size < 1 ? 1 : r.lm_batch_size;
+        if (n > g_max_batch - songs) {
+            songs = g_max_batch + 1;
+            break;
+        }
+        songs += n;
     }
     if (songs > g_max_batch) {
-        json_error(res, 400, ("Mixed LM batch: " + std::to_string(songs) + " songs exceed --max-batch " +
-                              std::to_string(g_max_batch)).c_str());
+        json_error(res, 400, ("Mixed LM batch: the songs exceed --max-batch " + std::to_string(g_max_batch)).c_str());
         return;
     }
 

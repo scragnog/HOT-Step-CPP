@@ -16,7 +16,7 @@ import { applyTriggers, resolveAdapterTriggers, resolveTriggerSpecs } from '../.
 import { readAdapterTrigger } from '../../adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../../generation/lmCache.js';
 import { degeneratePlanReason } from '../../generation/planGuard.js';
-import { aceLmSongsPerPass, planLmPasses } from './lmBatch.js';
+import { aceLmSongsPerPass, planLmPasses, trackFromPlan } from './lmBatch.js';
 import { claimLmFollowers, runSharedLmPass, songsOf, type LmFollower } from './lmCoalesce.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../../generation/sourceAudio.js';
 import { runPostProcessingChain, normalizePpParams } from '../../generation/postProcessing.js';
@@ -113,19 +113,7 @@ export async function runAceGeneration(
         // Cache hit — reconstruct full AceRequests from current params
         // + cached LM output. Only LM-generated fields come from cache;
         // everything else (DiT, adapter, DCW, etc.) uses current aceReq.
-        lmResults = cached.lmOutputs.map(lmOut => ({
-          ...aceReq,
-          audio_codes: lmOut.audio_codes,
-          caption: lmOut.caption,
-          lyrics: lmOut.lyrics,
-          bpm: lmOut.bpm,
-          duration: lmOut.duration,
-          keyscale: lmOut.keyscale,
-          timesignature: lmOut.timesignature,
-          // Resolved per-output LM seed (base + batch index) from the run
-          // that produced these codes — see the cache-miss rebuild below.
-          lm_seed: lmOut.lm_seed,
-        }));
+        lmResults = cached.lmOutputs.map(lmOut => trackFromPlan(aceReq, lmOut));
         job.lmResults = lmResults;
         cached.timestamp = Date.now(); // refresh LRU
 
@@ -202,7 +190,12 @@ export async function runAceGeneration(
           return all;
         };
 
+        // Either wait below can outlast a cancel: stop before sending any work.
+        const stopIfCancelled = () => {
+          if (deps.signal.aborted || (job.status as string) === 'cancelled') throw new Error('Cancelled');
+        };
         const sharedPlans = share ? await share.plans : null;
+        stopIfCancelled();
         if (share) {
           logGeneration(job.id, sharedPlans ? 'INFO' : 'WARNING', sharedPlans
             ? `[LM Phase] Plans came from job ${share.lead}'s LM pass`
@@ -218,6 +211,7 @@ export async function runAceGeneration(
         if (!sharedPlans && deps.pendingJobs && !config.aceServer.draftLm && songs < cap) {
           if (Number(job.params.lmBatchWave) > 1 && deps.pendingJobs().length === 0) {
             await new Promise(r => setTimeout(r, ACE_COALESCE_WAIT_MS));
+            stopIfCancelled();
           }
           followers = claimLmFollowers(job, aceReq, {
             pending: deps.pendingJobs(),
@@ -265,21 +259,7 @@ export async function runAceGeneration(
         // request and take only the LM-generated fields from the echo (the
         // same reconstruction the cache-hit path uses above), so every
         // sideband field reaches /synth regardless of cache state.
-        lmResults = lmResults.map(lmOut => ({
-          ...aceReq,
-          audio_codes: lmOut.audio_codes,
-          caption: lmOut.caption,
-          lyrics: lmOut.lyrics,
-          bpm: lmOut.bpm,
-          duration: lmOut.duration,
-          keyscale: lmOut.keyscale,
-          timesignature: lmOut.timesignature,
-          // The engine gives each LM batch output its own seed (lm_seed + b)
-          // and echoes the resolved value — keep it so per-track
-          // generation_params record the seed that actually produced this
-          // track's codes, not the request-level base.
-          lm_seed: lmOut.lm_seed,
-        }));
+        lmResults = lmResults.map(lmOut => trackFromPlan(aceReq, lmOut));
         job.lmResults = lmResults;
 
         // ── Plan guard (Rob, 2026-08-29) — adapter-led runs only ──────────
@@ -322,17 +302,7 @@ export async function runAceGeneration(
             // Replace only the degenerate slots; keep healthy plans untouched.
             for (const [j, b] of bad.entries()) {
               const lmOut = retryOut[Math.min(j, retryOut.length - 1)];
-              lmResults[b.idx] = {
-                ...aceReq,
-                audio_codes: lmOut.audio_codes,
-                caption: lmOut.caption,
-                lyrics: lmOut.lyrics,
-                bpm: lmOut.bpm,
-                duration: lmOut.duration,
-                keyscale: lmOut.keyscale,
-                timesignature: lmOut.timesignature,
-                lm_seed: lmOut.lm_seed,
-              };
+              lmResults[b.idx] = trackFromPlan(aceReq, lmOut, lmResults[b.idx].seed);
             }
             job.lmResults = lmResults;
           }
@@ -369,6 +339,7 @@ export async function runAceGeneration(
             keyscale: r.keyscale || '',
             timesignature: r.timesignature || '',
             lm_seed: r.lm_seed,
+            seed: r.seed,
           }));
           setLmCache(cacheKey, lmOutputs);
           logGeneration(job.id, 'INFO', `[LM Phase] Cached LM outputs (key=${cacheKey}, cache size=${getLmCacheSize()})`);
@@ -736,10 +707,8 @@ export async function runAceGeneration(
 
       const trackProgressBase = SYNTH_PROGRESS_START + trackIdx * progressPerTrack;
 
-      // Vary DiT seed per track for additional variation
-      if (job.params.randomSeed && trackIdx > 0) {
-        synthReq.seed = Math.floor(Math.random() * 2_147_483_647);
-      }
+      // Each track already has its own DiT seed: seed + i from the LM beside
+      // lm_seed + i, or a random one when the batch was expanded from one plan.
 
       // Resolve before submission so every track keeps its reproducible retake seed.
       if ((synthReq.retake_variance ?? 0) > 0 && (synthReq.retake_seed ?? -1) < 0) {

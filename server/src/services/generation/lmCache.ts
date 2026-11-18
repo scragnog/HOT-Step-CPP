@@ -17,6 +17,8 @@ export interface LmCacheEntry {
   /** Resolved engine LM seed for this output (base lm_seed + batch index) —
    *  cached so cache-hit tracks display the seed that produced their codes. */
   lm_seed?: number;
+  /** DiT seed the engine paired with this output (seed + batch index). */
+  seed?: number;
 }
 
 const LM_CACHE_MAX = 20;
