@@ -143,13 +143,19 @@ async function scrapeLyrics(songUrl: string): Promise<string | null> {
   }
 }
 
-async function acquireLyrics(artist: string, title: string, url: string): Promise<SourcedLyrics | null> {
-  try {
-    const raw = await scrapeLyrics(url);
-    const lyrics = raw ? cleanLyrics(raw) : '';
-    if (lyrics) return { title, lyrics, url, source: 'genius' };
-  } catch (error) {
-    console.warn('[Lyrics] Genius unavailable; trying other sources:', (error as Error).message);
+async function acquireLyrics(
+  artist: string, title: string, url: string, session: { blocked: boolean },
+): Promise<SourcedLyrics | null> {
+  if (!session.blocked) {
+    try {
+      await sleep(300);
+      const raw = await scrapeLyrics(url);
+      const lyrics = raw ? cleanLyrics(raw) : '';
+      if (lyrics) return { title, lyrics, url, source: 'genius' };
+    } catch (error) {
+      if (error instanceof GeniusBlockedError) session.blocked = true;
+      console.warn('[Lyrics] Genius unavailable; trying other sources:', (error as Error).message);
+    }
   }
   return lookupFallbackLyrics(artist, title);
 }
@@ -388,7 +394,7 @@ export async function fetchLyrics(
   albumName?: string | null,
   maxSongs = 10,
 ): Promise<LyricsSearchResponse> {
-  const scrapeDelay = 300;
+  const scrapeSession = { blocked: false };
   const songs: SongLyrics[] = [];
   let artistId: number | null = null;
 
@@ -444,11 +450,9 @@ export async function fetchLyrics(
         seenTitles.add(baseTitle);
 
         try {
-          await sleep(scrapeDelay);
-          const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url);
+          const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url, scrapeSession);
           if (lyric) songs.push({ ...lyric, title, album: albumName });
         } catch (err) {
-          if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${title}':`, err);
         }
       }
@@ -458,11 +462,9 @@ export async function fetchLyrics(
       for (const pt of pageTracks) {
         if (isBonusTrack(pt.title)) continue;
         try {
-          await sleep(scrapeDelay);
-          const lyric = await acquireLyrics(artistName, pt.title, pt.url);
+          const lyric = await acquireLyrics(artistName, pt.title, pt.url, scrapeSession);
           if (lyric) songs.push({ ...lyric, title: pt.title, album: albumName });
         } catch (err) {
-          if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${pt.title}':`, err);
         }
       }
@@ -483,11 +485,9 @@ export async function fetchLyrics(
       if (!url) continue;
 
       try {
-        await sleep(scrapeDelay);
-        const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url);
+        const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url, scrapeSession);
         if (lyric) songs.push({ ...lyric, title, album: songAlbum });
       } catch (err) {
-        if (err instanceof GeniusBlockedError) throw err;
         console.warn(`[Genius] Failed to scrape '${title}':`, err);
       }
     }

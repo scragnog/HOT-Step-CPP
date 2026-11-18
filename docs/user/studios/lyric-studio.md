@@ -26,6 +26,12 @@ The HF index preserves section tags but has limited coverage; LRCLIB supplies
 plain lyrics without section tags. Each saved song records its source and URL,
 and Source Lyrics shows Genius, Hugging Face or LRCLIB beside the song.
 
+Album fetches try every non-instrumental track, including those with complete
+lyrics on Genius, subject to the existing bonus-track and duplicate filters.
+Each fetch saves a new set, preserving existing sets and any lyrics you edited.
+If Genius blocks a lyric page, later tracks in that fetch skip both the
+Genius scrape and its pacing delay; the next fetch can try Genius again.
+
 The hosted HF lookup has a four-second limit and pauses for a minute after an
 error, so an unavailable index does not hold up every track. LRCLIB has an
 eight-second limit. If all sources fail, try again later or enter lyrics by
