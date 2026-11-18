@@ -26,12 +26,13 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
     import { pollUntilDone } from './src/services/generation/pollUntilDone.js';
     const calls = [];
     let rejectPick = false, failJob = false, cancelOnSubmit = false, cancelOnPoll = false, rejectUnload = false, polls = 0;
-    let controller, residentBytes;
-    const wav = Buffer.alloc(48);
-    wav.write('RIFF'); wav.writeUInt32LE(40, 4); wav.write('WAVE', 8);
+    let controller, residentBytes, endReason = 'limit_hit';
+    // 2 s of stereo PCM16 at a steady level, long enough for the 1.5 s cover fade.
+    const wavFrames = 96000, wav = Buffer.alloc(44 + wavFrames * 4, 0x10);
+    wav.write('RIFF'); wav.writeUInt32LE(36 + wavFrames * 4, 4); wav.write('WAVE', 8);
     wav.write('fmt ', 12); wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20);
     wav.writeUInt16LE(2, 22); wav.writeUInt32LE(48000, 24); wav.writeUInt32LE(192000, 28);
-    wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(4, 40);
+    wav.writeUInt16LE(4, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(wavFrames * 4, 40);
     globalThis.fetch = async (url, init = {}) => {
       const route = new URL(url).pathname;
       const body = init.body ? JSON.parse(init.body) : undefined;
@@ -54,7 +55,7 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       }
       if (route === '/heartmula/job') return Response.json({
         status: failJob ? 'failed' : 'done', stage: 'frames', seed: '18446744073709551615', noise_seed: '17',
-        pick: { global: 'Q8_0', local: 'Q4_K_M' }, end_reason: 'limit_hit',
+        pick: { global: 'Q8_0', local: 'Q4_K_M' }, end_reason: endReason,
         ...(failJob ? {error: {code: 'vram_insufficient', message: 'fixture VRAM refusal'}, admission: {need_bytes: 9000, free_bytes: 1000}} : {}),
       });
       if (route === '/job') {
@@ -164,9 +165,9 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       await heartmulaBackend.selectModel({global: 'Q8_0'});
       assert.equal((await heartmulaBackend.models()).defaults.lmAdapter, '');
       const makeJob = () => ({id: 'fixture-job', userId: 'fixture-user', envelope, params: {...raw}, attempts: [], status: 'pending', createdAt: Date.now()});
-      const makeContext = () => {
+      const makeContext = (env = envelope) => {
         controller = new AbortController();
-        return {envelope, attempt: {attempt: 1, startedAt: Date.now(), effective: {models: {}}, reseeded: false, engineJobIds: []},
+        return {envelope: env, attempt: {attempt: 1, startedAt: Date.now(), effective: {models: {}}, reseeded: false, engineJobIds: []},
           signal: controller.signal, lease: {isCurrent: () => true}, pollUntilDone,
           hooks: {onEngineJob() {}, onStage() {}, onArtifact() {}}};
       };
@@ -184,16 +185,32 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
       assert.equal(row.backend, 'heartmula');
       assert.equal(JSON.parse(row.generation_params).heartmulaResult.seed, raw.seed);
       assert.equal(outcome.artifacts[0].kind, 'audio');
-      assert.ok(fs.existsSync(path.join(config.data.audioDir, path.basename(row.audio_url))));
+      const saved = (o) => fs.readFileSync(path.join(config.data.audioDir,
+        path.basename(getDb().prepare('SELECT audio_url FROM songs WHERE id=?').get(o.songIds[0]).audio_url)));
+      assert.ok(saved(outcome).equals(wav), 'plain synth at its duration limit is not faded');
+      // A cover cut by the lead-sheet cap fades to silence over its last 1.5 s; one that ended on EOS is untouched.
+      const coverEnvelope = buildEnvelope({...raw, backendOverride: 'heartmula', taskType: 'cover', heartmulaCover: rolls},
+        'fixture-user', 'cover-job', Date.now());
+      const coverJob = () => ({...makeJob(), envelope: coverEnvelope, params: {...raw, taskType: 'cover'}});
+      const capped = saved(await heartmulaBackend.generate(coverJob(), makeContext(coverEnvelope)));
+      const fadeStart = 44 + (wavFrames - 72000) * 4;
+      assert.equal(capped.length, wav.length);
+      assert.ok(capped.subarray(0, fadeStart).equals(wav.subarray(0, fadeStart)), 'audio before the fade is untouched');
+      assert.equal(capped.readInt16LE(fadeStart), wav.readInt16LE(fadeStart), 'the fade starts at full level');
+      assert.deepEqual([capped.readInt16LE(wav.length - 4), capped.readInt16LE(wav.length - 2)], [0, 0], 'a capped cover ends at zero');
+      assert.ok(Math.abs(capped.readInt16LE(fadeStart + 36000 * 4) / wav.readInt16LE(fadeStart) - Math.SQRT1_2) < 1e-3, 'equal-power midpoint');
+      endReason = 'completed';
+      assert.ok(saved(await heartmulaBackend.generate(coverJob(), makeContext(coverEnvelope))).equals(wav), 'a cover that ended itself is byte-identical');
+      endReason = 'limit_hit';
       cancelOnSubmit = true;
       job = makeJob(); ctx = makeContext();
       assert.equal((await heartmulaBackend.generate(job, ctx)).endReason, 'cancelled');
       assert.ok(calls.some(c => c.url.includes('cancel=1')));
-      assert.equal(getDb().prepare('SELECT count(*) AS n FROM songs').get().n, 1);
+      assert.equal(getDb().prepare('SELECT count(*) AS n FROM songs').get().n, 3);
       cancelOnSubmit = false; cancelOnPoll = true;
       job = makeJob(); ctx = makeContext();
       assert.equal((await heartmulaBackend.generate(job, ctx)).endReason, 'cancelled');
-      assert.equal(getDb().prepare('SELECT count(*) AS n FROM songs').get().n, 1);
+      assert.equal(getDb().prepare('SELECT count(*) AS n FROM songs').get().n, 3);
       cancelOnPoll = false; failJob = true;
       job = makeJob(); ctx = makeContext();
       assert.equal((await heartmulaBackend.generate(job, ctx)).endReason, 'failed');

@@ -5,7 +5,7 @@ import { performance } from 'node:perf_hooks';
 import { config } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
-import { wavDurationSec } from '../../audioCrop.js';
+import { fadeWavFile, wavDurationSec } from '../../audioCrop.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import { startGenerationLog, logGeneration, logGenerationParams, finishGenerationLog, failGenerationLog } from '../../logger.js';
 import { heartmulaClient } from './client.js';
@@ -51,6 +51,8 @@ function samplerPlugins(params: Readonly<Record<string, unknown>>): Partial<Hear
 
 /** MuLaCover's duration limit in the engine (/heartmula/props cover_max_duration_s). */
 export const HEARTMULA_COVER_MAX_DURATION_S = 300;
+/** Fade-out where the lead-sheet cap stops a cover mid-phrase. */
+export const HEARTMULA_COVER_FADE_S = 1.5;
 
 /** Validate at enqueue time, before the job can enter the shared GPU lane. A cover
  *  (Cover Studio's rolls) goes to /heartmula/cover on the MuLaCover variant, never
@@ -197,6 +199,11 @@ export async function runHeartmulaGeneration(job: GenerationJob, ctx: Generation
     const filename = `${randomUUID()}.wav`;
     const filepath = path.join(config.data.audioDir, filename);
     fs.writeFileSync(filepath, audio);
+    // The frame cap cuts a cover at full level; fade it. A song that ended on audio EOS keeps its own ending.
+    if (rolls && detail.end_reason === 'limit_hit') {
+      const faded = fadeWavFile(filepath, 'out', HEARTMULA_COVER_FADE_S, 'equalpower');
+      log('INFO', `[HeartMuLa] Cover hit the lead-sheet length: ${faded.toFixed(2)} s fade-out`);
+    }
     const audioUrl = `/audio/${filename}`;
     const duration = wavDurationSec(filepath) || wire.duration_s;
     artifacts.push({ kind: 'audio', trackIndex: 0, url: audioUrl });

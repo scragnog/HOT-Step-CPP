@@ -5,7 +5,8 @@
 // function, so what you hear before applying is what gets written.
 
 export type FadeKind = 'in' | 'out';
-export type FadeCurve = 'linear' | 'exponential' | 'logarithmic' | 'scurve';
+// 'equalpower' is server-only (HeartMuLa cover cap), so FADE_CURVES leaves it out of the playbar.
+export type FadeCurve = 'linear' | 'exponential' | 'logarithmic' | 'scurve' | 'equalpower';
 
 export const FADE_CURVES: readonly FadeCurve[] = ['linear', 'exponential', 'logarithmic', 'scurve'];
 
@@ -17,6 +18,7 @@ export function fadeInGain(curve: FadeCurve, p: number): number {
     case 'exponential': return x * x;                          // slow start, fast finish
     case 'logarithmic': return 1 - (1 - x) * (1 - x);          // fast start, gentle finish
     case 'scurve': return 0.5 - 0.5 * Math.cos(Math.PI * x);   // eased at both ends
+    case 'equalpower': return Math.sin(Math.PI / 2 * x);       // constant power through a crossfade
     default: return x;
   }
 }
