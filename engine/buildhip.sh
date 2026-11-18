@@ -31,5 +31,7 @@ else
     echo "Building for GPU arch: ${GFX_NAME}"
 fi
 
-cmake .. -DGGML_HIP=ON -DGPU_TARGETS="${GFX_NAME}" -DCMAKE_BUILD_TYPE=Release
+cmake .. -DGGML_HIP=ON -DGPU_TARGETS="${GFX_NAME}" \
+    -DGGML_STATIC=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
+    -DCMAKE_BUILD_TYPE=Release
 cmake --build . --config Release -j "$(nproc --ignore=1)"

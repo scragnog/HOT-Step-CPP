@@ -158,7 +158,9 @@ cd ../..
 `engine/` also holds `buildcuda.sh`, `buildvulkan.sh`, `buildcpu.sh`, `buildall.sh`,
 `buildhip.sh` (ROCm) and `build-mac.sh`. `buildhip.sh` deletes `engine/build/` and
 rebuilds from scratch on every run, because a cache from another backend breaks a HIP
-configure.
+configure. It uses `GGML_STATIC=OFF`, `GGML_BACKEND_DL=ON` and
+`GGML_CPU_ALL_VARIANTS=ON`, matching the ROCm release build so the HIP backend
+can load as a runtime module.
 
 ## Get the models
 
