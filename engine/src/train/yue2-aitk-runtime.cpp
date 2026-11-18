@@ -11,6 +11,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include "yue2-aitk-sampler.h"
 #include "yue2-aitk-joint-step.h"
 #include "yue2-aitk-resume.h"
+#include "yue2-aitk-planner-best.h"
 #include "yue2-aitk-embedding-dequant.h"
 #include "yue2-aitk-fixture-replay.h"
 #include "../yue2/yue2-lm-name.h"
@@ -366,39 +367,6 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
         }
     }
     size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
-}
-// The gate's best planner, kept beside a checkpoint whose live planner has
-// moved past it, so a segment resumed before the freeze can still write it
-// back (GH #346). A parameter-only resume record: per-slot names, no
-// optimizer state; its step is the best reading's.
-constexpr const char * kPlannerBestFile = "planner-best.resume";
-bool write_planner_best(const std::filesystem::path & path, const Yue2AitkTrainState & state, const Yue2AitkTrainState::PlannerCopy & copy, int best_step) {
-    const auto named = state.named_tensors();
-    const size_t n = copy.size();
-    yue2_aitk::HostStateSnapshot snap; snap.step = best_step;
-    snap.names.resize(n); snap.elements.resize(n); snap.parameters.resize(n);
-    snap.state1_fp32.resize(n); snap.state2_fp32.resize(n); snap.state3_fp32.resize(n); snap.state4_fp32.resize(n);
-    snap.state1_u8.resize(n); snap.state2_u8.resize(n); snap.state3_u8.resize(n); snap.state4_u8.resize(n);
-    snap.absmax1.resize(n); snap.absmax2.resize(n); snap.absmax3.resize(n); snap.absmax4.resize(n);
-    for (size_t k = 0; k < n; ++k) { snap.names[k] = named[copy[k].first].name; snap.elements[k] = copy[k].second.size(); snap.parameters[k] = copy[k].second; }
-    return yue2_aitk::yue2_aitk_write_resume_v2(path.u8string().c_str(), snap, "{}");
-}
-// False when the file is missing, from another step, or does not match this
-// train state's planner slots.
-bool read_planner_best(const std::filesystem::path & path, const Yue2AitkTrainState & state, int best_step, Yue2AitkTrainState::PlannerCopy * out) {
-    std::error_code ec;
-    if (!std::filesystem::exists(path, ec)) return false;
-    yue2_aitk::ResumeRecord record;
-    if (!yue2_aitk::yue2_aitk_read_resume(path.u8string().c_str(), &record) || record.version != 3 || record.state.step != best_step) return false;
-    const auto named = state.named_tensors();
-    Yue2AitkTrainState::PlannerCopy copy = state.copy_planner();
-    if (record.state.names.size() != copy.size()) return false;
-    for (size_t k = 0; k < copy.size(); ++k) {
-        if (record.state.names[k] != named[copy[k].first].name || record.state.parameters[k].size() != copy[k].second.size()) return false;
-        copy[k].second = std::move(record.state.parameters[k]);
-    }
-    *out = std::move(copy);
-    return true;
 }
 }
 
@@ -1094,12 +1062,18 @@ static int run_impl(Config config, std::string * error) {
         // Only a live planner needs it; a held one already is the best one,
         // or (frozen by KL or by hand) the planner that run chose to keep.
         Yue2AitkTrainState::PlannerCopy best_planner;
+        // The last copy on disk and its best step: later checkpoints of that
+        // step hard-link it. The resumed record's copy is only ever linked,
+        // never changed or removed, so the checkpoint resumes the same way
+        // every time.
+        std::filesystem::path best_file; int best_file_step = -1;
         int planner_restored_from = planner_frozen_at >= 0 ? resume_binding.planner_restored_from : -1;
         if (planner_frozen_at < 0 && gate.best_step >= 0) {
             const bool at_best = resume_binding.planner_frozen_at < 0 ? gate.best_step == completed : resume_binding.planner_restored_from == gate.best_step;
+            const auto beside = std::filesystem::u8path(config.resume).parent_path() / yue2_aitk_planner_best::kFile;
             if (at_best) best_planner = state.copy_planner();
-            else if (!read_planner_best(std::filesystem::u8path(config.resume).parent_path() / kPlannerBestFile, state, gate.best_step, &best_planner))
-                std::fprintf(stderr, "[yue2-aitk] warning: the gate's best planner (step %d) is not beside this checkpoint; a gate freeze keeps the planner where it stands\n", gate.best_step);
+            else if (yue2_aitk_planner_best::read(beside, state, gate.best_step, &best_planner)) { best_file = beside; best_file_step = gate.best_step; }
+            else std::fprintf(stderr, "[yue2-aitk] warning: the gate's best planner (step %d) is not beside this checkpoint; a gate freeze keeps the planner where it stands\n", gate.best_step);
         }
         // Before the gate's freeze: the best planner back in place. Its
         // optimizer moments stay as they are: a frozen planner gets zero
@@ -1291,11 +1265,6 @@ static int run_impl(Config config, std::string * error) {
         // blind steps (the KL climbed 0.92 -> 1.64 in them and skipped four
         // rungs), read the plain mean of what is there from 5 fresh steps.
         const bool partial_readings = first_unfreeze;
-        // The previous checkpoint's best-planner copy, removed once a newer
-        // checkpoint lands. On resume that is the copy beside the record: the
-        // server gives every segment its own folder, so it lies outside
-        // --output, in the segment before.
-        std::filesystem::path older_best_file = config.resume.empty() ? std::filesystem::path{} : std::filesystem::u8path(config.resume).parent_path() / kPlannerBestFile;
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -1321,8 +1290,12 @@ static int run_impl(Config config, std::string * error) {
             }
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
-            if (planner_frozen_at < 0 && !best_planner.empty() && gate.best_step != step &&
-                !write_planner_best(temp_dir / kPlannerBestFile, state, best_planner, gate.best_step)) return false;
+            // ponytail: one fp32 copy (larger than the AR file) per best step
+            // that a checkpoint lands after; a gate cadence that is a divisor
+            // of --save-every leaves only the stale readings before the freeze.
+            const bool best_copy = planner_frozen_at < 0 && !best_planner.empty() && gate.best_step != step;
+            if (best_copy && !yue2_aitk_planner_best::publish(temp_dir / yue2_aitk_planner_best::kFile, best_file_step == gate.best_step ? best_file : std::filesystem::path{},
+                                                              state, best_planner, gate.best_step)) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
                 config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from, gate, frozen_reason, planner_restored_from);
             if (metadata.empty()) return false;
@@ -1365,12 +1338,7 @@ static int run_impl(Config config, std::string * error) {
             std::filesystem::rename(temp_dir, final_dir, save_ec);
             if (!save_ec) {
                 last_saved=step; event("checkpoint", step);
-                // ponytail: only the newest checkpoint keeps the best planner
-                // (fp32, larger than the AR file), so an older one resumes
-                // with a warning and freezes where it stands; keep one per
-                // best step (hard-linked) if resuming old rungs matters.
-                std::error_code rm; if (!older_best_file.empty()) std::filesystem::remove(older_best_file, rm);
-                older_best_file = final_dir / kPlannerBestFile;
+                if (best_copy) { best_file = final_dir / yue2_aitk_planner_best::kFile; best_file_step = gate.best_step; }
             }
             return !save_ec;
         };

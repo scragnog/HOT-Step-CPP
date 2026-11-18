@@ -14,9 +14,12 @@
 static void jl(const char * fmt, ...) { (void) fmt; }
 
 #include "yue2-aitk-train-state.h"
+#include "yue2-aitk-planner-best.h"
 #include "lm-optim.h"
 
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -79,6 +82,26 @@ static bool one(ggml_backend_t backend, const char * adapter, const char * optim
     size_t moved_past = 0;
     for (const auto & f : best) moved_past += read(named[f.first].parameter) != f.second;
     CHECK(moved_past == best.size());
+    if (!std::strcmp(optimizer, "adamw-lm")) {
+        // The copy beside a checkpoint: a later checkpoint of the same best
+        // step links it, and the link outlives the first folder's cleanup;
+        // a missing link source falls back to a write. Every read is the copy.
+        namespace pb = yue2_aitk_planner_best;
+        const auto dir = std::filesystem::temp_directory_path() / ("yue2-planner-best-" + std::string(adapter));
+        std::error_code ec; std::filesystem::remove_all(dir, ec); std::filesystem::create_directories(dir);
+        const auto a = dir / "a", b = dir / "b", c = dir / "c";
+        CHECK(pb::publish(a, {}, state, best, 2) && pb::publish(b, a, state, best, 2));
+        CHECK(std::filesystem::hard_link_count(b) == 2);
+        std::filesystem::remove(a);
+        CHECK(pb::publish(c, a, state, best, 2));
+        for (const auto & f : {b, c}) {
+            Yue2AitkTrainState::PlannerCopy back;
+            CHECK(pb::read(f, state, 2, &back) && back == best);
+            CHECK(pb::read(f, state, 2, &back) && back == best);  // a second resume reads the same
+            CHECK(!pb::read(f, state, 3, &back));
+        }
+        std::filesystem::remove_all(dir, ec);
+    }
     state.set_planner(best);
     state.freeze_planner();
     std::vector<std::vector<float>> before; for (const auto & p : named) before.push_back(read(p.parameter));
