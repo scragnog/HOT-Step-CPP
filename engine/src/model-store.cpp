@@ -1065,6 +1065,34 @@ MetadataFSM * store_fsm(ModelStore * s, const char * lm_path, int vocab_size) {
     return fsm;
 }
 
+bool st_read_null_cond(const char * st_dir, std::vector<float> & out) {
+    out.clear();
+    STMulti sm = {};
+    if (!st_multi_open(&sm, st_dir)) {
+        return false;
+    }
+    auto [shard_idx, e] = sm.find("null_condition_emb");
+    if (e) {
+        ggml_type nce_type = st_ggml_type(*e);
+        size_t    n        = 1;
+        for (int d = 0; d < e->n_dims; d++) n *= (size_t) e->shape[d];
+        const void * raw = sm.data(shard_idx, *e);
+        if (nce_type == GGML_TYPE_BF16) {
+            out.resize(n);
+            const uint16_t * src = (const uint16_t *) raw;
+            for (size_t i = 0; i < n; i++) {
+                uint32_t w = (uint32_t) src[i] << 16;
+                memcpy(&out[i], &w, 4);
+            }
+        } else if (nce_type == GGML_TYPE_F32) {
+            out.resize(n);
+            memcpy(out.data(), raw, n * sizeof(float));
+        }
+    }
+    st_multi_close(&sm);
+    return !out.empty();
+}
+
 const DiTMeta * store_dit_meta(ModelStore * s, const char * dit_path) {
     std::lock_guard<std::mutex> lock(s->mtx);
     std::string                 key = dit_path ? dit_path : "";
@@ -1170,27 +1198,7 @@ const DiTMeta * store_dit_meta(ModelStore * s, const char * dit_path) {
 
         // null_condition_emb: read from safetensors model file (not available for ONNX)
         if (!is_onnx) {
-            STMulti sm = {};
-            if (st_multi_open(&sm, dit_path)) {
-                auto [shard_idx, e] = sm.find("null_condition_emb");
-                if (e) {
-                    ggml_type nce_type = st_ggml_type(*e);
-                    size_t    n = 1;
-                    for (int d = 0; d < e->n_dims; d++) n *= (size_t) e->shape[d];
-                    const void * raw = sm.data(shard_idx, *e);
-                    meta->null_cond_cpu.resize(n);
-                    if (nce_type == GGML_TYPE_BF16) {
-                        const uint16_t * src = (const uint16_t *) raw;
-                        for (size_t i = 0; i < n; i++) {
-                            uint32_t w = (uint32_t) src[i] << 16;
-                            memcpy(&meta->null_cond_cpu[i], &w, 4);
-                        }
-                    } else if (nce_type == GGML_TYPE_F32) {
-                        memcpy(meta->null_cond_cpu.data(), raw, n * sizeof(float));
-                    }
-                }
-                st_multi_close(&sm);
-            }
+            st_read_null_cond(dit_path, meta->null_cond_cpu);
         } else {
             // ONNX path: the graph is the decoder only and has no
             // null_condition_emb. Leave null_cond_cpu empty; pipeline-synth.cpp

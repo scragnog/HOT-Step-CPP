@@ -33,7 +33,7 @@ Three modes: **bf16** (standard dynamo export; host staging fp32↔bf16), **fp16
 Static context in `pipeline-synth-ops.cpp` keyed on ONNX path (`s_trt_onnx_path`, :1186-1190, set at :1276) — model switch triggers reload/rebuild. Eviction (:1347-1356): `EVICT_STRICT` (default) frees the engine from VRAM after each generation (`[DiT-TRT] Engine unloaded from VRAM`); `EVICT_NEVER` ("Keep DiT & VAE loaded" / server `coResident`) keeps it resident.
 <!-- TODO(verify): the reload check compares s_trt_onnx_path (the resolved .onnx file) with ctx->dit_key.path, which is the directory for registry-listed ONNX DiTs, so a directory selection may reload the engine on every generation even under EVICT_NEVER. -->
 
-An ONNX DiT carries no FSQ tokenizer/detokenizer and no condition encoder. `pipeline-synth.cpp:113-169` goes two folders up from the ONNX folder (`models/onnx/<dir>` → `models`) and takes the first of a fixed list of safetensors XL DiT folders that holds `model.safetensors`; FSQ and the condition encoder both run on GGML from it. Without one: `[Synth-Load] WARNING: no safetensors DiT found for FSQ — covers/passthrough may fail` and `[Synth-Load] ONNX DiT: no safetensors XL DiT folder found for the condition encoder`, after which the request fails at text encoding.
+An ONNX DiT carries no FSQ tokenizer/detokenizer and no condition encoder. `pipeline-synth.cpp:113-169` goes two folders up from the ONNX folder (`models/onnx/<dir>` → `models`) and takes the first of a fixed list of safetensors XL DiT folders that holds `model.safetensors`; FSQ and the condition encoder both run on GGML from it, and `null_condition_emb` (the CFG uncond embedding, outside the exported decoder) is read from its weights by `st_read_null_cond`. Without one: `[Synth-Load] WARNING: no safetensors DiT found for FSQ — covers/passthrough may fail` and `[Synth-Load] ONNX DiT: no safetensors XL DiT folder found for the condition encoder`, after which the request fails at text encoding.
 
 ## 2. TRT sampler (`engine/src/hot-step-sampler-trt.h`, ~851 lines)
 
@@ -91,10 +91,10 @@ The registry scans `<data root>/models/` and its `onnx/` subfolder (`hot-step-se
   <lm folder>/    lm_full.onnx (+ data), lm_full.engine (built on first use),
                   optionally an inert trtllm-engine-*/ folder
   sa3/            StableStep tokenizer files (owned by that backend)
-<data root>/models/<safetensors XL DiT folder>/model.safetensors   FSQ + condition encoder for an ONNX DiT
+<data root>/models/<safetensors XL DiT folder>/model.safetensors   FSQ + condition encoder + null_condition_emb for an ONNX DiT
 ```
 
-As of 2026-10-23 the development machine's data root has no ONNX DiT or LM folders; `models/onnx/` holds only `sa3/`.
+As of 2026-10-23 the development machine's data root has no ONNX DiT or LM folders; `models/onnx/` holds only `sa3/`. A working DiT export (2026-11-18) sits outside the repo on the 4090 test PC. The ONNX DiT folder also needs `config.json` and `silence_latent.pt` (read by `store_dit_meta`). `ace-synth` does not scan `models/onnx/`; drive it through `ace-server`.
 
 ONNX export tooling: `tools/onnx-export/` — `export_dit.py`, `export_fp8_dit.py`, `export_lm.py`, `export_vae.py`, `export_vae_encoder.py`, `export_pp_vae.py`, `export_text_enc.py`, `export_cond_enc.py`, `gen_weight_map.py`, `test_trt_vae.py`, plus the SA3 exporters. The VAE, PP-VAE and encoder exports fed the removed ORT paths and have no consumer in the engine now. These run in the hot-step-9000 Python venv (a **separate repo**), patterns adapted from the DEMON project (`D:\Ace-Step-Latest\Demon`) — do not expect them to run with this repo's Node/C++ toolchain. MM3's exporter is `tools/mm3-trt-export/`.
 
@@ -134,6 +134,6 @@ ONNX export tooling: `tools/onnx-export/` — `export_dit.py`, `export_fp8_dit.p
 ## 9. Open questions / not verified
 
 - Current end-to-end TRT vs GGUF totals **after** the adapter fix + dedicated streams — the 77.6s/50.5s table predates both; no fresher benchmark in the repo.
-- Whether the ACE-Step TRT DiT and LM paths work end to end after the ORT removal; no ONNX DiT or LM is installed on the development machine.
+- Whether the ACE-Step TRT LM path works end to end after the ORT removal (the DiT path was verified 2026-11-18; see SKILL.md).
 - The 2026-05-30 design's 30–50% DiT speedup claim (measured: ~25%).
 - The vendored SDK headers are TensorRT 10.16.1 (`engine/deps/tensorrt/include/NvInferVersion.h`) while code comments in `dit-trt.h` say "TRT 11" for `kSTRONGLY_TYPED` being mandatory.

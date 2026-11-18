@@ -1446,7 +1446,13 @@ MM3 the request's `dit_backend` does.
   `IRefitter`.
   - ACE-Step DiT: selecting an `.onnx` DiT routes through `dit-trt.h`. The engine is
     built on first use and cached next to the ONNX as `.engine`; weights are refit
-    from the ONNX on each load.
+    from the ONNX on each load. The export is `tools/onnx-export/export_dit.py`
+    (bf16_mixed). Its folder needs `config.json` and `silence_latent.pt` beside the
+    `.onnx`. Measured 2026-11-18 on an RTX 4090 (XL, 30 s, 32 steps, CFG): the first
+    engine build took 20 min. DiT sampling took 1.05-1.22 s against 1.83 s on GGML,
+    but load plus refit took 7-9 s per job under default eviction, so a job was
+    slower overall. bf16 activations put one forward pass 5.4% from an fp32
+    reference, where GGML is 0.9%.
   - ACE-Step LM: `lm-trt.h` is used when `lm_full.onnx` sits in the LM's directory.
     The TRT-LLM path (`lm-trtllm.h`) is compiled out unless
     `-DHOT_STEP_TRTLLM_ENABLE=ON`.
@@ -1481,7 +1487,9 @@ for it. What used to run on it:
   `/pp-vae-reencode` returns 400.
 - An ONNX DiT's text and condition encoders run on GGML. The condition encoder loads
   from the safetensors XL DiT folder the FSQ fallback finds; without one the request
-  fails with a message naming the folder.
+  fails with a message naming the folder. The CFG uncond branch's
+  `null_condition_emb` is read from that folder's weights too
+  (`st_read_null_cond`), since the graph holds only the decoder.
 - ONNX VAEs and ONNX text encoders are no longer registered. `/synth` with an `.onnx`
   `vae_model` returns 400. Requests for the removed ACE preview pipeline also return 400.
 

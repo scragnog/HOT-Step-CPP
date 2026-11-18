@@ -120,7 +120,7 @@ There is **no dedicated bench tool** — instrumentation is log-based. Logs land
 | `engine/src/lm-trtllm.h` | TRT-LLM Executor — compile-time disabled, do not assume it runs |
 | `engine/src/trt-runtime-probe.h` | Checks the delay-loaded TensorRT DLLs are loadable before any TRT call |
 | `engine/src/pipeline-synth-ops.cpp` | Backend dispatch: TRT-vs-GGML gate `:1181`, adapter refit `:1280-1331`, eviction policy `:1347-1356`, GGML `dit_ggml_generate` call `:1465` |
-| `engine/src/pipeline-synth.cpp` | ONNX DiT sidecar handling: FSQ and condition-encoder fallback to a safetensors XL DiT folder (`:96-169`) |
+| `engine/src/pipeline-synth.cpp` | ONNX DiT sidecar handling: FSQ, condition-encoder and `null_condition_emb` fallback to a safetensors XL DiT folder (`:96-180`) |
 | `engine/src/pipeline-lm.cpp` | LM backend dispatch (TRT-LLM → raw TRT → GGML probe order `:1347-1432`), speculative decoding `:1025` |
 | `engine/src/hot-step-params.h` | `cfg_cutoff_ratio:240`, `cache_ratio:246` |
 | `engine/tools/hot-step-server.cpp` | CLI parsing; registry scan (including the `onnx/` subdirectory, `:3266-3270`); 400s for removed ONNX Runtime features |
@@ -155,8 +155,7 @@ There is **no dedicated bench tool** — instrumentation is log-based. Logs land
 - **VALIDATED — native TRT (Approach A) beat ORT+TRT-EP (Approach B) for the DiT** solely because adapter refit needs `IRefitter`, which ORT does not expose. ORT+TRT-EP was kept for refit-free models (VAE, encoders) until ONNX Runtime left the engine entirely.
 - **VALIDATED — TRT-LLM on native Windows is a dead end** (engine-version mismatch Docker 10.14 vs Windows SDK 10.16; ONNX-rebuilt engines lack TRT-LLM tensor bindings like `kv_cache_block_offsets`). A `trtllm-engine-*` folder next to an ONNX LM is ignored while TRT-LLM is compiled out.
 - **VALIDATED — LM-TRT teardown ordering** (Golden rule 5) prevents cross-runtime CUDA corruption.
-- **UNVERIFIED — current TRT-vs-GGUF end-to-end totals.** The 77.6s-vs-50.5s table predates the adapter fix and dedicated streams; no fresher benchmark exists in the repo. Re-measure before making "TRT is slower overall" claims.
-- **UNVERIFIED — whether the ACE-Step TRT paths still work end to end.** As of 2026-10-23 the development machine's data root holds no ONNX DiT or LM (its `models/onnx/` has only `sa3/` tokenizer files), and the ONNX Runtime removal commit notes its ONNX DiT changes were untested for the same reason.
+- **MEASURED (2026-11-18, RTX 4090, HOTSTEP-1270) — ACE-Step TRT DiT works end to end**, including ADG and restricted CFG intervals. Export: `export_dit.py` bf16_mixed of the sft-turbo ta-0.7 XL merge (8.34 GB, 10 min); first engine build 20 min. 30 s / 32 steps / CFG: DiT sampling 1.05-1.22 s TRT vs 1.83 s GGML; load + refit 7-9 s per job vs GGML DiT load 3.5-4.1 s, so per-job wall was 12 s TRT vs 9-10 s GGML under default eviction (keep-loaded not measured). One forward vs fp32 PyTorch: GGML 0.9% rel. error, TRT 5.4% (the bf16 recipe itself is 5.1%), so 32-step renders drift (waveform corr about 0.7 to GGML). The TRT LM was not tested.
 - **HYPOTHESIS — the 2026-05-30 design's 30–50% DiT speedup claim.** Measured reality was ~25%. Remaining headroom (cross-attn KV cache) is unimplemented and unproven here.
 
 ## Deeper reading

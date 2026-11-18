@@ -200,6 +200,10 @@ const float *   store_silence(ModelStore * s, const char * dit_path);
 MetadataFSM *   store_fsm(ModelStore * s, const char * lm_path, int vocab_size);
 const DiTMeta * store_dit_meta(ModelStore * s, const char * dit_path);
 
+// null_condition_emb as f32 from a safetensors DiT folder (BF16 or F32).
+// Needs no other sidecar. False and `out` empty when the tensor is absent.
+bool st_read_null_cond(const char * st_dir, std::vector<float> & out);
+
 // Observability: sum of currently resident GPU module weight buffers, and
 // the count of loaded GPU modules. Used by test-model-store to assert
 // eviction policy invariants.

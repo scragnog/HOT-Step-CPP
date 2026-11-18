@@ -165,9 +165,9 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
             fprintf(stderr, "[Synth-Load] ONNX DiT: condition encoder on GGML from %s\n", fsq_path.c_str());
             // Same for null_condition_emb: without it the CFG/ADG uncond
             // branch would see zeros instead of the trained null embedding.
-            const DiTMeta * st_meta = store_dit_meta(store, fsq_path.c_str());
-            if (st_meta && !st_meta->null_cond_cpu.empty()) {
-                ctx->null_cond = &st_meta->null_cond_cpu;
+            // Read straight from the weights: the folder needs no other sidecar.
+            if (st_read_null_cond(fsq_path.c_str(), ctx->onnx_null_cond)) {
+                ctx->null_cond = &ctx->onnx_null_cond;
                 fprintf(stderr, "[Synth-Load] ONNX DiT: null_condition_emb from %s\n", fsq_path.c_str());
             } else {
                 fprintf(stderr, "[Synth-Load] WARNING: ONNX DiT: no null_condition_emb in %s, CFG uses zeros\n",
