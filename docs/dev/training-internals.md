@@ -540,6 +540,24 @@ contains the required weights; Legacy remains available on its supported backend
 
 ### Live interval edits (GH #307, 2026-10-23)
 
+Joint previews reserve `runOnGpuLane` around the complete selection, render,
+unload and restore transaction. Exclusive reservations wait for YuE2 jobs
+that released their generation lease early to drain. Nested preview calls
+reuse the caller's lease.
+
+A plain indexed resume restores the budget and preview cadence from the run
+record. It may extend the budget but cannot silently shrink it. `.params.json`
+contains live pacing overrides, not the full recipe. New live edits also save
+`preview_every`, so a restart can recover that cadence. The next segment carries
+the saved revision to avoid replaying an old absolute `pause_at`.
+
+Only a checkpoint inside the indexed root with matching run identity, dataset
+and valid saved pacing may reuse that root. Resumes add a fresh numbered segment
+after all existing segment names. The catalogue keeps its original run ID and
+creation time; live-job checks and interval edits also accept that ID. Earlier
+checkpoints, preview files and logs remain in place. Refinements and unverified
+manual resumes retain separate output folders.
+
 `PATCH /datasets/:id/yue2-joint-runs/:jobId/params` with `{ saveEvery?, previewEvery? }`
 (whole numbers from 1 to the step cap) calls `updateYue2JointParams`. It changes the job's
 options, so later segments start with the new `--save-every` and preview cadence, and writes

@@ -150,6 +150,18 @@ When to move off them:
 
 ## Reading the training charts
 
+Resuming an interrupted joint run keeps its original calibrated step budget,
+save interval and preview cadence. A larger Steps value extends the budget;
+a smaller value does not shorten it. Live interval edits are restored too.
+A verified resume adds new segments to the original run folder, keeping its
+earlier checkpoints, previews and loss history together. Refinements still
+start a separate run. A manual resume path or a run with invalid saved pacing
+gets a fresh output folder.
+
+Joint-training previews and user generation take turns on the shared engine
+queue. A preview waits for generation to finish, then holds its turn through
+model loading, rendering and cleanup before the next generation can start.
+
 Joint training, the separate AR and NAR trainers, and the older Refine view share two panels. They sit side by side on a wide screen and stack in a narrow window. Progress is counted in steps; these runners do not report epochs.
 
 - **AR (stage 1)**: "Stage 1 writes the song's coarse token plan from lyrics and tags."

@@ -5,6 +5,113 @@ import os from 'node:os';
 import path from 'node:path';
 import { applyFixedRecipe, relayJsonLine, buildYue2JointTrainArgs, planPlannerGateHoldout, resolvePlannerGateItems, yue2GateSongIds, yue2PlannerGatePreview, legacyYue2DoraError, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision, updateYue2JointParams, yue2JointExpectedStep, yue2JointLivePace } from './yue2JointTrainRunner.js';
 import { createJob } from './labelingQueue.js';
+import { restoreYue2JointSchedule, nextYue2JointSegment, yue2JointSegment, isYue2JointContinuation, seedTrainClock, yue2JointRunIsLive } from './yue2JointTrainRunner.js';
+import { renderYue2JointPreview, YUE2_JOINT_PREVIEW_DEFAULTS } from './yue2JointPreview.js';
+import { runOnGpuLane } from '../generation/gpuLane.js';
+
+test('joint preview waits for generation and holds the GPU lane through cleanup', async () => {
+  const calls: string[] = [];
+  let releaseGeneration!: () => void;
+  const generation = runOnGpuLane(async () => {
+    calls.push('generation');
+    await new Promise<void>(resolve => { releaseGeneration = resolve; });
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  let releaseCleanup!: () => void;
+  let cleanupStarted!: () => void;
+  const cleaning = new Promise<void>(resolve => { cleanupStarted = resolve; });
+  const preview = renderYue2JointPreview({ output: 'unused', step: 80,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, baselineOnly: true }, arAdapter: 'ar', narAdapter: 'nar',
+    deps: {
+      persisted: () => ({ lm: 'base', vae_variant: 'standard', adapters: {
+        ar: { path: '', scales: {} }, nar: { path: '', scales: {} },
+      } }) as any,
+      select: async () => { calls.push('select'); throw new Error('mock select failure'); },
+      unload: async () => {
+        calls.push('unload'); cleanupStarted();
+        await new Promise<void>(resolve => { releaseCleanup = resolve; });
+        return { unloaded: false };
+      },
+    } as any,
+  });
+  const rejected = assert.rejects(preview, /preview cleanup failed/);
+  const next = runOnGpuLane(async () => { calls.push('next generation'); });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['generation']);
+  } finally { releaseGeneration(); }
+  await cleaning;
+  try { assert.deepEqual(calls, ['generation', 'select', 'unload']); }
+  finally { releaseCleanup(); }
+  await Promise.all([generation, rejected, next]);
+  assert.equal(calls.at(-1), 'next generation');
+});
+
+test('resume retains calibrated budget, crop and cadence on the absolute step axis', () => {
+  const root = fs.mkdtempSync(path.join(process.cwd(), '.test-yue2-resume-'));
+  try {
+    const saved = { checkpoint: 'base', dataset: 'dataset', outDir: root, steps: 600,
+      saveEvery: 20, seed: 42, device: 'MTL0', arCropFrames: 250,
+      preview: { enabled: true, everySteps: 10 }, calibration: { steps: 600, requestedSteps: 300 } };
+    const restored = { ...saved, ...restoreYue2JointSchedule(saved, { steps: 480,
+      preview: { enabled: true, everySteps: 20 } }, root) } as any;
+    const args = buildYue2JointTrainArgs(yue2JointSegment(restored, 80, 9, restored.preview.everySteps, true));
+    const value = (flag: string) => args[args.indexOf(flag) + 1];
+    assert.equal(value('--steps'), '600');
+    assert.equal(value('--pause-at'), '90');
+    assert.equal(value('--ar-crop-frames'), '250');
+    assert.deepEqual(restored.calibration, saved.calibration);
+    assert.equal(restoreYue2JointSchedule(saved, { steps: 700 }, root).steps, 700, 'explicit extension remains possible');
+    fs.writeFileSync(path.join(root, '.params.json'), JSON.stringify({ rev: 3, save_every: 15, pause_at: 80, preview_every: 5 }));
+    const live = restoreYue2JointSchedule(saved, { steps: 480 }, root) as any;
+    assert.equal(live.saveEvery, 15);
+    assert.equal(live.preview.everySteps, 5);
+    assert.equal(yue2JointSegment({ ...restored, ...live }, 80, 9, live.preview.everySteps, true).pauseAt, 85);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a resumed joint job remains live under its original run ID and its new job ID', () => {
+  const job = { id: 'new-job', kind: 'yue2-joint-train', opts: { continuation: { jobId: 'original' } } } as any;
+  assert.equal(yue2JointRunIsLive(job, 'original'), true);
+  assert.equal(yue2JointRunIsLive(job, 'new-job'), true);
+  assert.equal(yue2JointRunIsLive(job, 'another'), false);
+  assert.equal(yue2JointRunIsLive(undefined, 'original'), false);
+});
+
+test('same-folder resume adds a fresh segment and preserves earlier checkpoints, previews and history', () => {
+  const root = fs.mkdtempSync(path.join(process.cwd(), '.test-yue2-resume-'));
+  try {
+    const oldSegment = path.join(root, 'segments', 'segment-000008');
+    const checkpoint = path.join(oldSegment, 'checkpoint-step80');
+    fs.mkdirSync(checkpoint, { recursive: true });
+    const resume = path.join(checkpoint, 'optimizer.resume');
+    const log = path.join(oldSegment, 'train.jsonl');
+    fs.writeFileSync(resume, 'original optimizer');
+    fs.writeFileSync(log, '{"stage":"joint","step":80,"step_ms":125}\n');
+    fs.mkdirSync(path.join(root, 'previews'));
+    const preview = path.join(root, 'previews', 'step-80.wav');
+    fs.writeFileSync(preview, 'original preview');
+    const options = { checkpoint: 'base', dataset: 'dataset', outDir: root, steps: 600, saveEvery: 20, seed: 42, device: 'MTL0' };
+    fs.writeFileSync(path.join(root, 'run.json'), JSON.stringify({ jobId: 'original', output: root, createdAt: 1, options }));
+    const opts = { ...options, resume, continuation: { jobId: 'original', createdAt: 1 } };
+    assert.equal(isYue2JointContinuation(opts), true);
+    assert.equal(isYue2JointContinuation({ ...opts, continuation: { jobId: 'other', createdAt: 1 } }), false);
+    const next = yue2JointSegment(opts, 80, nextYue2JointSegment(root), 10, true);
+    assert.equal(next.outDir, path.join(root, 'segments', 'segment-000009'));
+    assert.equal(fs.existsSync(next.outDir), false);
+    fs.mkdirSync(next.outDir);
+    fs.writeFileSync(path.join(next.outDir, 'train.jsonl'), '{"stage":"joint","step":81,"step_ms":130}\n');
+    assert.equal(seedTrainClock(resume, 80).byStep.get(80), 125);
+    assert.equal(fs.readFileSync(resume, 'utf8'), 'original optimizer');
+    assert.equal(fs.readFileSync(preview, 'utf8'), 'original preview');
+    assert.equal(fs.readFileSync(log, 'utf8'), '{"stage":"joint","step":80,"step_ms":125}\n');
+    const outside = path.join(root, 'optimizer.resume');
+    fs.writeFileSync(outside, 'unrelated');
+    assert.equal(isYue2JointContinuation({ ...opts, resume: outside }), false);
+    fs.writeFileSync(path.join(root, '.params.json'), '{broken');
+    assert.equal(isYue2JointContinuation(opts), false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   const recipe = applyFixedRecipe({ method: 'fixed-recipe', steps: 2000, seed: 123, saveEvery: 100, rank: 16, alpha: 256, adapterType: 'lokr',
@@ -214,7 +321,7 @@ test('live interval edit: validates, re-paces the preview pause and writes .para
     assert.equal((updateYue2JointParams(job, { previewEvery: 2.5 }) as any).status, 400);
     assert.equal((updateYue2JointParams(job, {}) as any).status, 400);
     assert.deepEqual(updateYue2JointParams(job, { saveEvery: 25, previewEvery: 50 }), { saveEvery: 25, previewEvery: 50 });
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, '.params.json'), 'utf8')), { rev: 1, save_every: 25, pause_at: 450 });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outDir, '.params.json'), 'utf8')), { rev: 1, save_every: 25, pause_at: 450, preview_every: 50 });
     assert.equal(opts.saveEvery, 25);
     assert.equal(preview.everySteps, 50);
     // A pause past the end clamps to the last step; a run not paced by previews refuses previewEvery.

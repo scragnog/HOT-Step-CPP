@@ -10,6 +10,7 @@ import { promisify } from 'util';
 
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
+import { runOnGpuLane } from '../generation/gpuLane.js';
 import { getFFmpegPath } from '../../config.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2LmOverrides } from '../backends/yue2/generate.js';
@@ -223,7 +224,12 @@ function writeSharedSheet(output: string, sheet: SharedSheet): SharedSheet {
   return sheet;
 }
 
-export async function renderYue2JointPreview(input: {
+/** Selection, rendering and unload/restore share one lease with user generation. */
+export function renderYue2JointPreview(input: Parameters<typeof renderYue2JointPreviewOnLane>[0]): Promise<Yue2JointPreviewRecord> {
+  return runOnGpuLane(() => renderYue2JointPreviewOnLane(input), { label: 'YuE2 joint preview', family: 'yue2' });
+}
+
+async function renderYue2JointPreviewOnLane(input: {
   output: string; step: number; options: Yue2JointPreviewOptions;
   arAdapter: string; narAdapter: string; dataset?: string; signal?: AbortSignal;
   deps?: { select: typeof yue2SelectModel; warm: typeof yue2Warm; synth: typeof yue2Synth;

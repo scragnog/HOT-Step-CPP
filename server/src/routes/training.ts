@@ -199,7 +199,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
-import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint, planPlannerGateHoldout, PLANNER_GATE_DEFAULTS, yue2GateSongIds, yue2PlannerGatePreview, type Yue2PlannerGate } from '../services/training/yue2JointTrainRunner.js';
+import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint, planPlannerGateHoldout, PLANNER_GATE_DEFAULTS, yue2GateSongIds, yue2PlannerGatePreview, restoreYue2JointSchedule, isYue2JointContinuation, yue2JointRunIsLive, type ResolvedYue2JointTrainOptions, type Yue2PlannerGate } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, hasActiveBatch, finishScoredLadders, cancelBatch as cancelYue2Batch, batchRunsElsewhere, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
@@ -3703,6 +3703,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     const ds = yue2Preflight(req, res);
     if (!ds) return;
     let b = (req.body || {}) as Record<string, unknown>;
+    let continuation: ResolvedYue2JointTrainOptions['continuation'];
     // A continuation decided by a Node operation (yue2JointAdmission.ts):
     // its guard re-checks that decision just before the job is queued.
     const admissionGuard = b.admission === undefined ? undefined : takeJointAdmission(b.admission);
@@ -3729,8 +3730,13 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       // Per-resume flags never carry over from the source run: a planner
       // refinement of a decoder refinement must not inherit its freeze.
       const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, autoRefine: _a, ...inherited } = saved as Record<string, unknown>;
+      const plainResume = b.refine !== true && b.refinePlanner !== true && b.freezePlannerNow !== true;
+      const schedule = plainResume ? restoreYue2JointSchedule(saved, b, run.output) : {};
+      const identity = { jobId: run.jobId, createdAt: run.createdAt };
+      if (plainResume && isYue2JointContinuation({ ...saved, outDir: run.output,
+        resume: selected.optimizerPath, continuation: identity } as ResolvedYue2JointTrainOptions)) continuation = identity;
       b = { ...inherited, trainingMethod: 'aitk', autoPrepare: false,
-        checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
+        checkpoint: saved.checkpoint, dataset: saved.dataset, output: continuation ? run.output : '',
         resume: selected.optimizerPath,
         // A planner refinement saves at KL rungs only: no routine step saves
         // (saveEvery = the cap, so the only step-cadence save is the last one).
@@ -3769,6 +3775,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
+      b = { ...b, ...schedule };
+      b.resumeRunId = run.jobId;
       if (Number(b.steps) <= step) {
         res.status(400).json({ error: `Set the total step count above checkpoint step ${step}.` });
         return;
@@ -3795,7 +3803,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     // Dataset-Calibrated Training (opt-in): a fresh base-matched run that asks
     // for it gets steps and saveEvery sized to the album before the recipe
     // fills in warmup from the step count. Without calibrated: true, nothing here runs.
-    let calibration: Yue2Calibration | undefined;
+    let calibration = b.resumeRunId ? b.calibration as Yue2Calibration | undefined : undefined;
     if (b.calibrated === true && method === 'base-matched' && !(typeof b.resumeRunId === 'string' && b.resumeRunId)) {
       const reqSteps = Number(b.steps), reqEvery = Number(b.saveEvery);
       if (!Number.isInteger(reqSteps) || reqSteps < 1 || !Number.isInteger(reqEvery) || reqEvery < 1) {
@@ -3902,11 +3910,11 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     }
     const previewRequested = !!(b.preview && typeof b.preview === 'object'
       && (b.preview as Record<string, unknown>).enabled === true);
-    if (!outDir || (fs.existsSync(outDir) && !previewRequested)) {
+    if (!outDir || (fs.existsSync(outDir) && !previewRequested && !continuation)) {
       res.status(400).json({ error: `Joint-training output must be a new directory: ${outDir || '(empty)'}` });
       return;
     }
-    if (previewRequested && fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0) {
+    if (previewRequested && !continuation && fs.existsSync(outDir) && fs.readdirSync(outDir).length > 0) {
       res.status(400).json({ error: `Joint-training preview output directory must be empty: ${outDir}` });
       return;
     }
@@ -4158,6 +4166,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       checkpoint, dataset, outDir, steps, saveEvery, seed, device,
       ...(gpuUuid ? { gpuUuid } : {}),
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
+      ...(continuation ? { continuation } : {}),
       spawnEnv: gpuEnv,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
       preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || preview.parallel) ? preview : { ...preview, enabled: false },
@@ -4461,7 +4470,7 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
     res.json({
       // A mirrored run's own queue lives on its worker, not this machine's
       // active job — "still refining" tracks the worker's status as mirrored.
-      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId || (run.status === 'running' && !!run.origin), reviewComplete: yue2ReviewComplete(run.output),
+      runs: runs.map(run => ({ ...run, live: yue2JointRunIsLive(activeJoint, run.jobId) || (run.status === 'running' && !!run.origin), reviewComplete: yue2ReviewComplete(run.output),
         resumeError: typeof run.options.dataset !== 'string' || !fs.existsSync(run.options.dataset)
           ? 'Prepared dataset was cleared or is missing'
           : !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)
@@ -4556,7 +4565,7 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         try { best = bestReviewFact(reviewRungFacts(run, scores, allPreviews)); } catch { /* stays null */ }
         // A mirrored run's own queue lives on its worker, not this machine's
         // `active` job — "still refining" tracks the worker's status as mirrored.
-        const live = active?.id === run.jobId || (run.status === 'running' && !!run.origin);
+        const live = yue2JointRunIsLive(active, run.jobId) || (run.status === 'running' && !!run.origin);
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           origin: run.origin?.worker ?? null,
           live, rungs: rungs.length, previews: previews.length, scored: scored.size,
@@ -4637,7 +4646,7 @@ router.patch('/datasets/:id/yue2-joint-runs/:jobId/params', (req: Request, res: 
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     const active = queue.activeJobForDataset(ds.id);
-    if (active?.id !== req.params.jobId || active.kind !== 'yue2-joint-train') { res.status(409).json({ error: 'That run is not training on this machine' }); return; }
+    if (!active || !yue2JointRunIsLive(active, String(req.params.jobId))) { res.status(409).json({ error: 'That run is not training on this machine' }); return; }
     const result = updateYue2JointParams(active, req.body ?? {});
     if ('error' in result) { res.status(result.status).json({ error: result.error }); return; }
     res.json(result);

@@ -85,6 +85,8 @@ export interface ResolvedYue2JointTrainOptions {
   device: string;
   gpuUuid?: string;
   resume?: string;
+  /** Verified continuation of an indexed run, rather than a new refinement. */
+  continuation?: { jobId: string; createdAt: number };
   datasetSlug?: string;
   spawnEnv?: NodeJS.ProcessEnv;
   preview?: import('./types.js').Yue2JointPreviewOptions;
@@ -553,7 +555,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
       return 'Fixed recipe needs a dataset prepared with its caption grammar.';
   }
   if (!o.outDir) return 'Joint training requires a new output directory';
-  if (fs.existsSync(o.outDir)) return `output directory already exists; choose a new directory: ${o.outDir}`;
+  if (fs.existsSync(o.outDir) && !isYue2JointContinuation(o)) return `output directory already exists; choose a new directory: ${o.outDir}`;
   if (!fs.existsSync(path.dirname(o.outDir))) return `parent directory for joint-training output is missing: ${path.dirname(o.outDir)}`;
   if (!Number.isInteger(o.steps) || o.steps < 1) return 'steps must be a positive integer';
   if (!Number.isInteger(o.saveEvery) || o.saveEvery < 1 || o.saveEvery > o.steps) return 'saveEvery must be between 1 and steps';
@@ -780,10 +782,10 @@ function persistAitkCatalogue(
     if (!fs.statSync(opts.outDir).isDirectory()) return;
     const { spawnEnv: _env, resume: _resume, ...persisted } = opts;
     recordYue2AitkRun({
-      version: 1, jobId: job.id, datasetId: job.datasetId,
+      version: 1, jobId: opts.continuation?.jobId ?? job.id, datasetId: job.datasetId,
       datasetSlug: opts.datasetSlug ?? '', method: 'aitk', output: opts.outDir,
       options: persisted as Record<string, unknown>, status,
-      createdAt: job.startedAt ?? Date.now(), updatedAt: Date.now(),
+      createdAt: opts.continuation?.createdAt ?? job.startedAt ?? Date.now(), updatedAt: Date.now(),
       ...(job.error ? { error: job.error } : {}), checkpoints: [],
     });
   } catch { /* output may not exist yet; catalogue is advisory */ }
@@ -854,9 +856,67 @@ export function updateYue2JointParams(job: TrainingJob, body: { saveEvery?: unkn
     if (pace.previewPaced) pace.pauseAt = Math.min(o.steps, pace.start + (body.previewEvery as number));
   }
   pace.rev++;
-  fs.writeFileSync(path.join(o.outDir, '.params.json'), JSON.stringify({ rev: pace.rev, save_every: o.saveEvery, ...(pace.previewPaced ? { pause_at: pace.pauseAt } : {}) }));
+  fs.writeFileSync(path.join(o.outDir, '.params.json'), JSON.stringify({ rev: pace.rev, save_every: o.saveEvery, ...(pace.previewPaced ? { pause_at: pace.pauseAt, preview_every: pace.preview!.everySteps } : {}) }));
   log(job, 'info', `Intervals changed: checkpoint every ${o.saveEvery}${pace.preview && pace.preview.everySteps > 0 ? `, preview every ${pace.preview.everySteps}` : ''}`);
   return { saveEvery: o.saveEvery, ...(pace.preview && pace.preview.everySteps > 0 ? { previewEvery: pace.preview.everySteps } : {}) };
+}
+
+/** A continuation may reuse only the indexed root containing its checkpoint. */
+export function isYue2JointContinuation(o: ResolvedYue2JointTrainOptions): boolean {
+  if (!o.continuation || !o.resume) return false;
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(o.outDir, 'run.json'), 'utf8'));
+    const params = path.join(o.outDir, '.params.json');
+    if (fs.existsSync(params)) {
+      const live = JSON.parse(fs.readFileSync(params, 'utf8'));
+      if (!Number.isInteger(live.rev) || live.rev < 0 || !Number.isInteger(live.save_every)
+        || live.save_every < 1 || live.save_every > Number(record.options?.steps)) return false;
+    }
+    const relative = path.relative(fs.realpathSync(o.outDir), fs.realpathSync(o.resume));
+    return record.jobId === o.continuation.jobId && record.createdAt === o.continuation.createdAt
+      && path.resolve(record.output) === path.resolve(o.outDir)
+      && record.options?.dataset === o.dataset
+      && /^(?:segments[\\/]segment-\d+[\\/])?checkpoint-step\d+[\\/]optimizer\.resume$/.test(relative);
+  } catch { return false; }
+}
+
+/** Native outputs stay fresh; a resumed run adds segments beside its old ones. */
+export function nextYue2JointSegment(output: string): number {
+  let highest = 0;
+  try {
+    for (const name of fs.readdirSync(path.join(output, 'segments'))) {
+      const match = /^segment-(\d+)$/.exec(name);
+      if (match) highest = Math.max(highest, Number(match[1]));
+    }
+  } catch { /* no earlier segments */ }
+  return highest + 1;
+}
+
+export function yue2JointRunIsLive(job: TrainingJob | null | undefined, runId: string): boolean {
+  return job?.kind === 'yue2-joint-train' && (job.id === runId
+    || (job.opts as ResolvedYue2JointTrainOptions | undefined)?.continuation?.jobId === runId);
+}
+
+/** The run record owns the calibrated budget; .params.json owns live pacing. */
+export function restoreYue2JointSchedule(saved: Record<string, unknown>, requested: Record<string, unknown>, output: string): Record<string, unknown> {
+  let live: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(output, '.params.json'), 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) live = parsed;
+  } catch { /* no live edits */ }
+  const steps = Math.max(Number(saved.steps), Number(requested.steps) || 0);
+  const saveEvery = Number.isInteger(live.save_every) && Number(live.save_every) > 0 && Number(live.save_every) <= steps
+    ? live.save_every : saved.saveEvery;
+  const preview = saved.preview ?? requested.preview;
+  return { steps, saveEvery, calibration: saved.calibration,
+    preview: preview && typeof preview === 'object' && Number.isInteger(live.preview_every) && Number(live.preview_every) > 0
+      ? { ...preview, everySteps: live.preview_every } : preview };
+}
+
+export function yue2JointSegment(o: ResolvedYue2JointTrainOptions, step: number, segmentNo: number, cadence: number, segmented: boolean) {
+  const pauseAt = cadence > 0 ? Math.min(o.steps, step + cadence) : 0;
+  return { ...o, outDir: segmented ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir,
+    pauseAt: pauseAt > 0 && pauseAt < o.steps ? pauseAt : undefined };
 }
 
 export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
@@ -922,7 +982,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
     const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;
-    const segmented = !!(preview || planCheck);
+    const segmented = !!(preview || planCheck || o.continuation);
     if (segmented) fs.mkdirSync(path.join(o.outDir, 'segments'), { recursive: true });
     let plannerFrozen = !!o.resume && /planner_frozen_at/.test((() => { try { return fs.readFileSync(o.resume!, 'latin1').slice(0, 65536); } catch { return ''; } })());
     let checkOpts: Yue2PlanCheckOptions | undefined;
@@ -949,9 +1009,11 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     let resume = o.resume || '';
     const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
     let step = resumeStep;
-    let segmentNo = 1;
+    let segmentNo = nextYue2JointSegment(o.outDir);
     let previewChain: Promise<void> = Promise.resolve();
-    const pace: LivePace = { preview, start: step, pauseAt: 0, previewPaced: false, rev: 0 };
+    let paramsRev = 0;
+    try { const rev = JSON.parse(fs.readFileSync(path.join(o.outDir, '.params.json'), 'utf8')).rev; if (Number.isInteger(rev) && rev >= 0) paramsRev = rev; } catch { /* no live edits */ }
+    const pace: LivePace = { preview, start: step, pauseAt: 0, previewPaced: false, rev: paramsRev };
     yue2JointLivePace.set(job.id, pace);
     // The first segment carries the caller's freeze (a resume from a chosen
     // checkpoint); later segments freeze only when a plan check says so.
@@ -962,12 +1024,12 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       : undefined;
     for (;;) {
       if (isCancelled(job)) return;
-      const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
       const cadence = planCheck && !plannerFrozen ? planCheck.every : preview ? preview.everySteps : 0;
       const pauseAt = cadence > 0 ? Math.min(o.steps, step + cadence) : 0;
       Object.assign(pace, { start: step, pauseAt, previewPaced: !!preview && cadence > 0 && !(planCheck && !plannerFrozen) });
-      const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined, freezePlannerNow: freezeNext,
+      const segment = { ...yue2JointSegment(o, step, segmentNo, cadence, segmented), resume: resume || undefined, freezePlannerNow: freezeNext,
         paramsFile: path.join(o.outDir, '.params.json'), paramsRev: pace.rev };
+      const segmentOut = segment.outDir;
       freezeNext = false;
       const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
       if (preview?.parallel) {
@@ -976,6 +1038,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
         state.onRung = rungStep => {
           previewChain = previewChain.then(async () => {
             if (isCancelled(job)) return;
+            if (o.continuation && listYue2JointPreviews(o.outDir).some(p => p.step === rungStep)) return;
             const ck = checkpointRecords(segmentOut).find(c => c.step === rungStep);
             if (!ck?.arPath || !ck.narPath) { log(job, 'warn', `Rung ${rungStep}: checkpoint incomplete, no preview`); return; }
             try { await renderYue2JointPreview({ output: o.outDir, step: rungStep, options: preview, arAdapter: ck.arPath, narAdapter: ck.narPath, dataset: o.dataset, signal: job.controller.signal }); }
@@ -1025,7 +1088,9 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
         }
         lastGood = { step: state.pausedAt, optimizerPath: ckpt.optimizerPath };
       }
-      if (!preview) { resume = ckpt.optimizerPath; step = state.pausedAt; segmentNo++; continue; }
+      if (!preview || (o.continuation && listYue2JointPreviews(o.outDir).some(p => p.step === state.pausedAt))) {
+        resume = ckpt.optimizerPath; step = state.pausedAt; segmentNo++; continue;
+      }
       job.phase = 'preview'; emitProgress(job);
       try {
         await renderYue2JointPreview({ output: o.outDir, step: state.pausedAt, options: preview, arAdapter: ckpt.arPath, narAdapter: ckpt.narPath, dataset: o.dataset, signal: job.controller.signal });
