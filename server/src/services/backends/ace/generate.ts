@@ -113,7 +113,7 @@ export async function runAceGeneration(
         // Cache hit — reconstruct full AceRequests from current params
         // + cached LM output. Only LM-generated fields come from cache;
         // everything else (DiT, adapter, DCW, etc.) uses current aceReq.
-        lmResults = cached.lmOutputs.map(lmOut => trackFromPlan(aceReq, lmOut));
+        lmResults = cached.lmOutputs.map((lmOut, i) => trackFromPlan(aceReq, lmOut, i));
         job.lmResults = lmResults;
         cached.timestamp = Date.now(); // refresh LRU
 
@@ -259,7 +259,7 @@ export async function runAceGeneration(
         // request and take only the LM-generated fields from the echo (the
         // same reconstruction the cache-hit path uses above), so every
         // sideband field reaches /synth regardless of cache state.
-        lmResults = lmResults.map(lmOut => trackFromPlan(aceReq, lmOut));
+        lmResults = lmResults.map((lmOut, i) => trackFromPlan(aceReq, lmOut, i));
         job.lmResults = lmResults;
 
         // ── Plan guard (Rob, 2026-08-29) — adapter-led runs only ──────────
@@ -302,7 +302,7 @@ export async function runAceGeneration(
             // Replace only the degenerate slots; keep healthy plans untouched.
             for (const [j, b] of bad.entries()) {
               const lmOut = retryOut[Math.min(j, retryOut.length - 1)];
-              lmResults[b.idx] = trackFromPlan(aceReq, lmOut, lmResults[b.idx].seed);
+              lmResults[b.idx] = trackFromPlan(aceReq, lmOut, b.idx, lmResults[b.idx].seed);
             }
             job.lmResults = lmResults;
           }

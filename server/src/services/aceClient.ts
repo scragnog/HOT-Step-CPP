@@ -432,11 +432,12 @@ async function acePost(path: string, body?: unknown, contentType = 'application/
   return res;
 }
 
-/** True once any request went out with ?keep_loaded=1: the engine then stays
- *  on EVICT_NEVER for every later job until /models/restore-policy succeeds.
- *  Conservative across engine restarts and workers. */
-let keepLoadedLatched = false;
-export const aceKeepLoadedLatched = (): boolean => keepLoadedLatched;
+/** Engines (by URL) that a request with ?keep_loaded=1 went to: each stays
+ *  on EVICT_NEVER for every later job until its own /models/restore-policy
+ *  succeeds. Conservative across an engine restart. */
+const keepLoadedLatched = new Set<string>();
+/** True when the engine this call is scoped to is latched to keep-loaded. */
+export const aceKeepLoadedLatched = (): boolean => keepLoadedLatched.has(base());
 
 export const aceClient = {
   /** GET /health — check if ace-server is alive */
@@ -464,7 +465,7 @@ export const aceClient = {
    *  Returns the engine job id — poll via pollJob until status=done. */
   async warm(request: AceWarmRequest, keepLoaded = true): Promise<string> {
     const params = new URLSearchParams();
-    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched = true; }
+    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched.add(base()); }
     const qs = params.toString();
     const path = qs ? `/warm?${qs}` : '/warm';
     const res = await acePost(path, request);
@@ -489,7 +490,7 @@ export const aceClient = {
   async submitLm(request: AceRequest | AceRequest[], mode?: 'inspire' | 'format', keepLoaded = false): Promise<string> {
     const body = mode && !Array.isArray(request) ? { ...request, lm_mode: mode } : request;
     const params = new URLSearchParams();
-    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched = true; }
+    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched.add(base()); }
     const qs = params.toString();
     const path = qs ? `/lm?${qs}` : '/lm';
     const res = await acePost(path, body);
@@ -502,7 +503,7 @@ export const aceClient = {
   async submitSynth(request: AceRequest | AceRequest[], format: string = 'wav16', keepLoaded = false): Promise<string> {
     const params = new URLSearchParams();
     if (format !== 'mp3') params.set('format', format);
-    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched = true; }
+    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched.add(base()); }
     const qs = params.toString();
     const path = qs ? `/synth?${qs}` : '/synth';
     const res = await acePost(path, request);
@@ -526,7 +527,7 @@ export const aceClient = {
   ): Promise<string> {
     const params = new URLSearchParams();
     if (format !== 'mp3') params.set('format', format);
-    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched = true; }
+    if (keepLoaded) { params.set('keep_loaded', '1'); keepLoadedLatched.add(base()); }
     const qs = params.toString();
     const path = qs ? `/synth?${qs}` : '/synth';
     const boundary = '----HotStepBoundary' + Date.now();
@@ -1174,14 +1175,16 @@ export const aceClient = {
    *  the engine refused (CLI --keep-loaded), something was still in use, or
    *  the call failed. */
   async restoreEvictPolicy(): Promise<boolean> {
+    // The engine this call is scoped to, read before any await.
+    const engine = base();
     try {
-      const res = await aceFetch(`${base()}/models/restore-policy`, {
+      const res = await aceFetch(`${engine}/models/restore-policy`, {
         method: 'POST',
         signal: AbortSignal.timeout(TIMEOUT_QUICK),
       });
       if (!res.ok) return false;
       const body = await res.json().catch(() => ({})) as { restored?: boolean };
-      if (body.restored === true) keepLoadedLatched = false;
+      if (body.restored === true) keepLoadedLatched.delete(engine);
       return body.restored === true;
     } catch {
       return false;

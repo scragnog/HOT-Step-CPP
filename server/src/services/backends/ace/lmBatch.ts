@@ -58,13 +58,17 @@ export function aceLmSongsPerPass(coResident: boolean): number {
 export type LmPlan = Pick<AceRequest, 'audio_codes' | 'caption' | 'lyrics' | 'bpm' | 'duration'
   | 'keyscale' | 'timesignature' | 'lm_seed' | 'seed'>;
 
-/** The request a track renders from: the job's current request (every DiT,
- *  adapter and sideband field) with only the LM's fields from the plan, plus
- *  the seed pair the engine planned it with: lm_seed + i beside seed + i, so
- *  each track saves the pair it was planned with. A replay alone still drifts
- *  from the batched plan after its opening (docs/user/generation.md). `seed`
- *  overrides the DiT seed, for a plan-guard resample that keeps its slot's. */
-export function trackFromPlan(base: AceRequest, plan: Partial<LmPlan>, seed = plan.seed ?? base.seed): AceRequest {
+/** The request track `slot` renders from: the job's current request (every
+ *  DiT, adapter and sideband field) with only the LM's fields from the plan.
+ *  Its DiT seed is the current request's seed + slot, the same pair the engine
+ *  makes for a fresh plan (seed + i beside lm_seed + i), so a cached plan
+ *  reused under a new DiT seed renders with the new one. Only when the job has
+ *  no seed of its own does the engine's resolved one stand. A replay alone
+ *  still drifts from the batched plan after its opening
+ *  (docs/user/generation.md). `seed` overrides, for a plan-guard resample that
+ *  keeps its slot's. */
+export function trackFromPlan(base: AceRequest, plan: Partial<LmPlan>, slot: number,
+  seed = typeof base.seed === 'number' && base.seed >= 0 ? base.seed + slot : plan.seed ?? base.seed): AceRequest {
   return {
     ...base,
     audio_codes: plan.audio_codes,

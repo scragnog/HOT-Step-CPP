@@ -25,3 +25,24 @@ test('a keep_loaded request latches co-residence until the engine restores its p
     globalThis.fetch = real;
   }
 });
+
+test('the latch is per engine: restoring one worker leaves another latched', async () => {
+  const { engineWorkerScope } = await import('../config.js');
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    const body = String(url).includes('/models/restore-policy') ? { restored: true } : { id: '1' };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const A = { scopedUrl: 'http://127.0.0.1:18101' };
+  const B = { scopedUrl: 'http://127.0.0.1:18102' };
+  const req = { caption: 'c' } as AceRequest;
+  try {
+    await engineWorkerScope.run(A, () => aceClient.submitLm(req, undefined, true));
+    await engineWorkerScope.run(B, () => aceClient.submitLm(req, undefined, true));
+    assert.equal(await engineWorkerScope.run(A, () => aceClient.restoreEvictPolicy()), true);
+    assert.equal(engineWorkerScope.run(A, () => aceKeepLoadedLatched()), false);
+    assert.equal(engineWorkerScope.run(B, () => aceKeepLoadedLatched()), true);
+  } finally {
+    globalThis.fetch = real;
+  }
+});

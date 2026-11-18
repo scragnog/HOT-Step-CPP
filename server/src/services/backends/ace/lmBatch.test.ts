@@ -50,16 +50,24 @@ test('keeping the synth models resident leaves a 24 GB card one song per pass, a
   assert.equal(lmSongsPerPass(32607, true, 4), 4);
 });
 
-test('each track keeps the seed pair the engine planned it with, across split passes and the cache', () => {
+test('each track keeps the seed pair the engine planned it with, across split passes', () => {
   // Fixed seed 100, batch 5 in passes of 4: the engine answers seed + b and lm_seed + b per pass.
-  const out = planLmPasses({ ...base, adapter: 'dit.safetensors' } as AceRequest, 5, 4)
+  const req = { ...base, adapter: 'dit.safetensors' } as AceRequest;
+  const out = planLmPasses(req, 5, 4)
     .flatMap(p => Array.from({ length: p.lm_batch_size! }, (_, b) =>
       ({ audio_codes: 'c', seed: p.seed! + b, lm_seed: (p.lm_seed ?? p.seed!) + b })));
-  const tracks = out.map(o => trackFromPlan({ ...base, adapter: 'dit.safetensors' } as AceRequest, o));
+  const tracks = out.map((o, i) => trackFromPlan(req, o, i));
   assert.deepEqual(tracks.map(t => [t.seed, t.lm_seed]), [[100, 100], [101, 101], [102, 102], [103, 103], [104, 104]]);
   assert.ok(tracks.every(t => t.adapter === 'dit.safetensors'), 'job fields carried');
-  // A cache entry written before seeds were cached falls back to the request seed.
-  assert.equal(trackFromPlan(base, { audio_codes: 'c', lm_seed: 101 }).seed, 100);
   // A plan-guard resample keeps its slot's DiT seed.
-  assert.equal(trackFromPlan(base, { audio_codes: 'c', seed: 777, lm_seed: 1110 }, 101).seed, 101);
+  assert.equal(trackFromPlan(base, { audio_codes: 'c', seed: 777, lm_seed: 1110 }, 1, 101).seed, 101);
+});
+
+test('a cache hit keeps the plans but renders with the current DiT seed', () => {
+  // Independent LM seed 700, batch 2: planned under DiT seed 100, cached, then asked again with 200.
+  const cached = [{ audio_codes: 'a', seed: 100, lm_seed: 700 }, { audio_codes: 'b', seed: 101, lm_seed: 701 }];
+  const again = cached.map((p, i) => trackFromPlan({ caption: 'c', seed: 200, lm_seed: 700 } as AceRequest, p, i));
+  assert.deepEqual(again.map(t => [t.audio_codes, t.seed, t.lm_seed]), [['a', 200, 700], ['b', 201, 701]]);
+  // A job whose seed the engine drew keeps the engine's.
+  assert.equal(trackFromPlan({ caption: 'c', seed: -1 } as AceRequest, { audio_codes: 'a', seed: 5 }, 0).seed, 5);
 });
