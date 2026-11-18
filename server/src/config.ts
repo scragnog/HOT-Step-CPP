@@ -234,6 +234,12 @@ export const config = {
     host: process.env.ACESTEPCPP_HOST || '127.0.0.1',
     vaeChunk: parseInt(process.env.ACESTEPCPP_VAE_CHUNK || '1024', 10),
     vaeOverlap: parseInt(process.env.ACESTEPCPP_VAE_OVERLAP || '64', 10),
+    /** Songs per ACE LM pass at most: ace-server's default --max-batch. The
+     *  engine sizes the LM's KV cache per job, so this only bounds the largest
+     *  pass; the card's memory may allow fewer, and a bigger batch runs as
+     *  several passes (backends/ace/lmBatch.ts). An engine from before
+     *  HOTSTEP-1121 defaults to 1 and clamps to it, which still works. */
+    lmMaxBatch: 4,
     /** GPU device selection — maps to CUDA_VISIBLE_DEVICES env var for the engine process */
     cudaVisibleDevices: GPU_SETTING_ALL ?? (process.env.CUDA_VISIBLE_DEVICES || ''),
     /** Multi-GPU opt-in: comma-separated NVIDIA GPU UUIDs, one ace-server per

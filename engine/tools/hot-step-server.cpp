@@ -273,7 +273,7 @@ static AceSynthParams      g_synth_params;
 static AceUnderstandParams g_und_params;
 
 // limits
-static int  g_max_batch   = 1;
+static int  g_max_batch   = 4;  // LM KV is sized per job, so batch-1 jobs pay nothing for this
 static int  g_mp3_kbps    = 128;
 static bool g_keep_loaded = false;
 // True only when --keep-loaded was on the command line — that co-residency is
@@ -1122,6 +1122,18 @@ static std::string resolve_lm_adapter_path(const std::string & name_or_path) {
     return "";
 }
 
+// The LM's KV size is part of its store key, so under --keep-loaded a job with
+// another batch size would load a second copy beside the resident one. Drop
+// the resident LM first. Workers run one at a time, so a plain static is safe.
+static int g_lm_resident_batch = 1;
+static void lm_fit_resident_kv(int batch) {
+    if (g_keep_loaded && batch != g_lm_resident_batch) {
+        fprintf(stderr, "[Server] LM KV batch %d -> %d, evicting the resident LM\n", g_lm_resident_batch, batch);
+        store_evict_lm(g_store);
+    }
+    g_lm_resident_batch = batch;
+}
+
 // LM worker: generates metadata + lyrics + codes, stores JSON result in job.
 static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch_size, int mode) {
     if (job->cancel.load()) {
@@ -1141,6 +1153,11 @@ static void lm_worker(std::shared_ptr<Job> job, AceRequest ace_req, int lm_batch
     }
     AceLmParams p = g_lm_params;
     p.model_path  = entry->path.c_str();
+    // KV sized to this job, not to --max-batch: two sets per song (CFG) at
+    // about 1.2 GB each on the 4B LM. A batch-1 job keeps the key and the
+    // VRAM it always had, and still shares its LM with /understand.
+    p.max_batch   = lm_batch_size;
+    lm_fit_resident_kv(lm_batch_size);
 
     // Planner-LM runtime LoRA (local HOT-Step feature)
     std::string lm_adapter_path;
@@ -1278,6 +1295,7 @@ static void handle_lm(const httplib::Request & req, httplib::Response & res) {
         lm_batch_size = 1;
     }
     if (lm_batch_size > g_max_batch) {
+        fprintf(stderr, "[Server] lm_batch_size %d capped to --max-batch %d\n", lm_batch_size, g_max_batch);
         lm_batch_size = g_max_batch;
     }
 
@@ -2206,6 +2224,7 @@ static void understand_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
     AceUnderstandParams p = g_und_params;
     p.model_path          = lm_entry->path.c_str();
     p.dit_path            = dit->path.c_str();
+    lm_fit_resident_kv(p.max_batch);
 
     AceUnderstand * ctx = ace_understand_load(g_store, &p);
     if (!ctx) {
@@ -3419,7 +3438,7 @@ int main(int argc, char ** argv) {
     g_und_params.use_fa      = g_lm_params.use_fa;
     g_und_params.use_fsm     = g_lm_params.use_fsm;
     g_und_params.max_seq     = g_lm_params.max_seq;         // must match ace_lm: part of the LM ModelKey
-    g_und_params.max_batch   = g_lm_params.max_batch;       // must match ace_lm: part of the LM ModelKey
+    g_und_params.max_batch   = 1;  // matches a batch-1 /lm job's LM ModelKey (lm_worker sizes KV per job)
     g_und_params.vae_chunk   = g_synth_params.vae_chunk;    // share --vae-chunk with /synth
     g_und_params.vae_overlap = g_synth_params.vae_overlap;  // share --vae-overlap with /synth
     if (have_vae) {

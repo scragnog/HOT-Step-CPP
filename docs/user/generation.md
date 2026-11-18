@@ -287,8 +287,12 @@ copied into that folder and appear in the list.
 
 ### Batch size
 
-Asks for several tracks from one request (1 to 9). The LM plans that many variations, then
-the DiT renders them one after another, each as its own song in the Library. With the LM
+Asks for several tracks from one request (1 to 9). The LM plans that many variations, one
+plan per track, then the DiT renders them one after another, each as its own song in the
+Library. How many tracks one LM pass plans depends on the card's memory, since each track in
+a pass costs about 2.3 GB on the 4B LM: 4 on a 24 GB card, 2 on a 16 GB card, 1 on a smaller
+card, a non-NVIDIA GPU, or a 24 GB card with Keep models in VRAM on. More tracks run as further
+passes, so every track still gets its own plan. With the LM
 switched off, and for cover and repaint tasks, the extra tracks reuse the same plan with a
 different random DiT seed each. The generation timeout in Settings applies per track, not
 per batch.

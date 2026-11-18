@@ -16,6 +16,7 @@ import { applyTriggers, resolveAdapterTriggers, resolveTriggerSpecs } from '../.
 import { readAdapterTrigger } from '../../adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../../generation/lmCache.js';
 import { degeneratePlanReason } from '../../generation/planGuard.js';
+import { aceLmSongsPerPass, planLmPasses } from './lmBatch.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../../generation/sourceAudio.js';
 import { runPostProcessingChain, normalizePpParams } from '../../generation/postProcessing.js';
 import { getCachedLatent, saveCachedLatent } from '../../generation/sourceLatentCache.js';
@@ -168,14 +169,18 @@ export async function runAceGeneration(
         logGeneration(job.id, 'INFO', `[LM Phase] Submitting to ace-server... (cache key=${cacheKey})`);
 
         const coResident = job.params.coResident === true;
-        const lmJobId = await aceClient.submitLm(aceReq, undefined, coResident);
-        job.aceJobId = lmJobId;
-
-        await pollUntilDone(lmJobId, job, deps.signal, timeoutMinutes);
-
-        // Fetch LM results (array of enriched AceRequests)
-        const resultRes = await aceClient.getJobResult(lmJobId);
-        lmResults = await resultRes.json() as AceRequest[];
+        // One plan per song: the batch goes to the LM, split into passes the
+        // engine's --max-batch allows.
+        lmResults = [];
+        for (const pass of planLmPasses(aceReq, job.params.batchSize || 1, aceLmSongsPerPass(coResident))) {
+          const lmJobId = await aceClient.submitLm(pass, undefined, coResident);
+          job.aceJobId = lmJobId;
+          await pollUntilDone(lmJobId, job, deps.signal, timeoutMinutes);
+          // Fetch LM results (array of enriched AceRequests)
+          const resultRes = await aceClient.getJobResult(lmJobId);
+          const out = await resultRes.json() as AceRequest[];
+          if (Array.isArray(out)) lmResults.push(...out);
+        }
 
         // A COMPLETED LM job with zero parseable results is a failure, not an
         // empty batch. Before this check (2026-08-11), an engine-side
@@ -239,16 +244,21 @@ export async function runAceGeneration(
                 + `(seed ${seed}, rep penalty ${penalty.toFixed(2)})`);
             }
             job.stage = `Plan looked stuck — resampling (retry ${attempt}/2)...`;
+            // Resample only the degenerate slots, one fresh plan each.
             const retryReq = { ...aceReq, lm_seed: seed, lm_rep_penalty: penalty };
-            const retryJobId = await aceClient.submitLm(retryReq, undefined, coResident);
-            job.aceJobId = retryJobId;
-            await pollUntilDone(retryJobId, job, deps.signal, timeoutMinutes);
-            const retryRes = await aceClient.getJobResult(retryJobId);
-            const retryOut = await retryRes.json() as AceRequest[];
-            if (!Array.isArray(retryOut) || retryOut.length === 0) break;   // keep what we have
+            const retryOut: AceRequest[] = [];
+            for (const pass of planLmPasses(retryReq, bad.length, aceLmSongsPerPass(coResident))) {
+              const retryJobId = await aceClient.submitLm(pass, undefined, coResident);
+              job.aceJobId = retryJobId;
+              await pollUntilDone(retryJobId, job, deps.signal, timeoutMinutes);
+              const retryRes = await aceClient.getJobResult(retryJobId);
+              const out = await retryRes.json() as AceRequest[];
+              if (Array.isArray(out)) retryOut.push(...out);
+            }
+            if (retryOut.length === 0) break;   // keep what we have
             // Replace only the degenerate slots; keep healthy plans untouched.
-            for (const b of bad) {
-              const lmOut = retryOut[Math.min(b.idx, retryOut.length - 1)];
+            for (const [j, b] of bad.entries()) {
+              const lmOut = retryOut[Math.min(j, retryOut.length - 1)];
               lmResults[b.idx] = {
                 ...aceReq,
                 audio_codes: lmOut.audio_codes,

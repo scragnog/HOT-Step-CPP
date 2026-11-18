@@ -860,7 +860,7 @@ Server:
                           e.g. http://myhost:3001 (also env ACESTEPCPP_ALLOWED_ORIGINS)
   --allow-host <csv>      Extra hostnames accepted in the Host header, e.g. myhost
                           (case-insensitive, port ignored; also env ACESTEPCPP_ALLOWED_HOSTS)
-  --max-batch <N>         LM batch limit (default: 1)
+  --max-batch <N>         LM batch limit (default: 4)
   --max-seq <N>           KV cache size (default: 8192)
 
 Debug:
@@ -890,7 +890,10 @@ Notes the usage text does not cover:
   spectral denoiser (`denoise_strength`).
 - `--draft-lm` auto-discovery is disabled in the code; only an explicit path enables
   speculative decoding.
-- `--max-batch` is clamped to 1..9.
+- `--max-batch` is clamped to 1..9. It caps `lm_batch_size` on `/lm`; the LM's KV cache is
+  sized per job to its own batch (two sets per song), so a batch-1 job uses the same memory
+  at any `--max-batch`. Under `--keep-loaded`, a job with another batch size evicts the
+  resident LM first.
 - `--models` is scanned at startup, and its `onnx/` subfolder too. `--adapters` is
   scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
 - Lua plugins are scanned once at startup from `engine/plugins/` and then the
