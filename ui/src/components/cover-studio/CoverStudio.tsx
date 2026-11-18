@@ -1433,7 +1433,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         keyShift: coverKeyShift, cfgScale: coverCfgScale, lyricSchedule: coverLyricSchedule,
         lmAdapterAr: activeYue2Ar, lmAdapterNar: activeYue2Nar,
         pairMode: renderMode === 'base' ? 'base' : 'pair',
-        yue2Pick: { ...yue2PickAtEnqueue(null), lmAdapterArScale: clampCoverAr(coverArStrength) },
+        yue2Pick: yue2PickAtEnqueue(null, { lmAdapterAr: activeYue2Ar, lmAdapterNar: activeYue2Nar, lmAdapterArScale: clampCoverAr(coverArStrength) }),
         captionMode: yue2Mode ? 'custom' : captionMode, captionTracks: renderMode === 'base' ? [] : captionTracks,
       },
     };
@@ -1620,10 +1620,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
     parallelCoverArt: settings.parallelCoverArt,
   };
-  const pair = { ...yue2PickAtEnqueue(null),
+  const pair = yue2PickAtEnqueue(null, {
     lmAdapterArScale: clampCoverAr(coverArStrength),
     lmAdapterAr: activeYue2Ar,
-    lmAdapterNar: activeYue2Nar };
+    lmAdapterNar: activeYue2Nar });
   const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
   const coverChoices = { keepChords, ...coverChoicesFor(approvedSheet.abc, { voices: coverVoices,
     tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale }) };

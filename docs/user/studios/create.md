@@ -161,3 +161,5 @@ hidden there.
 - [Generation](../generation.md)
 - [Backends](../backends.md)
 - [Adapters](../adapters.md)
+
+For YuE2 Build by section, planning and starting a build capture the current model picker, including an adapter change still saving. A started build keeps its captured settings.

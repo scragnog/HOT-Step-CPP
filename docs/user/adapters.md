@@ -490,3 +490,5 @@ For reading the logs, see [Troubleshooting](troubleshooting.md#where-the-logs-ar
 ## Release data paths
 
 Release adapters default to the shared data folder's `adapters/`. A managed-folder move updates saved adapter paths inside transferred folders. An adapter directory override outside that folder remains external. See [Data folder and upgrades](data-folder.md).
+
+YuE2 adapter strength changes take effect when the model next loads. The next generation may need to reload the model. Create’s Build by section captures the current picker when planning and starting a build; an existing build keeps its captured settings. Cover Studio uses the same picker settings with its chosen adapter pair and cover AR strength.

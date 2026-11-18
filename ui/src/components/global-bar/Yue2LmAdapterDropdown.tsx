@@ -331,7 +331,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
               {inForce
                 ? t('globalBar.yue2AdapterInForce', 'Merged into the resident model now.')
-                : t('globalBar.yue2AdapterPending', 'Merges when the model next loads.')}
+                : t('globalBar.yue2AdapterPending', 'The selected adapter or strength takes effect when the model next loads; the next generation may need a reload.')}
             </p>
           </div>
 

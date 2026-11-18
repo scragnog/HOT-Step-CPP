@@ -117,3 +117,20 @@ test('a failed save does not drop an overlapping save that carries the same valu
   assert.deepEqual(pendingSelection('yue2'), {});
   assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: 0.6 });
 });
+
+
+test('shared YuE2 capture keeps picker paths and pending dials while applying studio overrides', async () => {
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  globalThis.fetch = async (input, init) => {
+    if (init?.method === 'POST') { await held; return json({ changed: true }); }
+    return json({ buckets: {}, defaults: { lmAdapterAr: 'ar', lmAdapterNar: 'nar', lmAdapterArScale: 1 } });
+  };
+  await useBackendStore.getState().fetchModels('yue2');
+  const save = useBackendStore.getState().selectModels({ lmAdapterNarScale: '0.4' }, 'yue2');
+  assert.deepEqual(yue2PickAtEnqueue(null, { lmAdapterArScale: 0.6 }),
+    { lmAdapterAr: 'ar', lmAdapterNar: 'nar', lmAdapterArScale: 0.6, lmAdapterNarScale: 0.4 });
+  assert.deepEqual(yue2PickAtEnqueue(null, { lmAdapterAr: '', lmAdapterNar: '' }),
+    { lmAdapterAr: '', lmAdapterNar: '', lmAdapterArScale: 1, lmAdapterNarScale: 0.4 });
+  release(); await save;
+});

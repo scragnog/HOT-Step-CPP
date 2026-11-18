@@ -448,6 +448,7 @@ const YUE2_PICK_KEY = /^(lm|vae|lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|
  *  /api/backends/models), which the server resolves with the picker's rules. */
 export function yue2PickAtEnqueue(
   preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
+  overrides: Record<string, string | number> = {},
 ): Record<string, string | number> {
   // A picker save still in flight wins over the defaults it is replacing.
   const defaults = {
@@ -465,7 +466,7 @@ export function yue2PickAtEnqueue(
     pick.lmAdapterAr = String(preset.yue2_ar_adapter_path ?? '').trim();
     pick.lmAdapterNar = String(preset.yue2_nar_adapter_path ?? '').trim();
   }
-  return pick;
+  return { ...pick, ...overrides };
 }
 
 export async function applyYue2PresetAdapters(

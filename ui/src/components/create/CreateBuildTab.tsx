@@ -16,6 +16,7 @@ import { Yue2BuildPage, buildCaption, useYue2Build, type BuildSettings } from '.
 import { COVER_AR_DEFAULT, clampCoverAr } from '../cover-studio/Yue2CoverPanel';
 import { barRanges } from '../../utils/abcSectionMove';
 import { notify } from '../shared/Toast';
+import { yue2PickAtEnqueue } from '../../utils/yue2CaptionSource';
 
 const YUE2 = 'yue2';
 const SESSION_KEY = 'hs-create-buildSessionId';
@@ -100,26 +101,26 @@ export const CreateBuildTab: React.FC<Props> = ({ token, getParams, onSave, onOn
     if (!params) return;
     setPlanning(true); setPlanError('');
     try {
-      const data = await generateApi.yue2Plan({ ...params, randomSeed: true, seed: -1 } as never);
+      const data = await generateApi.yue2Plan({ ...params, yue2Pick: yue2PickAtEnqueue(null, edited.ar === undefined ? {} : { lmAdapterArScale: edited.ar }), randomSeed: true, seed: -1 } as never);
       setPlan({ abc: data.abc, seed: data.seed });
     } catch (err) { setPlanError(err instanceof Error ? err.message : String(err)); }
     finally { setPlanning(false); }
-  }, [getParams]);
+  }, [getParams, edited.ar]);
 
   /** The params a build starts from: the open session's own, or the form's with the planned score and any settings edited here. */
   const buildParams = (): Record<string, unknown> | null => {
     if (session) return session.params;
     const params = getParams();
     if (!params) { notify('The Create form is not ready.'); return null; }
-    const pick = edited.ar === undefined ? params.yue2Pick : { ...(params.yue2Pick as Record<string, unknown> | undefined), lmAdapterArScale: edited.ar };
+    const pick = yue2PickAtEnqueue(null, edited.ar === undefined ? {} : { lmAdapterArScale: edited.ar });
     return { ...params, ...(supplied ? {} : { yue2Abc: plan?.abc ?? '' }), ...(plan && !supplied ? { seed: plan.seed } : {}), randomSeed: false,
       yue2BatchSize: 1, yue2Variations: 1, batchSize: 1,
-      ...(edited.cfg === undefined ? {} : { yue2CfgScale: edited.cfg }), ...(pick === undefined ? {} : { yue2Pick: pick }) };
+      ...(edited.cfg === undefined ? {} : { yue2CfgScale: edited.cfg }), yue2Pick: pick };
   };
 
   const settings: BuildSettings = (() => {
     const p = session?.params ?? form ?? {};
-    const ar = Number((p.yue2Pick as Record<string, unknown> | undefined)?.lmAdapterArScale);
+    const ar = Number((session ? p.yue2Pick as Record<string, unknown> | undefined : yue2PickAtEnqueue(null))?.lmAdapterArScale);
     const cfg = Number(p.yue2CfgScale);
     return { voices: 'both', tempo: 'free', keyShift: 0,
       cfgScale: session ? (Number.isFinite(cfg) && cfg > 0 ? cfg : 1) : edited.cfg ?? (Number.isFinite(cfg) && cfg > 0 ? cfg : 1),

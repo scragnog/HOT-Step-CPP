@@ -881,3 +881,5 @@ your lyric edits and queued execution remain separate from list refreshes.
 - [Generation](../generation.md)
 - [Backends](../backends.md)
 - [Adapters](../adapters.md)
+
+YuE2 covers and new section builds capture the model picker settings with the adapter pair and AR strength chosen in Cover Studio. Changing a strength takes effect when the model next loads.
