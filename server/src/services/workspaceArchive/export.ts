@@ -15,6 +15,7 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import archiver from 'archiver';
 import Database from 'better-sqlite3';
+import { parse as dotenvParse } from 'dotenv';
 import { backupDatabase } from '../../db/backup.js';
 import type { DataChildren } from '../../dataroot/locate.js';
 import { isCredentialKey } from '../generation/requestCapture.js';
@@ -64,24 +65,36 @@ export function isMachineKey(key: string): boolean {
   ].includes(key);
 }
 
-/** The archive's settings/.env: KEY=VALUE lines only (comments can hold
- *  pasted keys), without path keys, machine keys and, with secrets off,
- *  credential keys. Returns the dropped key names (never values). */
+/** One KEY=value line that dotenv parses back to exactly `v`, or null when no
+ *  quoting can (a value holding all three quote kinds). Single quotes and
+ *  backticks expand nothing; double quotes turn \n and \r into line breaks. */
+function envLine(key: string, v: string): string | null {
+  if (/^[^\s#'"`\\]*$/.test(v)) return `${key}=${v}`;
+  const q = ["'", '`', '"'].find(c => !v.includes(c) && !(c === '"' && /\\[nr]/.test(v)));
+  return q ? `${key}=${q}${v}${q}` : null;
+}
+
+/** The archive's settings/.env, rebuilt from parsed values: comments (inline
+ *  ones too) never travel, since they can hold pasted keys. Without path keys,
+ *  machine keys and, with secrets off, credential keys. Returns the dropped
+ *  key names (never values). */
 export function archiveEnvText(text: string, secrets: boolean): { text: string; dropped: string[] } {
   const keep: string[] = [];
   const dropped: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    if (!m) continue;
-    const key = m[1];
-    if (ENV_PATH_KEYS.includes(key) || isMachineKey(key) || (!secrets && isCredentialKey(key))) dropped.push(key);
-    else keep.push(line.trim());
+  for (const [key, value] of Object.entries(dotenvParse(text))) {
+    const line = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+      && !(ENV_PATH_KEYS.includes(key) || isMachineKey(key) || (!secrets && isCredentialKey(key))) ? envLine(key, value) : null;
+    if (line === null) dropped.push(key); else keep.push(line);
   }
   return { text: keep.length ? keep.join('\n') + '\n' : '', dropped };
 }
 
 /** Test seam: runs after a file has been read into the zip, before it is re-checked. */
-export const hooks = { afterRead: (_abs: string): void | Promise<void> => {} };
+export const hooks = {
+  afterRead: (_abs: string): void | Promise<void> => {},
+  /** Runs once a source file's read stream exists. */
+  opened: (_abs: string, _stream: fs.ReadStream): void => {},
+};
 
 const DB_ENTRY = 'library/hotstep.db';
 const ENV_ENTRY = 'settings/.env';
@@ -193,12 +206,16 @@ export async function exportWorkspace(o: ExportOptions): Promise<ExportResult> {
   aborted.catch(() => {});
   const check = () => { if (ac.signal.aborted) throw ac.signal.reason; };
   const timer = o.blockers && setInterval(() => {
-    const b = o.blockers!();
+    let b: string[];
+    // A throw here would be uncaught (timer callback): stop the export instead.
+    try { b = o.blockers!(); } catch (e: any) { b = [`could not check for running work (${e.message})`]; }
     if (b.length) ac.abort(new ExportError(`Export stopped: work started while it ran (${b.join('; ')})`, 409, { blockers: b }));
   }, o.recheckMs ?? 3000);
 
   let archive: archiver.Archiver | null = null;
   let out: fs.WriteStream | null = null;
+  /** The source file being read, so an abort can close it. */
+  let reading: { rs: fs.ReadStream; hasher: Transform } | null = null;
   try {
     const inv: Inventory = takeInventory(o.children, o.choice);
     const hasDb = fs.existsSync(o.children.db);
@@ -266,8 +283,11 @@ export async function exportWorkspace(o: ExportOptions): Promise<ExportResult> {
       let n = 0;
       const hasher = new Transform({ transform(chunk, _e, cb) { hash.update(chunk); n += chunk.length; cb(null, chunk); } });
       const rs = fs.createReadStream(abs);
+      reading = { rs, hasher };
       rs.on('error', e => ac.abort(e));
+      hooks.opened(abs, rs);
       await append(rs.pipe(hasher), name, before.mtime);
+      reading = null;
       await hooks.afterRead(abs);
       let after: fs.Stats | null = null;
       try { after = fs.statSync(abs); } catch { /* removed */ }
@@ -317,7 +337,12 @@ export async function exportWorkspace(o: ExportOptions): Promise<ExportResult> {
     if (!ac.signal.aborted) ac.abort(e);
     const reason = ac.signal.reason;
     archive?.abort();
-    if (out && !out.closed) await new Promise<void>(r => { out!.once('close', () => r()); out!.destroy(); });
+    // Close the source file, the hasher and the part file before anything is
+    // removed or the caller releases its hold.
+    const shut = (s: NodeJS.ReadableStream & { closed: boolean; destroy(): void } | null) =>
+      !s || s.closed ? Promise.resolve() : new Promise<void>(r => { s.once('close', () => r()); s.destroy(); });
+    const src = reading as { rs: fs.ReadStream; hasher: Transform } | null;   // set inside addFile; TS cannot see it
+    await Promise.all([shut(src?.rs ?? null), shut(src?.hasher ?? null), shut(out as any)]);
     fs.rmSync(part, { force: true });
     throw reason;
   } finally {

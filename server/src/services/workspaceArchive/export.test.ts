@@ -7,6 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { parse as dotenvParse } from 'dotenv';
 
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'hs-archive-'));
 // config.ts (through db/backup.ts) bootstraps a data root at import: a temp one.
@@ -25,6 +26,8 @@ type Manifest = import('./manifest.js').Manifest;
 const S = {
   setting: 'SENTINEL-SETTING-7f3a', deleted: 'SENTINEL-DELETED-91bc', hf: 'hf_SENTINELHFTOKEN0042',
   env: 'SENTINEL-ENV-55d1', before: 'SENTINEL-BEFORE-c0de', bak: 'SENTINEL-BAK-e11e',
+  inline: 'SENTINEL-INLINE-ab12', adapterEnv: 'SENTINEL-ADAPTER-ENV-3c3c', tokenBak: 'SENTINEL-TOKEN-BAK-4d4d',
+  nestedBak: 'SENTINEL-NESTED-BAK-5e5e',
 };
 const OFF = { training: true, adapters: true, models: false, secrets: false };
 
@@ -59,11 +62,22 @@ function fixture() {
   put(path.join(lib, 'training', '_backup-2026-10-05-mirror', 'x.json'), '{}');
   put(path.join(lib, 'training', 'yue2-aitk-runs.json'), '[]');
   put(path.join(lib, 'training', 'yue2-aitk-runs.json.123.456.tmp'), '[]');
+  put(path.join(lib, 'muscriptor', 'hf_token.bak-1'), S.tokenBak);
+  put(path.join(lib, 'audio', 'old', 'mix.wav.bak-2'), S.nestedBak);
   put(path.join(c.adapters, 'a1.safetensors'), crypto.randomBytes(3_000));
   put(path.join(c.adapters, 'run1', 'step-100', 'adapter.safetensors'), crypto.randomBytes(2_000));
+  put(path.join(c.adapters, 'run1', 'finished'), '');
+  put(path.join(c.adapters, '.env'), `OPENAI_API_KEY=${S.adapterEnv}`);
+  put(path.join(c.adapters, 'run1', 'notes.xyz'), 'unknown type');
+  put(path.join(c.adapters, 'run1', 'backup_2026-01-01', 'adapter.safetensors'), S.nestedBak);
   put(path.join(c.models, 'm.gguf'), crypto.randomBytes(4_000));
+  put(path.join(c.models, 'tok', 'tokenizer.json'), '{}');
+  put(path.join(c.models, 'tok', 'LICENSE'), 'MIT');
+  put(path.join(c.models, 'dit.engine'), 'gpu-built');
+  put(path.join(c.models, 'tool.exe'), 'binary');
   put(c.envFile, [
     '# GEMINI_API_KEY=' + S.env + ' (old)', `GEMINI_API_KEY=${S.env}`, 'SERVER_PORT=3001', 'SERVER_HOST=0.0.0.0',
+    `GEMINI_MODEL_ALT=model # old API key ${S.inline}`,
     `DATA_DIR=${lib}`, 'CUDA_VISIBLE_DEVICES=1', 'GEMINI_MODEL=gemini-2.5-flash', 'TRAINING_WORKER_TOKEN=abc',
   ].join('\n'));
   put(path.join(root, 'settings', '.env.before-import-1'), `GEMINI_API_KEY=${S.before}`);
@@ -174,9 +188,16 @@ test('export with defaults: hashes verify, secrets absent from the bytes, junk s
   assert.equal(skipped['library/training/yue2-aitk-runs.json.123.456.tmp'], 'temp');
   assert.equal(skipped['settings/.env.before-import-1'], 'backup');
   assert.equal(skipped['settings/.env.bak-1216'], 'backup');
+  // At any depth and in user-named folders: backups, credential files, unknown types.
+  assert.equal(skipped['library/muscriptor/hf_token.bak-1'], 'backup');
+  assert.equal(skipped['library/audio/old/mix.wav.bak-2'], 'backup');
+  assert.equal(skipped['adapters/.env'], 'secret');
+  assert.equal(skipped['adapters/run1/notes.xyz'], 'unknown');
+  assert.equal(skipped['adapters/run1/backup_2026-01-01'], 'backup');
+  assert.ok(zip.has('adapters/run1/finished'));
 
   const env = zip.get('settings/.env')!.toString();
-  assert.equal(env, 'GEMINI_MODEL=gemini-2.5-flash\n');
+  assert.equal(env, 'GEMINI_MODEL_ALT=model\nGEMINI_MODEL=gemini-2.5-flash\n', 'values only: no comments, inline ones included');
   assert.deepEqual(m.env!.droppedKeys.sort(), ['CUDA_VISIBLE_DEVICES', 'DATA_DIR', 'GEMINI_API_KEY', 'SERVER_HOST', 'SERVER_PORT', 'TRAINING_WORKER_TOKEN']);
 
   const dbFile = path.join(f.dir, 'snapshot-check.db');
@@ -192,7 +213,7 @@ test('export with defaults: hashes verify, secrets absent from the bytes, junk s
   assert.deepEqual(m.externals.map(e => [e.path, e.refs]).sort(), [[path.join(f.c.models, 'm.gguf'), 1], [f.external, 2]].sort());
   const src = Object.fromEntries(m.sources.map(s => [s.prefix, s]));
   assert.equal(src['adapters'].path, f.c.adapters);
-  assert.equal(src['adapters'].files, 2);
+  assert.equal(src['adapters'].files, 3);
   assert.equal(src['library/training'].files, 2);
   assert.equal(r.bytes, bytes.length);
 });
@@ -207,6 +228,10 @@ test('secrets and models on: credentials and hf_token travel, models carried', a
   assert.equal(zip.get('library/muscriptor/hf_token')!.toString(), S.hf);
   assert.match(zip.get('settings/.env')!.toString(), new RegExp(`GEMINI_API_KEY=${S.env}`));
   assert.ok(zip.has('models/m.gguf'));
+  assert.ok(zip.has('models/tok/tokenizer.json') && zip.has('models/tok/LICENSE'), 'tokenizers and licences travel');
+  assert.equal(r.manifest.skipped.find(s => s.path === 'models/dit.engine')?.reason, 'machine');
+  assert.equal(r.manifest.skipped.find(s => s.path === 'models/tool.exe')?.reason, 'machine');
+  assert.equal(r.manifest.skipped.find(s => s.path === 'library/muscriptor/hf_token.bak-1')?.reason, 'backup', 'a backup stays out even with Secrets on');
   assert.ok(![...zip.keys()].some(n => n.startsWith('library/training/') || n.startsWith('adapters/')));
   assert.equal(r.manifest.skipped.find(s => s.path === 'library/training')?.reason, 'category-off');
   assert.equal(r.manifest.db!.credentialRowsRemoved, 0);
@@ -245,6 +270,39 @@ test('cancel and a blocker that appears both abort cleanly', async () => {
   } finally { hooks.afterRead = () => {}; f.db.close(); }
 });
 
+test('cancel in the middle of reading a big file closes its source stream before returning', async () => {
+  const f = fixture();
+  fs.mkdirSync(f.outDir);
+  const big = path.join(f.c.library, 'audio', 'big.wav');
+  fs.writeFileSync(big, Buffer.alloc(32 * 1024 * 1024, 1));
+  const ac = new AbortController();
+  let stream: fs.ReadStream | null = null;
+  hooks.opened = (abs, rs) => { if (abs === big) { stream = rs; rs.once('data', () => ac.abort()); } };
+  try {
+    await assert.rejects(exportWorkspace({ children: f.c, dataRoot: f.root, outFile: path.join(f.outDir, 'c.zip'), choice: OFF, appVersion: 't', signal: ac.signal }),
+      (e: unknown) => e instanceof ExportCancelled);
+    assert.ok(stream, 'the big file was opened');
+    const s = stream as unknown as fs.ReadStream;
+    assert.equal(s.destroyed, true);
+    assert.equal(s.closed, true, 'file handle closed before exportWorkspace returned');
+    assert.ok(s.bytesRead < 32 * 1024 * 1024, 'stopped mid-file');
+    assert.deepEqual(leftovers(f.outDir), []);
+  } finally { hooks.opened = () => {}; f.db.close(); }
+});
+
+test('a blocker check that throws stops the export instead of crashing', async () => {
+  const f = fixture();
+  fs.mkdirSync(f.outDir);
+  hooks.afterRead = () => new Promise(r => setTimeout(r, 30));
+  try {
+    await assert.rejects(exportWorkspace({
+      children: f.c, dataRoot: f.root, outFile: path.join(f.outDir, 'd.zip'), choice: OFF, appVersion: 't',
+      recheckMs: 5, blockers: () => { throw new Error('registry closed'); },
+    }), /could not check for running work \(registry closed\)/);
+    assert.deepEqual(leftovers(f.outDir), []);
+  } finally { hooks.afterRead = () => {}; f.db.close(); }
+});
+
 test('preflight refuses a destination inside an exported folder or an existing file', () => {
   const f = fixture();
   f.db.close();
@@ -258,9 +316,20 @@ test('preflight refuses a destination inside an exported folder or an existing f
 });
 
 test('archiveEnvText keeps workspace keys only', () => {
-  const r = archiveEnvText('A=1\n# B_API_KEY=x\nexport OLLAMA_MODEL=llama3\nVITE_PORT=3000\nHOT_STEP_DATA_ROOT=x\nUNSLOTH_PASSWORD=p\nACESTEPCPP_ADAPTERS=/x\n', false);
-  assert.equal(r.text, 'A=1\nexport OLLAMA_MODEL=llama3\n');
-  assert.deepEqual(r.dropped, ['VITE_PORT', 'HOT_STEP_DATA_ROOT', 'UNSLOTH_PASSWORD', 'ACESTEPCPP_ADAPTERS']);
+  const src = [
+    'A=1', '# B_API_KEY=x', 'export OLLAMA_MODEL=llama3', 'VITE_PORT=3000', 'HOT_STEP_DATA_ROOT=x',
+    'UNSLOTH_PASSWORD=p', 'ACESTEPCPP_ADAPTERS=/x', 'NAME=model # old key SECRET-IN-COMMENT',
+    `SPACED="two words # not a comment"`, `MULTI="line one\nline two"`, `QUOTES="it's"`,
+    `RAW='keep \\n literal'`, 'TICKS="a\'b`c\\"d"',
+  ].join('\n');
+  const r = archiveEnvText(src, false);
+  assert.ok(!r.text.includes('SECRET-IN-COMMENT'), 'no comment text survives');
+  assert.deepEqual(r.dropped, ['VITE_PORT', 'HOT_STEP_DATA_ROOT', 'UNSLOTH_PASSWORD', 'ACESTEPCPP_ADAPTERS', 'TICKS']);
+  // What a later dotenv load reads back is exactly what was kept.
+  const want = Object.fromEntries(Object.entries(dotenvParse(src)).filter(([k]) => ['A', 'OLLAMA_MODEL', 'NAME', 'SPACED', 'MULTI', 'QUOTES', 'RAW'].includes(k)));
+  assert.deepEqual(dotenvParse(r.text), want);
+  assert.equal(want.NAME, 'model');
+  assert.equal(want.MULTI, 'line one\nline two');
   assert.match(archiveEnvText('UNSLOTH_PASSWORD=p\n', true).text, /UNSLOTH_PASSWORD=p/);
 });
 
@@ -358,9 +427,9 @@ test('route: preview, a finished export, and refusal while work runs', async () 
   try {
     const pv = await s.call('GET', `${ARCHIVE_BASE}/preview?destination=${encodeURIComponent(f.outDir)}`);
     assert.equal(pv.status, 200);
-    assert.equal(pv.body.categories.adapters.files, 2);
-    assert.equal(pv.body.categories.models.files, 1);
-    assert.equal(pv.body.categories.secrets.files, 1);
+    assert.equal(pv.body.categories.adapters.files, 3);
+    assert.equal(pv.body.categories.models.files, 3);
+    assert.equal(pv.body.categories.secrets.files, 2, 'hf_token and adapters/.env');
     assert.ok(pv.body.categories.library.bytes > 70_000, 'library includes the DB');
     assert.deepEqual(pv.body.categories.adapters.paths, [f.c.adapters]);
     assert.deepEqual(pv.body.defaults, OFF);

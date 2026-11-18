@@ -61,6 +61,19 @@ test('hold: refused while work runs or is queued, during an update, or while hel
   gate.open();
 });
 
+test('hold: a blocker that throws after the drain drops the hold', async () => {
+  const gate = createGate();
+  const s = await serve(gate);
+  try {
+    let calls = 0;
+    await assert.rejects(gate.hold({ blockers: () => { if (++calls > 1) throw new Error('registry closed'); return []; } }), /registry closed/);
+    assert.equal(gate.held, false);
+    assert.equal(await s.status('POST', '/api/songs'), 200, 'writes are not stuck behind a lost hold');
+    const h = await gate.hold({ blockers: () => [] });
+    h.release();
+  } finally { await s.close(); }
+});
+
 test('hold: drains in-flight writes, and gives up (released) when one will not finish', async () => {
   const gate = createGate();
   const s = await serve(gate);

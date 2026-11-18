@@ -307,11 +307,15 @@ export function createGate() {
     const mine = { allow: o.allow ?? [], message: o.message ?? 'HOT-Step is exporting the workspace. Changes are paused until it finishes.' };
     held = mine;
     const release = () => { if (held === mine) held = null; };
-    const drained = await drain(o.fromRequest ? 1 : 0, o.drainMs ?? 10_000);
-    const blockers = drained ? check() : ['requests still in flight'];
-    if (blockers.length) {
+    // Any failure from here on, a throwing blocker included, drops the hold:
+    // the caller gets no handle to release it with.
+    try {
+      const drained = await drain(o.fromRequest ? 1 : 0, o.drainMs ?? 10_000);
+      const blockers = drained ? check() : ['requests still in flight'];
+      if (blockers.length) throw fail(`Wait for running work to finish: ${blockers.join('; ')}`, 409, { blockers });
+    } catch (e) {
       release();
-      throw fail(`Wait for running work to finish: ${blockers.join('; ')}`, 409, { blockers });
+      throw e;
     }
     return { release, check };
   }
