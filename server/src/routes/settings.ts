@@ -24,6 +24,7 @@ import { getDataLocation, getBusyBlockers, previewOperation, scheduleOperation, 
 import { listJobs, trainersExiting } from '../services/training/labelingQueue.js';
 import { gpuLaneBusy, gpuLaneDepth } from '../services/generation/gpuLane.js';
 import { createDataFolderHandlers } from './settingsDataFolder.js';
+import workspaceArchiveRoutes from './settingsWorkspaceArchive.js';
 import { requestWorkerRestart } from './shutdown.js';
 
 const router = Router();
@@ -46,6 +47,8 @@ router.get('/data-folder', dataFolder.location);
 router.post('/data-folder/preview', dataFolder.preview);
 router.post('/data-folder/schedule', dataFolder.schedule);
 router.post('/data-folder/cancel', dataFolder.cancel);
+// Workspace archive (ARCHIVE_BASE in settingsWorkspaceArchive.ts must match this mount).
+router.use('/workspace-archive', workspaceArchiveRoutes);
 
 /** Set of exposed keys for fast lookup */
 const exposedSet = new Set<string>(EXPOSED_ENV_KEYS);

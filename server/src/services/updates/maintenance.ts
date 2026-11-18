@@ -211,6 +211,9 @@ export function createGate() {
   /** Update-only blockers (queued work a data-folder move may leave queued). */
   const extraBlockers: Array<() => string[]> = [];
 
+  /** A lease-free write hold (workspace export); null when none. */
+  let held: { allow: string[]; message: string } | null = null;
+
   const authorised = (req: Request) => !!lease && tokenMatches(req.get(TOKEN_HEADER), lease.tokenSha256);
 
   function middleware(req: Request, res: Response, next: NextFunction): void {
@@ -219,6 +222,10 @@ export function createGate() {
         error: 'HOT-Step is installing an update. It will be back shortly.',
         maintenance: { state: 'closed', leaseId: lease?.id ?? null },
       });
+      return;
+    }
+    if (held && MUTATING(req.method) && !held.allow.includes(req.path)) {
+      res.status(503).set('Retry-After', '5').json({ error: held.message, maintenance: { state: 'held' } });
       return;
     }
     // A request counts until its handler ends the response. A client
@@ -281,8 +288,37 @@ export function createGate() {
     return taken;
   }
 
+  /** Hold writes without a lease, for work that reads the data folder while
+   *  the app stays up (workspace export). Refused while an update is open,
+   *  another hold is active, or any work runs or is queued. Then mutating
+   *  requests get 503 (GET, HEAD and OPTIONS pass, as do `allow` paths) and
+   *  in-flight writes drain. `check()` re-runs the blockers for the holder to
+   *  poll; `release()` is idempotent. Call from inside a request handler when
+   *  `fromRequest` (that request is excluded from the drain). */
+  async function hold(o: {
+    blockers: () => string[]; allow?: string[]; message?: string;
+    fromRequest?: boolean; drainMs?: number;
+  }): Promise<{ release: () => void; check: () => string[] }> {
+    if (closed) throw fail('An update is in progress', 409);
+    if (held) throw fail('Another export is already holding writes', 409);
+    const check = () => [...o.blockers(), ...extraBlockers.flatMap(f => f())];
+    const before = check();
+    if (before.length) throw fail(`Wait for running work to finish: ${before.join('; ')}`, 409, { blockers: before });
+    const mine = { allow: o.allow ?? [], message: o.message ?? 'HOT-Step is exporting the workspace. Changes are paused until it finishes.' };
+    held = mine;
+    const release = () => { if (held === mine) held = null; };
+    const drained = await drain(o.fromRequest ? 1 : 0, o.drainMs ?? 10_000);
+    const blockers = drained ? check() : ['requests still in flight'];
+    if (blockers.length) {
+      release();
+      throw fail(`Wait for running work to finish: ${blockers.join('; ')}`, 409, { blockers });
+    }
+    return { release, check };
+  }
+
   return {
-    middleware, whenOpen, close, open, begin, authorised,
+    middleware, whenOpen, close, open, begin, authorised, hold,
+    get held() { return held !== null; },
     addBlocker: (f: () => string[]) => { extraBlockers.push(f); },
     get state() { return { closed, leaseId: lease?.id ?? null, deferred: deferred.length }; },
   };
