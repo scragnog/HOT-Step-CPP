@@ -343,6 +343,8 @@ export interface Yue2CoverSubmission extends Partial<CoverScoreChoices> {
   sourceLabel?: string;
   /** Reviewed full score, retained beside the score actually rendered. */
   fullScore?: string;
+  /** Set at submission when Ins supplies the missing vocal melody. */
+  melodyFromInstrument?: true;
   /** Follow source: steer the composer with the source recording itself
    *  (sourceGuide.ts). Absent = the score alone, as before. */
   guide?: Yue2CoverGuide;
@@ -382,6 +384,7 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
     ...(sourceLabel ? { sourceLabel } : {}),
     ...rawChoices as Partial<CoverScoreChoices>,
     ...(fullScore !== undefined ? { fullScore } : {}),
+    ...(r.melodyFromInstrument === true ? { melodyFromInstrument: true as const } : {}),
     ...(guide ? { guide } : {}) };
 }
 
@@ -392,6 +395,19 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
 export function yue2CoverPickBase(persisted: Yue2PersistedSelection): Yue2PersistedSelection {
   const empty = { path: '', scales: yue2DefaultScales() };
   return { ...persisted, adapters: { ar: empty, nar: empty } };
+}
+
+/** Use the instrument melody when the approved cover has no sounding Vocal. */
+export function coverInstrumentMelody(abc: string): string {
+  if (hasSoundingVocalBar(abc) || !/^V:\s*Ins\b/im.test(abc)) return abc;
+  const swapped = abc.replace(/^(V:\s*)(Vocal|Vocals|Ins)\b([^\r\n]*)/gim,
+    (_line, prefix: string, id: string, attrs: string) => {
+      const instrument = /^ins$/i.test(id);
+      const renamed = attrs.replace(/(name|snm)="[^"]*"/gi, (field: string, key: string) =>
+        `${key}="${instrument ? (key.toLowerCase() === 'name' ? 'Vocal Melody' : 'Vocal') : (key.toLowerCase() === 'name' ? 'Ins Melody' : 'Inst.')}"`);
+      return `${prefix}${instrument ? 'Vocal' : 'Ins'}${renamed}`;
+    });
+  return hasSoundingVocalBar(swapped) ? swapped : abc;
 }
 
 /** Pure descriptive snapshot. The live mapper remains mapYue2Params(). */
@@ -423,8 +439,8 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     if (!abc) {
       throw new Error('A cover needs an approved lead sheet (yue2Abc) — none was supplied.');
     }
-    if (!soundingFor(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
-    coverAbc = abc;
+    coverAbc = instrumentalRender ? abc : coverInstrumentMelody(abc);
+    if (!soundingFor(coverAbc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
   }
   const options: Record<string, unknown> = {};
   for (const key of Object.keys(submission)) {
@@ -439,7 +455,8 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     options.yue2Cover = { ...(cover.sourceId ? { sourceId: cover.sourceId } : {}),
       ...(cover.sourceKind ? { sourceKind: cover.sourceKind } : {}),
       ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),
-      ...choices, fullScore: score.fullScore, ...(cover.guide ? { guide: cover.guide } : {}) } satisfies Yue2CoverSubmission;
+      ...choices, fullScore: typeof submission.yue2Abc === 'string' ? submission.yue2Abc.trim() : score.fullScore,
+      ...(coverAbc !== (submission.yue2Abc as string).trim() ? { melodyFromInstrument: true as const } : {}), ...(cover.guide ? { guide: cover.guide } : {}) } satisfies Yue2CoverSubmission;
     options.yue2Abc = score.renderedAbc;
     options.yue2CfgScale = choices.cfgScale;
   }

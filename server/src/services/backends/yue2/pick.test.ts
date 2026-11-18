@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  yue2ResolvePick, yue2PickFromModels, yue2CoverFromSubmission, yue2CoverPickBase,
+  yue2ResolvePick, yue2PickFromModels, yue2CoverFromSubmission, yue2CoverPickBase, coverInstrumentMelody,
   yue2PlanStackFrom, yue2PlanScaleDiffers, yue2LmVariant, yue2AdapterHome, slotDefaults,
   type Yue2PersistedSelection,
 } from './index.js';
@@ -248,17 +248,18 @@ test('a cover submission with a blank ABC is rejected at submit', async () => {
   );
 });
 
-test('a silent Vocal score is rejected for a vocal cover and accepted for an instrumental one', async () => {
+test('a silent Vocal cover takes its melody from Ins; a sounding Vocal stays byte-identical', async () => {
   const { yue2Backend } = await import('./index.js');
   const yue2Abc = 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|';
-  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c', lyrics: 'la la',
-    yue2Cover: { sourceId: 's' }, yue2Abc }),
-  /The transcriber heard no melody in this source/);
-  for (const extra of [{ instrumental: true, lyrics: 'la la' }, {}]) {
-    // Past the score check the resolver needs a database; only the score verdict matters here.
-    try { yue2Backend.resolveRequest({ caption: 'c', ...extra, yue2Cover: { sourceId: 's' }, yue2Abc }); }
-    catch (err) { assert.doesNotMatch((err as Error).message, /heard no melody/); }
-  }
+  const moved = coverInstrumentMelody(yue2Abc);
+  assert.equal(moved, 'X:1\nV: Ins\nZ4|z4|\nV: Vocal\nC4|');
+  const sounding = yue2Abc.replace('Z4|z4|', 'D4|');
+  assert.equal(coverInstrumentMelody(sounding), sounding);
+  const declared = 'X:1\r\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\r\nV: Ins clef=treble name="Ins Melody" snm="Inst."\r\nK:C\r\nV: Vocal\r\nZ|\r\nV: Ins\r\nG4|\r\n';
+  const promoted = coverInstrumentMelody(declared);
+  assert.match(promoted, /V: Vocal clef=treble name="Vocal Melody" snm="Vocal"/);
+  assert.match(promoted, /V: Vocal\r\nG4\|/);
+  assert.equal(coverInstrumentMelody(declared.replace('G4|', 'Z|')), declared.replace('G4|', 'Z|'));
   assert.throws(() => yue2Backend.resolveRequest({ caption: 'c', instrumental: true,
     yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nz4|' }),
   /The transcriber heard no melody in this source/);
@@ -278,6 +279,10 @@ test('cover submission captures both voices by default and preserves explicit vo
       "import assert from 'node:assert/strict';",
       "import { initDb } from './src/db/database.js'; import { yue2Backend } from './src/services/backends/yue2/index.js';",
       "initDb(); const resolved = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\\nV: Vocal\\nz4|C4|\\nV: Ins\\nC4|' });",
+      "const silent = 'X:1\\nM:4/4\\nL:1/4\\nK:C\\nV: Vocal\\nZ|\\nV: Ins\\nG4|';",
+      "const promoted = yue2Backend.resolveRequest({ caption: 'c', lyrics: 'la', yue2Cover: { sourceId: 's', voices: 'vocal', keepChords: true, tempo: 'source' }, yue2Abc: silent });",
+      "assert.match(promoted.options.yue2Abc, /V: Vocal\\nG4\\|/); assert.equal(promoted.options.yue2Cover.fullScore, silent); assert.equal(promoted.options.yue2Cover.melodyFromInstrument, true);",
+      "const real = silent.replace('Z|', 'C4|'); const retained = yue2Backend.resolveRequest({caption: 'c', lyrics: 'la', yue2Cover: { sourceId: 's', voices: 'both', keepChords: true, tempo: 'source' }, yue2Abc: real}); assert.equal(retained.options.yue2Abc, real); assert.equal(retained.options.yue2Cover.melodyFromInstrument, undefined);",
       "assert.ok(resolved.options.yue2Abc.includes('C4|'));",
       "assert.equal(resolved.options.yue2Cover.voices, 'both');",
       "assert.ok(resolved.options.yue2Abc.includes('V: Ins'));",

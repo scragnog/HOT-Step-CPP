@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, waitYue2PlanJob, Yue2PlanStuckError, yue2PlanMode, yue2TrackReplayParams, type Yue2PreparedJob } from './generate.js';
+import { releaseYue2RenderLane, coverScoreHealth, jobCover, mapYue2Params, planYue2Jobs, waitYue2PlanJob, Yue2PlanStuckError, yue2PlanMode, yue2TrackReplayParams, type Yue2PreparedJob } from './generate.js';
+import { classifyYue2Score } from './scoreHealth.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -18,6 +19,13 @@ function fakeJob(envelopeOptions: Record<string, unknown> | undefined, params: R
     params,
   } as unknown as GenerationJob;
 }
+
+test('cover melody provenance reaches score health from the captured envelope', () => {
+  const captured = jobCover(fakeJob({ yue2Cover: { sourceId: 'source', melodyFromInstrument: true }, yue2Abc: 'X:1' }, {}));
+  const health = classifyYue2Score('X:1\nM:4/4\nL:1/4\nK:C\nV: Vocal\nC4|');
+  assert.match(coverScoreHealth(health, captured?.cover).reason, /melody from the instrument part/);
+  assert.strictEqual(coverScoreHealth(health, { sourceId: 'source' }), health);
+});
 
 test('jobCover reads the ABC from the envelope, not from job.params', () => {
   const job = fakeJob(

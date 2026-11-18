@@ -322,7 +322,7 @@ Cover Studio draft to resume the workflow.
    box; text you have already typed is kept.
    Importing over an existing score asks before replacing it. Neither path uses
    source audio as an inference conditioning signal after approval.
-   A score with no sounding Vocal bar fails a vocal cover with "The transcriber heard no melody in this source"; add a melody note before confirming or generating. An instrumental cover (Instrumental on, or no lyrics) also accepts a score whose Vocal line is silent as long as the Ins line sounds; a score where nothing sounds still fails.
+   For a vocal cover, when Vocal has no sounding notes and Ins has a melody, YuE2 uses the instrument part as the vocal melody. A sounding Vocal part stays unchanged. An instrumental cover (Instrumental on, or no lyrics) also accepts a silent Vocal when Ins sounds; a score where nothing sounds still fails with "The transcriber heard no melody in this source".
 3. Prepare the score in two steps, **1. Fix structure** then **2. Assign lyrics**
    (see [Prepare](#prepare-fix-the-structure-then-assign-lyrics)). Each step ends
    with a confirmation, and Generate stays disabled until both are current for the

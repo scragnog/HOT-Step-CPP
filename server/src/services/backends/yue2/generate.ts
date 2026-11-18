@@ -819,6 +819,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt, s
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
   for (const n of notes) log('WARNING', `[YuE2] ${n}`);
+  if (captured?.cover.melodyFromInstrument) log('INFO', '[YuE2] Cover melody from the instrument part (Vocal was empty).');
   const section = jobContinuation(job);
   if (section) {
     job.stage = 'YuE2: reading source recording...';
@@ -1489,6 +1490,11 @@ function yue2FinishNeedsGpu(params: any): boolean {
     || !!params.whisperLyricsEnabled || !!params.yue2AlignLyrics || !!params.coverArtEnabled;
 }
 
+/** Preserve the source of a fallback melody in the saved health and log. */
+export function coverScoreHealth(health: Yue2ScoreHealth, cover?: Yue2CoverSubmission): Yue2ScoreHealth {
+  return cover?.melodyFromInstrument ? { ...health, reason: `${health.reason}; melody from the instrument part` } : health;
+}
+
 /** Save, post-process, transcribe, align and persist one job's tracks, then
  *  mark it succeeded: the tail of the old single-job path, unchanged. */
 async function finishYue2Job(
@@ -1500,7 +1506,7 @@ async function finishYue2Job(
   {
     // Healthy-but-long vs runaway: the score says which, when there is one
     // (cot=off renders have no plan stage and no score to read).
-    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '', activeStyleNorms(jobPick(job))) : undefined;
+    const scoreHealth = finalDetail.abc ? coverScoreHealth(classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '', activeStyleNorms(jobPick(job))), cover) : undefined;
     if (scoreHealth) {
       log(scoreHealth.verdict === 'runaway' ? 'WARNING' : 'INFO',
         `[YuE2] Score: ${scoreHealth.verdict} — ${scoreHealth.reason}`);
