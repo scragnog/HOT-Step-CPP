@@ -12,6 +12,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { config, getFFmpegPath } from '../../config.js';
+import type { LyricSource } from '../lireek/lyricFallbacks.js';
 import { searchSongLyrics } from '../lireek/geniusService.js';
 import { getProvider } from '../lireek/llm/registry.js';
 import { normaliseLyricTags } from './lyricTags.js';
@@ -150,7 +151,7 @@ export async function enhanceGenius(
   sample: TrainingSample,
   ds: TrainingDatasetRow,
   opts: { artist?: string; album?: string; sanitizeHeaders: boolean },
-): Promise<{ lyrics: string; source: 'genius'; searched: string } | null> {
+): Promise<{ lyrics: string; source: LyricSource; searched: string } | null> {
   const { artist, title } = resolveArtistTitle(sample, ds, opts);
   const searched = `${artist} — ${title}`;
   if (!artist || !title) {
@@ -187,7 +188,7 @@ export async function enhanceGenius(
   if (opts.sanitizeHeaders) lyrics = normaliseLyricTags(lyrics);
   if (!lyrics.trim()) return null;
 
-  return { lyrics, source: 'genius', searched };
+  return { lyrics, source: hit.source, searched };
 }
 
 // ── LLM caption ──────────────────────────────────────────────────────────

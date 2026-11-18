@@ -18,9 +18,20 @@ and captioning need at least one LLM provider configured. See
 Genius needs a Genius access token, set with the API keys under Settings > AI
 Services. Genius's lyrics pages turn away the app's own web client, so the app
 downloads them with `curl`, which ships with Windows 10 and later and with
-macOS. If Genius still blocks the download, the fetch fails with a message
-saying so. None of this is required to type lyrics in by hand and send them to
-Custom-Gen.
+macOS. If a lyric page fails or has no lyrics, the app tries the hosted
+[Hugging Face Genius index](https://huggingface.co/datasets/theelderemo/genius-lyrics-cleaned),
+then [LRCLIB](https://lrclib.net). Both fallbacks match artist and title and need
+no additional key or dataset download. Genius still supplies album track lists.
+The HF index preserves section tags but has limited coverage; LRCLIB supplies
+plain lyrics without section tags. Each saved song records its source and URL,
+and Source Lyrics shows Genius, Hugging Face or LRCLIB beside the song.
+
+The hosted HF lookup has a four-second limit and pauses for a minute after an
+error, so an unavailable index does not hold up every track. LRCLIB has an
+eight-second limit. If all sources fail, try again later or enter lyrics by
+hand. These fallbacks also apply to individual song searches and Training
+Studio's Genius enhancement; training label records keep the actual source.
+None of this is required to type lyrics in by hand and send them to Custom-Gen.
 
 An external agent (Claude Code, Codex) can also drive Lyric Studio through the
 `lyricstudio` MCP server. See

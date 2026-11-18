@@ -1,6 +1,6 @@
 # Features
 
-HOT-Step CPP is a desktop app for local AI music generation. It started as a fork of [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and now runs four music models, which the app calls backends: ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3. All four run natively in one C++/GGML engine. Generation, training, stem separation, captioning and transcription all happen on your own machine; the only network calls are model downloads, Genius lyric lookups, any external LLM provider or second training PC you choose to configure, and a check for a newer version on GitHub at most once a day.
+HOT-Step CPP is a desktop app for local AI music generation. It started as a fork of [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and now runs four music models, which the app calls backends: ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3. All four run natively in one C++/GGML engine. Generation, training, stem separation, captioning and transcription all happen on your own machine; the only network calls are model downloads, Genius, Hugging Face and LRCLIB lyric lookups, any external LLM provider or second training PC you choose to configure, and a check for a newer version on GitHub at most once a day.
 
 This page is the catalogue: one line per feature, with the studios in sidebar order. Each group links to the page that explains how to use it. The full doc index is in [docs/README.md](docs/README.md).
 
@@ -208,7 +208,7 @@ AI-assisted lyric writing from a learned style profile, plus caption-based sound
 
 | Feature | What it does |
 |---|---|
-| Genius fetch | Pull an artist's or album's lyrics, or add artists, albums and songs by hand. |
+| Genius fetch | Pull an artist's or album's lyrics with Hugging Face then LRCLIB fallbacks for missing pages. Saved songs show their source. Artists, albums and songs can also be added by hand. |
 | Style profiles | An LLM profiles themes, tone and structure; rhyme, meter and vocabulary statistics are computed locally without one. |
 | Lyric generation | Streams new songs from a profile, with an optional subject and count, avoiding subjects, keys and titles used before. |
 | Write Lyrics | Local Ollama writes a complete song from a theme, style, structure or starter lines, without source songs or a learned profile, and saves it under Generated Lyrics. |

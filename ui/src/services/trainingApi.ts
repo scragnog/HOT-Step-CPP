@@ -1472,7 +1472,7 @@ export type SampleLabelStatus =
   | 'processing'  // currently being labeled
   | 'error';      // last label attempt failed (see `error`)
 
-export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'flamingo' | 'llm' | 'tags' | 'filename' | 'user';
+export type FieldSource = 'sidecar' | 'understand' | 'essentia' | 'beat_this' | 'sheetsage' | 'genius' | 'hf-genius' | 'lrclib' | 'flamingo' | 'llm' | 'tags' | 'filename' | 'user';
 
 // ── Dataset ──────────────────────────────────────────────────────────────
 export interface TrainingDatasetSummary {

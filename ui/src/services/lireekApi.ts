@@ -47,6 +47,7 @@ export interface LyricsSet {
 }
 
 export interface SongLyric {
+  source?: 'genius' | 'hf-genius' | 'lrclib';
   title: string;
   lyrics: string;
   instrumental?: boolean;

@@ -93,6 +93,11 @@ export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDelet
               {song.key ? (
                 <span className="text-[11px] text-zinc-500 font-mono">{song.key}</span>
               ) : null}
+              {song.source && (
+                <span className="text-[11px] text-zinc-500">
+                  {song.source === 'hf-genius' ? 'Hugging Face' : song.source === 'lrclib' ? 'LRCLIB' : 'Genius'}
+                </span>
+              )}
               <span className="text-xs text-zinc-500">
                 {song.instrumental ? t('trainingStudio.lyricStudio.captionsOnly') : `${lyrics.split('\n').length} lines`}
               </span>

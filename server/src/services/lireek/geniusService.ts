@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as cheerio from 'cheerio';
 import { config } from '../../config.js';
+import { lookupFallbackLyrics, type LyricSource, type SourcedLyrics } from './lyricFallbacks.js';
 
 const execFileP = promisify(execFile);
 
@@ -22,6 +23,8 @@ export interface SongLyrics {
   title: string;
   album: string | null;
   lyrics: string;
+  source: LyricSource;
+  url: string;
 }
 
 export interface LyricsSearchResponse {
@@ -138,6 +141,17 @@ async function scrapeLyrics(songUrl: string): Promise<string | null> {
     console.warn(`[Genius] Scrape error for ${songUrl}:`, err);
     return null;
   }
+}
+
+async function acquireLyrics(artist: string, title: string, url: string): Promise<SourcedLyrics | null> {
+  try {
+    const raw = await scrapeLyrics(url);
+    const lyrics = raw ? cleanLyrics(raw) : '';
+    if (lyrics) return { title, lyrics, url, source: 'genius' };
+  } catch (error) {
+    console.warn('[Lyrics] Genius unavailable; trying other sources:', (error as Error).message);
+  }
+  return lookupFallbackLyrics(artist, title);
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -423,7 +437,7 @@ export async function fetchLyrics(
         const songInfo = track.song ?? {};
         const url = songInfo.url;
         const title = songInfo.title ?? 'Unknown';
-        if (!url || songInfo.lyrics_state !== 'complete' || songInfo.instrumental) continue;
+        if (!url || songInfo.instrumental) continue;
         if (isBonusTrack(title)) continue;
         const baseTitle = title.replace(/\s*\(.*\)/, '').trim().toLowerCase();
         if (seenTitles.has(baseTitle)) continue;
@@ -431,8 +445,8 @@ export async function fetchLyrics(
 
         try {
           await sleep(scrapeDelay);
-          const raw = await scrapeLyrics(url);
-          if (raw) songs.push({ title, album: albumName, lyrics: cleanLyrics(raw) });
+          const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url);
+          if (lyric) songs.push({ ...lyric, title, album: albumName });
         } catch (err) {
           if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${title}':`, err);
@@ -445,8 +459,8 @@ export async function fetchLyrics(
         if (isBonusTrack(pt.title)) continue;
         try {
           await sleep(scrapeDelay);
-          const raw = await scrapeLyrics(pt.url);
-          if (raw) songs.push({ title: pt.title, album: albumName, lyrics: cleanLyrics(raw) });
+          const lyric = await acquireLyrics(artistName, pt.title, pt.url);
+          if (lyric) songs.push({ ...lyric, title: pt.title, album: albumName });
         } catch (err) {
           if (err instanceof GeniusBlockedError) throw err;
           console.warn(`[Genius] Failed to scrape '${pt.title}':`, err);
@@ -470,8 +484,8 @@ export async function fetchLyrics(
 
       try {
         await sleep(scrapeDelay);
-        const raw = await scrapeLyrics(url);
-        if (raw) songs.push({ title, album: songAlbum, lyrics: cleanLyrics(raw) });
+        const lyric = await acquireLyrics(songInfo.primary_artist?.name ?? artistName, title, url);
+        if (lyric) songs.push({ ...lyric, title, album: songAlbum });
       } catch (err) {
         if (err instanceof GeniusBlockedError) throw err;
         console.warn(`[Genius] Failed to scrape '${title}':`, err);
@@ -483,7 +497,7 @@ export async function fetchLyrics(
     throw new Error(
       `No lyrics found for '${artistName}'` +
       (albumName ? ` – album '${albumName}'` : '') +
-      '. Please check the spelling and try again.',
+      '. Genius, the HF index and LRCLIB could not supply lyrics. Check spelling or try again later.',
     );
   }
 
@@ -570,10 +584,10 @@ function artistTokensAgree(a: string, b: string): boolean {
   return short.every(t => set.has(t));
 }
 
-export async function searchSongLyrics(
+async function searchGeniusSongLyrics(
   artist: string, title: string,
   opts?: { relaxed?: boolean },
-): Promise<{ title: string; lyrics: string; url: string } | null> {
+): Promise<SourcedLyrics | null> {
   const hits = await apiSearch(`${title} ${artist}`, 5);
   const artistNorm = normalizeArtist(artist);
   const titleNorm = normalizeTitle(title);
@@ -601,9 +615,25 @@ export async function searchSongLyrics(
 
     const raw = await scrapeLyrics(songUrl);
     if (raw) {
-      return { title: result.title ?? title, lyrics: cleanLyrics(raw), url: songUrl };
+      return { title: result.title ?? title, lyrics: cleanLyrics(raw), url: songUrl, source: 'genius' };
     }
   }
+  return null;
+}
+
+export async function searchSongLyrics(
+  artist: string, title: string, opts?: { relaxed?: boolean },
+): Promise<SourcedLyrics | null> {
+  let geniusError: unknown;
+  try {
+    const hit = await searchGeniusSongLyrics(artist, title, opts);
+    if (hit?.lyrics.trim()) return hit;
+  } catch (error) {
+    geniusError = error;
+  }
+  const fallback = await lookupFallbackLyrics(artist, title);
+  if (fallback) return fallback;
+  if (geniusError) throw geniusError;
   return null;
 }
 

@@ -1285,7 +1285,7 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
               const hit = await geniusHits.get(sample.sampleId)!;
               if (hit) {
                 incoming.lyrics = hit.lyrics;
-                sources.lyrics = 'genius';
+                sources.lyrics = hit.source;
                 lyricsError = null;
               } else {
                 const { artist, title } = resolveArtistTitle(enriched, ds, {});
@@ -1526,7 +1526,7 @@ async function runGeniusJob(job: TrainingJob): Promise<void> {
           // "This song is an instrumental" for instrumentals, and that hit
           // must set the flag rather than clear it.
           await mergeIntoSidecar(sample, { lyrics: hit.lyrics }, policy, true);
-          markLabeled(job, ds, sample, { lyrics: 'genius' });
+          markLabeled(job, ds, sample, { lyrics: hit.source });
           job.done++;
         }
       } catch (err: any) {
