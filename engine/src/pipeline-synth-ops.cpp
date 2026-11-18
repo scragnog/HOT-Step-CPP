@@ -775,10 +775,10 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             }
         };
 
-        // null_condition_emb lives on the DiTMeta. Empty when the model has none.
+        // null_condition_emb (ctx->null_cond). Empty when the model has none.
         s.null_cond_vec.resize(H_cond);
-        if (!ctx->meta->null_cond_cpu.empty()) {
-            memcpy(s.null_cond_vec.data(), ctx->meta->null_cond_cpu.data(), H_cond * sizeof(float));
+        if (!ctx->null_cond->empty()) {
+            memcpy(s.null_cond_vec.data(), ctx->null_cond->data(), H_cond * sizeof(float));
         }
 
         // NEGATIVE PROMPT Phase B: cond-encode neg text. Keep the FULL encoded

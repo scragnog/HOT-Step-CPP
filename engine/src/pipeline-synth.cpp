@@ -90,6 +90,7 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         delete ctx;
         return NULL;
     }
+    ctx->null_cond = &ctx->meta->null_cond_cpu;
     ctx->Oc     = ctx->meta->cfg.out_channels;           // 64
     ctx->ctx_ch = ctx->meta->cfg.in_channels - ctx->Oc;  // 128
 
@@ -162,6 +163,16 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         if (fsq_path != submodel_path) {
             ctx->cond_enc_key.path = fsq_path;
             fprintf(stderr, "[Synth-Load] ONNX DiT: condition encoder on GGML from %s\n", fsq_path.c_str());
+            // Same for null_condition_emb: without it the CFG/ADG uncond
+            // branch would see zeros instead of the trained null embedding.
+            const DiTMeta * st_meta = store_dit_meta(store, fsq_path.c_str());
+            if (st_meta && !st_meta->null_cond_cpu.empty()) {
+                ctx->null_cond = &st_meta->null_cond_cpu;
+                fprintf(stderr, "[Synth-Load] ONNX DiT: null_condition_emb from %s\n", fsq_path.c_str());
+            } else {
+                fprintf(stderr, "[Synth-Load] WARNING: ONNX DiT: no null_condition_emb in %s, CFG uses zeros\n",
+                        fsq_path.c_str());
+            }
         } else {
             ctx->cond_enc_key.path.clear();
             fprintf(stderr, "[Synth-Load] ONNX DiT: no safetensors XL DiT folder found for the condition encoder\n");

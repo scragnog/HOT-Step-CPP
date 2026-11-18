@@ -1192,9 +1192,10 @@ const DiTMeta * store_dit_meta(ModelStore * s, const char * dit_path) {
                 st_multi_close(&sm);
             }
         } else {
-            // ONNX path: null_condition_emb is baked into the ONNX graph
-            // Leave null_cond_cpu empty — the TRT sampler handles CFG internally
-            fprintf(stderr, "[Store] ONNX DiT: null_condition_emb handled by TRT graph\n");
+            // ONNX path: the graph is the decoder only and has no
+            // null_condition_emb. Leave null_cond_cpu empty; pipeline-synth.cpp
+            // takes it from the safetensors fallback folder.
+            fprintf(stderr, "[Store] ONNX DiT: null_condition_emb comes from the safetensors fallback\n");
         }
     }
 

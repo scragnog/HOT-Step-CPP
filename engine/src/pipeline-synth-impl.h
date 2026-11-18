@@ -31,6 +31,12 @@ struct AceSynth {
     // null_cond_cpu, is_turbo and the DiT config without loading the DiT.
     const DiTMeta * meta;
 
+    // null_condition_emb for the CFG uncond branch, owned by the store. It is
+    // meta->null_cond_cpu, except for an ONNX DiT: the graph holds only the
+    // decoder, so it comes from the safetensors XL DiT folder the FSQ fallback
+    // resolves (pipeline-synth.cpp). Empty when neither has one.
+    const std::vector<float> * null_cond;
+
     // Derived constants mirrored for inline use in ops.
     int Oc;      // out_channels (64)
     int ctx_ch;  // in_channels - Oc (128)
