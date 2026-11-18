@@ -16,6 +16,7 @@ import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
 import { toast } from 'react-toastify';
 import { SampleRow } from './SampleRow';
 import { SampleDrawer } from './SampleDrawer';
+import { CaptionReplace } from './CaptionReplace';
 
 export type ColAlign = 'left' | 'center' | 'right';
 export interface ColDef {
@@ -78,6 +79,9 @@ type RowFilter = 'all' | 'unlabeled';
 export const SampleGrid: React.FC = () => {
   const { t } = useTranslation();
   const datasetId = useTrainingStore(s => s.selectedDatasetId);
+  const worker = useTrainingStore(s => s.trainingWorker);
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  useEffect(() => setReplaceOpen(false), [datasetId, worker]);
   const samplesById = useTrainingStore(s => s.samplesById);
   const sampleOrder = useTrainingStore(s => s.sampleOrder);
   const pendingEdits = useTrainingStore(s => s.pendingEdits);
@@ -262,6 +266,8 @@ export const SampleGrid: React.FC = () => {
           <button className={bulkBtn} onClick={() => void bulkSet({ excluded: true })}>{t('trainingStudio.grid.bulkExclude')}</button>
           <button className={bulkBtn} onClick={() => void bulkSet({ excluded: false })}>{t('trainingStudio.grid.bulkInclude')}</button>
           <button className={bulkBtn} onClick={() => void bulkSet({ isInstrumental: true })}>{t('trainingStudio.grid.bulkInstrumental')}</button>
+          <button className={`${bulkBtn} disabled:opacity-40`} disabled={Object.keys(pendingEdits).length > 0 || savingSampleIds.size > 0}
+            onClick={() => setReplaceOpen(true)}>{t('trainingStudio.replace.title')}</button>
           <button
             className={bulkBtn}
             onClick={() => {
@@ -313,6 +319,9 @@ export const SampleGrid: React.FC = () => {
           </button>
         </div>
       )}
+
+      {replaceOpen && datasetId && <CaptionReplace key={`${worker}:${datasetId}`} datasetId={datasetId} worker={worker}
+        sampleIds={Array.from(selectedSampleIds)} onClose={() => setReplaceOpen(false)} />}
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-white/5">

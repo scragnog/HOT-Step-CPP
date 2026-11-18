@@ -37,6 +37,7 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   POST   /datasets/:id/rescan                         — pick up added/removed files
 //   DELETE /datasets/:id                                — forget (never touches sourceDir)
 //   POST   /datasets/:id/samples/bulk                   — bulk field set
+//   POST   /datasets/:id/samples/replace-captions       — preview or apply selected caption replacements
 //   PATCH  /datasets/:id/samples/:sampleId              — edit one sample
 //   GET    /datasets/:id/samples/:sampleId/audio        — stream audio (Range aware)
 //   GET    /datasets/:id/samples/:sampleId/mm3          — read <stem>.mm3.txt
@@ -183,6 +184,7 @@ import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanu
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
+import { CaptionReplaceError, replaceSelectedCaptions } from '../services/training/captionReplace.js';
 import { essentiaAvailable, essentiaTempoProfile } from '../services/training/essentiaClient.js';
 import { parsePipelineLabelOptions } from '../services/training/pipelineLabelOptions.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
@@ -1146,6 +1148,23 @@ async function applySamplePatch(
 
   return reloadSample(ds, sample);
 }
+
+router.post('/datasets/:id/samples/replace-captions', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline() || hasActiveBatch()) {
+      res.status(409).json({ error: 'Wait for the active dataset job or batch to finish.' }); return;
+    }
+    const samples = await buildSamples(ds);
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline() || hasActiveBatch()) {
+      res.status(409).json({ error: 'Wait for the active dataset job or batch to finish.' }); return;
+    }
+    res.json(replaceSelectedCaptions(ds.sourceDir, samples, req.body || {}));
+  } catch (err: any) {
+    res.status(err instanceof CaptionReplaceError ? err.status : 500).json({ error: err.message });
+  }
+});
 
 router.post('/datasets/:id/samples/bulk', async (req: Request, res: Response) => {
   try {

@@ -23,6 +23,7 @@
 // is that worker. Mutations take no signal: aborting a read is fine, but a
 // cancelled request must never be mistaken for cancelling a server job.
 import { apiClient, type ReadOptions } from './httpClient';
+import type { CaptionReplaceRequest, CaptionReplacePreview } from '../../../server/src/contracts/captionReplace';
 import type { Sa3DatasetAssets } from '../../../server/src/contracts/training';
 import type {
   HeartmulaCheckpointNowRequest, HeartmulaDatasetAssets, HeartmulaPrepareRequest, HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest,
@@ -2546,6 +2547,13 @@ export async function patchSample(id: string, sampleId: string, patch: PatchSamp
     { method: 'PATCH', ...jsonBody(patch) }, reqOpts,
   );
   return data.sample;
+}
+
+export async function replaceCaptions(id: string, input: CaptionReplaceRequest, target: TrainingTarget): Promise<CaptionReplacePreview> {
+  return request<CaptionReplacePreview>(
+    `/datasets/${encodeURIComponent(id)}/samples/replace-captions`,
+    { method: 'POST', ...jsonBody(input) }, target,
+  );
 }
 
 export async function bulkSetSamples(id: string, sampleIds: string[], set: BulkSetInput, reqOpts?: TrainingTarget): Promise<BulkResult> {

@@ -1,5 +1,16 @@
 {
   "translation": {
+    "trainingStudio.replace.title": "Find and replace in captions",
+    "trainingStudio.replace.saveFirst": "Save pending grid edits, then preview again before applying.",
+    "trainingStudio.replace.scope": "Edits captions for the {{count}} tracks selected when opened. Matches are case-sensitive plain text in .txt caption fields and .yue2.txt files. Build again afterward to update dataset.json.",
+    "trainingStudio.replace.find": "Find",
+    "trainingStudio.replace.findInfo": "Text to match exactly, including letter case. All occurrences in captions are replaced. Regular expressions are not supported.",
+    "trainingStudio.replace.with": "Replace with",
+    "trainingStudio.replace.withInfo": "Text to put in place of each match. Leave blank to remove the matched text. Lyrics and other metadata are kept.",
+    "trainingStudio.replace.preview": "Preview files",
+    "trainingStudio.replace.count": "Will change {{files}} files across {{tracks}} tracks. Review the files below, then apply.",
+    "trainingStudio.replace.apply": "Apply replacement",
+    "trainingStudio.replace.done": "Changed {{files}} files across {{tracks}} tracks. Build again to update dataset.json.",
     "trainingStudio.job.phaseCaptionLoading": "loading model / encoding audio",
     "trainingStudio.job.phaseCaptionEncoding": "encoding audio",
     "trainingStudio.job.phaseCaptionWriting": "writing caption",
