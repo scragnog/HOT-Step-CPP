@@ -501,7 +501,22 @@ export function planPrefix(abc: string, lyrics: string, plan: PlanEntry[], sing:
   const rest = chars.slice(at).join('').split('\n');
   const end = rest.findIndex(line => label(line.trim()));
   if (end < 0) throw new Error('The occurrence has no label line.');
-  return `${chars.slice(0, at).join('')}${rest.slice(0, end + 1).join('\n')}\n`;
+  const before = chars.slice(0, at).join('');
+  const currentKey = [...before.matchAll(/^\s*K:.*$/gm)].at(-1)?.[0].trim();
+  // The arrangement restates a source section's entry fields after its label,
+  // often after V:. Move its initial key into the planner prefix, whose final
+  // line must remain the label. Stop at the first music line.
+  let targetKey = currentKey;
+  for (const raw of rest.slice(end + 1)) {
+    const line = raw.trim();
+    if (label(line)) break;
+    if (!line || line.startsWith('%')) continue;
+    const field = FIELD.exec(line);
+    if (!field) break;
+    if (field[1] === 'K') targetKey = line;
+  }
+  const key = targetKey && targetKey !== currentKey ? `${targetKey}\n` : '';
+  return `${before}${key}${rest.slice(0, end + 1).join('\n')}\n`;
 }
 
 /** Bars written per voice kind; a voice named neither Vocal nor Ins is not counted. */
@@ -543,6 +558,17 @@ export function spliceSection(abc: string, section: number, added: string): stri
   if (section < 0 || section >= starts.length) throw new Error('No such section in the score.');
   const trailer = lines.at(-1) === '' ? [lines.pop()!] : [];
   const end = starts[section + 1] ?? lines.length;
-  lines.splice(starts[section] + 1, end - starts[section] - 1, ...added.replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n'));
+  // A key at the start of the old section belongs to the slot. Keep it when
+  // replacing the music, so the new score retains the change for later slots.
+  let initialKey: string | undefined;
+  for (const raw of lines.slice(starts[section] + 1, end)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%')) continue;
+    const field = FIELD.exec(line);
+    if (!field) break;
+    if (field[1] === 'K') initialKey = line;
+  }
+  lines.splice(starts[section] + 1, end - starts[section] - 1, ...(initialKey ? [initialKey] : []),
+    ...added.replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n'));
   return [...lines, ...trailer].join('\n');
 }

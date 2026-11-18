@@ -308,6 +308,21 @@ test('plan_continue: the prefix is the composed score up to an occurrence plus i
   assert.ok(planPrefix(score, lyrics, plan, [], 0).endsWith('% verse\n'));
 });
 
+test('plan_continue uses the target section key after a reorder', () => {
+  const keyed = score.replace('% chorus\nV: Vocal', '% chorus\nK:G\nV: Vocal');
+  const prefix = planPrefix(keyed, lyrics, [INTRO, BRIDGE, VERSE], [], 2);
+  assert.match(prefix, /K:C\n% verse\n$/, 'verse returns to its source key after the G bridge');
+  const changed = planPrefix(keyed, lyrics, [INTRO, VERSE, CHORUS], [], 2);
+  assert.match(changed, /K:G\n% chorus\n$/, 'a key change at the start of a new section reaches the planner');
+  const kept = spliceSection(keyed, CHORUS, 'V: Vocal\nc16|\nV: Ins\nZ|\n');
+  assert.match(kept, /% chorus\nK:G\nV: Vocal/);
+  assert.match(planPrefix(kept, lyrics, [INTRO, BRIDGE], [], 1), /K:G\n% bridge\n$/);
+  const plain = planPrefix(score, lyrics, [INTRO, VERSE], [], 1);
+  const composed = composeArrangement(score, lyrics, [INTRO, VERSE]);
+  const at = composed.occurrences[1].abcStart;
+  assert.equal(plain, Array.from(composed.abc).slice(0, at).join('') + '% verse\n');
+});
+
 test('plan_continue: a section\'s lines are replaced, and the labels stay', () => {
   const lines = 'V: Vocal\nd16|\nV: Ins\nZ|\n';
   const out = spliceSection(score, CHORUS, lines);
