@@ -49,7 +49,7 @@ export function WorkspaceArchivePanel() {
   });
 
   const setDest = (v: string) => { setDestination(v); setChecked(''); };
-  const check = () => setChecked(destination.trim());
+  const check = () => { const d = destination.trim(); if (d === checked) void previewQuery.refetch(); else setChecked(d); };
   const on = (id: ArchiveCategoryId) => id === 'library' || !!picked?.[id as keyof ArchiveChoice];
   const bytesFor = (id: ArchiveCategoryId) => preview?.categories[id].bytes ?? 0;
   // Selected categories, plus the library again: the database is snapshotted before it is zipped.
@@ -58,7 +58,7 @@ export function WorkspaceArchivePanel() {
   const free = dest?.freeBytes ?? null;
   const tooSmall = free !== null && needed > free;
   const problems = [...(preview?.blockers ?? []), ...(dest?.errors ?? []), ...(tooSmall ? [t('settings.workspaceArchive.noSpace')] : [])];
-  const canStart = !running && !startMut.isPending && !!picked && !!dest && checked === destination.trim() && problems.length === 0;
+  const canStart = !running && !startMut.isPending && !previewQuery.isFetching && !previewQuery.isError && !!picked && !!dest && checked === destination.trim() && problems.length === 0;
   const pct = job?.progress && job.progress.bytesTotal > 0 ? Math.min(100, Math.round(100 * job.progress.bytesDone / job.progress.bytesTotal)) : 0;
 
   return <section className="settings-section">
