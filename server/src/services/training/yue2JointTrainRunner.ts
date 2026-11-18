@@ -750,7 +750,9 @@ export function relayJsonLine(job: TrainingJob, line: string, state: RelayState,
     // (rungs stop below the target), and its checkpoint event came first.
     if (opts && opts.klCheckpointEvery! > 0) state.onRung?.(step);
     log(job, 'info', raw.reason === 'planner_ce'
-      ? `Planner held-out loss stopped improving at step ${step}; frozen there, decoder keeps training`
+      ? (typeof raw.restored_from === 'number'
+        ? `Planner held-out loss stopped improving at step ${step}; planner restored to its best reading (step ${raw.restored_from}) and frozen, decoder keeps training`
+        : `Planner held-out loss stopped improving at step ${step}; frozen there, decoder keeps training`)
       : raw.reason === 'manual' ? `Planner frozen at step ${step}; decoder keeps training`
       : `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'planner_gate' && step !== undefined) {

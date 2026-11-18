@@ -140,6 +140,9 @@ struct ResumeBinding {
     // kl, planner_ce or manual (empty in records written before reasons).
     yue2_aitk_runtime::PlannerGate gate;
     std::string frozen_reason;
+    // The gate's best planner was written back at the freeze, from this step:
+    // the held planner is the best one (GH #346). -1 = frozen where it stood.
+    int planner_restored_from = -1;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -244,6 +247,10 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
             binding->planner_frozen_at=int(yyjson_get_sint(v));
         }
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_reason")) { if(!str_field(v,&binding->frozen_reason)) return fail(error,"resume planner_frozen_reason field is malformed"); }
+        if(yyjson_val * v=yyjson_obj_get(root,"planner_restored_from")) {
+            if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_restored_from field is malformed");
+            binding->planner_restored_from=int(yyjson_get_sint(v));
+        }
     }
     // The gate's settings bind the run like the split does: a resumed segment
     // must reach the verdict a continuous run would, so they cannot change.
@@ -289,7 +296,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
                              const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
                              const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0, int lr_decaying_from = -1,
-                             const yue2_aitk_runtime::PlannerGate & gate = {}, const std::string & frozen_reason = {}) {
+                             const yue2_aitk_runtime::PlannerGate & gate = {}, const std::string & frozen_reason = {}, int planner_restored_from = -1) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -328,6 +335,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (planner_frozen_at>=0) { yyjson_mut_obj_add_int(doc,root,"planner_frozen_at",planner_frozen_at); yyjson_mut_obj_add_int(doc,root,"nar_extra_steps",config.nar_extra_steps); }
     if (planner_frozen_at>=0 && !frozen_reason.empty()) yyjson_mut_obj_add_strcpy(doc,root,"planner_frozen_reason",frozen_reason.c_str());
+    if (planner_frozen_at>=0 && planner_restored_from>=0) yyjson_mut_obj_add_int(doc,root,"planner_restored_from",planner_restored_from);
     // Only gated runs carry this, so other records are unchanged. No best
     // until the first reading (JSON has no infinity).
     if (config.planner_gate_every>0) {
@@ -358,6 +366,39 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
         }
     }
     size_t n=0; char * raw=yyjson_mut_write(doc,0,&n); std::string out=raw?std::string(raw,n):std::string(); std::free(raw); yyjson_mut_doc_free(doc); return out;
+}
+// The gate's best planner, kept beside a checkpoint whose live planner has
+// moved past it, so a segment resumed before the freeze can still write it
+// back (GH #346). A parameter-only resume record: per-slot names, no
+// optimizer state; its step is the best reading's.
+constexpr const char * kPlannerBestFile = "planner-best.resume";
+bool write_planner_best(const std::filesystem::path & path, const Yue2AitkTrainState & state, const Yue2AitkTrainState::PlannerCopy & copy, int best_step) {
+    const auto named = state.named_tensors();
+    const size_t n = copy.size();
+    yue2_aitk::HostStateSnapshot snap; snap.step = best_step;
+    snap.names.resize(n); snap.elements.resize(n); snap.parameters.resize(n);
+    snap.state1_fp32.resize(n); snap.state2_fp32.resize(n); snap.state3_fp32.resize(n); snap.state4_fp32.resize(n);
+    snap.state1_u8.resize(n); snap.state2_u8.resize(n); snap.state3_u8.resize(n); snap.state4_u8.resize(n);
+    snap.absmax1.resize(n); snap.absmax2.resize(n); snap.absmax3.resize(n); snap.absmax4.resize(n);
+    for (size_t k = 0; k < n; ++k) { snap.names[k] = named[copy[k].first].name; snap.elements[k] = copy[k].second.size(); snap.parameters[k] = copy[k].second; }
+    return yue2_aitk::yue2_aitk_write_resume_v2(path.u8string().c_str(), snap, "{}");
+}
+// False when the file is missing, from another step, or does not match this
+// train state's planner slots.
+bool read_planner_best(const std::filesystem::path & path, const Yue2AitkTrainState & state, int best_step, Yue2AitkTrainState::PlannerCopy * out) {
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec)) return false;
+    yue2_aitk::ResumeRecord record;
+    if (!yue2_aitk::yue2_aitk_read_resume(path.u8string().c_str(), &record) || record.version != 3 || record.state.step != best_step) return false;
+    const auto named = state.named_tensors();
+    Yue2AitkTrainState::PlannerCopy copy = state.copy_planner();
+    if (record.state.names.size() != copy.size()) return false;
+    for (size_t k = 0; k < copy.size(); ++k) {
+        if (record.state.names[k] != named[copy[k].first].name || record.state.parameters[k].size() != copy[k].second.size()) return false;
+        copy[k].second = std::move(record.state.parameters[k]);
+    }
+    *out = std::move(copy);
+    return true;
 }
 }
 
@@ -1047,11 +1088,50 @@ static int run_impl(Config config, std::string * error) {
             planner_frozen_at = completed; frozen_reason = "manual";
             std::fprintf(stderr, "[yue2-aitk] --freeze-planner-now: planner frozen at the resumed step %d\n", completed);
         }
+        // The gate's best planner (GH #346): kept from its best reading and
+        // written back when it freezes, so the frozen planner is the best one,
+        // not the one patience x every updates past it. Empty = none held.
+        // Only a live planner needs it; a held one already is the best one,
+        // or (frozen by KL or by hand) the planner that run chose to keep.
+        Yue2AitkTrainState::PlannerCopy best_planner;
+        int planner_restored_from = planner_frozen_at >= 0 ? resume_binding.planner_restored_from : -1;
+        if (planner_frozen_at < 0 && gate.best_step >= 0) {
+            const bool at_best = resume_binding.planner_frozen_at < 0 ? gate.best_step == completed : resume_binding.planner_restored_from == gate.best_step;
+            if (at_best) best_planner = state.copy_planner();
+            else if (!read_planner_best(std::filesystem::u8path(config.resume).parent_path() / kPlannerBestFile, state, gate.best_step, &best_planner))
+                std::fprintf(stderr, "[yue2-aitk] warning: the gate's best planner (step %d) is not beside this checkpoint; a gate freeze keeps the planner where it stands\n", gate.best_step);
+        }
+        // Before the gate's freeze: the best planner back in place. Its
+        // optimizer moments stay as they are: a frozen planner gets zero
+        // gradients and is held after every update, so they never reach its
+        // weights, and an --unfreeze-planner segment starts from the best
+        // weights with moments that decayed through the frozen steps, as it
+        // does after any freeze.
+        const auto restore_best_planner = [&]() -> bool {
+            if (gate.best_step < 0 || gate.best_step == completed) return true;
+            if (best_planner.empty()) {
+                std::fprintf(stderr, "[yue2-aitk] warning: no copy of the best planner (step %d); frozen where it stands at step %d\n", gate.best_step, completed);
+                return true;
+            }
+            state.set_planner(best_planner);
+            if (dora && !state.refresh_dora(model, error)) return false;
+            ggml_backend_synchronize(backend.value);
+            planner_restored_from = gate.best_step;
+            std::fprintf(stderr, "[yue2-aitk] planner restored to its best held-out reading (step %d) before the freeze at step %d\n", gate.best_step, completed);
+            return true;
+        };
+        const auto frozen_event = [&](const char * reason) {
+            std::cout << "{\"stage\":\"planner_frozen\",\"step\":" << completed << ",\"reason\":\"" << reason << "\"";
+            if (planner_restored_from >= 0) std::cout << ",\"restored_from\":" << planner_restored_from;
+            std::cout << "}\n" << std::flush;
+        };
         const bool pending_freeze = planner_frozen_at < 0 && gate.pending(config);
         if (pending_freeze) {
             // The record's last reading fired on a step a spike stop ended.
+            if (!restore_best_planner()) return 1;
+            best_planner = {};
             planner_frozen_at = completed; frozen_reason = "planner_ce";
-            std::cout << "{\"stage\":\"planner_frozen\",\"step\":" << completed << ",\"reason\":\"planner_ce\"}\n" << std::flush;
+            frozen_event("planner_ce");
             std::fprintf(stderr, "[yue2-aitk] the record's held-out reading fired at step %d: planner frozen there\n", completed);
         }
         if (planner_frozen_at >= 0) {
@@ -1211,6 +1291,11 @@ static int run_impl(Config config, std::string * error) {
         // blind steps (the KL climbed 0.92 -> 1.64 in them and skipped four
         // rungs), read the plain mean of what is there from 5 fresh steps.
         const bool partial_readings = first_unfreeze;
+        // The previous checkpoint's best-planner copy, removed once a newer
+        // checkpoint lands. On resume that is the copy beside the record: the
+        // server gives every segment its own folder, so it lies outside
+        // --output, in the segment before.
+        std::filesystem::path older_best_file = config.resume.empty() ? std::filesystem::path{} : std::filesystem::u8path(config.resume).parent_path() / kPlannerBestFile;
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -1236,8 +1321,10 @@ static int run_impl(Config config, std::string * error) {
             }
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
+            if (planner_frozen_at < 0 && !best_planner.empty() && gate.best_step != step &&
+                !write_planner_best(temp_dir / kPlannerBestFile, state, best_planner, gate.best_step)) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from, gate, frozen_reason);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from, gate, frozen_reason, planner_restored_from);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", step))).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
             if (use_lm) {
@@ -1276,10 +1363,22 @@ static int run_impl(Config config, std::string * error) {
                 if (!yue2_aitk::yue2_aitk_write_resume(resume.u8string().c_str(), adamw->capture(), metadata)) return false;
             }
             std::filesystem::rename(temp_dir, final_dir, save_ec);
-            if (!save_ec) { last_saved=step; event("checkpoint", step); }
+            if (!save_ec) {
+                last_saved=step; event("checkpoint", step);
+                // ponytail: only the newest checkpoint keeps the best planner
+                // (fp32, larger than the AR file), so an older one resumes
+                // with a warning and freezes where it stands; keep one per
+                // best step (hard-linked) if resuming old rungs matters.
+                std::error_code rm; if (!older_best_file.empty()) std::filesystem::remove(older_best_file, rm);
+                older_best_file = final_dir / kPlannerBestFile;
+            }
             return !save_ec;
         };
         auto freeze_here = [&](const char * reason) -> bool {
+            // The gate's freeze keeps its best planner; a KL freeze keeps the
+            // planner that reached the target.
+            if (!std::strcmp(reason, "planner_ce") && !restore_best_planner()) return false;
+            best_planner = {};
             // Freeze first, so the checkpoint's resume record already says
             // frozen and resumes decoder-only.
             planner_frozen_at = completed; frozen_reason = reason;
@@ -1288,7 +1387,7 @@ static int run_impl(Config config, std::string * error) {
             // so the spike guard's baseline starts over.
             gnorm_window.clear(); spike_steps.clear();
             if (!save_checkpoint(completed)) return false;
-            std::cout << "{\"stage\":\"planner_frozen\",\"step\":" << completed << ",\"reason\":\"" << reason << "\"}\n" << std::flush;
+            frozen_event(reason);
             return true;
         };
         auto freeze_at_kl = [&](double reading) -> bool {
@@ -1502,6 +1601,7 @@ static int run_impl(Config config, std::string * error) {
                 const double epoch = PlannerGate::epochs(gate.draws, order.size());
                 const auto verdict = gate.observe(config, completed, epoch, ce);
                 if (verdict == PlannerGate::Verdict::nonfinite) { fail(error, "nonfinite held-out planner CE"); return 1; }
+                if (gate.best_step == completed) best_planner = state.copy_planner();
                 std::ostringstream reading; reading << std::setprecision(9)
                     << "{\"stage\":\"planner_gate\",\"step\":" << completed << ",\"epoch\":" << epoch << ",\"ce\":" << ce
                     << ",\"best\":" << gate.best << ",\"best_step\":" << gate.best_step << ",\"stale\":" << gate.stale

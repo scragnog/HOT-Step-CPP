@@ -403,6 +403,8 @@ test('planner gate reading is a metric and leaves the phase alone; the freeze re
   assert.equal((state as any).frozenAt, 40);
   assert.ok(messages().some(m => /held-out loss stopped improving at step 40/.test(m)));
   assert.ok(!messages().some(m => /KL target/.test(m)));
+  relayJsonLine(job, JSON.stringify({ stage: 'planner_frozen', step: 45, reason: 'planner_ce', restored_from: 20 }), state);
+  assert.ok(messages().some(m => /step 45; planner restored to its best reading \(step 20\)/.test(m)));
   relayJsonLine(job, JSON.stringify({ stage: 'planner_frozen', step: 50, reason: 'kl' }), state);
   assert.ok(messages().some(m => /reached its KL target at step 50/.test(m)));
 });

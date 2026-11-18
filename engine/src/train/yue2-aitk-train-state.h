@@ -177,22 +177,29 @@ public:
     // clip norm and Prodigy's d see the decoder alone; hold_planner() runs
     // after the optimizer step and writes the captured weights back, which
     // undoes whatever momentum or weight decay moved. Optimizer-agnostic.
-    void freeze_planner() {
-        frozen_.clear();
+    // A copy of the planner's slots (slot index, weights). The held-out gate
+    // keeps one at its best reading and writes it back with set_planner()
+    // before it freezes (GH #346).
+    using PlannerCopy = std::vector<std::pair<size_t, std::vector<float>>>;
+    PlannerCopy copy_planner() const {
+        PlannerCopy copy;
         for (size_t i = 0; i < slots_.size(); ++i) {
             if (slots_[i].name.rfind("diffusion_model", 0) == 0) continue;
             std::vector<float> weights(ggml_nelements(slots_[i].parameter));
             ggml_backend_tensor_get(slots_[i].parameter, weights.data(), 0, ggml_nbytes(slots_[i].parameter));
-            frozen_.emplace_back(i, std::move(weights));
+            copy.emplace_back(i, std::move(weights));
         }
+        return copy;
     }
+    void set_planner(const PlannerCopy & copy) {
+        for (const auto & f : copy) ggml_backend_tensor_set(slots_[f.first].parameter, f.second.data(), 0, ggml_nbytes(slots_[f.first].parameter));
+    }
+    void freeze_planner() { frozen_ = copy_planner(); }
     bool planner_frozen() const { return !frozen_.empty(); }
     void zero_planner_gradients() {
         for (const auto & f : frozen_) ggml_backend_tensor_memset(slots_[f.first].gradient, 0, 0, ggml_nbytes(slots_[f.first].gradient));
     }
-    void hold_planner() {
-        for (const auto & f : frozen_) ggml_backend_tensor_set(slots_[f.first].parameter, f.second.data(), 0, ggml_nbytes(slots_[f.first].parameter));
-    }
+    void hold_planner() { set_planner(frozen_); }
 
     // Default recipe uses one joint parameter group. pre_scale (--grad-accum:
     // 1/N) multiplies every gradient before the norm is taken, so the clip
@@ -331,7 +338,7 @@ private:
     ggml_backend_buffer_t buffer_ = nullptr;
     Yue2AitkExpertAdapters ar_, nar_;
     std::vector<Slot> slots_;
-    std::vector<std::pair<size_t, std::vector<float>>> frozen_;  // slot index, held weights
+    PlannerCopy frozen_;  // slot index, held weights
     // [expert (0 = NAR, 1 = AR)][layer] -> slot indices in yue2_aitk_layer_params order.
     std::array<std::vector<std::vector<size_t>>, 2> layer_slots_{};
     std::array<std::vector<std::vector<ggml_tensor *>>, 2> layer_grads_{};  // same order, gradient tensors

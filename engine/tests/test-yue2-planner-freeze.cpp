@@ -72,8 +72,17 @@ static bool one(ggml_backend_t backend, const char * adapter, const char * optim
         return true;
     };
     CHECK(step(false));  // live: every moment is now nonzero
+    // The gate's best reading (GH #346): copied, trained past, written back
+    // before the freeze, so the held planner is the copy, bit for bit.
+    const auto best = state.copy_planner();
+    CHECK(step(false));
+    size_t moved_past = 0;
+    for (const auto & f : best) moved_past += read(named[f.first].parameter) != f.second;
+    CHECK(moved_past == best.size());
+    state.set_planner(best);
     state.freeze_planner();
     std::vector<std::vector<float>> before; for (const auto & p : named) before.push_back(read(p.parameter));
+    for (const auto & f : best) CHECK(before[f.first] == f.second);
     CHECK(step(true)); CHECK(step(true));
     size_t planner = 0, decoder = 0, decoder_moved = 0;
     for (size_t i = 0; i < named.size(); ++i) {
