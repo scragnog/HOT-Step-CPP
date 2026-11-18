@@ -147,6 +147,17 @@ startup warns in the launch console and uses `HOT-Step-Data` beside the app, or 
 original checkout folders in dev. This may show an empty library. The saved location
 is kept; reconnect the drive and restart to use it again.
 
+The **Workspace archive** panel exports your workspace to one zip. Enter or browse to a
+destination folder and click **Check**. Switches then show each category with its size:
+Library (always included), Training data, Adapters, Models (off by default) and Secrets
+(off by default, because anyone holding the zip could read the keys). The panel shows the
+space needed and the free space at the destination, and lists anything that stops the
+export: running or queued work, a destination inside a folder being exported, or too
+little space. **Start export** stays disabled while any of these remain. While the export
+runs, every other change in the app is paused and the panel shows progress and a
+**Cancel export** button; playback and viewing keep working. A cancelled or failed export
+leaves no zip behind. Import is not in the panel yet.
+
 | Control | What it does |
 |---|---|
 | Extracted Stems | Shows how many stem extractions, individual stems, and total disk space are stored, with a confirm-to-clear button that deletes all of them. |

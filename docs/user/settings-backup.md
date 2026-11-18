@@ -38,6 +38,10 @@ copy the whole data folder while HOT-Step is stopped. API keys are in `settings/
 the MuScriptor Hugging Face token is in `library/muscriptor/hf_token`; both are inside that
 folder and are not in the JSON file. Treat a copy of the folder as secret.
 
+To move your workspace to another machine, use **Workspace archive** in Settings > Storage & Data
+instead of copying by hand: it writes one zip of the library and, if you choose, training data,
+adapters, models and secrets. Models and secrets are off by default.
+
 Upgrading does not need a backup restore: extract the new version and start it. It finds
 the same data folder through your profile. See [Data folder and upgrades](data-folder.md).
 

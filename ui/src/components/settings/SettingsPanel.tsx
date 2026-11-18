@@ -15,6 +15,7 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { engineWorkersOptions, healthOptions, updatesStatusOptions } from '../../queries/shell-queue/settings';
 import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
+import { WorkspaceArchivePanel } from './WorkspaceArchivePanel';
 import { SettingsBackupPanel } from './SettingsBackupPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ReportIssuePanel } from './ReportIssuePanel';
@@ -892,6 +893,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {activeTab === 'storage' && (
       <>
       <DataFolderPanel />
+      <WorkspaceArchivePanel />
       <SettingsBackupPanel settings={settings} onSettingsChange={onSettingsChange} />
       <StemStorage />
 

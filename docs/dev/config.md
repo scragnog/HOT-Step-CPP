@@ -65,6 +65,10 @@ the GPU list and the data-folder controls (handlers in `routes/settingsDataFolde
 | `POST /api/settings/data-folder/preview` | Body `{ "kind", "target" }`: `kind` is `move`, `repoint`, `create` or `import`, `target` an absolute folder. Plans the operation and returns its errors without changing anything |
 | `POST /api/settings/data-folder/schedule` | Same body. Records the operation in the pointer, then requests a restart, which carries it out before the DB opens. 409 while work is running |
 | `POST /api/settings/data-folder/cancel` | Drops a pending operation that has not started |
+| `GET /api/settings/workspace-archive/preview` | Optional `?destination=<absolute folder>`. Bytes and file counts per category (`library`, `training`, `adapters`, `models`, `secrets`), the default choices, the destination's free space and errors, skipped entries, and the blockers that would stop an export |
+| `POST /api/settings/workspace-archive/export` | Body `{ "destination", "categories"? }`. Holds writes (every other mutating request gets 503 `{ maintenance: { state: 'held' } }`), then answers 202 `{ job }` and zips in the background. 409 while an export runs, 400 on a bad destination or choice |
+| `GET /api/settings/workspace-archive/export` | `{ job }`: `state` (`holding`, `running`, `done`, `failed`, `cancelled`), `progress`, `outFile`, `bytes`, `error`. Null before the first export |
+| `POST /api/settings/workspace-archive/export/cancel` | Aborts the running export and drops the hold; allowed through the hold |
 
 The whitelist is `EXPOSED_ENV_KEYS` in `config.ts`. A key that is not on it can only be
 set by editing `.env` or the shell environment. Keys in `RESTART_REQUIRED_KEYS` are written

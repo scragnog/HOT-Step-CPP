@@ -6,6 +6,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { adapterApi, healthApi, profileApi, reportLogsApi, settingsApi } from '../../services/api';
 import { audioQueueApi } from '../../services/audioQueueApi';
 import { dataFolderApi } from '../../services/dataFolderApi';
+import { workspaceArchiveApi, type ArchiveJob } from '../../services/workspaceArchiveApi';
 import { updatesApi, type UpdateRestartAttempt } from '../../services/updatesApi';
 import { completedUpdate, updatesViewState } from '../../components/settings/updatesViewState';
 import { getStemStats } from '../../services/stemStudioApi';
@@ -75,6 +76,21 @@ export const stemStatsOptions = () => queryOptions({
 export const dataFolderOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/data-folder'),
   queryFn: ({ signal }) => dataFolderApi.location({ signal }),
+  staleTime: 0,
+});
+
+/** The workspace export job; polled while it holds or runs. */
+export const workspaceArchiveJobOptions = () => queryOptions({
+  queryKey: serverKey('shell-queue/workspace-archive-job'),
+  queryFn: ({ signal }) => workspaceArchiveApi.job({ signal }),
+  staleTime: 0,
+  refetchInterval: pollWhile<{ job: ArchiveJob | null }>(d => d?.job?.state === 'holding' || d?.job?.state === 'running', 1000),
+});
+
+/** Bytes per category, blockers and (when given) the destination's checks. Fresh per ask. */
+export const workspaceArchivePreviewOptions = (destination: string) => queryOptions({
+  queryKey: serverKey('shell-queue/workspace-archive-preview', { filters: { destination } }),
+  queryFn: ({ signal }) => workspaceArchiveApi.preview(destination, { signal }),
   staleTime: 0,
 });
 
