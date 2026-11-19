@@ -1,26 +1,30 @@
 import { useQuery } from '@tanstack/react-query';
-import { studioPluginsOptions } from '../../queries/studios/shared';
+import { studioPluginsOptions } from '@/queries/studios/shared';
 // StormPage.tsx — Full-width STORM Streaming performance page
 // MDMAchine / A&E Concepts 2026
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { HintButton } from '@/components/shared/controls/HintButton';
 import { Zap, Square, Play, Music } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useStreamAudio } from '../../hooks/useStreamAudio';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useStreamAudio } from '@/hooks/useStreamAudio';
 import { StormLiveControls, type LyricsMode, type SlotMeta } from './StormLiveControls';
 import { DriftPanel } from './DriftPanel';
-import { expandWildcards, hasWildcards } from '../../utils/wildcardUtils';
-import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
-import { useBackendStore } from '../../stores/backendStore';
-import type { BackendExtensionParam } from '../../stores/backendStore';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { StyledSelect } from '../shared/StyledSelect';
-import { QueryError } from '../shared/QueryError';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
-import type { GenerationParams } from '../../types';
+import { expandWildcards, hasWildcards } from '@/utils/wildcardUtils';
+import { BackendCapabilityGate } from '@/components/shared/status/BackendCapabilityGate';
+import { useBackendStore } from '@/stores/backendStore';
+import type { BackendExtensionParam } from '@/stores/backendStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import type { GenerationParams } from '@/types';
+import { readJson } from '@/utils/storage/storageJson';
+import { formatPercent, formatDecimal } from '@/utils/format/format';
 
 // ── Camelot wheel ─────────────────────────────────────────────────────────────
 const KEY_TO_CAMELOT: Record<string, string> = {
@@ -94,7 +98,12 @@ interface DeckProps {
 }
 
 const DeckPanel: React.FC<DeckProps> = ({ id, label, otherCamelot, crossfadeGain, onRegister }) => {
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    getGlobalParams: s.getGlobalParams,
+    guidanceMode: s.guidanceMode, guidanceScale: s.guidanceScale,
+    inferMethod: s.inferMethod, inferenceSteps: s.inferenceSteps,
+    pluginParams: s.pluginParams, scheduler: s.scheduler,
+  })));
   const sa = useStreamAudio(id);
   useEffect(() => { onRegister?.(sa); }, [sa.isPlaying, sa.detectedKey]); // re-register on play state / key detection
   const [caption, setCaption] = usePersistedState(`hs-storm-${id}-caption`, '');
@@ -206,7 +215,7 @@ const DeckPanel: React.FC<DeckProps> = ({ id, label, otherCamelot, crossfadeGain
             <input type="range" min={0} max={1} step={0.05} value={sa.volume}
               onChange={e => sa.setVolume(Number(e.target.value))}
               className="flex-1 accent-red-500 h-1" />
-            <span className="text-[9px] text-zinc-400 w-8 text-right tabular-nums">{Math.round(sa.volume*100)}%</span>
+            <span className="text-[9px] text-zinc-400 w-8 text-right tabular-nums">{formatPercent(sa.volume)}</span>
           </div>
         </div>
       )}
@@ -251,7 +260,13 @@ interface StormPageProps {
 }
 
 export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount: _activeJobCount }) => {
-  const gp = useGlobalParams();
+  const { t } = useTranslation();
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    getGlobalParams: s.getGlobalParams,
+    guidanceMode: s.guidanceMode, guidanceScale: s.guidanceScale,
+    inferMethod: s.inferMethod, inferenceSteps: s.inferenceSteps,
+    pluginParams: s.pluginParams, scheduler: s.scheduler,
+  })));
   const [mode, setMode] = usePersistedState<StormMode>('hs-storm-page-mode', 'continuous');
 
   // Seq/Cont stream state
@@ -265,7 +280,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const [streamLyricsNS, setStreamLyricsNS] = React.useState('');
   const [persistStyle,   setPersistStyle]   = React.useState(true);
   const [persistLyrics,  setPersistLyrics]  = React.useState(true);
-  const [streamSeed,     setStreamSeed]     = usePersistedState('hs-storm-seed', Math.floor(Math.random()*2147483647));
+  // A lazy initializer, not a random value in the argument: the default is
+  // evaluated on every render otherwise, which is impure and pointless.
+  const [seedDefault] = React.useState(() => Math.floor(Math.random() * 2147483647));
+  const [streamSeed,     setStreamSeed]     = usePersistedState('hs-storm-seed', seedDefault);
   const [streamSeedLock, setStreamSeedLock] = usePersistedState('hs-storm-seed-lock', false);
   const [caption,       setCaption]       = usePersistedState('hs-storm-caption', '');
   const [lyrics,        setLyrics]        = usePersistedState('hs-storm-lyrics', '');
@@ -381,10 +399,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       },
       ...(cacheRatio > 0       ? { cacheRatio }      : {}),
       ...(cfgCutoffRatio < 1.0 ? { cfgCutoffRatio }  : {}),
-      coResident: (() => {
-        try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident === true; }
-        catch { return false; }
-      })(),
+      coResident: readJson<{ coResident?: boolean }>('ace-settings', {}).coResident === true,
     };
     if (mode === 'sequential') {
       onGenerate({ ...params, guidanceScale: liveParams.guidance_scale, inferenceSteps: liveParams.inference_steps, duration: liveParams.duration, bpm: liveParams.bpm });
@@ -699,7 +714,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                       {meta.detectedBpm  && <span className="text-orange-400 tabular-nums">♩ {Math.round(meta.detectedBpm)} BPM</span>}
                       {meta.detectedKey  && <span className="text-cyan-400">{meta.detectedKey} · {KEY_TO_CAMELOT[meta.detectedKey] || '—'}</span>}
                       {meta.seed         !== undefined && <span className="text-zinc-500 tabular-nums font-mono text-[10px]">🎲 {meta.seed}</span>}
-                      {meta.guidance     !== undefined && <span className="text-blue-400">cfg {meta.guidance.toFixed(1)}</span>}
+                      {meta.guidance     !== undefined && <span className="text-blue-400">cfg {formatDecimal(meta.guidance, 1)}</span>}
                       {meta.steps        !== undefined && <span className="text-yellow-400">steps {meta.steps}</span>}
                       {meta.duration     !== undefined && <span className="text-green-400">{Math.round(meta.duration)}s</span>}
                       {meta.solver       && <span className="text-cyan-400 truncate max-w-[140px]" title={meta.solver}>⚙ {meta.solver}</span>}
@@ -727,9 +742,11 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                       info="The style caption for the stream. Supports {A|B|C} wildcard syntax, expandable in place with the wildcard button. Combined with the LoRA trigger word and beat intro/outro text before sending." />
                     <div className="flex items-center gap-1">
                       {hasWildcards(caption) && (
-                        <button onClick={()=>setCaption(expandWildcards(caption, streamSeed, 0))}
-                          className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors"
-                          title="Expand wildcards in-place">{'{·}'} expand</button>
+                        <HintButton onClick={()=>setCaption(expandWildcards(caption, streamSeed, 0))}
+                          label={t('storm.expandWildcards', 'Expand wildcards')}
+                          info={t('storm.expandWildcardsInfo', 'Resolves every {A|B} choice in this field once, using the stream seed.')}
+                          ariaLabel={t('storm.expandWildcards', 'Expand wildcards')}
+                          className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors">{'{·}'} expand</HintButton>
                       )}
                       <button onClick={()=>setAutoExpand(v=>!v)}
                         title={autoExpand ? 'Auto-expand ON: wildcards resolve on Start' : 'Auto-expand OFF'}
@@ -790,9 +807,11 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                         info="Lyrics for the stream. The loop/cycle/shuffle buttons control how sections advance automatically as slots play: loop repeats the same lyrics, cycle steps through sections in order, shuffle picks a random unseen section each slot. Ignored when Instrumental is on." />
                       <div className="flex items-center gap-1">
                         {hasWildcards(lyrics) && (
-                          <button onClick={()=>setLyrics(expandWildcards(lyrics, streamSeed, 0))}
-                            className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors"
-                            title="Expand wildcards in-place">{'{·}'} expand</button>
+                          <HintButton onClick={()=>setLyrics(expandWildcards(lyrics, streamSeed, 0))}
+                            label={t('storm.expandWildcards', 'Expand wildcards')}
+                            info={t('storm.expandWildcardsInfo', 'Resolves every {A|B} choice in this field once, using the stream seed.')}
+                            ariaLabel={t('storm.expandWildcards', 'Expand wildcards')}
+                            className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors">{'{·}'} expand</HintButton>
                         )}
                         <button onClick={()=>setAutoExpand(v=>!v)}
                           title={autoExpand ? 'Auto-expand ON' : 'Auto-expand OFF'}
@@ -822,9 +841,11 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                       info="Free-text negative prompt, sent with every slot. Optional; leave blank to skip." />
                     <div className="flex items-center gap-1">
                       {hasWildcards(negPrompt) && (
-                        <button onClick={()=>setNegPrompt(expandWildcards(negPrompt, streamSeed, 0))}
-                          className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors"
-                          title="Expand wildcards in-place">{'{·}'} expand</button>
+                        <HintButton onClick={()=>setNegPrompt(expandWildcards(negPrompt, streamSeed, 0))}
+                          label={t('storm.expandWildcards', 'Expand wildcards')}
+                          info={t('storm.expandWildcardsInfo', 'Resolves every {A|B} choice in this field once, using the stream seed.')}
+                          ariaLabel={t('storm.expandWildcards', 'Expand wildcards')}
+                          className="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition-colors">{'{·}'} expand</HintButton>
                       )}
                       <button onClick={()=>setAutoExpand(v=>!v)}
                         title={autoExpand ? 'Auto-expand ON' : 'Auto-expand OFF'}
@@ -988,7 +1009,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <input type="range" min={0} max={1} step={0.05} value={lssStrength}
                       onChange={e=>{ const v=Number(e.target.value); setLssStrength(v); if (sa.isPlaying) sa.sendControl('lss_strength',v); }}
                       className="flex-1 accent-red-500 h-1"/>
-                    <span className="text-[11px] text-zinc-300 w-9 text-right tabular-nums">{lssStrength.toFixed(2)}</span>
+                    <span className="text-[11px] text-zinc-300 w-9 text-right tabular-nums">{formatDecimal(lssStrength, 2)}</span>
                   </div>
                 </div>
                 {(cacheRatio>0||cfgCutoffRatio<1.0)&&!sa.isPlaying&&(
@@ -1184,7 +1205,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   onChange={e => setXfader(Number(e.target.value))}
                   className="w-full accent-pink-500"/>
                 <div className="text-[9px] text-zinc-500 tabular-nums">
-                  {Math.round(gainA*100)}% A / {Math.round(gainB*100)}% B
+                  {formatPercent(gainA)} A / {formatPercent(gainB)} B
                 </div>
               </div>
 

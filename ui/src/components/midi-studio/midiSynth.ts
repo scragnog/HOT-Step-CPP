@@ -1,3 +1,5 @@
+import { clamp01 } from '@/utils/format/clamp';
+import { byNumber } from '@/utils/sort';
 // midiSynth.ts — WebAudio playback engine for MIDI Studio
 //
 // Plays transcribed notes with simple per-family synth voices, in sync with
@@ -108,7 +110,7 @@ export class MidiSynth {
 
   /** 0 = original only, 1 = MIDI only; equal-power blend in between. */
   setCrossfade(v: number): void {
-    this.crossfade = Math.min(1, Math.max(0, v));
+    this.crossfade = clamp01(v);
     const t = this.ctx.currentTime;
     this.origGain.gain.setTargetAtTime(Math.cos(this.crossfade * Math.PI / 2), t, 0.02);
     this.midiGain.gain.setTargetAtTime(Math.sin(this.crossfade * Math.PI / 2), t, 0.02);
@@ -121,12 +123,12 @@ export class MidiSynth {
     this.notes.push(...notes);
     // note_end events can arrive slightly out of start order — sort from the
     // unscheduled tail only, so already-played history is untouched
-    const tail = this.notes.slice(this.schedIdx).sort((a, b) => a.start - b.start);
+    const tail = this.notes.slice(this.schedIdx).sort(byNumber(x => x.start));
     this.notes = this.notes.slice(0, this.schedIdx).concat(tail);
   }
 
   setAllNotes(notes: PlayNote[]): void {
-    this.notes = [...notes].sort((a, b) => a.start - b.start);
+    this.notes = [...notes].sort(byNumber(x => x.start));
     this.resync();
   }
 

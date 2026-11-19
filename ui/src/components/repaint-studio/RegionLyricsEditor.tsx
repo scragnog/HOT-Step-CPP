@@ -11,7 +11,8 @@ import {
   reconstructLyrics,
   formatTime,
   type RegionLrcLine,
-} from '../../utils/lrcUtils';
+} from '@/utils/lyrics/lrcUtils';
+import { plural } from '@/utils/format/plural';
 
 interface RegionLyricsEditorProps {
   /** Raw LRC text (null if no LRC available) */
@@ -116,9 +117,9 @@ export const RegionLyricsEditor: React.FC<RegionLyricsEditorProps> = ({
               <span className="text-sm font-medium text-white">Region Lyrics</span>
             </div>
             <div className="flex items-center gap-3 text-xs text-zinc-500">
-              <span>{inRegionCount} line{inRegionCount !== 1 ? 's' : ''} in range</span>
+              <span>{inRegionCount} {plural(inRegionCount, 'line')} in range</span>
               {sectionCount > 0 && (
-                <span>{sectionCount} section{sectionCount !== 1 ? 's' : ''}</span>
+                <span>{sectionCount} {plural(sectionCount, 'section')}</span>
               )}
             </div>
           </div>
@@ -132,7 +133,7 @@ export const RegionLyricsEditor: React.FC<RegionLyricsEditorProps> = ({
           {/* Indicator if there are hidden lines before */}
           {showStart > 0 && (
             <div className="text-[10px] text-zinc-600 text-center py-1">
-              ··· {showStart} earlier line{showStart !== 1 ? 's' : ''} ···
+              ··· {showStart} earlier {plural(showStart, 'line')} ···
             </div>
           )}
 
@@ -207,7 +208,7 @@ export const RegionLyricsEditor: React.FC<RegionLyricsEditorProps> = ({
           {/* Indicator if there are hidden lines after */}
           {showEnd < markedLines.length - 1 && (
             <div className="text-[10px] text-zinc-600 text-center py-1">
-              ··· {markedLines.length - 1 - showEnd} later line{markedLines.length - 1 - showEnd !== 1 ? 's' : ''} ···
+              ··· {markedLines.length - 1 - showEnd} later {plural(markedLines.length - 1 - showEnd, 'line')} ···
             </div>
           )}
         </div>

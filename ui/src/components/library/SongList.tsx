@@ -12,25 +12,31 @@ import {
   FileArchive, Info,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { moveFocus } from '../../utils/hotkeys';
-import { HOTKEY_EVENT } from '../../hooks/useGlobalHotkeys';
-import type { Song } from '../../types';
-import { togglePlay, usePlaybackSelector } from '../../stores/playbackStore';
-import { useMm3StreamAudio, mm3StreamTakeState } from '../../stores/mm3StreamStore';
-import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
-import { useDisguiseMode } from '../../hooks/useDisguiseMode';
-import { downloadAll } from '../../utils/downloadTrack';
-import { useAuth } from '../../context/AuthContext';
-import { HoverFullText } from '../shared/HoverFullText';
-import { SongActionsMenu } from '../shared/SongActionsMenu';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { moveFocus } from '@/utils/hotkeys';
+import { HOTKEY_EVENT } from '@/hooks/useGlobalHotkeys';
+import type { Song } from '@/types';
+import { togglePlay, usePlaybackSelector } from '@/stores/playbackStore';
+import { useMm3StreamAudio, mm3StreamTakeState } from '@/stores/mm3StreamStore';
+import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from '@/stores/abCompareStore';
+import { useDisguiseMode } from '@/hooks/useDisguiseMode';
+import { downloadAll } from '@/utils/audio/downloadTrack';
+import { useAuth } from '@/context/AuthContext';
+import { HoverFullText } from '@/components/shared/controls/HoverFullText';
+import { SongActionsMenu } from '@/components/shared/songs/SongActionsMenu';
 import { openImportTracks } from './ImportTracksModal';
-import { CoverImage } from '../shared/CoverImage';
-import { displayTitle, displaySubtext } from '../../utils/songDisplay';
-import { formatRelativeDay } from '../../utils/dateUtils';
-import { applySelectClick } from '../../utils/rangeSelect';
+import { CoverImage } from '@/components/shared/songs/CoverImage';
+import { displayTitle, displaySubtext } from '@/utils/songDisplay';
+import { formatRelativeDay } from '@/utils/format/dateUtils';
+import { applySelectClick } from '@/utils/rangeSelect';
 import { buildSongBadges, coverTag } from './songBadges';
-import { trackMetadata } from '../details/songFacts';
-import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
+import { trackMetadata } from '@/components/details/songFacts';
+import { usePersistedState, writePersistedState } from '@/hooks/usePersistedState';
+import { formatClock } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
+import { writeJson } from '@/utils/storage/storageJson';
+import { plural } from '@/utils/format/plural';
+import { clamp01 } from '@/utils/format/clamp';
 
 /** Grid card size: the minimum card width in px, one saved setting for every song grid. */
 const CARD_SIZE_KEY = 'hs-songGridCardSize';
@@ -455,7 +461,7 @@ export const SongList: React.FC<SongListProps> = ({
         <h3 className="text-lg font-bold text-white truncate min-w-0">{title}</h3>
         <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span className="text-xs text-zinc-500 font-medium">
-            {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
+            {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} {plural(filteredSongs.length, 'song')}
           </span>
 
           {showImport && (
@@ -843,64 +849,67 @@ function qualityColor(score: number): string {
 }
 
 const QualityBadge: React.FC<{ song: Song }> = ({ song }) => {
+  const { t } = useTranslation();
   const scores = parseQualityScores(song.quality_scores);
+  // No hook may sit below this early return: a song that gains or loses
+  // quality data would change the component's hook count.
   if (!scores) return null;
 
-  const [showTooltip, setShowTooltip] = React.useState(false);
-
-  const renderBadge = (q: ParsedQuality, label?: string) => (
-    <span
-      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${qualityColor(q.score)} cursor-help`}
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
-      {label ? `${label}: ` : ''}{Math.round(q.score * 100)}%
+  const metric = (label: string, value: number) => (
+    <span className="flex justify-between gap-4">
+      <span className="text-zinc-500">{label}</span>
+      <span className={qualityColor(value).split(' ')[0]}>{formatPercent(value)}</span>
     </span>
   );
 
-  const renderTooltip = () => {
-    if (!showTooltip) return null;
-    const entries: Array<{ label: string; q: ParsedQuality }> = [];
-    if (scores.unmastered) entries.push({ label: 'Unmastered', q: scores.unmastered });
-    if (scores.mastered) entries.push({ label: 'Mastered', q: scores.mastered });
+  const detail = (label: string, q: ParsedQuality) => (
+    <span className="mt-2 block first:mt-0">
+      <span className="mb-1 block text-[10px] font-bold text-zinc-700 dark:text-zinc-300">{label}</span>
+      <span className="block space-y-0.5">
+        {metric(t('library.quality.overall', 'Overall'), q.score)}
+        {metric(t('library.quality.metallic', 'Metallic'), q.metallic)}
+        {metric(t('library.quality.wordCuts', 'Word Cuts'), q.wordCuts)}
+        {metric(t('library.quality.noise', 'Noise'), q.noise)}
+      </span>
+    </span>
+  );
 
-    return (
-      <div className="absolute bottom-full left-0 mb-1.5 z-50 p-2.5 rounded-lg bg-zinc-900 border border-white/10 shadow-xl min-w-[160px]">
-        {entries.map(({ label, q }) => (
-          <div key={label} className="mb-2 last:mb-0">
-            <div className="text-[10px] font-bold text-zinc-300 mb-1">{label}</div>
-            <div className="space-y-0.5">
-              <div className="flex justify-between text-[10px]">
-                <span className="text-zinc-500">Overall</span>
-                <span className={qualityColor(q.score).split(' ')[0]}>{Math.round(q.score * 100)}%</span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-zinc-500">Metallic</span>
-                <span className={qualityColor(q.metallic).split(' ')[0]}>{Math.round(q.metallic * 100)}%</span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-zinc-500">Word Cuts</span>
-                <span className={qualityColor(q.wordCuts).split(' ')[0]}>{Math.round(q.wordCuts * 100)}%</span>
-              </div>
-              <div className="flex justify-between text-[10px]">
-                <span className="text-zinc-500">Noise</span>
-                <span className={qualityColor(q.noise).split(' ')[0]}>{Math.round(q.noise * 100)}%</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
+  // A span, not a button: the badge has no action of its own, and the old
+  // badge let a click bubble to the song row to play/select it. A button here
+  // would both look actionable and swallow that click.
+  const badge = (q: ParsedQuality, label: string) => (
+    <span
+      tabIndex={0}
+      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border cursor-help outline-none focus-visible:ring-2 focus-visible:ring-pink-400 ${qualityColor(q.score)}`}
+    >
+      {label}
+    </span>
+  );
 
-  const hasBoth = scores.unmastered && scores.mastered;
+  const hasBoth = !!scores.unmastered && !!scores.mastered;
+  // One card for both scores, as the old tooltip did: raw and processed are
+  // judged against each other, so showing only the hovered badge's numbers
+  // loses the comparison that made the pair useful.
+  const info = (
+    <>
+      {scores.unmastered && detail(t('library.quality.unmastered', 'Unmastered'), scores.unmastered)}
+      {scores.mastered && detail(t('library.quality.mastered', 'Mastered'), scores.mastered)}
+    </>
+  );
 
   return (
-    <div className="relative inline-flex items-center gap-1">
-      {scores.unmastered && renderBadge(scores.unmastered, hasBoth ? 'Raw' : undefined)}
-      {scores.mastered && renderBadge(scores.mastered, hasBoth ? 'PP' : undefined)}
-      {renderTooltip()}
-    </div>
+    <ParamLabel label={t('library.quality.title', 'Quality scores')} info={info} rootClassName="inline-flex">
+      <span className="relative inline-flex items-center gap-1">
+        {scores.unmastered && badge(
+          scores.unmastered,
+          `${hasBoth ? `${t('library.quality.raw', 'Raw')}: ` : ''}${formatPercent(scores.unmastered.score)}`,
+        )}
+        {scores.mastered && badge(
+          scores.mastered,
+          `${hasBoth ? `${t('library.quality.pp', 'PP')}: ` : ''}${formatPercent(scores.mastered.score)}`,
+        )}
+      </span>
+    </ParamLabel>
   );
 };
 
@@ -948,7 +957,7 @@ function useStreamingSong(song: Song): { isStreaming: boolean; frac: number; aud
   const received = st ? st.received : stream.received;
   const expected = st ? st.expected : stream.expected;
   const frac = isStreaming && expected > 0
-    ? Math.max(0, Math.min(1, received / expected))
+    ? clamp01(received / expected)
     : 0;
   // Is this the take coming out of the speakers? Several are growing at once
   // and only one is audible, so a card has to say which — otherwise the first
@@ -986,10 +995,7 @@ const SongItem: React.FC<SongItemProps> = ({
 
   const formatDuration = (val: string | number | undefined) => {
     if (!val) return '--:--';
-    if (typeof val === 'string') return val;
-    const m = Math.floor(val / 60);
-    const s = Math.floor(val % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return typeof val === 'string' ? val : formatClock(val);
   };
 
   const { bpm, keyScale } = trackMetadata(song);
@@ -1081,7 +1087,7 @@ const SongItem: React.FC<SongItemProps> = ({
                                ${streamAudible ? 'bg-pink-500/90' : 'bg-orange-500/90'}`}
                     title={streamAudible ? 'This is the take you are hearing' : 'Rendering — click to listen to this one'}>
                 <Radio size={8} className="animate-pulse" />
-                {Math.round(streamFrac * 100)}%
+                {formatPercent(streamFrac)}
               </span>
             )}
             {onRename && !selectionMode && (
@@ -1239,10 +1245,7 @@ const SongCard: React.FC<SongCardProps> = ({
 
   const formatDuration = (val: string | number | undefined) => {
     if (!val) return '--:--';
-    if (typeof val === 'string') return val;
-    const m = Math.floor(val / 60);
-    const s = Math.floor(val % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return typeof val === 'string' ? val : formatClock(val);
   };
 
   const handleClick = (e: React.MouseEvent) => {
@@ -1346,7 +1349,7 @@ const SongCard: React.FC<SongCardProps> = ({
               <div className="px-2 pb-1 text-[9px] font-medium text-orange-200 drop-shadow
                               flex items-center justify-between tabular-nums">
                 <span>{streamAudible ? 'playing as it renders' : 'generation in progress'}</span>
-                <span>{Math.round(streamFrac * 100)}%</span>
+                <span>{formatPercent(streamFrac)}</span>
               </div>
               <div className="h-1 bg-black/50">
                 <div
@@ -1495,7 +1498,7 @@ const TableTitleCell: React.FC<{
         <span className="flex-shrink-0 flex items-center gap-1 px-1 rounded bg-orange-500/90
                          text-[9px] font-bold uppercase tracking-wide text-white">
           <Radio size={8} className="animate-pulse" />
-          {Math.round(frac * 100)}%
+          {formatPercent(frac)}
         </span>
       )}
       {onRename && (
@@ -1605,7 +1608,7 @@ function loadColWidths(): Record<string, number> {
 }
 
 function saveColWidths(w: Record<string, number>) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(w)); } catch { /* ignore */ }
+  try { writeJson(STORAGE_KEY, w); } catch { /* ignore */ }
 }
 
 // ── Column visibility (user-customizable columns) ────────────────────────────
@@ -1617,7 +1620,7 @@ function loadColVisibility(): Record<string, boolean> {
   try { const v = localStorage.getItem(COL_VIS_KEY); return v ? JSON.parse(v) : {}; } catch { return {}; }
 }
 function saveColVisibility(v: Record<string, boolean>) {
-  try { localStorage.setItem(COL_VIS_KEY, JSON.stringify(v)); } catch { /* ignore */ }
+  try { writeJson(COL_VIS_KEY, v); } catch { /* ignore */ }
 }
 
 /** Whether a column shows when the user hasn't explicitly toggled it. */
@@ -1713,10 +1716,7 @@ const SongTable: React.FC<SongTableProps> = ({
 
   const formatDuration = (val: string | number | undefined) => {
     if (!val) return '--:--';
-    if (typeof val === 'string') return val;
-    const m = Math.floor(val / 60);
-    const s = Math.floor(val % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return typeof val === 'string' ? val : formatClock(val);
   };
 
   // Sum of fixed column widths (spacer is flexible, contributes nothing).

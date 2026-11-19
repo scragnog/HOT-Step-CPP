@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { backendModelsOptions } from '../../queries/global-models/options';
-import { QueryError } from '../shared/QueryError';
-import { queryManager } from '../../queries/invalidation';
-import { apiClient } from '../../services/httpClient';
+import { backendModelsOptions } from '@/queries/global-models/options';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { queryManager } from '@/queries/invalidation';
+import { apiClient } from '@/services/httpClient';
 // Yue2LmAdapterDropdown.tsx — Adapters cluster for a backend whose LM adapters
 // are ENGINE STATE rather than per-request parameters.
 //
@@ -39,12 +39,16 @@ import { apiClient } from '../../services/httpClient';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, FileInput, FolderOpen, Loader2, RotateCcw, Search } from 'lucide-react';
-import { useBackendStore } from '../../stores/backendStore';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Slider } from '../shared/Slider';
-import { StyledSelect } from '../shared/StyledSelect';
-import { FileBrowserModal } from '../shared/FileBrowserModal';
+import { useBackendStore } from '@/stores/backendStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { Slider } from '@/components/shared/controls/Slider';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { FileBrowserModal } from '@/components/shared/overlays/FileBrowserModal';
+import { formatBytes } from '@/utils/format/format';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { formatLoss } from '@/utils/format/format';
+import { isPresent } from '@/utils/guards';
 
 const inputClasses =
   'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
@@ -92,12 +96,6 @@ function keysFor(kind: SlotKind) {
     rebase: `lmAdapter${Slot}Rebase`,
     inForce: `lmAdapter${Slot}InForce`,
   };
-}
-
-function formatSize(bytes?: number): string {
-  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '';
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
 
 /** Last two path segments, extension dropped — enough to tell two runs apart
@@ -313,16 +311,16 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 entry?.rank ? `rank ${entry.rank}` : '',
                 entry?.steps ? `${entry.steps} steps` : '',
                 entry?.final ? 'final export' : '',
-                formatSize(entry?.bytes),
-              ].filter(Boolean).join(' · ')}
+                formatBytes(entry?.bytes, { zero: '' }),
+              ].filter(isPresent).join(' · ')}
             </p>
             <p className="text-[10px] text-zinc-500 font-mono break-all">{selected}</p>
             <p className="text-[11px] text-zinc-700 dark:text-zinc-300 tabular-nums">
               {typeof entry?.loss === 'number' && Number.isFinite(entry.loss)
-                ? t('globalBar.yue2AdapterLoss', 'Mean of last 20 logged losses: {{loss}}', { loss: entry.loss.toFixed(4) })
+                ? t('globalBar.yue2AdapterLoss', 'Mean of last 20 logged losses: {{loss}}', { loss: formatLoss(entry.loss) })
                 : t('globalBar.yue2AdapterLossUnknown', 'Training loss: not recorded')}
               {typeof entry?.valLoss === 'number' && Number.isFinite(entry.valLoss)
-                && ` · ${t('globalBar.yue2AdapterVal', 'Held-out val: {{val}}', { val: entry.valLoss.toFixed(4) })}`}
+                && ` · ${t('globalBar.yue2AdapterVal', 'Held-out val: {{val}}', { val: formatLoss(entry.valLoss) })}`}
             </p>
             {/* Chosen vs merged: the delta is baked in at load, so a fresh pick
                 is not in force until the next generation warms the model.
@@ -526,7 +524,7 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
             { name: body.name }));
     } catch (err) {
       setNote(t('globalBar.yue2AdapterImportFailed', 'Import failed: {{error}}',
-        { error: err instanceof Error ? err.message : String(err) }));
+        { error: errorMessage(err) }));
     } finally {
       setBusy(false);
     }
@@ -742,7 +740,7 @@ export const Yue2LmAdapterBadge: React.FC = () => {
       const m = catalogue?.lmAdapterMeta?.[p];
       return { kind, label: m?.trigger || m?.runName || shortName(p), path: p };
     })
-    .filter(Boolean) as Array<{ kind: SlotKind; label: string; path: string }>;
+    .filter(isPresent) as Array<{ kind: SlotKind; label: string; path: string }>;
 
   if (picked.length === 0) return <span className="text-[10px] text-zinc-600">None</span>;
 

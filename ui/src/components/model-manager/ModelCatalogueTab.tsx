@@ -1,4 +1,4 @@
-import { MulacoverPackNotice } from '../cover-studio/HeartmulaCoverPanel';
+import { MulacoverPackNotice } from '@/components/cover-studio/mm3/HeartmulaCoverPanel';
 // ModelCatalogueTab.tsx — Tabbed model catalogue browser
 //
 // Two-level tabs: a top-level family bar (ACE-Step 1.5 / MiniMax-Music3 /
@@ -12,11 +12,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Download, ExternalLink, Info, KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelRow } from './ModelRow';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
-import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import type { RegistryFile, DownloadJob } from '../../types';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { usePersistedState, writePersistedState } from '@/hooks/usePersistedState';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import type { RegistryFile, DownloadJob } from '@/types';
 
 export type FamilyTab = 'as1.5' | 'mm3' | 'yue2' | 'sa3' | 'heartmula' | 'shared';
 

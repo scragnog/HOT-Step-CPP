@@ -2,7 +2,7 @@
 // Run with the ui suite: node --import ../server/node_modules/tsx/dist/loader.mjs --test "src/**/*.test.ts"
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { ApiError } from '../services/httpClient';
+import { ApiError } from '@/services/httpClient';
 import {
   ERROR_POLL_MAX_MS, isRetryableError, pollWhile, retryDelay, retryQuery,
 } from './contract';

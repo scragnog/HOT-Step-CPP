@@ -1,0 +1,89 @@
+// PhaseStepper.tsx — Dataset · Preprocess · Train · Monitor
+//
+// All four phases ship. Monitor is the batch-pipeline queue view (see
+// MonitorPanel.tsx).
+//
+// Under YuE2, phase 2 is Prepare (2026-09-30): the latent cache, codes, lead
+// sheets and optional stems/alignment moved there from the Train page, so the
+// Optimise phase after it can measure the prepared album before training.
+// Monitor is absent under YuE2: the batch pipeline it watches only runs the
+// preprocess-based backends, and YuE2's own batch queue shows on the Train page.
+
+import React from 'react';
+import { ArrowLeft, Database, Layers, Cpu, Activity, Lock, Sparkles, ListChecks, Gauge } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { useTrainingStore, type TrainingPhase } from '@/stores/trainingStore';
+import { getTrainingPlugin } from '@/components/training-studio/lib/trainingPlugins';
+import type { TrainingTargetId } from '@/components/training-studio/lib/trainingPluginTypes';
+
+const PHASES: Array<{ id: TrainingPhase; icon: React.ReactNode; labelKey: string; enabled: boolean }> = [
+  { id: 'dataset',    icon: <Database size={14} />, labelKey: 'trainingStudio.phase.dataset',    enabled: true },
+  { id: 'preprocess', icon: <Layers size={14} />,   labelKey: 'trainingStudio.phase.preprocess', enabled: true },
+  // YuE2 only: optional measurements of the prepared album before training.
+  { id: 'optimise',   icon: <Gauge size={14} />,    labelKey: 'trainingStudio.phase.optimise',   enabled: true },
+  { id: 'train',      icon: <Cpu size={14} />,      labelKey: 'trainingStudio.phase.train',      enabled: true },
+  // YuE2 only: push a finished adapter's planner up the KL rungs and listen.
+  { id: 'refine',     icon: <Sparkles size={14} />, labelKey: 'trainingStudio.phase.refine',     enabled: true },
+  // YuE2 only: ladders with previews awaiting the listener's scores.
+  { id: 'review',     icon: <ListChecks size={14} />, labelKey: 'trainingStudio.phase.review',   enabled: true },
+  { id: 'monitor',    icon: <Activity size={14} />, labelKey: 'trainingStudio.phase.monitor',    enabled: true },
+];
+
+/** `target` is the studio's one effective training target (useTrainingTarget). */
+export const PhaseStepper: React.FC<{ target: TrainingTargetId }> = ({ target }) => {
+  const { t } = useTranslation();
+  const phase = useTrainingStore(s => s.phase);
+  const setPhase = useTrainingStore(s => s.setPhase);
+  const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
+  const closeDataset = useTrainingStore(s => s.closeDataset);
+  // Which chips show, and what phase 2 is called, belongs to the target's
+  // plug-in: ACE encodes a tensor cache, MiniMax-Music3 exports RVQ codes
+  // ("Codes"), YuE2 prepares ("Prepare") and has no Monitor, SA3 has no
+  // Preprocess at all. Refine stays hidden for everyone; it is only reachable
+  // from Review for the earlier recipe's ladders.
+  const plugin = getTrainingPlugin(target);
+  const phases = plugin.phases.map(id => PHASES.find(p => p.id === id)!);
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {selectedDatasetId && (
+        <button
+          type="button"
+          onClick={() => { closeDataset(); setPhase('dataset'); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-full text-xs font-semibold border border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5"
+        >
+          <ArrowLeft size={14} /> {t('trainingStudio.phase.allDatasets', 'All datasets')}
+        </button>
+      )}
+      {phases.map((p, i) => {
+        const active = phase === p.id;
+        return (
+          <React.Fragment key={p.id}>
+            {i > 0 && <div className="w-4 h-px bg-zinc-300 dark:bg-white/10" />}
+            <button
+              type="button"
+              disabled={!p.enabled}
+              onClick={() => p.enabled && setPhase(p.id)}
+              title={p.enabled ? undefined : t('trainingStudio.phase.comingSoon')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                active
+                  ? 'text-amber-500 bg-amber-500/10 border-amber-500/30'
+                  : p.enabled
+                    ? 'text-zinc-500 border-transparent hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5'
+                    : 'text-zinc-400 dark:text-zinc-600 border-transparent cursor-not-allowed'
+              }`}
+            >
+              {p.enabled ? p.icon : <Lock size={12} />}
+              {(() => {
+                const override = plugin.phaseLabels[p.id];
+                return override ? t(override.key, override.fallback) : t(p.labelKey);
+              })()}
+            </button>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+export default PhaseStepper;

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useUpload } from '../../queries/writes';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Toggle } from '../shared/Toggle';
+import { useUpload } from '@/queries/writes';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { Toggle } from '@/components/shared/controls/Toggle';
 import type { Yue2Continuation as Section } from '../../../../server/src/contracts/yue2Continuation';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 export const Yue2Continuation: React.FC<{ value?: Section; onChange: (value?: Section) => void }> = ({ value, onChange }) => {
   const { t } = useTranslation();
@@ -30,7 +31,7 @@ export const Yue2Continuation: React.FC<{ value?: Section; onChange: (value?: Se
           try {
             const result = await upload.mutateAsync({ path: '/upload/audio', files: [{ field: 'audio', file }] });
             update({ sourceAudioUrl: result.audio_url });
-          } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+          } catch (err) { setError(errorMessage(err)); }
         }} className="w-full text-xs" />
       {source.sourceAudioUrl && <audio controls src={source.sourceAudioUrl} className="w-full" />}
       <div className="grid grid-cols-2 gap-2">

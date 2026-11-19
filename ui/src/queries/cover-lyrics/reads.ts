@@ -1,9 +1,9 @@
 import { queryOptions } from '@tanstack/react-query';
-import { getAuthToken } from '../../services/axiosClient';
-import { apiClient, type ReadOptions } from '../../services/httpClient';
-import { queryClient } from '../client';
-import { serverKey, resourceKey, type Resource } from '../keys';
-import { queryManager } from '../invalidation';
+import { getAuthToken } from '@/services/axiosClient';
+import { apiClient, type ReadOptions } from '@/services/httpClient';
+import { queryClient } from '@/queries/client';
+import { serverKey, resourceKey, type Resource } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
 
 export type Domain = 'lireek' | 'drafts' | 'cover' | 'workflow';
 const resource = (domain: Domain): Resource => `cover-lyrics/${domain}`;

@@ -8,6 +8,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ChevronDown, Check, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { splitModel } from './modelLabels';
+import { useClickOutside } from '@/hooks/useClickOutside';
 
 /** Detect model format from the raw model name/path.
  *  ONNX detection: .onnx extension OR known ONNX directory name patterns
@@ -113,16 +114,7 @@ export const ModelSelect: React.FC<ModelSelectProps> = ({
     : options;
 
   // Close on click outside
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  useClickOutside([containerRef], () => setOpen(false), open);
 
   // On open: reset the query and focus the filter input. On close: clear query.
   useEffect(() => {

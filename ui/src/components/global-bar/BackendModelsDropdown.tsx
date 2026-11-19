@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { backendModelsOptions } from '../../queries/global-models/options';
-import { QueryError } from '../shared/QueryError';
+import { backendModelsOptions } from '@/queries/global-models/options';
+import { QueryError } from '@/components/shared/feedback/QueryError';
 // BackendModelsDropdown.tsx — model picker for backends whose model choice is
 // ENGINE STATE rather than a per-request parameter.
 //
@@ -18,21 +18,23 @@ import { QueryError } from '../shared/QueryError';
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ParamLabel } from '../shared/ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { Download } from 'lucide-react';
-import { useBackendStore } from '../../stores/backendStore';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { ModelManagerModal } from '../model-manager/ModelManagerModal';
+import { useBackendStore } from '@/stores/backendStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { ModelManagerModal } from '@/components/model-manager/ModelManagerModal';
 import { VariantModelSelect } from './ModelSelect';
 import { splitModel } from './modelLabels';
 import type { Mm3DitRuntime } from './Mm3RendererRow';
 import { Mm3RendererRow } from './Mm3RendererRow';
-import { snapshotOptions } from '../../queries/cover-lyrics/reads';
-import type { Yue2CoverReadiness } from '../../services/yue2CoverApi';
-import { useSheetTranscriber, type SheetTranscriber } from '../cover-studio/sheetTranscriber';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
+import { snapshotOptions } from '@/queries/cover-lyrics/reads';
+import type { Yue2CoverReadiness } from '@/services/yue2CoverApi';
+import { useSheetTranscriber, type SheetTranscriber } from '@/components/cover-studio/lyrics/sheetTranscriber';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { formatBytes } from '@/utils/format/format';
+import { isPresent } from '@/utils/guards';
 
 /** The lead-sheet transcriber: SheetSage2 or SheetSage2-Refined, and Refined's
  *  modal keys. Stored on the server; covers, the AR sheet stage and labelling
@@ -98,11 +100,6 @@ const BUCKET_LABELS: Record<string, string> = {
   flow: 'Codec flow model',
   scalar_decoder: 'Waveform decoder',
 };
-
-function formatBytes(bytes?: number): string {
-  if (!bytes || bytes <= 0) return '';
-  return `${(bytes / 1e9).toFixed(2)} GB`;
-}
 
 export const BackendModelsDropdown: React.FC = () => {
   const { t } = useTranslation();
@@ -252,7 +249,7 @@ export const BackendModelsBadge: React.FC = () => {
   const catalogue = useBackendStore(s => s.models[s.activeBackendId] ?? null);
   const parts = Object.keys(catalogue?.buckets ?? {})
     .map(k => String(catalogue?.defaults?.[k] ?? ''))
-    .filter(Boolean);
+    .filter(isPresent);
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
       {parts.length ? parts.join(' · ') : '—'}

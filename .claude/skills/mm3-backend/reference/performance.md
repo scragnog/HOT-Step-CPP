@@ -426,7 +426,7 @@ window is checked against it rather than trusted.
 
 **The transport is STORM's, the scheduler is NOT.** The byte stream is the same
 shape `POST /api/generate/storm/stream` already emits, so `extractWav` is shared
-(moved to `ui/src/utils/wavStream.ts`). But `useStreamAudio` CROSSFADES between
+(moved to `ui/src/utils/audio/wavStream.ts`). But `useStreamAudio` CROSSFADES between
 independent generations; MM3 windows are consecutive spans of ONE signal and
 must HARD-SPLICE, so `ui/src/stores/mm3StreamStore.ts` is a separate module (a
 singleton since a0cd06f8, because the engine allows one reader per job and the

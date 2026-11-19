@@ -1,13 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query';
-import * as api from '../../services/trainingApi';
-import { bridgeEvents, type BridgeOptions } from '../sseBridge';
-import { resourceKey, scopeOf, SHARED } from '../keys';
+import * as api from '@/services/trainingApi';
+import { bridgeEvents, type BridgeOptions } from '@/queries/sseBridge';
+import { resourceKey, scopeOf, SHARED } from '@/queries/keys';
 import type { Worker } from './queries';
-import { trainingQueries } from '../training-data/queries';
+import { trainingQueries } from '@/queries/training-data/queries';
 import { jobFrameUpdate } from './jobFrame';
-import { useTrainingStore } from '../../stores/trainingStore';
-import { queryManager } from '../invalidation';
-import { ApiError, HttpStatus } from '../../services/apiError';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { queryManager } from '@/queries/invalidation';
+import { ApiError, HttpStatus } from '@/services/apiError';
 
 export function invalidateRunReads(client: QueryClient, worker: Worker) {
   return queryManager.filter(client, { queryKey: ['hs'], predicate: q =>

@@ -13,8 +13,9 @@
 
 import React from 'react';
 import { Headphones, AlertTriangle, Play } from 'lucide-react';
-import { useMm3StreamAudio, mm3StreamResume } from '../../stores/mm3StreamStore';
-import { HintButton } from '../shared/HintButton';
+import { useMm3StreamAudio, mm3StreamResume } from '@/stores/mm3StreamStore';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { formatClock } from '@/utils/format/format';
 
 interface Mm3StreamStatusProps {
   /** The job this card is for — the line only speaks for the job the store is
@@ -25,10 +26,7 @@ interface Mm3StreamStatusProps {
   interleaved?: boolean | null;
 }
 
-const mmss = (s: number) => {
-  const t = Math.max(0, Math.floor(s));
-  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-};
+const mmss = (s: number) => formatClock(Math.max(0, Math.floor(s)));
 
 export const Mm3StreamStatus: React.FC<Mm3StreamStatusProps> = ({ jobId, interleaved }) => {
   const s = useMm3StreamAudio();

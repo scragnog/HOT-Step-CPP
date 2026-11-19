@@ -3,15 +3,16 @@
 // file browser's directory listings.
 
 import { queryOptions } from '@tanstack/react-query';
-import { adapterApi, healthApi, profileApi, reportLogsApi, settingsApi } from '../../services/api';
-import { audioQueueApi } from '../../services/audioQueueApi';
-import { dataFolderApi } from '../../services/dataFolderApi';
-import { updatesApi, type UpdateRestartAttempt } from '../../services/updatesApi';
-import { completedUpdate, updatesViewState } from '../../components/settings/updatesViewState';
-import { getStemStats } from '../../services/stemStudioApi';
-import { serverKey, sharedKeys } from '../keys';
-import { pollWhile } from '../contract';
+import { adapterApi, healthApi, profileApi, reportLogsApi, settingsApi } from '@/services/api';
+import { audioQueueApi } from '@/services/audioQueueApi';
+import { dataFolderApi } from '@/services/dataFolderApi';
+import { updatesApi, type UpdateRestartAttempt } from '@/services/updatesApi';
+import { completedUpdate, updatesViewState } from '@/components/settings/updatesViewState';
+import { getStemStats } from '@/services/stemStudioApi';
+import { serverKey, sharedKeys } from '@/queries/keys';
+import { pollWhile } from '@/queries/contract';
 import type { EngineWorkersResponse } from '../../../../server/src/contracts/settings';
+import { byNumber } from '@/utils/sort';
 
 export const healthOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/health'),
@@ -52,7 +53,7 @@ export const reportFailedJobOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/report-failed-job', { auth: true }),
   queryFn: async ({ signal }) => {
     const { items } = await audioQueueApi.list({ signal });
-    return items.filter(i => i.status === 'failed').sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+    return items.filter(i => i.status === 'failed').sort(byNumber(x => x.updatedAt, 'desc'))[0] ?? null;
   },
   staleTime: 0,
 });
@@ -81,7 +82,7 @@ export const dataFolderOptions = () => queryOptions({
 /** An explicit adapter-folder scan (a read-only POST). Fresh per click.
  *  Owned by global-models; re-exported so settings-area consumers keep one
  *  import surface. */
-export { adapterScanOptions } from '../global-models/options';
+export { adapterScanOptions } from '@/queries/global-models/options';
 
 /** One directory listing in the file browser. Fresh each time it is opened,
  *  since files come and go; the cache only joins repeated requests. */

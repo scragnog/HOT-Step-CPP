@@ -29,11 +29,13 @@ import {
   mm3StreamSilence,
   mm3StreamSeek, mm3StreamSetVolume,
 } from './mm3StreamStore';
-import { setPitchRatio } from '../audio/pitchShift';
-import { forgetPeaks } from '../audio/peaksClient';
-import * as engine from '../audio/engine';
+import { setPitchRatio } from '@/audio/pitchShift';
+import { forgetPeaks } from '@/audio/peaksClient';
+import * as engine from '@/audio/engine';
 import { endEditGainAt, type EndEdit, type FadeCurve, type FadeKind } from '../../../server/src/contracts/fade';
-import i18n from '../i18n';
+import i18n from '@/i18n';
+import { writeJson } from '@/utils/storage/storageJson';
+import { emit } from '@/utils/appEvents';
 
 /** VST monitoring and the global player are mutually exclusive — they'd play
  *  two tracks at once. Whenever global playback starts, stop the VST monitor. */
@@ -227,7 +229,7 @@ function loadPrefs(): PersistedPrefs {
 }
 
 function savePrefs(p: PersistedPrefs): void {
-  localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+  writeJson(PREFS_KEY, p);
   // Keep legacy key in sync for any remaining consumers
   localStorage.setItem('volume', String(p.volume));
 }
@@ -262,12 +264,12 @@ function saveTrackList(tl: PersistedTrackList): void {
     coverUrl: t.coverUrl, duration: t.duration, style: t.style,
   }));
   try {
-    localStorage.setItem(TRACKLIST_KEY, JSON.stringify({ ...tl, trackList: slim }));
+    writeJson(TRACKLIST_KEY, { ...tl, trackList: slim });
   } catch {
     // QuotaExceededError — clear the key and retry with just the current track
     try {
       localStorage.removeItem(TRACKLIST_KEY);
-      localStorage.setItem(TRACKLIST_KEY, JSON.stringify({ ...tl, trackList: slim.slice(0, 1) }));
+      writeJson(TRACKLIST_KEY, { ...tl, trackList: slim.slice(0, 1) });
     } catch { /* give up gracefully — playback still works, just won't persist */ }
   }
 }
@@ -318,7 +320,7 @@ const _listeners = new Set<() => void>();
 
 function notify(): void {
   _listeners.forEach(cb => cb());
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  emit(CHANGE_EVENT);
 }
 
 function setState(updates: Partial<PlaybackState>): void {
@@ -433,8 +435,9 @@ engine.onEnded(() => {
 
 // ── Loading ──────────────────────────────────────────────────────────────────
 
-/** Core play logic — hands the track to whichever player can play it. */
-function loadTrack(track: PlaybackTrack): void {
+/** Core play logic — hands the track to whichever player can play it.
+ *  `autoplay: false` loads the file without starting it; see `cue`. */
+function loadTrack(track: PlaybackTrack, opts: { autoplay?: boolean } = {}): void {
   // Auto-exit A/B mode when playing a regular track
   if (_state.abMode) {
     setState({ abMode: false, abTrackA: null, abTrackB: null });
@@ -500,7 +503,7 @@ function loadTrack(track: PlaybackTrack): void {
       mastered: track.masteredAudioUrl || undefined,
       noAdapter: track.noAdapterAudioUrl || undefined,
     },
-    { autoplay: true }
+    { autoplay: opts.autoplay !== false }
   );
   engine.setVolume(_state.volume);
   engine.setRate(_state.playbackRate);
@@ -537,6 +540,40 @@ export function play(track: PlaybackTrack): void {
   setState({ trackList: [track], trackIndex: 0, source: 'direct' });
   persistTrackList();
   loadTrack(track);
+}
+
+/**
+ * Put a track in the player without starting it.
+ *
+ * `play()` means PLAY, and that is right for a click on a row or a card. It is
+ * the wrong verb for a track you are about to work on: opening the lyric editor
+ * needs the file in the element — its transport and waveform are the player's —
+ * but a burst of music nobody asked for is a surprise. So this selects the
+ * track, opens the bar, and loads the audio paused.
+ *
+ * It exists because "open the editor" used to mean "go and press play first on
+ * another screen", and because a track restored from localStorage on page load
+ * is `currentTrack` without ever having been handed to the engine: the bar shows
+ * it, the Lyrics strip shows its words, and every transport button in the
+ * editor listened to an empty element.
+ */
+export function cue(track: PlaybackTrack): void {
+  const current = _state.currentTrack;
+  // Already the loaded track: re-loading would throw away a playhead someone
+  // set in the bar, and there is nothing to fix.
+  if (current?.id === track.id && engine.getSnapshot().trackId === track.id) return;
+  // A live render has no file for the element to hold.
+  if (!track.audioUrl || track.streamJobId) return;
+
+  // Same track, not in the element (a restored one): keep the richer row the
+  // bar is already showing rather than the caller's projection of it.
+  const target = current?.id === track.id ? current : track;
+  if (current?.id !== target.id) {
+    stopVstMonitorIfActive();
+    setState({ trackList: [target], trackIndex: 0, source: 'direct' });
+    persistTrackList();
+  }
+  loadTrack(target, { autoplay: false });
 }
 
 /** Play a track within a navigable list */

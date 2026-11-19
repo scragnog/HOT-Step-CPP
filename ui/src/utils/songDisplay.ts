@@ -3,7 +3,7 @@
 // Nothing here is ever written back. Rename edits the stored title; these
 // helpers only decide what the card, row and table show.
 
-import type { Song } from '../types';
+import type { Song } from '@/types';
 
 /**
  * Trailing model tags people leave on a title when comparing writers —

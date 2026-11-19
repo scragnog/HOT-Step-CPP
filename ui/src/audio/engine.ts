@@ -29,6 +29,7 @@
 
 import { fetchPeaks, peaksCached, type Peaks } from './peaksClient';
 import { pitchAttachElement, pitchResume } from './pitchShift';
+import { clamp01 } from '@/utils/format/clamp';
 
 export type Variant = 'original' | 'mastered' | 'noAdapter';
 
@@ -120,6 +121,16 @@ export function subscribeFrame(fn: FrameListener): () => void {
 
 let el: HTMLAudioElement | null = null;
 
+/** A seek asked for before the element knew its own length.
+ *
+ * A track handed over a moment ago — the lyric editor cues one when it opens,
+ * and the first click on a word can land before the file has reported its
+ * duration — has no length yet, and seeking against zero has to be refused.
+ * Refusing used to mean dropping the seek, so the click did nothing and the
+ * editor looked broken. Kept here instead, and applied when the metadata
+ * arrives. */
+let pendingSeek: number | null = null;
+
 /** The one media element. Created on first use and never replaced, which is
  *  what lets it be captured for the audio graph exactly once — a second
  *  createMediaElementSource on the same element throws and cannot be undone. */
@@ -143,6 +154,20 @@ function element(): HTMLAudioElement {
       state.duration = a.duration;
       emit();
     }
+  });
+  // A seek that arrived before this file said how long it is; `seek` queues it
+  // there. Applying it here is the other half of that promise.
+  a.addEventListener('loadedmetadata', () => {
+    if (pendingSeek === null) return;
+    const t = pendingSeek;
+    pendingSeek = null;
+    const dur = a.duration;
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    a.currentTime = Math.max(0, Math.min(dur - 0.05, t));
+    state.currentTime = a.currentTime;
+    lastEmittedTime = a.currentTime;
+    emit();
+    for (const fn of frameListeners) fn(state.currentTime, dur);
   });
   a.addEventListener('canplay', () => {
     if (state.loading) { state.loading = false; emit(); }
@@ -310,6 +335,8 @@ export function load(
   state.currentTime = opts.startAt ?? 0;
   state.duration = 0;
   lastEmittedTime = 0;
+  // A seek aimed at the previous file must not be replayed onto this one.
+  pendingSeek = null;
 
   current = track;
   pointAt(urlFor(track, state.variant), {
@@ -389,7 +416,13 @@ export function stop(): void {
 export function seek(seconds: number): void {
   const a = element();
   const dur = state.duration || a.duration;
-  if (!Number.isFinite(dur) || dur <= 0) return;
+  if (!Number.isFinite(dur) || dur <= 0) {
+    // No length yet — the normal state for the moment after a track is handed
+    // over. Queue where the caller wanted to land instead of dropping it.
+    pendingSeek = Math.max(0, seconds);
+    return;
+  }
+  pendingSeek = null;
   const t = Math.max(0, Math.min(dur - 0.05, seconds));
   a.currentTime = t;
   state.currentTime = t;
@@ -413,7 +446,7 @@ export function setGainShape(fn: ((t: number, duration: number) => number) | nul
 }
 
 export function setVolume(v: number): void {
-  const vol = Math.max(0, Math.min(1, v));
+  const vol = clamp01(v);
   state.volume = vol;
   if (el) el.volume = vol;
   emit();
@@ -447,5 +480,6 @@ export function unload(): void {
     available: [], variant: 'original' as Variant,
   });
   lastEmittedTime = 0;
+  pendingSeek = null;
   emit();
 }

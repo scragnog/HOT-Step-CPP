@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
-import type { UpdateApplyResult, UpdateRestartAttempt } from '../../services/updatesApi';
-import { updateReconnectOptions } from '../../queries/shell-queue/settings';
+import type { UpdateApplyResult, UpdateRestartAttempt } from '@/services/updatesApi';
+import { updateReconnectOptions } from '@/queries/shell-queue/settings';
 import { updateVersion } from './updatesViewState';
+import { formatDateTime } from '@/utils/format/dateUtils';
 
 // App owns the attempt so replacing Settings with a liveness screen cannot
 // discard it. Settings starts the attempt only after apply returns 202.
@@ -19,7 +20,7 @@ export function UpdateOutcome({ result }: { result: UpdateApplyResult }) {
   return <>
     <p>{t(`settings.updates.outcome.${result.outcome}`, { version: updateVersion(result) })}</p>
     {result.message && <p className="setting-description">{result.message}</p>}
-    <time className="setting-description" dateTime={result.at}>{new Date(result.at).toLocaleString()}</time>
+    <time className="setting-description" dateTime={result.at}>{formatDateTime(result.at)}</time>
   </>;
 }
 

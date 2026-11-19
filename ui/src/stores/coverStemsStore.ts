@@ -10,8 +10,8 @@ import {
   startSeparation as apiStartSeparation, waitForCompletion, getStemAudioUrl,
   releaseSeparation as apiReleaseSeparation,
   type SeparationLevel,
-} from '../services/supersepApi';
-import type { StemControl, MixerStemInfo } from '../components/shared/StemMixer';
+} from '@/services/supersepApi';
+import type { StemControl, MixerStemInfo } from '@/components/shared/StemMixer';
 
 interface CoverStemsState {
   sepJobId: string | null;

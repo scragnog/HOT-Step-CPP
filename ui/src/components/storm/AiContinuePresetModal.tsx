@@ -2,11 +2,13 @@
 // MDMAchine / A&E Concepts 2026 — STORM Streaming
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { hashImportValue, type AiContinuePresetBody } from '../../services/preferencesApi';
-import { PresetCollection } from '../../services/presetCollection';
-import { SettingDocument } from '../../services/settingDocument';
-import { PresetSyncNotices } from '../shared/PresetSyncNotices';
+import { hashImportValue, type AiContinuePresetBody } from '@/services/preferencesApi';
+import { PresetCollection } from '@/services/presetCollection';
+import { SettingDocument } from '@/services/settingDocument';
+import { PresetSyncNotices } from '@/components/shared/feedback/PresetSyncNotices';
+import { readJson } from '@/utils/storage/storageJson';
 
 // ── Preset types ──────────────────────────────────────────────────────────────
 export interface AiPreset {
@@ -63,7 +65,8 @@ export const MIGRATED_FLAG: Record<PresetCategory, string> = {
 };
 
 function loadLegacyUserPresets(key: string): AiPreset[] {
-  try { const v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+  const v = readJson<unknown>(key, []);
+  return Array.isArray(v) ? v : [];
 }
 
 const legacyKey = (category: PresetCategory) => category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY;
@@ -111,6 +114,90 @@ export function loadTemplate(): string {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 }
 
+const PresetPill: React.FC<{
+  preset: AiPreset;
+  category: PresetCategory;
+  isUser?: boolean;
+  firedId: string | null;
+  onFire: (preset: AiPreset, category: PresetCategory) => void;
+  onDelete: (category: PresetCategory, id: string) => void;
+}> = ({ preset, category, isUser, firedId, onFire, onDelete }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-0.5 group">
+      <button
+        onClick={() => onFire(preset, category)}
+        className={`text-[10px] px-2 py-0.5 rounded-l-md font-medium transition-all ${
+          firedId === preset.id
+            ? 'bg-green-600 text-white scale-95'
+            : 'bg-zinc-800 text-zinc-300 hover:bg-violet-700 hover:text-white'}`}>
+        {firedId === preset.id ? t('storm.aiContinue.fired', '✓ fired') : preset.label}
+      </button>
+      {isUser ? (
+        <button onClick={() => onDelete(category, preset.id)}
+          aria-label={t('storm.aiContinue.deletePreset', 'Delete preset')}
+          className="text-[9px] px-1 py-0.5 rounded-r-md bg-zinc-800 text-zinc-700 hover:bg-red-900/40 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
+          <Trash2 size={8} />
+        </button>
+      ) : (
+        <span className="w-0 rounded-r-md bg-zinc-800" />
+      )}
+    </div>
+  );
+};
+
+const PresetSection: React.FC<{
+  category: PresetCategory;
+  builtins: AiPreset[];
+  user: AiPreset[];
+  firedId: string | null;
+  onFire: (preset: AiPreset, category: PresetCategory) => void;
+  onDelete: (category: PresetCategory, id: string) => void;
+  newLabel: string;
+  newValue: string;
+  onLabelChange: (value: string) => void;
+  onValueChange: (value: string) => void;
+  onAdd: () => void;
+}> = ({ category, builtins, user, firedId, onFire, onDelete, newLabel, newValue, onLabelChange, onValueChange, onAdd }) => {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">{t('storm.aiContinue.builtIn', 'Built-in')}</div>
+        <div className="flex flex-wrap gap-1">
+          {builtins.map(p => (
+            <PresetPill key={p.id} preset={p} category={category} firedId={firedId} onFire={onFire} onDelete={onDelete} />
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">{t('storm.aiContinue.myPresets', 'My Presets')}</div>
+        {user.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-2">
+            {user.map(p => (
+              <PresetPill key={p.id} preset={p} category={category} isUser firedId={firedId} onFire={onFire} onDelete={onDelete} />
+            ))}
+          </div>
+        )}
+        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/50 border border-zinc-800">
+          <input type="text" value={newLabel} onChange={e => onLabelChange(e.target.value)}
+            placeholder={t('storm.aiContinue.labelPlaceholder', 'Button label (e.g. My vibe shift)')}
+            className="w-full px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 transition-colors" />
+          <input type="text" value={newValue} onChange={e => onValueChange(e.target.value)}
+            placeholder={t('storm.aiContinue.valuePlaceholder', 'Direction sent to AI (e.g. shift toward jazz influences)')}
+            onKeyDown={e => { if (e.key === 'Enter') onAdd(); }}
+            className="w-full px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 transition-colors" />
+          <button onClick={onAdd}
+            disabled={!newLabel.trim() || !newValue.trim()}
+            className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-violet-600 hover:bg-violet-500 text-white font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+            <Plus size={9} /> {t('storm.aiContinue.add', 'Add preset')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Props ────────────────────────────────────────────────────────────────────
 interface AiContinuePresetModalProps {
   isOpen: boolean;
@@ -126,6 +213,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
   isOpen, onClose, onPresetFire, onTemplateChange,
 }) => {
   const server = aiContinueState();
+  const { t } = useTranslation();
   const styleSnap    = React.useSyncExternalStore(server.style.subscribe, server.style.getSnapshot);
   const lyricSnap    = React.useSyncExternalStore(server.lyric.subscribe, server.lyric.getSnapshot);
   const templateSnap = React.useSyncExternalStore(server.template.subscribe, server.template.getSnapshot);
@@ -183,66 +271,6 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
     </button>
   );
 
-  const PresetPill = ({ preset, category, isUser }: { preset: AiPreset; category: PresetCategory; isUser?: boolean }) => (
-    <div className="flex items-center gap-0.5 group">
-      <button
-        onClick={() => firePreset(preset, category)}
-        className={`text-[10px] px-2 py-0.5 rounded-l-md font-medium transition-all ${
-          firedId === preset.id
-            ? 'bg-green-600 text-white scale-95'
-            : 'bg-zinc-800 text-zinc-300 hover:bg-violet-700 hover:text-white'}`}>
-        {firedId === preset.id ? '✓ fired' : preset.label}
-      </button>
-      {/* delete button for user presets */}
-      {isUser ? (
-        <button onClick={() => deletePreset(category, preset.id)}
-          className="text-[9px] px-1 py-0.5 rounded-r-md bg-zinc-800 text-zinc-700 hover:bg-red-900/40 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
-          <Trash2 size={8} />
-        </button>
-      ) : (
-        <span className="w-0 rounded-r-md bg-zinc-800" /> // keep pill shape consistent
-      )}
-    </div>
-  );
-
-  const PresetSection = ({ category, builtins, user }: {
-    category: PresetCategory; builtins: AiPreset[]; user: AiPreset[];
-  }) => (
-    <div className="space-y-3">
-      {/* Built-ins */}
-      <div>
-        <div className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">Built-in</div>
-        <div className="flex flex-wrap gap-1">
-          {builtins.map(p => <PresetPill key={p.id} preset={p} category={category} />)}
-        </div>
-      </div>
-      {/* User presets */}
-      <div>
-        <div className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">My Presets</div>
-        {user.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {user.map(p => <PresetPill key={p.id} preset={p} category={category} isUser />)}
-          </div>
-        )}
-        {/* Add new */}
-        <div className="space-y-1.5 p-2 rounded-lg bg-zinc-900/50 border border-zinc-800">
-          <input type="text" value={newLabel} onChange={e => setNewLabel(e.target.value)}
-            placeholder="Button label (e.g. My vibe shift)"
-            className="w-full px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 transition-colors" />
-          <input type="text" value={newValue} onChange={e => setNewValue(e.target.value)}
-            placeholder="Direction sent to AI (e.g. shift toward jazz influences)"
-            onKeyDown={e => { if (e.key === 'Enter') addPreset(category); }}
-            className="w-full px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-[10px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/40 transition-colors" />
-          <button onClick={() => addPreset(category)}
-            disabled={!newLabel.trim() || !newValue.trim()}
-            className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-violet-600 hover:bg-violet-500 text-white font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <Plus size={9} /> Add preset
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -254,9 +282,9 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white">🤖 AI Continue Presets</span>
+              <span className="text-sm font-bold text-white">{t('storm.aiContinue.title', '🤖 AI Continue Presets')}</span>
             </div>
-            <button onClick={onClose}
+            <button onClick={onClose} aria-label={t('common.close', 'Close')}
               className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors">
               <X size={15} />
             </button>
@@ -264,9 +292,9 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
 
           {/* Tabs */}
           <div className="flex gap-1 px-4 pt-3">
-            {tabBtn('style',    '🎨 Style Presets')}
-            {tabBtn('lyric',    '🎤 Lyric Presets')}
-            {tabBtn('template', '⚙ Template')}
+            {tabBtn('style',    t('storm.aiContinue.styleTab', '🎨 Style Presets'))}
+            {tabBtn('lyric',    t('storm.aiContinue.lyricTab', '🎤 Lyric Presets'))}
+            {tabBtn('template', t('storm.aiContinue.templateTab', '⚙ Template'))}
           </div>
 
           {/* Body */}
@@ -281,6 +309,14 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
                 category="style"
                 builtins={BUILTIN_STYLE_PRESETS}
                 user={userStylePresets}
+                firedId={firedId}
+                onFire={firePreset}
+                onDelete={deletePreset}
+                newLabel={newLabel}
+                newValue={newValue}
+                onLabelChange={setNewLabel}
+                onValueChange={setNewValue}
+                onAdd={() => addPreset('style')}
               />
             )}
             {tab === 'lyric' && (
@@ -288,23 +324,38 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
                 category="lyric"
                 builtins={BUILTIN_LYRIC_PRESETS}
                 user={userLyricPresets}
+                firedId={firedId}
+                onFire={firePreset}
+                onDelete={deletePreset}
+                newLabel={newLabel}
+                newValue={newValue}
+                onLabelChange={setNewLabel}
+                onValueChange={setNewValue}
+                onAdd={() => addPreset('lyric')}
               />
             )}
             {tab === 'template' && (
               <div className="space-y-2">
                 {templateSnap.error && (
                   <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-red-950/40 border border-red-900 text-[10px] text-red-300" role="alert">
-                    <span className="flex-1">{templateSnap.error} Your edit is still shown below{templateSnap.status === 'conflict' ? ' and is not being saved' : ''}.</span>
+                    <span className="flex-1">
+                      {templateSnap.status === 'conflict'
+                        ? t('storm.aiContinue.staleConflict', '{{error}} Your edit is still shown below and is not being saved.', { error: templateSnap.error })
+                        : t('storm.aiContinue.stale', '{{error}} Your edit is still shown below.', { error: templateSnap.error })}
+                    </span>
                     {templateSnap.status === 'conflict' && templateSnap.serverValue !== null && (
-                      <button onClick={() => server.template.useServer()} className="underline flex-shrink-0">Use theirs</button>
+                      <button onClick={() => server.template.useServer()} className="underline flex-shrink-0">{t('storm.aiContinue.useTheirs', 'Use theirs')}</button>
                     )}
                     <button onClick={() => void server.template.reapply()} className="underline flex-shrink-0">
-                      {templateSnap.status === 'conflict' ? 'Reapply mine' : 'Retry'}
+                      {templateSnap.status === 'conflict' ? t('storm.aiContinue.reapplyMine', 'Reapply mine') : t('storm.aiContinue.retry', 'Retry')}
                     </button>
                   </div>
                 )}
                 <p className="text-[10px] text-zinc-500 leading-relaxed">
-                  Raw prompt sent to the LLM. Tokens: <code className="text-violet-400">{"\\{direction\\}"}</code> (replaced with direction hint if set), <code className="text-violet-400">{"\\{lyrics\\}"}</code> (current lyrics), <code className="text-violet-400">{"\\{style\\}"}</code> (current caption).
+                  {t('storm.aiContinue.templateIntro', 'Raw prompt sent to the LLM. Tokens:')}{' '}
+                  <code className="text-violet-400">{"\\{direction\\}"}</code> {t('storm.aiContinue.directionHint', '(replaced with direction hint if set)')},{' '}
+                  <code className="text-violet-400">{"\\{lyrics\\}"}</code> {t('storm.aiContinue.currentLyrics', '(current lyrics)')},{' '}
+                  <code className="text-violet-400">{"\\{style\\}"}</code> {t('storm.aiContinue.currentCaption', '(current caption)')}.
                 </p>
                 <textarea
                   value={template}
@@ -316,7 +367,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
                   onClick={() => handleTemplateChange(DEFAULT_TEMPLATE)}
                   className="text-[9px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 transition-colors"
                 >
-                  Reset to default
+                  {t('storm.aiContinue.resetDefault', 'Reset to default')}
                 </button>
               </div>
             )}
@@ -325,7 +376,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
           {/* Footer note */}
           <div className="px-4 py-2 border-t border-zinc-800">
             <p className="text-[9px] text-zinc-600">
-              Clicking a preset fires immediately — doesn't wait for the interval. Direction field sets the persistent hint picked up each interval.
+              {t('storm.aiContinue.footer', "Clicking a preset fires immediately — doesn't wait for the interval. Direction field sets the persistent hint picked up each interval.")}
             </p>
           </div>
         </div>

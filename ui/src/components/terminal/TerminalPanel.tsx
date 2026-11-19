@@ -1,4 +1,4 @@
-import { VramIndicator } from '../shared/VramIndicator';
+import { VramIndicator } from '@/components/shared/status/VramIndicator';
 // TerminalPanel.tsx — Live engine log viewer with search and VRAM display
 //
 // Mirrors ace-server stderr output in the app. Supports search filtering,
@@ -10,7 +10,7 @@ import { VramIndicator } from '../shared/VramIndicator';
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { Search, X, Trash2, ArrowDown, Pin, PinOff, Wifi, WifiOff } from 'lucide-react';
-import { useEventSource, type LogLine } from '../../hooks/useEventSource';
+import { useEventSource, type LogLine } from '@/hooks/useEventSource';
 
 
 

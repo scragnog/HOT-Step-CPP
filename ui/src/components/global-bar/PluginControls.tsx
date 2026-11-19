@@ -14,12 +14,12 @@
 
 import React from 'react';
 import { RotateCcw, ChevronDown } from 'lucide-react';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle, type ToggleAccent } from '../shared/Toggle';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import type { PluginParamSchema } from '../../types/pluginTypes';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle, type ToggleAccent } from '@/components/shared/controls/Toggle';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import type { PluginParamSchema } from '@/types/pluginTypes';
 
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
 

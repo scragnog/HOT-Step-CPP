@@ -77,6 +77,7 @@ In sidebar order. The sidebar lists only the studios the active backend can run.
 | [Media for frontend clients](dev/frontend-media.md) | Import, export and the two live audio streams |
 | [Plugin authoring](dev/plugins-authoring.md) | Writing a Lua solver, scheduler, guidance or postprocess plugin |
 | [Training internals](dev/training-internals.md) | Trainer architecture, measured numbers, open decisions |
+| [YuE2 training audit](dev/yue2-training-audit/README.md) | What the YuE2 trainers optimise, where the shipped recipes disagree, and which adjustments are worth making |
 | [Releasing](dev/releasing.md) | Cutting and publishing a release, CI caching, gotchas |
 | [RunPod Pod template](dev/runpod.md) | The `runpod` Docker target on a RunPod GPU Pod, its HTTP proxy and the missing login; the published image arrives with the next release |
 | [Writing and maintaining the docs](dev/docs-contributing.md) | Layout, page template, generated tables, the checker |

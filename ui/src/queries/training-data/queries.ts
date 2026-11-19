@@ -11,14 +11,14 @@
 // Query; nothing else fetches these snapshots.
 
 import { queryOptions, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import { scopeOf, serverKey, sharedKeys, type Resource, type Worker } from '../keys';
-import * as api from '../../services/trainingApi';
-import * as preparation from '../../services/trainingPreparationApi';
-import { adapterApi } from '../../services/api';
-import { apiClient } from '../../services/httpClient';
-import { browseOptions } from '../shell-queue/settings';
-import type { LmSize } from '../../services/trainingApi';
-import { pollWhile } from '../contract';
+import { scopeOf, serverKey, sharedKeys, type Resource, type Worker } from '@/queries/keys';
+import * as api from '@/services/trainingApi';
+import * as preparation from '@/services/trainingPreparationApi';
+import { adapterApi } from '@/services/api';
+import { apiClient } from '@/services/httpClient';
+import { browseOptions } from '@/queries/shell-queue/settings';
+import type { LmSize } from '@/services/trainingApi';
+import { pollWhile } from '@/queries/contract';
 import type { HeartmulaPreviewListResponse, HeartmulaStatusResponse } from '../../../../server/src/contracts/heartmulaTraining';
 
 /** One captioned track in a YuE2 source dataset. The caption a render

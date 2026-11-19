@@ -2,6 +2,7 @@ import type { TrainingRecipeFamily } from '../../../server/src/contracts/trainin
 import type { TrainingWorkerRef } from '../../../server/src/contracts/trainingOperation';
 import { currentWorkerRef, snapshotFor, trainingOperation } from './trainingOperations';
 import type { ReadOptions } from './httpClient';
+import { newId } from '@/utils/id';
 
 export interface TrainingRecipe<T = Record<string, unknown>> {
   recipeVersion: number;
@@ -28,7 +29,7 @@ export function getTrainingRecipe<T>(family: TrainingRecipeFamily, preset?: stri
  *  envelope, so a later Train on switch cannot change the accepted recipe. */
 export function resolveTrainingRecipe<T>(family: TrainingRecipeFamily, overrides: Record<string, unknown>, preset?: string): Promise<TrainingRecipe<T>> {
   return trainingOperation('recipes', '/resolve', {
-    body: snapshotFor({ kind: `recipe:${family}`, idempotencyKey: crypto.randomUUID(),
+    body: snapshotFor({ kind: `recipe:${family}`, idempotencyKey: newId(),
       payload: { family, recipeVersion: 1, overrides, ...(preset ? { preset } : {}) } }),
   });
 }

@@ -13,8 +13,8 @@
 
 import { useCallback, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { Song } from '../types';
-import { ApiError, HttpStatus, apiClient } from '../services/httpClient';
+import type { Song } from '@/types';
+import { ApiError, HttpStatus, apiClient } from '@/services/httpClient';
 
 /** Build the metadata payload used for both preview and generation. */
 export function songPromptInputs(song: Song) {

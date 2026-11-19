@@ -4,8 +4,8 @@ import { parseHTML } from 'linkedom';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
-import { resourceKey } from '../keys';
+import { createQueryClient } from '@/queries/client';
+import { resourceKey } from '@/queries/keys';
 import {
   compareQueries, CMP,
 } from './queries';
@@ -13,7 +13,7 @@ import {
   applyScores, beginOptimisticScores, commitScoreResult, localStatus, patchSession,
   patchSessionSummary, reconcileScoreResult, rollbackScores, summaryOf, useSetCompareScore,
 } from './writes';
-import type { CompareSession, CompareTake } from '../../services/compareApi';
+import type { CompareSession, CompareTake } from '@/services/compareApi';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });

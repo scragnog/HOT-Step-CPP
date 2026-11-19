@@ -1,8 +1,8 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
-import { serverKey, resourceKey } from '../keys';
-import { pollWhile } from '../contract';
-import { queryManager } from '../invalidation';
-import { getMidiStatus, listMidiJobs, getMidiProgress, getMidiNotes, deleteMidiJob, type MidiJobSummary, type MidiStudioStatus } from '../../services/midiStudioApi';
+import { serverKey, resourceKey } from '@/queries/keys';
+import { pollWhile } from '@/queries/contract';
+import { queryManager } from '@/queries/invalidation';
+import { getMidiStatus, listMidiJobs, getMidiProgress, getMidiNotes, deleteMidiJob, type MidiJobSummary, type MidiStudioStatus } from '@/services/midiStudioApi';
 
 export const midiActive = (job: { status: string }) => job.status === 'queued' || job.status === 'transcribing';
 export const midiStatusOptions = () => queryOptions({

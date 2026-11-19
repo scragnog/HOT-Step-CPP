@@ -14,23 +14,25 @@ import {
   CheckCircle2, ExternalLink, Music, KeyRound, Loader2, AlertTriangle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '@/context/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { midiJobsOptions, midiStatusOptions, removeMidiJob } from '../../queries/studios/midi';
-import { queryManager } from '../../queries/invalidation';
-import { useStudioSongs } from '../../queries/studios/shared';
-import type { Song } from '../../types';
+import { midiJobsOptions, midiStatusOptions, removeMidiJob } from '@/queries/studios/midi';
+import { queryManager } from '@/queries/invalidation';
+import { useStudioSongs } from '@/queries/studios/shared';
+import type { Song } from '@/types';
 import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
   HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL,
   type MuscriptorModel,
-} from '../../services/midiStudioApi';
+} from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
 import { MidiExportPanel } from './MidiExportPanel';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Toggle } from '../shared/Toggle';
-import { useUpload } from '../../queries/writes';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { useUpload } from '@/queries/writes';
+import { formatClock, formatDecimal } from '@/utils/format/format';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 const MODEL_INFO: Array<{ id: MuscriptorModel; params: string }> = [
   { id: 'small', params: '103M' },
@@ -109,7 +111,7 @@ export const MidiStudio: React.FC = () => {
         setSourceSongId(undefined);
         setShowLibrary(false);
       },
-      onError: err => setSubmitError(err instanceof Error ? err.message : String(err)),
+      onError: err => setSubmitError(errorMessage(err)),
     });
   }, [uploadAudio]);
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -132,13 +134,13 @@ export const MidiStudio: React.FC = () => {
   const downloadMut = useMutation({
     mutationFn: (m: MuscriptorModel | typeof BEAT_MODEL) => startModelDownload(m),
     onSuccess: () => refreshStatus(),
-    onError: err => setSubmitError(err instanceof Error ? err.message : String(err)),
+    onError: err => setSubmitError(errorMessage(err)),
   });
 
   const transcribeMut = useMutation({
     mutationFn: () => submitTranscription({ sourceAudioUrl, sourceFileName: sourceName, songId: sourceSongId, model, speculative }),
     onSuccess: () => refreshJobs(),
-    onError: err => setSubmitError(err instanceof Error ? err.message : String(err)),
+    onError: err => setSubmitError(errorMessage(err)),
   });
   const handleTranscribe = () => {
     if (!sourceAudioUrl) return;
@@ -153,7 +155,7 @@ export const MidiStudio: React.FC = () => {
       if (tok.trim()) setShowTokenEditor(false);
       refreshStatus();
     },
-    onError: err => setHfTokenError(err instanceof Error ? err.message : String(err)),
+    onError: err => setHfTokenError(errorMessage(err)),
   });
   const handleSaveHfToken = (tok: string) => {
     setHfTokenError('');
@@ -164,7 +166,7 @@ export const MidiStudio: React.FC = () => {
     try {
       await deletion.mutateAsync(jobId);
       if (expandedJob === jobId) setExpandedJob(null);
-    } catch (err) { setSubmitError(err instanceof Error ? err.message : String(err)); }
+    } catch (err) { setSubmitError(errorMessage(err)); }
   };
 
   const engineMissing = !!status && !status.engineAvailable;
@@ -174,7 +176,7 @@ export const MidiStudio: React.FC = () => {
   // it after the status refresh, so the mutation's own pending covers the gap.
   const canTranscribe = !!status?.engineAvailable && !!modelState?.downloaded && !!sourceAudioUrl && !isUploading && !transcribeMut.isPending;
 
-  const fmtGB = (b: number) => `${(b / 1e9).toFixed(2)} GB`;
+  const fmtGB = (b: number) => `${formatDecimal((b / 1e9), 2)} GB`;
 
   return (
     <div className="h-full w-full overflow-y-auto">
@@ -343,7 +345,7 @@ export const MidiStudio: React.FC = () => {
                   >
                     <span className="text-sm text-zinc-800 dark:text-zinc-200 truncate">{song.title || t('midiStudio.untitled')}</span>
                     <span className="text-[11px] text-zinc-400 flex-shrink-0">
-                      {song.duration ? `${Math.floor(Number(song.duration) / 60)}:${String(Math.floor(Number(song.duration) % 60)).padStart(2, '0')}` : ''}
+                      {song.duration ? formatClock(Number(song.duration)) : ''}
                     </span>
                   </button>
                 ))}

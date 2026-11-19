@@ -15,10 +15,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { GpuInfo } from '../../../../server/src/contracts/settings';
-import { envOptions, gpusOptions } from '../../queries/shell-queue/settings';
-import { queryManager } from '../../queries/invalidation';
-import { settingsApi, shutdownApi } from '../../services/api';
-import { ApiError } from '../../services/apiError';
+import { envOptions, gpusOptions } from '@/queries/shell-queue/settings';
+import { queryManager } from '@/queries/invalidation';
+import { settingsApi, shutdownApi } from '@/services/api';
+import { ApiError } from '@/services/apiError';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { emit } from '@/utils/appEvents';
 
 export interface EnvFormStatus {
   type: 'success' | 'error' | 'warning';
@@ -120,7 +122,7 @@ export function useEnvSettingsForm(): EnvSettingsForm {
         setStatus({ type: 'success', text: `Saved ${res.updated.length} setting(s). Changes are live.` });
       }
     },
-    onError: e => setStatus({ type: 'error', text: `Failed to save: ${e instanceof Error ? e.message : String(e)}` }),
+    onError: e => setStatus({ type: 'error', text: `Failed to save: ${errorMessage(e)}` }),
   });
 
   const save = () => {
@@ -146,7 +148,7 @@ export function useEnvSettingsForm(): EnvSettingsForm {
     mutationFn: () => shutdownApi.restart(),
     onMutate: () => {
       setStatus({ type: 'warning', text: 'Restarting…' });
-      window.dispatchEvent(new CustomEvent('hotstep:restarting'));
+      emit('hotstep:restarting');
     },
     onError: e => {
       // A refused restart (an HTTP error) means the server is still up — drop
@@ -155,13 +157,13 @@ export function useEnvSettingsForm(): EnvSettingsForm {
       // server tears the socket down as it goes, so keep waiting for the reload.
       if (e instanceof ApiError && e.status > 0) {
         setStatus({ type: 'error', text: t('api.error.refused') });
-        window.dispatchEvent(new CustomEvent('hotstep:restart-cancelled'));
+        emit('hotstep:restart-cancelled');
       }
     },
   });
 
   const loadError = envQuery.isError
-    ? `Failed to load: ${envQuery.error instanceof Error ? envQuery.error.message : String(envQuery.error)}`
+    ? `Failed to load: ${errorMessage(envQuery.error)}`
     : null;
 
   return {

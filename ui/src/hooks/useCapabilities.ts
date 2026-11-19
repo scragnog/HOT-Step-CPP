@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { capabilitiesOptions } from '../queries/global-models/options';
-import { useBackendStore, type BackendCapabilities } from '../stores/backendStore';
+import { capabilitiesOptions } from '@/queries/global-models/options';
+import { useBackendStore, type BackendCapabilities } from '@/stores/backendStore';
 
 export interface UseCapabilitiesResult {
   capabilities: BackendCapabilities | null;

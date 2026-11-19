@@ -1,4 +1,4 @@
-import { useStudioSongs } from '../../queries/studios/shared';
+import { useStudioSongs } from '@/queries/studios/shared';
 // RepaintStudio.tsx — Main Repaint Studio orchestrator
 //
 // Composes: RepaintWaveform, RegionLyricsEditor, RepaintSettings
@@ -7,31 +7,33 @@ import { useStudioSongs } from '../../queries/studios/shared';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { submitStudioRender, followStudioRender } from '../../services/repaintLayerWorkflowApi';
-import { useUpload } from '../../queries/writes';
-import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
-import { useBackendStore } from '../../stores/backendStore';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { submitStudioRender, followStudioRender } from '@/services/repaintLayerWorkflowApi';
+import { useUpload } from '@/queries/writes';
+import { studioWorkflowApi as workflowApi } from '@/queries/studios/workflows';
+import { useBackendStore } from '@/stores/backendStore';
 import { useQuery } from '@tanstack/react-query';
-import { lyricsOptions } from '../../queries/studios/lyrics';
+import { lyricsOptions } from '@/queries/studios/lyrics';
 import { RepaintWaveform } from './RepaintWaveform';
 import { RegionLyricsEditor } from './RegionLyricsEditor';
 import { RepaintSettings } from './RepaintSettings';
-import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
+import { BackendCapabilityGate } from '@/components/shared/status/BackendCapabilityGate';
 import {
   addManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-} from '../../stores/audioGenQueueStore';
-import type { Song } from '../../types';
-import { useDisguiseMode } from '../../hooks/useDisguiseMode';
-import { useStudioDraftMirror } from '../../services/studioDraftMirror';
-import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { notify } from '../shared/Toast';
+} from '@/stores/audioGenQueueStore';
+import type { Song } from '@/types';
+import { useDisguiseMode } from '@/hooks/useDisguiseMode';
+import { useStudioDraftMirror } from '@/services/studioDraftMirror';
+import { StudioDraftPicker } from '@/components/shared/overlays/StudioDraftPicker';
+import { notify } from '@/components/shared/feedback/Toast';
+import { writeJson } from '@/utils/storage/storageJson';
+import { newId } from '@/utils/id';
 
 // ── Persist helpers (same pattern as CoverStudio) ──
 function persist(key: string, value: unknown) {
-  try { localStorage.setItem(`hs-repaint-${key}`, JSON.stringify(value)); } catch {}
+  try { writeJson(`hs-repaint-${key}`, value); } catch {}
 }
 function restore<T>(key: string, fallback: T): T {
   try {
@@ -43,7 +45,6 @@ function restore<T>(key: string, fallback: T): T {
 
 export const RepaintStudio: React.FC = () => {
   const { token } = useAuth();
-  const gp = useGlobalParamsStore();
   const { disguiseArtist } = useDisguiseMode();
 
   // Narrow-screen (<1024px) pane switcher — which of the two columns is visible
@@ -237,12 +238,12 @@ export const RepaintStudio: React.FC = () => {
     if (!source) { showToast('Select the source again to verify ownership'); return; }
     const effEnd = regionEnd > 0 ? regionEnd : duration;
     if (effEnd <= regionStart) { showToast('Invalid region — end must be after start'); return; }
-    const key = crypto.randomUUID();
+    const key = newId();
     submissionKeyRef.current = key;
     setIsGenerating(true);
     let submittedJobId: string | null = null;
     try {
-      const engineParams = gp.getGlobalParams();
+      const engineParams = useGlobalParamsStore.getState().getGlobalParams();
       const { job } = await submitStudioRender('repaint-render', {
         source, expectedBackend: useBackendStore.getState().activeBackendId,
         engineParams, regionStart, regionEnd: effEnd, lyrics, styleCaption,
@@ -285,7 +286,7 @@ export const RepaintStudio: React.FC = () => {
       }
     }
   }, [token, sourceAudioUrl, sourceSong, sourceAssetId, regionStart, regionEnd, duration,
-    lyrics, styleCaption, sourceName, repaintMode, crossfadeFrames, gp]);
+    lyrics, styleCaption, sourceName, repaintMode, crossfadeFrames]);
 
   const handleCancel = async () => {
     submissionKeyRef.current = null;

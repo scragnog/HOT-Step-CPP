@@ -9,12 +9,15 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp, Music, Pencil } from 'lucide-react';
-import { parseLrc, type LrcLine } from '../../utils/lrcUtils';
-import { findCurrentLineIndex, findActiveWordIndex } from '../../utils/wordLrcUtils';
-import { lrcOptions, lyricsJsonOptions } from '../../queries/shell-queue/lyrics';
+import { parseLrc, type LrcLine } from '@/utils/lyrics/lrcUtils';
+import { findCurrentLineIndex, findActiveWordIndex } from '@/utils/lyrics/wordLrcUtils';
+import { lrcOptions, lyricsJsonOptions } from '@/queries/shell-queue/lyrics';
+import { cue, getPlaybackState } from '@/stores/playbackStore';
+import { seedLinesFromLrc } from './lyric-editor/lrcSeed';
+import type { EditLine } from './lyric-editor/timingModel';
 import { WordHighlighter } from './WordHighlighter';
 import { LyricEditorModal } from './LyricEditorModal';
-import { HintButton } from '../shared/HintButton';
+import { HintButton } from '@/components/shared/controls/HintButton';
 
 interface LyricsBarProps {
     audioUrl?: string;
@@ -43,13 +46,19 @@ function findCurrentIndex(lines: LrcLine[], time: number): number {
 
 export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, duration = 0, title }) => {
     const [expanded, setExpanded] = useState(true);
-    const [editing, setEditing] = useState(false);
+    /** What the editor was opened on, frozen at the click — see `openEditor`. */
+    const [editing, setEditing] = useState<{
+        audioUrl: string; title?: string; duration: number; seed: EditLine[] | null;
+    } | null>(null);
 
     // Word-level .lyrics.json takes priority; .lrc is the fallback. Both are
     // shared sidecar queries, joined with SectionMarkers' reads of the same track.
     const wordData = useQuery(lyricsJsonOptions(audioUrl ?? '')).data ?? null;
     const lrc = useQuery(lrcOptions(audioUrl ?? '')).data ?? null;
     const fetchedLrc = wordData ? null : lrc;
+    // The editor's starting point when the track has line timings but no word
+    // timings: one chip per word, inside the line it belongs to.
+    const lrcSeed = useMemo(() => seedLinesFromLrc(lrc ?? '', duration), [lrc, duration]);
 
     const lines = useMemo(() => fetchedLrc ? parseLrc(fetchedLrc) : [], [fetchedLrc]);
     const currentIdx = findCurrentIndex(lines, currentTime);
@@ -67,6 +76,29 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, dur
     // Derive display text for LRC fallback
     const displayText = currentIdx >= 0 ? lines[currentIdx]?.text ?? '' : '';
 
+    /**
+     * Open the editor with this track in the player.
+     *
+     * The strip can be showing the track that a page reload restored into the
+     * bar: it is the current track, the bar draws it, and its file was never
+     * handed to the engine. The pencil used to open an editor whose transport
+     * had nothing to play at all. Cueing is a no-op when the track is already
+     * loaded, so a playhead set in the bar survives the click.
+     */
+    const openEditor = () => {
+        if (!audioUrl) return;
+        const track = getPlaybackState().currentTrack;
+        if (track && track.audioUrl === audioUrl) cue(track);
+        // Frozen here, not read from the live track: a playlist can reach the
+        // end of this song behind the modal and load the next one, and the
+        // editor must keep the file it opened with. Rebound to the new track it
+        // would hold one song's lines while its saver pointed at the other's
+        // sidecar.
+        // The seed is only used when the sidecar has no words in it, so it is
+        // passed unconditionally and the modal decides.
+        setEditing({ audioUrl, title, duration, seed: lrcSeed });
+    };
+
     // Don't render if no lyrics data at all
     if (lines.length === 0 && !wordData) return null;
 
@@ -76,8 +108,9 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, dur
                 {/* The tab and the editor door share one header, but the door is
                     positioned out of the flow: the title stays centred over the
                     lyric line below instead of being pushed left by the button.
-                    Editing needs word timings and an open strip, so the pencil is
-                    only there when both are true. */}
+                    Editing needs timed lyrics — word timings, or a line-level
+                    `.lrc` whose lines can be split into words — and an open
+                    strip, so the pencil is only there when both are true. */}
                 <div className="relative flex items-center justify-center">
                     <button
                         onClick={() => setExpanded(!expanded)}
@@ -87,11 +120,11 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, dur
                         <span className="font-medium tracking-wide uppercase text-[10px]">Lyrics</span>
                         {expanded ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
                     </button>
-                    {expanded && wordData && audioUrl && (
+                    {expanded && (wordData || lrcSeed.length > 0) && audioUrl && (
                         <HintButton
                             label="Edit word timings"
-                            info="Opens the lyric editor: a zoomed timeline with one chip per word, the waveform behind it and the karaoke preview underneath. The pencil appears only when the strip is open and the track has word timings, so it is never one stray click away."
-                            onClick={() => setEditing(true)}
+                            info="Opens the lyric editor: a zoomed timeline with one chip per word, the waveform behind it and the karaoke preview underneath. The pencil appears only when the strip is open and the track has timed lyrics — word timings, or a line-level .lrc whose lines are split into words — so it is never one stray click away."
+                            onClick={openEditor}
                             className="flex items-center gap-1 rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-black/5 hover:text-zinc-700 dark:border-white/10 dark:text-zinc-400 dark:hover:bg-white/10"
                             rootClassName="absolute right-2 top-1/2 -translate-y-1/2"
                         >
@@ -132,14 +165,14 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime, dur
                 </div>
             </div>
 
-            {editing && audioUrl && (
-                <LyricEditorModal
-                    audioUrl={audioUrl}
-                    title={title}
-                    duration={duration}
-                    currentTime={currentTime}
-                    onClose={() => setEditing(false)}
-                />
+            {editing && (                    <LyricEditorModal
+                        audioUrl={editing.audioUrl}
+                        title={editing.title}
+                        duration={editing.duration}
+                        currentTime={currentTime}
+                        seed={editing.seed}
+                        onClose={() => setEditing(null)}
+                    />
             )}
         </>
     );

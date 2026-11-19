@@ -19,7 +19,7 @@
 // ['hs', 'training-data/datasets', { worker: 'A' }] every dataset list on A.
 
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import { apiClient } from '../services/httpClient';
+import { apiClient } from '@/services/httpClient';
 
 export type Area = 'training-data' | 'training-runs' | 'global-models' | 'cover-lyrics' | 'studios' | 'shell-queue' | 'compare';
 

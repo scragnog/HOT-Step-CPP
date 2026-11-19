@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { vstScanOptions } from '../../queries/global-models/options';
+import { vstScanOptions } from '@/queries/global-models/options';
 // VstChainDropdown.tsx — VST3 Post-Processing chain panel for the global bar
 //
 // Shows the plugin chain, lets you add/remove/reorder plugins,
@@ -19,19 +19,20 @@ import {
   ChevronUp, ChevronDown, Power, Headphones, Square,
   BookmarkPlus, Check, RefreshCw, AlertTriangle,
 } from 'lucide-react';
-import { useVstChainStore } from '../../stores/vstChainStore';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { PresetSyncNotices } from '../shared/PresetSyncNotices';
-import { usePlaybackSelector, togglePlay } from '../../stores/playbackStore';
+import { useVstChainStore } from '@/stores/vstChainStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { PresetSyncNotices } from '@/components/shared/feedback/PresetSyncNotices';
+import { usePlaybackSelector, togglePlay } from '@/stores/playbackStore';
+import { formatClock } from '@/utils/format/format';
+import { plural } from '@/utils/format/plural';
 
 const ACCENT = 'violet' as const;
 
 // Format seconds as mm:ss
 function formatTime(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
+  return formatClock(s);
 }
 
 // ── Plugin Search Dropdown ──────────────────────────────────
@@ -213,13 +214,16 @@ const PresetManager: React.FC = () => {
             </button>
           </div>
         ) : (
-          <button
+          <HintButton
+            label={t('vst.saveChainPreset', 'Save current chain as preset')}
+            info={t('vst.saveChainPresetInfo', 'Stores the current plugin order and settings under a name you can reload later.')}
+            ariaLabel={t('vst.savePreset', 'Save preset')}
             onClick={() => setSaving(true)}
-            title="Save current chain as preset"
+            rootClassName="flex-shrink-0"
             className="p-1.5 rounded-lg hover:bg-violet-500/10 text-zinc-500 hover:text-violet-400 transition-colors flex-shrink-0"
           >
             <BookmarkPlus size={12} />
-          </button>
+          </HintButton>
         )
       )}
     </div>
@@ -398,15 +402,17 @@ export const VstChainDropdown: React.FC = () => {
               className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium"
               info="VST3 plugins are applied to the generated audio in chain order. Open a plugin's native UI with the link icon to configure it — settings are saved automatically when you close that window." />
             {monitoring && !pendingGuiChanges && (
-              <button
+              <HintButton
                 onClick={handleRestart}
                 disabled={restarting}
-                title="Restart monitor to reload plugin state"
+                label={t('vst.restartMonitor', 'Restart monitor')}
+                info={t('vst.restartMonitorInfo', 'Restarts the monitor so it reloads plugin state after settings changed.')}
+                ariaLabel={t('vst.reload', 'Reload')}
                 className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-violet-400 transition-colors disabled:opacity-50"
               >
                 <RefreshCw size={10} className={restarting ? 'animate-spin' : ''} />
                 reload
-              </button>
+              </HintButton>
             )}
           </div>
           {safeChain.map((entry, i) => (
@@ -506,7 +512,7 @@ export const VstChainBadge: React.FC = () => {
           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-violet-500" />
         </span>
       )}
-      {monitoring ? 'monitoring' : `${enabled.length} plugin${enabled.length !== 1 ? 's' : ''}`}
+      {monitoring ? 'monitoring' : `${enabled.length} ${plural(enabled.length, 'plugin')}`}
     </span>
   );
 };

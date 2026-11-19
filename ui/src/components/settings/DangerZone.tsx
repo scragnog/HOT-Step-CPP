@@ -7,9 +7,9 @@ import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { songApi } from '../../services/api';
-import { lireekApi } from '../../services/lireekApi';
-import { invalidateEvents } from '../../queries/invalidation';
+import { songApi } from '@/services/api';
+import { lireekApi } from '@/services/lireekApi';
+import { invalidateEvents } from '@/queries/invalidation';
 
 interface DangerZoneProps {
   onNukeComplete?: () => void;

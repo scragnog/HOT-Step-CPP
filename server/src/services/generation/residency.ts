@@ -34,6 +34,13 @@ export function familyDemand(family: Family): number {
 // this step: activeFamily(), holdEngine(), engineHeld(), enqueueEviction(),
 // require the real GPU lane and registry injection.
 
+/** What an eviction needs from a backend: its id, and how to free it. */
+type Evictable = { id: Family; releaseVram?: () => Promise<void> };
+/** Test hook: the backends an eviction consults. A test of the lane must not
+ *  reach a real engine over HTTP just because another family is registered. */
+let evictables: (() => Evictable[]) | null = null;
+export function _setEvictionBackends(lister: (() => Evictable[]) | null): void { evictables = lister; }
+
 /** Free every other family's VRAM and wait until each one confirms, before
  *  `family` loads weights on the lane. Both run on the caller's engine worker
  *  (backendRelease.ts), so a job on one card never evicts or waits on another. Run on every lane task that loads a
@@ -42,8 +49,10 @@ export function familyDemand(family: Family): number {
  *  keep-loaded leaves its LM resident without being a generation. Releasing a
  *  family with nothing loaded is a cheap no-op. */
 export async function evictOtherFamilies(family: string): Promise<void> {
-  const { listBackends } = await import('../backends/registry.js');
-  for (const other of listBackends()) {
+  const others: Evictable[] = evictables
+    ? evictables()
+    : (await import('../backends/registry.js')).listBackends();
+  for (const other of others) {
     if (other.id === family || !other.releaseVram) continue;
     trackBackendRelease(other.id, () => other.releaseVram!()).catch(err => {
       console.warn(`[Residency] releaseVram not confirmed for '${other.id}' before '${family}':`, err?.message || err);

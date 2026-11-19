@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import * as hotkeys from '../utils/hotkeys';
+import * as hotkeys from '@/utils/hotkeys';
 
 test('global handler respects editors, dialogs and Compare, and dispatches cancellable list actions', () => {
   let effect: () => (() => void);

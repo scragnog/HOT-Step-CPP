@@ -6,12 +6,13 @@
  * Mutually exclusive with the mobile nav drawer.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, ListMusic } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PlaylistSidebar } from './PlaylistSidebar';
-import type { PlaylistItem } from '../lyric-studio/playlistStore';
+import type { PlaylistItem } from '@/components/lyric-studio/playlistStore';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 interface MobilePlaylistOverlayProps {
   isOpen: boolean;
@@ -36,19 +37,7 @@ export const MobilePlaylistOverlay: React.FC<MobilePlaylistOverlayProps> = ({
   onCloseRef.current = onClose;
 
   // a11y: focus in on open, Escape closes, focus returns to the opener on close.
-  useEffect(() => {
-    if (!isOpen) return;
-    const opener = document.activeElement as HTMLElement | null;
-    overlayRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCloseRef.current();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      if (opener && document.contains(opener)) opener.focus();
-    };
-  }, [isOpen]);
+  useFocusTrap(overlayRef, isOpen, { onEscape: () => onCloseRef.current() });
 
   if (!isOpen) return null;
 

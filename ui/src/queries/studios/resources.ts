@@ -1,12 +1,12 @@
 import { queryOptions } from '@tanstack/react-query';
-import { serverKey } from '../keys';
-import { apiClient } from '../../services/httpClient';
-import { getProviders } from '../../services/assistantApi';
-import { fetchInspireProviders, fetchInstagenPrompt } from '../../services/inspireApi';
-import { listJobs, getExtractResult, getExtractProgress } from '../../services/stemStudioApi';
-import { getProgress, getStemList } from '../../services/supersepApi';
-import { getStreamSession } from '../../services/streamSessionsApi';
-import { builderApi } from '../../services/api';
+import { serverKey } from '@/queries/keys';
+import { apiClient } from '@/services/httpClient';
+import { getProviders } from '@/services/assistantApi';
+import { fetchInspireProviders, fetchInstagenPrompt } from '@/services/inspireApi';
+import { listJobs, getExtractResult, getExtractProgress } from '@/services/stemStudioApi';
+import { getProgress, getStemList } from '@/services/supersepApi';
+import { getStreamSession } from '@/services/streamSessionsApi';
+import { builderApi } from '@/services/api';
 
 export const assistantProvidersOptions = () => queryOptions({
   queryKey: serverKey('studios/assistant-providers'), queryFn: ({ signal }) => getProviders({ signal }),

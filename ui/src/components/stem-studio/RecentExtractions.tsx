@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { extractionsOptions } from '../../queries/studios/resources';
-import { resourceKey } from '../../queries/keys';
-import { queryManager } from '../../queries/invalidation';
+import { extractionsOptions } from '@/queries/studios/resources';
+import { resourceKey } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
 // RecentExtractions.tsx — List of past extraction jobs (right sidebar)
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, ChevronRight, Clock } from 'lucide-react';
-import { deleteJob, type ExtractJobSummary } from '../../services/stemStudioApi';
+import { deleteJob, type ExtractJobSummary } from '@/services/stemStudioApi';
 
 interface RecentExtractionsProps {
   onSelectJob: (jobId: string) => void;

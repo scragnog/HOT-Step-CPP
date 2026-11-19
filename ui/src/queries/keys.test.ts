@@ -7,7 +7,7 @@ import { createQueryClient as makeClient } from './client';
 import {
   getSessionEpoch, normalizeFilters, resourceKey, scopeOf, serverKey, sharedKeys, startAuthSession,
 } from './keys';
-import { listDatasets, setTrainingWorker } from '../services/trainingApi';
+import { listDatasets, setTrainingWorker } from '@/services/trainingApi';
 
 // gcTime keeps a 5 min timer per query; clear every client so node can exit.
 // A query removed mid-fetch re-arms its timer when the fetch settles, out of

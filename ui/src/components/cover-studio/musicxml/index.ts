@@ -1,4 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate';
+import { byNumber } from '@/utils/sort';
+import { isPresent } from '@/utils/guards';
 
 export interface MusicXmlPart { id: string; name: string; staves: number; voices: number; hasLyrics: boolean; verses: string[] }
 /** `chords`: where the score's chord symbols came from: its own <harmony>, inferred
@@ -420,7 +422,7 @@ function convert(part: Element, others: Element[], warnings: Set<string>, staff:
   const timeline = played.flatMap(m => {
     const at = offset;
     offset += m.implicit ? m.events.reduce((t, e) => Math.max(t, e.end), 0) : m.barTicks;
-    return [...m.events].sort((a, b) => a.start - b.start).map(e => ({ e, start: at + e.start, end: at + e.end }));
+    return [...m.events].sort(byNumber(x => x.start)).map(e => ({ e, start: at + e.start, end: at + e.end }));
   });
   timeline.forEach((x, i) => {
     const next = timeline[i + 1];
@@ -433,7 +435,7 @@ function convert(part: Element, others: Element[], warnings: Set<string>, staff:
   const bars: Bar[] = played.map(({ implicit, events, chords, changes: scoreChanges, keyFifths: measureFifths, barTicks, words }) => {
     for (const word of words) { const joined = playedWords.length && /-$/.test(playedWords[playedWords.length - 1]);
       if (joined) playedWords[playedWords.length - 1] = playedWords[playedWords.length - 1].slice(0, -1) + word; else playedWords.push(word); }
-    events.sort((a, b) => a.start - b.start);
+    events.sort(byNumber(x => x.start));
     const letter = new Map<string, number>(), exact = new Map<string, number>();
     const used = events.reduce((t, e) => Math.max(t, e.end), 0);
     // A pickup bar is padded before its notes, any other short bar after them.
@@ -459,7 +461,7 @@ function convert(part: Element, others: Element[], warnings: Set<string>, staff:
     // is split and tied.
     const chordChanges = new Map<number, string | null>();
     if (active) chordChanges.set(0, active);
-    for (const c of [...chords].sort((a, b) => a.at - b.at)) chordChanges.set(Math.min(lead + c.at, barEnd - 1), c.chord && label(c.chord, measureFifths));
+    for (const c of [...chords].sort(byNumber(x => x.at))) chordChanges.set(Math.min(lead + c.at, barEnd - 1), c.chord && label(c.chord, measureFifths));
     const points = [...new Set([0, barEnd, ...chordChanges.keys(), ...scoreChanges.map(c => lead + c.at), ...notes.flatMap(n => [n.start, n.end])])].sort((a, b) => a - b);
     const tokens: string[] = [];
     // Adjacent rests merge into one before they are split into written lengths.
@@ -576,7 +578,7 @@ export async function importMusicXml(file: Blob, fileName: string, opts: { partI
   if (info.voices > 1) warnings.add('Multiple voices: the first voice on the chosen staff is imported');
   const result = convert(selected, nodes.filter(p => p !== selected), warnings, staff, verse);
   if (result.abc.length > 5120) {
-    const playedBars = [...result.abc.matchAll(/^V: Vocal\n([^\n]+)/gm)].flatMap(m => m[1].split('|').filter(Boolean)).length;
+    const playedBars = [...result.abc.matchAll(/^V: Vocal\n([^\n]+)/gm)].flatMap(m => m[1].split('|').filter(isPresent)).length;
     const near = Math.max(1, Math.floor(5120 / result.abc.length * playedBars));
     warnings.add(`This score may pass YuE2's 5,120-token limit and be cut near played bar ${near} (estimated from ABC length); check the final bars`);
   }

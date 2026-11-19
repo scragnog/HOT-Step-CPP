@@ -3,11 +3,11 @@
 // Run with the ui suite: node --import ../server/node_modules/tsx/dist/loader.mjs --test "src/**/*.test.ts"
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
-import { queryClient } from '../client';
-import { scopeOf, sharedKeys } from '../keys';
+import { queryClient } from '@/queries/client';
+import { scopeOf, sharedKeys } from '@/queries/keys';
 import { trainingQueries } from './queries';
-import { useTrainingStore } from '../../stores/trainingStore';
-import { setTrainingWorker } from '../../services/trainingApi';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { setTrainingWorker } from '@/services/trainingApi';
 
 const initial = useTrainingStore.getState();
 const realFetch = globalThis.fetch;

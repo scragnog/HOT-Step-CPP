@@ -12,7 +12,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useMutation, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import { apiClient } from '../services/httpClient';
+import { apiClient } from '@/services/httpClient';
 import { invalidateEvents, queryManager, type EventRef } from './invalidation';
 
 /** What a write dirtied: named events, or a direct plan for parameterized keys. */

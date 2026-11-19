@@ -5,9 +5,10 @@
 
 import React, { useRef, useCallback, useEffect, useState, useMemo } from 'react';
 import { Play, Pause, SkipForward } from 'lucide-react';
-import { WaveformPlayer, type WaveformPlayerHandle } from '../player/WaveformPlayer';
-import { SectionMarkers } from '../player/SectionMarkers';
-import { formatTime } from '../../utils/lrcUtils';
+import { WaveformPlayer, type WaveformPlayerHandle } from '@/components/player/WaveformPlayer';
+import { SectionMarkers } from '@/components/player/SectionMarkers';
+import { formatTime } from '@/utils/lyrics/lrcUtils';
+import { formatDecimal } from '@/utils/format/format';
 
 interface RepaintWaveformProps {
   audioUrl: string;
@@ -88,7 +89,7 @@ export const RepaintWaveform: React.FC<RepaintWaveformProps> = ({
   const regionLabel = useMemo(() => {
     const effEnd = regionEnd > 0 ? regionEnd : duration;
     const regionDur = effEnd - regionStart;
-    return `${formatTime(regionStart)} → ${formatTime(effEnd)} (${regionDur.toFixed(1)}s)`;
+    return `${formatTime(regionStart)} → ${formatTime(effEnd)} (${formatDecimal(regionDur, 1)}s)`;
   }, [regionStart, regionEnd, duration]);
 
   const effEnd = regionEnd > 0 ? regionEnd : duration;

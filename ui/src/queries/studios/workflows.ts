@@ -1,12 +1,12 @@
-import { followJob, workflowApi } from '../../services/workflowApi';
-import { queryClient } from '../client';
-import { queryManager } from '../invalidation';
-import { documentOptions, workflowOptions } from '../cover-lyrics/workflows';
-import { followWorkflowJob } from '../workflowFollow';
+import { followJob, workflowApi } from '@/services/workflowApi';
+import { queryClient } from '@/queries/client';
+import { queryManager } from '@/queries/invalidation';
+import { documentOptions, workflowOptions } from '@/queries/cover-lyrics/workflows';
+import { followWorkflowJob } from '@/queries/workflowFollow';
 
 // One owner per resource: cover-lyrics' workflow factories carry the optional
 // ReadOptions signal and are consumed by both workflow APIs.
-export { documentOptions, workflowOptions } from '../cover-lyrics/workflows';
+export { documentOptions, workflowOptions } from '@/queries/cover-lyrics/workflows';
 
 export const studioWorkflowApi = {
   ...workflowApi,

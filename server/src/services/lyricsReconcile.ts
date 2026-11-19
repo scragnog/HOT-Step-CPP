@@ -12,12 +12,29 @@ import type { WhisperResult, WhisperWord } from './whisperTranscribe.js';
 // Types
 // ──────────────────────────────────────────────
 
+/**
+ * Which vocal stream a word belongs to.
+ *
+ * A harmony can sing over the lead, so the two are not one sequence: each layer
+ * gets its own monotonic cursor and never pushes the other. Absent means
+ * `lead`, which is every sidecar written before the field existed.
+ */
+export type VocalLayer = 'lead' | 'backing' | 'adlib';
+
 export interface LyricsWord {
   word: string;
   start: number;
   end: number;
-  confidence: number;
+  /** The recogniser's own probability, when it supplied one. Absent means "not
+   *  measured": the statistics pass must not read an invented 1 as a confident
+   *  word, nor an invented 0 as a word worth snapping. */
+  confidence?: number;
   source: 'matched' | 'whisper' | 'ad-lib';
+  /** Placed by ear. The statistics pass treats the word as an anchor: it is not
+   *  cut back, snapped or pushed, and the words around it move instead. */
+  checked?: boolean;
+  /** The stream this word belongs to; wins over its line's `layer`. */
+  layer?: VocalLayer;
 }
 
 export interface LyricsLine {
@@ -26,14 +43,145 @@ export interface LyricsLine {
   text: string;
   words: LyricsWord[];
   section?: string;  // e.g. 'Verse 1', 'Chorus', 'Bridge'
+  /** A person listened to this line in the editor and placed it by ear. The
+   *  fixture store keeps only checked lines, so a machine's guess is never
+   *  recorded as the reference it is later scored against. */
+  checked?: boolean;
+  /** The stream this line belongs to. Untagged lines are the lead; a backing
+   *  line is allowed to overlap it, because the two are sung at once. */
+  layer?: VocalLayer;
 }
 
 export interface LyricsJson {
   version: 1;
-  method: 'whisper' | 'mms-fa';
+  /** `mms-fa` means the CTC aligner timed the words; `whisper` means the
+   *  reconciled transcript did. Whisper still runs alongside a CTC pass as the
+   *  fallback and the verification transcript. `lrc-lines` is the editor's own
+   *  first save of a sheet seeded from a line-level `.lrc`: those times were
+   *  neither heard nor aligned. */
+  method: 'whisper' | 'mms-fa' | 'lrc-lines';
   whisperModel: string;
   vocalsIsolated: boolean;
   lines: LyricsLine[];
+  /** What ran, what it cost, and what it had to repair. Written by the
+   *  alignment pipeline; absent on sidecars from an older version. */
+  diagnostics?: LyricsDiagnostics;
+}
+
+/** One timing the statistics pass changed, with its reason. This is the record
+ *  a dry run returns and the fixture regressions read. */
+export interface PolishRepair {
+  line: number;
+  word: number;
+  from: { start: number; end: number };
+  to: { start: number; end: number };
+  reason: 'monotonic' | 'cut-back' | 'snap' | 'repeat';
+}
+
+/** The baseline one section's words were judged against. */
+export interface PolishSectionBaseline {
+  section: string;
+  words: number;
+  medianSec: number;
+  madSec: number;
+  lowSec: number;
+  highSec: number;
+}
+
+/**
+ * How far the CTC timings stray from Whisper's anchors.
+ *
+ * Exact lyrics already force the CTC path to be monotone, so this is not a
+ * guard against a wild path — it is the measurement that says whether the path
+ * is drifting inside a line, and where. Words are paired by text, so a word one
+ * side dropped does not shift the comparison.
+ */
+export interface AnchorDrift {
+  /** Anchor words the audit had, the denominator for `outliers`; the CTC side's
+   *  own count is `words`. Not the pair count: an anchor one side dropped has
+   *  no pair and is still an anchor. */
+  anchors: number;
+  /** Words the CTC pass produced. */
+  words: number;
+  medianMs: number;
+  p90Ms: number;
+  /** Pairs further apart than the tolerance, counted rather than moved. */
+  outliers: number;
+  /** The widest disagreements, worst first, so a report names places to listen.
+   *  `section` is the label the line carried, so a pooled report can say
+   *  "chorus" without the file the number came from. */
+  worst: Array<{
+    line: number; word: number; driftMs: number; anchorSec: number; ctcSec: number; section?: string;
+  }>;
+  /** The same audit per section and occurrence. A section that comes back is the
+   *  case a corridor would fix, so its drift is counted apart from the first
+   *  occurrence rather than averaged into it. */
+  sections: AnchorDriftSection[];
+}
+
+/** Drift inside one run of lines: a section's first appearance, its second, ... */
+export interface AnchorDriftSection {
+  /** The label the run's lines carried; '' for lines that carry none. */
+  section: string;
+  /** 1-based occurrence of this section in the track. */
+  occurrence: number;
+  /** Pairs that fell inside the run. */
+  words: number;
+  medianMs: number;
+  p90Ms: number;
+  outliers: number;
+}
+
+/** The alignment run behind a `.lyrics.json`, for the editor's badge and for
+ *  support: which stages ran, which fell back, and how much was moved. */
+export interface LyricsDiagnostics {
+  method: LyricsJson['method'];
+  stages: string[];
+  /** The CTC aligner's GGUF, when it ran. */
+  model: string;
+  whisperModel: string;
+  windows: number;
+  dtw: boolean;
+  vocalsIsolated: boolean;
+  /** Words in the pass, and how many it left exactly as the aligner placed them. */
+  words: number;
+  untouched: number;
+  wordsMoved: number;
+  wordsFlagged: number;
+  cutBack: number;
+  snapped: number;
+  /** Words on a hand-checked line: treated as anchors and never moved. */
+  anchored?: number;
+  /** Lines that had an earlier occurrence to reuse, and words it re-placed. */
+  repeatedLines?: number;
+  repeatWordsMoved?: number;
+  /** Hand-placed lines carried from the sidecar into this run. */
+  checkedKept?: number;
+  monotonicRepairs: number;
+  /** The global baseline, for the record; per-word decisions used section bands. */
+  baseline: { medianSec: number; madSec: number; lowSec: number; highSec: number };
+  sections: PolishSectionBaseline[];
+  /** Every change, capped. `repairsTruncated` says the cap was hit. */
+  repairs: PolishRepair[];
+  repairsTruncated?: boolean;
+  /** CTC against Whisper's anchors, when both ran. Nothing is moved by it. */
+  anchorDrift?: AnchorDrift;
+  /** Why a stage was skipped, joined with `; `; null when nothing fell back. */
+  fallback: string | null;
+  elapsedMs: number;
+  range?: {
+    fromLine: number;
+    toLine: number;
+    startSec: number;
+    endSec: number;
+    cropStartSec: number;
+    cropEndSec: number;
+    /** How the range run's section labels were placed back on the new lines. */
+    sectionsMatched?: { text: number; index: number; time: number };
+    /** Words the splice had to push clear of, or trim against, a line outside
+     *  the selection. Absent when the block landed inside its gap already. */
+    seamFixes?: { pushed: number; trimmed: number };
+  };
 }
 
 // ──────────────────────────────────────────────
@@ -249,6 +397,10 @@ const SECTION_MARKER = /^\[.*\]$/;
 
 const LINE_GAP_THRESHOLD_S = 1.5;  // seconds between words to force a new line
 const LINE_MAX_WORDS = 15;         // max words per line before forced split
+/** How far an unscripted word must start inside the previous word to count as
+ *  a second voice rather than the next syllable. Whisper's own word ends carry
+ *  slop of a few tens of milliseconds, so the floor sits above that. */
+const POLYPHONIC_OVERLAP_SEC = 0.15;
 
 // ──────────────────────────────────────────────
 // Main: reconcileLyrics
@@ -324,7 +476,7 @@ export function reconcileLyrics(
         word: sourceWords[pair.sourceIdx],
         start: ww.start,
         end: ww.end,
-        confidence: ww.probability ?? 1,
+        confidence: ww.probability,
         source: 'matched',
         srcLine: sourceLineIdx[pair.sourceIdx],
       });
@@ -335,7 +487,7 @@ export function reconcileLyrics(
         word: ww.word,
         start: ww.start,
         end: ww.end,
-        confidence: ww.probability ?? 0,
+        confidence: ww.probability,
         source: 'whisper',
         srcLine: sourceLineIdx[pair.sourceIdx],
       });
@@ -346,7 +498,7 @@ export function reconcileLyrics(
         word: ww.word,
         start: ww.start,
         end: ww.end,
-        confidence: ww.probability ?? 0,
+        confidence: ww.probability,
         source: 'ad-lib',
         srcLine: -1,
       });
@@ -366,6 +518,20 @@ export function reconcileLyrics(
     ? mergedWords.slice(firstMatched, lastMatched + 1)
     : mergedWords;  // no matches at all — keep everything as fallback
 
+  // 5c. A word the sheet never asked for, heard *inside* the word before it, is
+  // a second voice: a word the same singer adds follows the one before it, while
+  // a harmony starts while the lead is still sounding. Marking it as its own
+  // stream is what stops it from extending the lead line's bounds and from being
+  // pushed to the end of the lead by the monotonic cursor. It is not a repair of
+  // the timing — the mark is upstream so the repair can respect it.
+  for (let i = 1; i < trimmedWords.length; i++) {
+    const prev = trimmedWords[i - 1];
+    const curr = trimmedWords[i];
+    if (curr.source !== 'ad-lib') continue;
+    if (curr.start >= prev.end - POLYPHONIC_OVERLAP_SEC) continue;
+    curr.layer = 'backing';
+  }
+
   // 6. Group words into lines using source line boundaries
   //    Primary break: when source line index changes
   //    Secondary break: timing gap > threshold, or line too long
@@ -377,6 +543,7 @@ export function reconcileLyrics(
 
   let currentWords: LyricsWord[] = [stripSrcLine(trimmedWords[0])];
   let currentSrcLine = trimmedWords[0].srcLine;
+  let currentLayer: VocalLayer = trimmedWords[0].layer ?? 'lead';
 
   for (let i = 1; i < trimmedWords.length; i++) {
     const prev = trimmedWords[i - 1];
@@ -385,15 +552,20 @@ export function reconcileLyrics(
 
     // Break at source line boundary (when the source line changes)
     const srcLineChanged = curr.srcLine !== -1 && currentSrcLine !== -1 && curr.srcLine !== currentSrcLine;
+    // A layer change is a break in its own right: a backing word must not join
+    // the lead's line (which would stretch its bounds), and the lead's next word
+    // must not join the backing line.
+    const layerChanged = (curr.layer ?? 'lead') !== currentLayer;
     // Also break on large timing gaps or very long lines
     const timingBreak = gap > LINE_GAP_THRESHOLD_S;
     const lengthBreak = currentWords.length >= LINE_MAX_WORDS;
 
-    if (srcLineChanged || timingBreak || lengthBreak) {
+    if (srcLineChanged || layerChanged || timingBreak || lengthBreak) {
       const section = currentSrcLine >= 0 ? sourceLineSection[currentSrcLine] : undefined;
       lines.push(buildLine(currentWords, section));
       currentWords = [stripSrcLine(curr)];
       currentSrcLine = curr.srcLine;
+      currentLayer = curr.layer ?? 'lead';
     } else {
       currentWords.push(stripSrcLine(curr));
       // Track source line — ad-lib words (-1) inherit from the current line
@@ -444,6 +616,10 @@ function buildLine(words: LyricsWord[], section?: string): LyricsLine {
     words,
   };
   if (section) line.section = section;
+  // Only a non-lead stream is marked: a sidecar written before layers existed
+  // carries no field, and a lead line does not need one.
+  const layer = words[0]?.layer;
+  if (layer && layer !== 'lead') line.layer = layer;
   return line;
 }
 

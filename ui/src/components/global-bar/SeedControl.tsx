@@ -9,12 +9,14 @@
 import React, { useEffect, useState } from 'react';
 import { Minus, Plus, Save } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
 import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
-import { ParamLabel } from '../shared/ParamLabel';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
-import { parseSeed, toSeed, U64_MAX, type Seed } from '../../utils/seed';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { parseSeed, toSeed, U64_MAX, type Seed } from '@/utils/seed';
 
 // Matches the seed range used elsewhere in the app (StormLiveControls, TrainDitForm).
 const MAX_SEED = 2147483647;
@@ -38,7 +40,10 @@ const SeedInput: React.FC<{ value: Seed; onChange: (v: Seed) => void; className:
 
 export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({ inputClasses, hint }) => {
   const { t } = useTranslation();
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    seed: s.seed, randomSeed: s.randomSeed,
+    setSeed: s.setSeed, setRandomSeed: s.setRandomSeed,
+  })));
   const [seedDrawerOpen, setSeedDrawerOpen] = useState(false);
   // BigInt so a uint64 seed steps by exactly one; seeds already past MAX_SEED
   // step within the uint64 range instead of snapping down to MAX_SEED.
@@ -58,10 +63,13 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
             label="Generation Seed"
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
             onReset={!gp.randomSeed && gp.seed !== GLOBAL_PARAM_DEFAULTS.seed ? () => gp.setSeed(GLOBAL_PARAM_DEFAULTS.seed) : undefined} />
-          <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
+          <HintButton onClick={() => setSeedDrawerOpen(true)}
+            label={t('seed.manager', 'Seed Manager')}
+            info={t('seed.managerInfo', 'Save the current seed or load a saved one. Saved seeds are shared by every generator.')}
+            ariaLabel={t('seed.manager', 'Seed Manager')}
             className="text-zinc-500 hover:text-amber-400 transition-colors">
             <Save size={12} />
-          </button>
+          </HintButton>
         </div>
         <div className="flex items-center gap-1.5">
           <ParamLabel label="Random" className="text-xs text-zinc-500"

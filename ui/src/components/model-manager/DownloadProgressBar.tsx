@@ -3,29 +3,14 @@
 import React from 'react';
 import { X, Play } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { DownloadJob } from '../../types';
+import type { DownloadJob } from '@/types';
+import { formatBytes, formatBytesPerSecond } from '@/utils/format/format';
 
 interface Props {
   job: DownloadJob;
   onCancel: (jobId: string) => void;
   onResume: (jobId: string) => void;
   compact?: boolean;
-}
-
-/** Format bytes to human-readable string */
-function formatSize(bytes: number): string {
-  if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(2) + ' GB';
-  if (bytes >= 1_048_576) return (bytes / 1_048_576).toFixed(1) + ' MB';
-  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
-  return bytes + ' B';
-}
-
-/** Format speed to human-readable string */
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec >= 1_073_741_824) return (bytesPerSec / 1_073_741_824).toFixed(1) + ' GB/s';
-  if (bytesPerSec >= 1_048_576) return (bytesPerSec / 1_048_576).toFixed(1) + ' MB/s';
-  if (bytesPerSec >= 1024) return (bytesPerSec / 1024).toFixed(0) + ' KB/s';
-  return bytesPerSec.toFixed(0) + ' B/s';
 }
 
 /** Format ETA in human-readable form */
@@ -94,9 +79,9 @@ export const DownloadProgressBar: React.FC<Props> = ({ job, onCancel, onResume, 
 
       {/* Stats row */}
       <div className="flex items-center justify-between mt-1 text-[10px] text-zinc-500">
-        <span>{formatSize(job.bytesDownloaded)} / {formatSize(job.totalBytes)}</span>
+        <span>{formatBytes(job.bytesDownloaded)} / {formatBytes(job.totalBytes)}</span>
         {isActive && job.speed > 0 && (
-          <span>{formatSpeed(job.speed)} · ETA {formatEta(remaining, job.speed)}</span>
+          <span>{formatBytesPerSecond(job.speed)} · ETA {formatEta(remaining, job.speed)}</span>
         )}
         {job.status === 'failed' && job.error && (
           <span className="text-red-400 truncate ml-2">{job.error}</span>

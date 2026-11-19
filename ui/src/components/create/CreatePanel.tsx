@@ -8,32 +8,32 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query';
 import { Zap, ListPlus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { useAuth } from '../../context/AuthContext';
-import { generateApi } from '../../services/api';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useGlobalParamsStore } from '@/context/GlobalParamsContext';
+import { useAuth } from '@/context/AuthContext';
+import { generateApi } from '@/services/api';
 import { Yue2ScorePreviewModal, type Yue2ScorePreviewData } from './Yue2ScorePreviewModal';
 import { ContentSection } from './ContentSection';
 import { Yue2Continuation } from './Yue2Continuation';
 import type { Yue2Continuation as ContinuationSection } from '../../../../server/src/contracts/yue2Continuation';
-import { Fold } from '../shared/Fold';
+import { Fold } from '@/components/shared/controls/Fold';
 import { MetadataSection } from './MetadataSection';
-import { LatentImport } from '../shared/LatentImport';
-import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
+import { LatentImport } from '@/components/shared/songs/LatentImport';
+import { CoverArtSubjectSection } from '@/components/shared/songs/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
 import { TrainingDraftBar } from './TrainingDraftBar';
 import { applyCreateDraft, createContentParams, createYue2Replay, liveBackendRefusal } from './createContent';
-import { useStudioDraftMirror } from '../../services/studioDraftMirror';
-import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { useBackendStore } from '../../stores/backendStore';
-import { setBackendParamFor } from '../../stores/globalParamsStore';
-import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
+import { useStudioDraftMirror } from '@/services/studioDraftMirror';
+import { StudioDraftPicker } from '@/components/shared/overlays/StudioDraftPicker';
+import { useBackendStore } from '@/stores/backendStore';
+import { setBackendParamFor } from '@/stores/globalParamsStore';
+import { expandWildcards, hasWildcards, randomWildcardSeed } from '@/utils/wildcardUtils';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources, pickNearestBpmTrack,
   readMm3CaptionSources, resolveMm3Caption,
   type Mm3CaptionSourcesHandoff,
-} from '../../utils/mm3CaptionSource';
+} from '@/utils/lyrics/mm3CaptionSource';
 import {
   YUE2_BACKEND_ID, YUE2_CAPTION_DATASET_KEY, YUE2_CAPTION_SOURCES_KEY,
   ensureYue2CaptionSource, pickNearestBpmTrack as pickNearestYue2Track,
@@ -42,18 +42,20 @@ import {
   writeYue2CaptionSelection, yue2CaptionAdapterPath,
   yue2TrackBpm,
   type Yue2CaptionSelection, type Yue2SourceTrack,
-} from '../../utils/yue2CaptionSource';
-import { type TrainingDatasetSummary } from '../../services/trainingApi';
-import { useTrainingStore } from '../../stores/trainingStore';
+} from '@/utils/lyrics/yue2CaptionSource';
+import { type TrainingDatasetSummary } from '@/services/trainingApi';
+import { useTrainingStore } from '@/stores/trainingStore';
 // training-data's worker-scoped dataset list, read through its options so
 // Create and Training Studio share one cache entry per worker.
-import { trainingQueries } from '../../queries/training-data/queries';
-import { extractCaptionTags } from '../../utils/captionTags';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { writePersistedState } from '../../hooks/usePersistedState';
-import type { GenerationParams, Song } from '../../types';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { extractCaptionTags } from '@/utils/lyrics/captionTags';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { writePersistedState } from '@/hooks/usePersistedState';
+import type { GenerationParams, Song } from '@/types';
 import type { CreateIntent } from '../../../../server/src/contracts/resolution';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { writeJson } from '@/utils/storage/storageJson';
 
 const NO_DATASETS: TrainingDatasetSummary[] = [];
 
@@ -135,7 +137,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     const next: Mm3CaptionSourcesHandoff = value === 'auto' || value === 'custom'
       ? { ...mm3Sources, mode: value, selectedTitle: undefined }
       : { ...mm3Sources, mode: 'track', selectedTitle: value.slice('track:'.length) };
-    try { localStorage.setItem(MM3_CAPTION_SOURCES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    try { writeJson(MM3_CAPTION_SOURCES_KEY, next); } catch { /* ignore */ }
     setMm3Sources(next);
     // Switching to Custom hands the box back with the song's own caption in it —
     // otherwise it would be left holding the dataset track's.
@@ -334,7 +336,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   }, []);
 
   // Global params context — for reuse data
-  const gp = useGlobalParams();
+  // Actions are stable; only the two seed values need live subscriptions.
+  const gp = useGlobalParamsStore.getState();
+  const gpRandomSeed = useGlobalParamsStore(s => s.randomSeed);
+  const gpSeed = useGlobalParamsStore(s => s.seed);
 
   // ── YuE2 score preview ──
   // The "Preview the score first" toggle is a YuE2 backend extension, so it
@@ -376,13 +381,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       // draw; the first attempt honours the global seed control.
       const seedParams = freshSeed
         ? { ...params, randomSeed: true, seed: -1 }
-        : { ...params, randomSeed: gp.randomSeed, seed: gp.seed };
+        : { ...params, randomSeed: gpRandomSeed, seed: gpSeed };
       const data = await generateApi.yue2Plan(seedParams);
       setScorePreview(prev => (prev.open ? { ...prev, data } : prev));
     } catch (err) {
-      setScorePreview(prev => (prev.open ? { ...prev, error: err instanceof Error ? err.message : String(err) } : prev));
+      setScorePreview(prev => (prev.open ? { ...prev, error: errorMessage(err) } : prev));
     }
-  }, [token, gp.randomSeed, gp.seed]);
+  }, [token, gpRandomSeed, gpSeed]);
 
   // ── Reuse data (Edit) — restores ALL generation params for full reproducibility ──
   useEffect(() => {
@@ -502,7 +507,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const assembleParams = () => {
     // Wildcard auto-expand: reproducible from the DiT seed when it's locked,
     // fresh randomness when the seed is random anyway
-    const wcSeed = gp.randomSeed ? randomWildcardSeed() : Number(gp.seed);
+    const wcSeed = gpRandomSeed ? randomWildcardSeed() : Number(gpSeed);
     const resolvedCaption = compose.autoExpand && hasWildcards(caption)
       ? expandWildcards(caption, wcSeed, 0) : caption;
     const resolvedLyrics = compose.autoExpand && hasWildcards(lyrics)
@@ -685,7 +690,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           beatIntro={beatIntro} onBeatIntroChange={setBeatIntro}
           introBars={introBars} onIntroBarsChange={setIntroBars}
           autoExpand={autoExpand} onAutoExpandChange={setAutoExpand}
-          wildcardSeed={gp.randomSeed ? undefined : Number(gp.seed)}
+          wildcardSeed={gpRandomSeed ? undefined : Number(gpSeed)}
           captionReadOnly={mm3CaptionLocked || yue2CaptionLocked}
           yue2Mode={yue2Ui}
           afterStyle={yue2DatasetFold}

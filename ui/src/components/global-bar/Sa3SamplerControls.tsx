@@ -23,13 +23,14 @@
 //     says so rather than letting the dropdown imply more than it delivers.
 
 import React from 'react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { usePluginRegistry } from '../../hooks/usePluginRegistry';
+import { useGlobalParams } from '@/context/GlobalParamsContext';
+import { usePluginRegistry } from '@/hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
-import { ParamLabel } from '../shared/ParamLabel';
-import { EditableSlider } from '../shared/EditableSlider';
-import { StyledSelect } from '../shared/StyledSelect';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { EditableSlider } from '@/components/shared/controls/EditableSlider';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { isPresent } from '@/utils/guards';
 
 // Registered plugin names for the SA3 Clean preset (verified against plugins/).
 const SA3_CLEAN_SOLVER    = 'md_wasserstein_flow_v121';
@@ -66,7 +67,7 @@ export const Sa3SamplerControls: React.FC = () => {
   // under the <select> — three of them at once, in the deepest nested panel in
   // the app.
   const join = (...parts: (string | false | undefined)[]) =>
-    parts.filter(Boolean).join(' ') || undefined;
+    parts.filter(isPresent).join(' ') || undefined;
 
   const solverInfo = join(
     solverMeta?.description,

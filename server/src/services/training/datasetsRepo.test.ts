@@ -13,6 +13,8 @@ const SERVER_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 // against a scratch database.
 test('a read-only re-sync (same counters, newly cached album) keeps the dataset revision; a real change moves it', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'datasets-repo-'));
+  // `node --eval` code is not type-stripped (tsx/esm only loads the modules it
+  // imports), so this script is plain JS: no `as any`, annotations or `!`.
   const script = [
     "import assert from 'node:assert/strict';",
     "import { initDb } from './src/db/database.js';",
@@ -22,9 +24,9 @@ test('a read-only re-sync (same counters, newly cached album) keeps the dataset 
     "const at = '2026-01-01T00:00:00.000Z';",
     "repo.insertDataset({ id: 'd1', slug: 'd1', name: 'd1', sourceDir: 'x', recursive: false, customTag: '', tagPosition: 'prepend',",
     "  genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: 'en', sampleCount: 2, labeledCount: 1,",
-    "  excludedCount: 0, status: 'labeled', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: at, updatedAt: at } as any);",
-    "const sample = (caption: string) => ({ caption, excluded: false, fileMissing: false, tagAlbum: 'Album A' }) as any;",
-    "const ds = () => repo.getDataset('d1')!;",
+    "  excludedCount: 0, status: 'labeled', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: at, updatedAt: at });",
+    "const sample = caption => ({ caption, excluded: false, fileMissing: false, tagAlbum: 'Album A' });",
+    "const ds = () => repo.getDataset('d1');",
     // A read-only view: same counters, album detected for the first time.
     "assert.equal(syncCounters(ds(), [sample('x'), sample('')]), at);",
     "assert.equal(ds().updatedAt, at);",

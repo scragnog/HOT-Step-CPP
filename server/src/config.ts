@@ -441,6 +441,10 @@ export const config = {
   whisper: {
     exe: resolveDataPath(process.env.WHISPER_EXE || '') || path.join(RUNTIME.whisperDir ?? path.join(PROJECT_ROOT, 'tools', 'whisper'), `whisper-cli${BIN_EXT}`),
     modelsDir: resolveDataPath(process.env.WHISPER_MODELS_DIR || '') || path.join(resolveDataPath(process.env.ACESTEPCPP_MODELS || '') || DEFAULT_MODELS, 'whisper'),
+    /** One CLI call's budget. A whole track in one call used to die at 120 s. */
+    timeoutMs: Number(process.env.WHISPER_TIMEOUT_MS) > 0 ? Number(process.env.WHISPER_TIMEOUT_MS) : 600_000,
+    /** Longest activity-gated window. Under the 600 s budget with room to spare. */
+    windowSec: Number(process.env.WHISPER_WINDOW_SEC) > 0 ? Number(process.env.WHISPER_WINDOW_SEC) : 90,
   },
 };
 

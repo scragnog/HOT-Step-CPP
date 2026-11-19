@@ -15,8 +15,8 @@
 
 import { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
-import { registerAudioMotion } from '../../stores/discoStore';
-import { pitchAttachElement, pitchTapNode } from '../../audio/pitchShift';
+import { registerAudioMotion } from '@/stores/discoStore';
+import { pitchAttachElement, pitchTapNode } from '@/audio/pitchShift';
 
 interface SpectrumAnalyzerProps {
   /** The HTMLMediaElement to analyze (from wavesurfer's getMediaElement) */

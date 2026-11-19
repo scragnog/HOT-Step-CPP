@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Song } from '../../types';
+import type { Song } from '@/types';
 import { buildSongBadges, coverTag } from './songBadges';
 
 const song = (backend: string, generationParams: Record<string, unknown>) => ({ backend, generationParams }) as Song;

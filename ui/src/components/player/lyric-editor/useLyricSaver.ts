@@ -12,11 +12,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
-import { queryClient } from '../../../queries/client';
-import { sharedKeys } from '../../../queries/keys';
-import { saveLyricTimings } from '../../../services/api';
-import { ApiError } from '../../../services/httpClient';
-import { sidecarUrl, type LyricsJson } from '../../../utils/wordLrcUtils';
+import { queryClient } from '@/queries/client';
+import { sharedKeys } from '@/queries/keys';
+import { saveLyricTimings } from '@/services/api';
+import { ApiError } from '@/services/httpClient';
+import { sidecarUrl, type LyricsJson } from '@/utils/lyrics/wordLrcUtils';
 import { AUTOSAVE_MS, cloneLines, type EditLine } from './timingModel';
 
 const jsonKey = (audioUrl: string) => sharedKeys.lyricsJson(sidecarUrl(audioUrl, '.lyrics.json'));
@@ -112,10 +112,24 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
   const saveRef = useRef(save);
   useLayoutEffect(() => { saveRef.current = save; }, [save]);
 
+  /**
+   * Push the next automatic write back, without switching autosave off.
+   *
+   * Used after an undo that reverses a whole applied diff: the change still
+   * saves itself, but a couple of seconds later, so the state it landed in is on
+   * screen (and redoable) before the file changes to match it.
+   */
+  const holdRef = useRef(0);
+  const delayAutosave = useCallback((ms: number) => {
+    holdRef.current = Date.now() + ms;
+    setTick(n => n + 1);
+  }, []);
+
   useEffect(() => {
     if (!autoSave || !enabled || stale) return;
     if (JSON.stringify(lines) === baselineRef.current) return;
-    const timer = setTimeout(() => { void saveRef.current({ silent: true }); }, AUTOSAVE_MS);
+    const wait = Math.max(AUTOSAVE_MS, holdRef.current - Date.now());
+    const timer = setTimeout(() => { void saveRef.current({ silent: true }); }, wait);
     return () => clearTimeout(timer);
   }, [lines, tick, enabled, autoSave, stale]);
 
@@ -132,7 +146,7 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
 
   return {
     data: { dirty, saving, saveError, stale, savedLines },
-    save, adopt, reload,
+    save, adopt, reload, delayAutosave,
   };
 }
 

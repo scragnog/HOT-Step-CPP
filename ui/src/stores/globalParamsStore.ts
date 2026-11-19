@@ -7,13 +7,14 @@
 // Uses the SAME hs-* localStorage keys -- zero migration needed.
 
 import { create } from 'zustand';
-import type { GenerationParams, LmRepMode, StableStepBackend, StableStepBlendMode } from '../types';
-import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
+import type { GenerationParams, LmRepMode, StableStepBackend, StableStepBlendMode } from '@/types';
+import { DEFAULT_SETTINGS, type AppSettings } from '@/components/settings/SettingsPanel';
 import { useBackendStore } from './backendStore';
-import { normalizeSeed, type Seed } from '../utils/seed';
+import { normalizeSeed, type Seed } from '@/utils/seed';
+import { writeJson } from '@/utils/storage/storageJson';
 
 const STRING_SEED_BACKENDS = new Set(['heartmula', 'yue2']);
-import { apiClient } from '../services/httpClient';
+import { apiClient } from '@/services/httpClient';
 
 // -- Types --
 
@@ -36,7 +37,7 @@ function readKey<T>(key: string, fallback: T): T {
 }
 
 function writeKey<T>(key: string, value: T): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full */ }
+  try { writeJson(key, value); } catch { /* full */ }
 }
 
 type Mm3RefinerSettings = Pick<GenerationParams, 'mm3RefinerEnabled' | 'mm3RefinerSteps'

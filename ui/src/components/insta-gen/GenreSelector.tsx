@@ -6,7 +6,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ChevronDown, X, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { GENRE_TAXONOMY, ALL_GENRES } from '../../data/genres';
+import { GENRE_TAXONOMY, ALL_GENRES } from '@/data/genres';
+import { useClickOutside } from '@/hooks/useClickOutside';
 
 interface GenreSelectorProps {
   selected: string[];
@@ -21,15 +22,7 @@ export const GenreSelector: React.FC<GenreSelectorProps> = ({ selected, onChange
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  useClickOutside([containerRef], () => setIsOpen(false));
 
   // Focus search on open
   useEffect(() => {

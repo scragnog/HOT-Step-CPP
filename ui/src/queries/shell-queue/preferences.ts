@@ -11,11 +11,11 @@
 import { queryOptions } from '@tanstack/react-query';
 import {
   preferencesApi, type ImportPreferenceItem, type PresetFamily, type SettingsFamily,
-} from '../../services/preferencesApi';
-import type { TypedDocument } from '../../services/workflowApi';
-import { queryClient } from '../client';
-import { serverKey } from '../keys';
-import { queryManager } from '../invalidation';
+} from '@/services/preferencesApi';
+import type { TypedDocument } from '@/services/workflowApi';
+import { queryClient } from '@/queries/client';
+import { serverKey } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
 
 const presetsOptions = <T>(family: PresetFamily) => queryOptions({
   queryKey: serverKey('shell-queue/presets', { filters: { family } }),

@@ -3,8 +3,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import serverOfflineImage from '../assets/server-offline.webp?inline';
+import serverOfflineImage from '@/assets/server-offline.webp?inline';
 import { useServerHealthReload } from './useServerHealthReload';
+import { useInterval } from '@/hooks/useInterval';
 
 /** Restarting overlay — polls /api/health and reloads when the server is back */
 export const RestartingOverlay: React.FC = () => {
@@ -13,12 +14,7 @@ export const RestartingOverlay: React.FC = () => {
   const [dots, setDots] = useState('');
 
   // Animate dots
-  useEffect(() => {
-    const iv = setInterval(() => {
-      setDots(prev => prev.length >= 3 ? '' : prev + '.');
-    }, 500);
-    return () => clearInterval(iv);
-  }, []);
+  useInterval(() => setDots(prev => prev.length >= 3 ? '' : prev + '.'), 500);
 
   // Keep polling, but say what to do once a restart has clearly stalled.
   const [stalled, setStalled] = useState(false);

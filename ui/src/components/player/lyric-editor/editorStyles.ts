@@ -22,6 +22,20 @@ export const PAN_BTN = 'rounded-full border border-zinc-300 bg-white/85 p-1.5 te
 export const SAVE_BTN = 'flex items-center gap-1 rounded-md border border-emerald-600 bg-emerald-600 px-2 py-0.5 '
   + 'text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:pointer-events-none disabled:opacity-40';
 
-/** One editor row: the same top border, padding and type from top to bottom. */
-export const ROW = 'flex flex-wrap items-center gap-1.5 border-t border-zinc-200 px-3 py-2 text-[11px] '
+/** Between two clusters in a row, so the groups read as groups and not as one run. */
+export const DIVIDER = 'mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-white/10';
+
+/**
+ * One editor row: a scope label in a fixed left gutter, that scope's controls
+ * to its right. Every row uses this shape, so the controls line up down the
+ * whole editor instead of each row inventing its own start.
+ */
+export const ROW = 'flex items-start gap-2 border-t border-zinc-200 px-3 py-2 text-[11px] '
   + 'text-zinc-600 dark:border-white/10 dark:text-zinc-300';
+
+/** The scope's name in the gutter. Short words only: the column is 48px. */
+export const ROW_LABEL = 'w-12 shrink-0 pt-[3px] text-right text-[9px] font-semibold uppercase '
+  + 'tracking-wider text-zinc-400 dark:text-zinc-500';
+
+/** The controls of one row. Clusters are divided; the body does the wrapping. */
+export const ROW_BODY = 'flex min-w-0 flex-1 flex-wrap items-center gap-1.5';

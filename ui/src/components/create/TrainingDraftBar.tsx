@@ -5,12 +5,13 @@
 // Either way the query is cleared, so a reload does not offer it again.
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore, scopedKey } from '../../stores/globalParamsStore';
-import { writePersistedState } from '../../hooks/usePersistedState';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore, scopedKey } from '@/stores/globalParamsStore';
+import { writePersistedState } from '@/hooks/usePersistedState';
 import {
   applyTrainingCreateDraft, clearTrainingDraftQuery, loadTrainingCreateDraft, trainingDraftIdFromUrl,
 } from './trainingCreateDraft';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 export const TrainingDraftBar: React.FC = () => {
   const { t } = useTranslation();
@@ -40,7 +41,7 @@ export const TrainingDraftBar: React.FC = () => {
       });
       dismiss();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

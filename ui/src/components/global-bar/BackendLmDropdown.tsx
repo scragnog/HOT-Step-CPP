@@ -21,14 +21,14 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { useBackendStore } from '../../stores/backendStore';
+import { useBackendStore } from '@/stores/backendStore';
 import {
   BackendExtensionControls,
   useBackendExtensions,
   useBackendExtensionSummary,
 } from './BackendExtensionControls';
-import { ParamLabel } from '../shared/ParamLabel';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
 
 /** YuE2: unlimited composer top-k with temperature above 1.0 breaks the song.
  *  The server clamps temperature to 1.0 then; this tells the user up front. */

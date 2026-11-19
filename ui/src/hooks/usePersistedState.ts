@@ -5,6 +5,7 @@
 // so the top bar stays in sync with Lyric Studio's adapter changes.
 
 import { useState, useEffect } from 'react';
+import { writeJson } from '@/utils/storage/storageJson';
 
 /** `revive` adjusts what was read back (merge in defaults added since it was
  *  saved, drop one-shot fields). A new `key` (another dataset, say) reads that
@@ -28,7 +29,7 @@ export function usePersistedState<T>(key: string, defaultValue: T, revive: (stor
   useEffect(() => {
     if (stateKey !== key) return;
     try {
-      localStorage.setItem(key, JSON.stringify(state));
+      writeJson(key, state);
     } catch {
       // Storage full or unavailable
     }

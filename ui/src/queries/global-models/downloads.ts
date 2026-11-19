@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { DownloadJob } from '../../types';
-import { serverKey } from '../keys';
-import { bridgeEvents, type BridgeOptions } from '../sseBridge';
+import type { DownloadJob } from '@/types';
+import { serverKey } from '@/queries/keys';
+import { bridgeEvents, type BridgeOptions } from '@/queries/sseBridge';
 import { modelChangeKeys, invalidateModels } from './options';
 
 export const downloadsKey = () => serverKey('global-models/downloads');

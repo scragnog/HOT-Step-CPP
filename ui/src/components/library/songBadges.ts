@@ -1,5 +1,5 @@
-import type { Song } from '../../types';
-import { songBackend } from '../details/songFacts';
+import type { Song } from '@/types';
+import { songBackend } from '@/components/details/songFacts';
 
 export interface SongBadge {
   label: 'ar' | 'vae' | 'cfg' | 'solver' | 'quant' | 'scale' | 'bias' | 'sound';

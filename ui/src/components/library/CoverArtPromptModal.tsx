@@ -15,11 +15,11 @@ import ReactDOM from 'react-dom';
 import { QueryObserver, useQueryClient } from '@tanstack/react-query';
 import { X, Image as ImageIcon, Loader2, Sparkles, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Song } from '../../types';
-import { apiClient } from '../../services/httpClient';
-import { useCoverArtGeneration, songPromptInputs } from '../../hooks/useCoverArtGeneration';
-import { pollWhile } from '../../queries/contract';
-import { coverArtJobOptions, type CoverArtJob } from '../../queries/shell-queue/queue';
+import type { Song } from '@/types';
+import { apiClient } from '@/services/httpClient';
+import { useCoverArtGeneration, songPromptInputs } from '@/hooks/useCoverArtGeneration';
+import { pollWhile } from '@/queries/contract';
+import { coverArtJobOptions, type CoverArtJob } from '@/queries/shell-queue/queue';
 
 const coverArtEnded = (job: CoverArtJob | undefined) => job?.status === 'succeeded' || job?.status === 'failed';
 /** Give up following a job after this long; the server keeps working. */

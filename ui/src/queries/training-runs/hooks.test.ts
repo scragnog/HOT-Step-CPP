@@ -4,11 +4,11 @@ import { parseHTML } from 'linkedom';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
+import { createQueryClient } from '@/queries/client';
 import { useJobSelection, useReload, useRunEvents } from './hooks';
 import { runQueries } from './queries';
-import type { TrainingJobSummary } from '../../services/trainingApi';
-import { trainingQueries } from '../training-data/queries';
+import type { TrainingJobSummary } from '@/services/trainingApi';
+import { trainingQueries } from '@/queries/training-data/queries';
 
 test('a standalone job bridge closes its shared source on a terminal frame without a chart', async () => {
   const saved = { window: globalThis.window, document: globalThis.document, EventSource: globalThis.EventSource };

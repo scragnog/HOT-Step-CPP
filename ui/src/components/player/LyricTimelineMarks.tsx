@@ -14,9 +14,9 @@
 
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { lrcOptions, lyricsJsonOptions } from '../../queries/shell-queue/lyrics';
-import { parseLrc } from '../../utils/lrcUtils';
-import { findActiveWordIndex, findCurrentLineIndex } from '../../utils/wordLrcUtils';
+import { lrcOptions, lyricsJsonOptions } from '@/queries/shell-queue/lyrics';
+import { parseLrc } from '@/utils/lyrics/lrcUtils';
+import { findActiveWordIndex, findCurrentLineIndex } from '@/utils/lyrics/wordLrcUtils';
 
 interface LyricTimelineMarksProps {
   audioUrl?: string;

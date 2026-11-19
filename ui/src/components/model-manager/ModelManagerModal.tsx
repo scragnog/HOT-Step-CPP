@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { invalidateModels } from '../../queries/global-models/options';
+import { invalidateModels } from '@/queries/global-models/options';
 // ModelManagerModal.tsx — Full-screen model manager modal
 //
 // Entry point for browsing, downloading, and managing GGUF models.
@@ -14,17 +14,13 @@ import { useDownloadStream } from './useDownloadStream';
 import { StarterPackCard } from './StarterPackCard';
 import { ModelCatalogueTab, FAMILY_TABS, familyForPack, type FamilyTab } from './ModelCatalogueTab';
 import { DownloadProgressBar } from './DownloadProgressBar';
-import { modelManagerApi } from '../../services/api';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { modelManagerApi } from '@/services/api';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { formatBytes } from '@/utils/format/format';
+import { plural } from '@/utils/format/plural';
 
 interface Props {
   onClose: () => void;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(1) + ' GB';
-  if (bytes >= 1_048_576) return (bytes / 1_048_576).toFixed(0) + ' MB';
-  return (bytes / 1024).toFixed(0) + ' KB';
 }
 
 /** Read the persisted Hugging Face token (set on the StableStep tab).
@@ -164,7 +160,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
                 <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 p-4">
                   <h3 className="text-xs font-semibold text-sky-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                     <Download size={13} className="animate-bounce" />
-                    {activeJobs.length} download{activeJobs.length > 1 ? 's' : ''} in progress
+                    {activeJobs.length} {plural(activeJobs.length, 'download')} in progress
                   </h3>
                   <div className="space-y-2">
                     {activeJobs.map(job => (
@@ -251,7 +247,7 @@ export const ModelManagerModal: React.FC<Props> = ({ onClose }) => {
               {registry?.modelsDir || '—'}
             </span>
             <span>{totalInstalled} {t('models.installed').toLowerCase()}</span>
-            <span>{formatSize(totalDiskUsage)} {t('models.onDisk', { size: '' }).trim()}</span>
+            <span>{formatBytes(totalDiskUsage)} {t('models.onDisk', { size: '' }).trim()}</span>
           </div>
           {hasActiveDownloads && (
             <span className="text-[10px] text-sky-400 animate-pulse">{t('models.downloadsActive')}</span>

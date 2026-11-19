@@ -5,8 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { aiContinueState, _resetAiContinueStateForTests, TEMPLATE_KEY, USER_STYLE_KEY, DEFAULT_TEMPLATE, loadTemplate } from './AiContinuePresetModal';
-import { PreferencesFake, tick, withBrowser } from '../../services/preferencesTestFake';
-import { MAX_QUERY_RETRIES } from '../../queries/contract';
+import { PreferencesFake, tick, withBrowser } from '@/services/preferencesTestFake';
+import { MAX_QUERY_RETRIES } from '@/queries/contract';
 
 const isGet = (c: { method: string; path: string }) => c.method === 'GET' && c.path.endsWith('/settings/ai-continue-template');
 const isPut = (c: { method: string; path: string }) => c.method === 'PUT' && c.path.endsWith('/settings/ai-continue-template');

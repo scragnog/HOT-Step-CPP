@@ -4,6 +4,15 @@
 // which is why the editor calls it on the first pointer move rather than every
 // move: the granularity of history is a UI decision, so it stays in the UI.
 //
+// The two stacks are mirrored in refs. `undo` has to read the entry that is
+// current when the pointer lands, and — the reason this matters — it must not
+// write `lines` from inside a `setPast` updater. React runs that updater during
+// render and a `setLines` called there is a side effect in render: React 19
+// drops it, so Undo stayed enabled, emptied the stack, and left the sheet
+// exactly as it was. Every mutation below updates the refs and then publishes
+// them, so undo, redo and a burst of pointer-driven records all see the same
+// history.
+//
 // The return is `{ data, ...handlers }`: `data` is what the screen reads,
 // everything else is something it may call. A component takes the handler slice
 // it needs and cannot touch the rest, so `const { data, ...history } =
@@ -20,6 +29,8 @@ export function useEditHistory(initial: EditLine[]) {
   const [past, setPast] = useState<EditLine[][]>([]);
   const [future, setFuture] = useState<EditLine[][]>([]);
   const linesRef = useRef(lines);
+  const pastRef = useRef<EditLine[][]>([]);
+  const futureRef = useRef<EditLine[][]>([]);
 
   /**
    * Update the ref in the same call as the state, so `record()` taken on the
@@ -37,41 +48,59 @@ export function useEditHistory(initial: EditLine[]) {
   useEffect(() => { linesRef.current = lines; }, [lines]);
 
   const record = useCallback(() => {
-    setPast(p => {
-      const next = [...p, linesRef.current];
-      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
-    });
-    setFuture([]);
+    const next = [...pastRef.current, linesRef.current];
+    pastRef.current = next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
+    futureRef.current = [];
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
   }, []);
 
   const undo = useCallback(() => {
-    setPast(p => {
-      if (p.length === 0) return p;
-      const prev = p[p.length - 1];
-      setFuture(f => [linesRef.current, ...f].slice(0, MAX_HISTORY));
-      linesRef.current = prev;
-      setLinesState(prev);
-      return p.slice(0, -1);
-    });
+    const entries = pastRef.current;
+    if (entries.length === 0) return;
+    const prev = entries[entries.length - 1];
+    pastRef.current = entries.slice(0, -1);
+    futureRef.current = [linesRef.current, ...futureRef.current].slice(0, MAX_HISTORY);
+    linesRef.current = prev;
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    setLinesState(prev);
   }, []);
 
   const redo = useCallback(() => {
-    setFuture(f => {
-      if (f.length === 0) return f;
-      const next = f[0];
-      setPast(p => [...p, linesRef.current].slice(-MAX_HISTORY));
-      linesRef.current = next;
-      setLinesState(next);
-      return f.slice(1);
-    });
+    const entries = futureRef.current;
+    if (entries.length === 0) return;
+    const next = entries[0];
+    futureRef.current = entries.slice(1);
+    pastRef.current = [...pastRef.current, linesRef.current].slice(-MAX_HISTORY);
+    linesRef.current = next;
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    setLinesState(next);
+  }, []);
+
+  /**
+   * Take a new array as one undoable step: the file after an Apply, or a
+   * Reload. `reset` is for a first load, where there is nothing to go back to;
+   * this is for a replacement the person might want back.
+   */
+  const replace = useCallback((next: EditLine[]) => {
+    pastRef.current = [...pastRef.current, linesRef.current].slice(-MAX_HISTORY);
+    futureRef.current = [];
+    linesRef.current = next;
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
+    setLinesState(next);
   }, []);
 
   /** Start over from a fresh file: new lines, no history. */
   const reset = useCallback((next: EditLine[]) => {
     linesRef.current = next;
+    pastRef.current = [];
+    futureRef.current = [];
     setLinesState(next);
-    setPast([]);
-    setFuture([]);
+    setPast(pastRef.current);
+    setFuture(futureRef.current);
   }, []);
 
   return {
@@ -81,11 +110,11 @@ export function useEditHistory(initial: EditLine[]) {
       canUndo: past.length > 0,
       canRedo: future.length > 0,
     },
-    setLines, record, undo, redo, reset,
+    setLines, record, undo, redo, reset, replace,
   };
 }
 
 /** The hook's whole return, so its shape is never written twice. */
 export type EditHistory = ReturnType<typeof useEditHistory>;
-/** What a component may call: the handlers, without the state. */
+/** What a component may call: the handlers, without the data. */
 export type EditHistoryHandlers = Omit<EditHistory, 'data'>;

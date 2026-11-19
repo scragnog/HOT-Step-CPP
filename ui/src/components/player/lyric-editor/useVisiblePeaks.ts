@@ -23,10 +23,14 @@ export interface VisiblePeaksOptions {
   pxPerSec: number;
   scrollLeft: number;
   height: number;
+  /** The section drawn over the waveform, in seconds, when there is one. */
+  span?: { start: number; end: number } | null;
+  /** Whether a pointer is still dragging that section, which deepens the tint. */
+  dragging?: boolean;
 }
 
 export function useVisiblePeaks({
-  wrapRef, canvasRef, peaks, total, pxPerSec, scrollLeft, height,
+  wrapRef, canvasRef, peaks, total, pxPerSec, scrollLeft, height, span, dragging,
 }: VisiblePeaksOptions) {
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -42,16 +46,33 @@ export function useVisiblePeaks({
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, height);
-    if (!peaks || peaks.min.length === 0 || total <= 0) return;
-    const mid = height / 2;
-    ctx.fillStyle = 'rgba(161, 161, 170, 0.75)';
-    const buckets = peaks.min.length;
-    for (let x = 0; x < cssW; x += 2) {
-      const time = (scrollLeft + x) / pxPerSec;
-      const b = Math.min(buckets - 1, Math.max(0, Math.floor((time / total) * buckets)));
-      const top = mid - peaks.max[b] * (mid - 1);
-      const bottom = mid - peaks.min[b] * (mid - 1);
-      ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
+    if (peaks && peaks.min.length > 0 && total > 0) {
+      const mid = height / 2;
+      ctx.fillStyle = 'rgba(161, 161, 170, 0.75)';
+      const buckets = peaks.min.length;
+      for (let x = 0; x < cssW; x += 2) {
+        const time = (scrollLeft + x) / pxPerSec;
+        const b = Math.min(buckets - 1, Math.max(0, Math.floor((time / total) * buckets)));
+        const top = mid - peaks.max[b] * (mid - 1);
+        const bottom = mid - peaks.min[b] * (mid - 1);
+        ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
+      }
     }
-  }, [wrapRef, canvasRef, peaks, total, pxPerSec, scrollLeft, height]);
+    // The section tint is painted here, not by a DOM overlay: a section wider
+    // than the window is tens of thousands of pixels at full zoom, and a
+    // backdrop-filtered element that wide stops painting in Chromium. That is
+    // why the pink used to vanish as soon as the view was zoomed in.
+    // Times are seconds and `scrollLeft` is pixels, so each end is converted to
+    // pixels first and the offset subtracted from that. Writing
+    // `(span.start - scrollLeft) * pxPerSec` mixed the units and put the tint
+    // tens of thousands of pixels away as soon as the view was panned.
+    if (span && span.end > span.start) {
+      const x0 = Math.max(0, span.start * pxPerSec - scrollLeft);
+      const x1 = Math.min(cssW, span.end * pxPerSec - scrollLeft);
+      if (x1 > x0) {
+        ctx.fillStyle = dragging ? 'rgba(236, 72, 153, 0.4)' : 'rgba(236, 72, 153, 0.25)';
+        ctx.fillRect(x0, 0, x1 - x0, height);
+      }
+    }
+  }, [wrapRef, canvasRef, peaks, total, pxPerSec, scrollLeft, height, span, dragging]);
 }

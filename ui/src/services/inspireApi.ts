@@ -1,7 +1,8 @@
-import { serverKey } from '../queries/keys';
-import { waitForSnapshot } from '../queries/studios/wait';
+import { serverKey } from '@/queries/keys';
+import { waitForSnapshot } from '@/queries/studios/wait';
 import { apiClient, type ClientOptions, type ReadOptions } from './httpClient';
 import { getAuthToken, SLOW_ROUTE_TIMEOUT_MS } from './axiosClient';
+import { newId } from '@/utils/id';
 // inspireApi.ts — Frontend API client for the inspire endpoint
 //
 // Provides submit + poll interface for the Insta-Gen inspire flow.
@@ -156,7 +157,7 @@ export async function resetInstagenPrompt(): Promise<void> {
 
 // Durable Insta-Gen workflows. The preview document is the authority for
 // edits; approval names its exact revision.
-import { studioWorkflowApi as workflowApi, followStudioJob as followJob } from '../queries/studios/workflows';
+import { studioWorkflowApi as workflowApi, followStudioJob as followJob } from '@/queries/studios/workflows';
 export { followJob };
 
 export interface InstaWorkflowInput {
@@ -170,9 +171,9 @@ export interface InstaWorkflowInput {
 // error line covers the submit leg and the SSE job follow alike), so the JSON
 // legs stay silent — one notifier per failure.
 export const instaWorkflowApi = {
-  preview: (input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+  preview: (input: InstaWorkflowInput, key = newId()) =>
     workflowApi.submit('insta-preview', key, input as unknown as Record<string, unknown>, { silent: true }),
-  direct: (input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+  direct: (input: InstaWorkflowInput, key = newId()) =>
     workflowApi.submit('insta-direct', key, input as unknown as Record<string, unknown>, { silent: true }),
   approve: (documentId: string, revision: number, key = `approve:${documentId}:${revision}`) =>
     workflowApi.submit('insta-approve', key, { documentId, revision }, { silent: true }),

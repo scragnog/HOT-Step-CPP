@@ -1,7 +1,7 @@
-import { getSessionEpoch } from '../../queries/keys';
+import { getSessionEpoch } from '@/queries/keys';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { projectsOptions, projectOptions } from '../../queries/studios/resources';
-import { queryManager } from '../../queries/invalidation';
+import { projectsOptions, projectOptions } from '@/queries/studios/resources';
+import { queryManager } from '@/queries/invalidation';
 // SongBuilder.tsx — Udio-style section-by-section song assembly
 //
 // Build a song one section at a time. Each section generates N candidate
@@ -16,24 +16,30 @@ import { queryManager } from '../../queries/invalidation';
 // studio is the orchestration layer + bookkeeping (builder_projects/sections).
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { notify } from '../shared/Toast';
+import { notify } from '@/components/shared/feedback/Toast';
 import {
   Plus, Loader2, Play, Pause, Check, Trash2, Music, Layers,
   ChevronLeft, ArrowRightToLine, ArrowLeftToLine, Sparkles, MapPin, Pencil,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { builderApi } from '../../services/api';
-import type { BuilderProject, BuilderSection, BuilderDirection } from '../../services/api';
-import { ApiError, HttpStatus } from '../../services/apiError';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { builderApi } from '@/services/api';
+import type { BuilderProject, BuilderSection, BuilderDirection } from '@/services/api';
+import { ApiError, HttpStatus } from '@/services/apiError';
 import { followSection as followSectionJob } from './followSection';
-import { useBackendStore } from '../../stores/backendStore';
-import { getGenerationTimeoutMinutes } from '../../utils/generationTimer';
-import { play, playFromList, togglePlay, usePlaybackSelector, songToTrack } from '../../stores/playbackStore';
-import type { Song } from '../../types';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
+import { useBackendStore } from '@/stores/backendStore';
+import { getGenerationTimeoutMinutes } from '@/utils/audio/generationTimer';
+import { play, playFromList, togglePlay, usePlaybackSelector, songToTrack } from '@/stores/playbackStore';
+import type { Song } from '@/types';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { readJson } from '@/utils/storage/storageJson';
+import { plural } from '@/utils/format/plural';
+import { newId } from '@/utils/id';
+import { formatDecimal } from '@/utils/format/format';
+import { byText, byNumber } from '@/utils/sort';
+import { isPresent } from '@/utils/guards';
 
 // ── Lyrics helpers ───────────────────────────────────────────────────────────
 
@@ -63,7 +69,6 @@ export const SongBuilder: React.FC = () => {
   const { token, sessionEpoch } = useAuth();
   void sessionEpoch;
   const client = useQueryClient();
-  const gp = useGlobalParamsStore();
 
   // Previews route through the global play bar (full scrub/transport for free).
   const playingTrackId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
@@ -76,7 +81,7 @@ export const SongBuilder: React.FC = () => {
   const playSong = useCallback((song: Song | null, list: (Song | null)[]) => {
     if (!song) return;
     if (playingTrackId === song.id) { togglePlay(); return; }
-    const tracks = list.filter(Boolean).map(s => songToTrack(s as Song));
+    const tracks = list.filter(isPresent).map(s => songToTrack(s as Song));
     playFromList(songToTrack(song), tracks, 'direct');
   }, [playingTrackId]);
 
@@ -199,13 +204,13 @@ export const SongBuilder: React.FC = () => {
   // 'generating', finalize at 'ready'). Either way it's the audition target.
   const activeSection = useMemo(
     () => sections.filter(s => s.status === 'generating' || s.status === 'ready')
-      .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null,
+      .sort(byText(x => x.created_at, 'desc'))[0] ?? null,
     [sections],
   );
 
   // Timeline = chosen sections in musical (position) order
   const timeline = useMemo(
-    () => chosenSections.slice().sort((a, b) => a.position - b.position),
+    () => chosenSections.slice().sort(byNumber(x => x.position)),
     [chosenSections],
   );
 
@@ -382,7 +387,7 @@ export const SongBuilder: React.FC = () => {
     const blocks = timeline.map(s => fmtBlock(s.label, s.lyrics));
     const newBlock = fmtBlock(nextLabel, nextLyrics);
     const all = direction === 'prepend' ? [newBlock, ...blocks] : [...blocks, newBlock];
-    return all.filter(Boolean).join('\n\n') || '[Instrumental]';
+    return all.filter(isPresent).join('\n\n') || '[Instrumental]';
   }, [timeline, nextLabel, nextLyrics, direction]);
 
   // ── Section length: bars ↔ seconds ──
@@ -413,7 +418,7 @@ export const SongBuilder: React.FC = () => {
     const secs = s.section_length || 0;
     if (bpm > 0 && secs > 0) {
       const bars = Math.round((secs * bpm) / (beatsPerBar * 60));
-      return `${bars} bar${bars === 1 ? '' : 's'} · ${Math.round(secs)}s`;
+      return `${bars} ${plural(bars, 'bar')} · ${Math.round(secs)}s`;
     }
     return secs > 0 ? `${Math.round(secs)}s` : `${Math.round(Number(s.chosen?.duration) || 0)}s`;
   }, [bpm, beatsPerBar]);
@@ -451,15 +456,12 @@ export const SongBuilder: React.FC = () => {
   // plus this captured composer state (server/src/services/songBuilder/sectionOps.ts).
   const generateMut = useMutation({
     mutationFn: ({ projectId, revision }: { projectId: string; revision: number }) => {
-      const engineParams: Record<string, unknown> = { ...gp.getGlobalParams() };
+      const engineParams: Record<string, unknown> = { ...useGlobalParamsStore.getState().getGlobalParams() };
       if (typeof engineParams.generationTimeoutMinutes !== 'number') engineParams.generationTimeoutMinutes = getGenerationTimeoutMinutes();
       // "Keep Models in VRAM" is respected, never forced (see sectionOps.ts).
-      const coResident = (() => {
-        try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident === true; }
-        catch { return false; }
-      })();
+      const coResident = readJson<{ coResident?: boolean }>('ace-settings', {}).coResident === true;
       return builderApi.generateSection(projectId, {
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newId(),
         expectedRevision: revision,
         expectedBackend: useBackendStore.getState().activeBackendId,
         direction, label: nextLabel, lyrics: nextLyrics,
@@ -640,7 +642,7 @@ export const SongBuilder: React.FC = () => {
                     <div className="text-sm text-white truncate">{p.title}</div>
                     <div className="text-[11px] text-zinc-500 truncate">{p.style || 'No style set'}</div>
                   </div>
-                  <span className="text-[11px] text-zinc-600">{p.section_count ?? 0} section{(p.section_count ?? 0) === 1 ? '' : 's'}</span>
+                  <span className="text-[11px] text-zinc-600">{p.section_count ?? 0} {plural((p.section_count ?? 0), 'section')}</span>
                   <Trash2
                     size={14} className={`text-zinc-600 hover:text-red-400${deleteProjectMut.isPending && deleteProjectMut.variables === p.id ? ' opacity-40' : ''}`}
                     onClick={e => { e.stopPropagation(); if (deleteProjectMut.isPending) return; deleteProject(p.id); }}
@@ -670,7 +672,7 @@ export const SongBuilder: React.FC = () => {
         </div>
         {headSong && (
           <div className="text-[11px] text-zinc-400">
-            Song so far: <span className="text-violet-300 font-medium">{Math.round(effHeadDuration)}s</span> · {timeline.length} section{timeline.length === 1 ? '' : 's'}
+            Song so far: <span className="text-violet-300 font-medium">{Math.round(effHeadDuration)}s</span> · {timeline.length} {plural(timeline.length, 'section')}
           </div>
         )}
       </div>
@@ -915,7 +917,7 @@ export const SongBuilder: React.FC = () => {
                     <button onClick={estimateBarsFromLyrics} disabled={lyricLineCount === 0}
                       className="text-[11px] text-violet-400 hover:text-violet-300 disabled:opacity-40"
                       title="Estimate bars from the number of lyric lines (~2 bars per line) — a starting point you can adjust">
-                      ≈ from lyrics ({lyricLineCount} line{lyricLineCount === 1 ? '' : 's'})
+                      ≈ from lyrics ({lyricLineCount} {plural(lyricLineCount, 'line')})
                     </button>
                   </div>
                 </div>
@@ -961,7 +963,7 @@ export const SongBuilder: React.FC = () => {
                     className="px-2.5 py-1 rounded-lg bg-violet-600/80 hover:bg-violet-500 disabled:opacity-40 text-[11px] text-white flex items-center gap-1.5"
                     title="Scrub the play bar below to the spot, then capture it here"
                   >
-                    <MapPin size={11} /> Set to playhead{playingTrackId === headSong.id ? ` (${playheadTime.toFixed(1)}s)` : ''}
+                    <MapPin size={11} /> Set to playhead{playingTrackId === headSong.id ? ` (${formatDecimal(playheadTime, 1)}s)` : ''}
                   </button>
                 </div>
                 <p className="text-[10px] text-zinc-600 mt-1.5">
@@ -1002,7 +1004,7 @@ export const SongBuilder: React.FC = () => {
                   <div className="flex items-center gap-3 mt-2">
                     <span className="text-[11px] text-zinc-400 whitespace-nowrap">Strength</span>
                     <input type="range" min={0.1} max={0.9} step={0.05} value={seedStrength} onChange={e => setSeedStrength(Number(e.target.value))} className="flex-1 accent-violet-500" />
-                    <span className="text-[11px] text-violet-300 w-9 text-right">{seedStrength.toFixed(2)}</span>
+                    <span className="text-[11px] text-violet-300 w-9 text-right">{formatDecimal(seedStrength, 2)}</span>
                   </div>
                 )}
               </div>
@@ -1034,7 +1036,7 @@ export const SongBuilder: React.FC = () => {
                 onClick={handleGenerate}
                 className="w-full px-3 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors"
               >
-                <Sparkles size={16} /> Generate {project.variant_count || 4} variant{(project.variant_count || 4) === 1 ? '' : 's'}
+                <Sparkles size={16} /> Generate {project.variant_count || 4} {plural((project.variant_count || 4), 'variant')}
               </button>
             )}
 

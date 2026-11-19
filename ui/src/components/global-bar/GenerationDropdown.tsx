@@ -1,4 +1,4 @@
-import { useReferenceTracks } from '../../queries/global-models/hooks';
+import { useReferenceTracks } from '@/queries/global-models/hooks';
 // GenerationDropdown.tsx — DiT generation settings for the global param bar
 //
 // Adapted from the DiT section of create/GenerationSettings.tsx.
@@ -8,18 +8,20 @@ import React, { useCallback, useMemo } from 'react';
 // Seed input uses local string state to avoid parseInt("-") → NaN → -1 snap-back
 import { useTranslation } from 'react-i18next';
 import { RotateCcw, ChevronDown, Music2, Upload, Trash2, Zap } from 'lucide-react';
-import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
+import { useGlobalParams, useGlobalParamsStore } from '@/context/GlobalParamsContext';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
 import { formatScheduler, formatReferenceName } from './modelLabels';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useAuth } from '../../context/AuthContext';
-import { usePluginRegistry } from '../../hooks/usePluginRegistry';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useAuth } from '@/context/AuthContext';
+import { usePluginRegistry } from '@/hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
 import { SeedControl } from './SeedControl';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { formatBytes, formatDecimal } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
@@ -128,11 +130,11 @@ export const GenerationDropdown: React.FC = () => {
           </div>
           {(gp.cfgCutoffRatio < 1 || gp.lmCfgCutoffRatio < 1 || gp.cacheRatio > 0) && (
             <span className="text-[10px] text-amber-400/60 font-mono">
-              {gp.cfgCutoffRatio < 1 ? `CFG ${Math.round(gp.cfgCutoffRatio * 100)}%` : ''}
+              {gp.cfgCutoffRatio < 1 ? `CFG ${formatPercent(gp.cfgCutoffRatio)}` : ''}
               {gp.cfgCutoffRatio < 1 && gp.lmCfgCutoffRatio < 1 ? ' · ' : ''}
-              {gp.lmCfgCutoffRatio < 1 ? `LM ${Math.round(gp.lmCfgCutoffRatio * 100)}%` : ''}
+              {gp.lmCfgCutoffRatio < 1 ? `LM ${formatPercent(gp.lmCfgCutoffRatio)}` : ''}
               {(gp.cfgCutoffRatio < 1 || gp.lmCfgCutoffRatio < 1) && gp.cacheRatio > 0 ? ' · ' : ''}
-              {gp.cacheRatio > 0 ? `Cache ${Math.round(gp.cacheRatio * 100)}%` : ''}
+              {gp.cacheRatio > 0 ? `Cache ${formatPercent(gp.cacheRatio)}` : ''}
             </span>
           )}
         </button>
@@ -297,7 +299,7 @@ export const GenerationDropdown: React.FC = () => {
         const alpha = parseFloat(parts[1] || '0.5');
         const betaParam = parseFloat(parts[2] || '0.7');
         const updateBeta = (a: number, b: number) => {
-          gp.setScheduler(`beta:${a.toFixed(2)}:${b.toFixed(2)}`);
+          gp.setScheduler(`beta:${formatDecimal(a, 2)}:${formatDecimal(b, 2)}`);
         };
         return (
           <div className="rounded-xl border border-teal-500/20 bg-teal-500/5 p-3 space-y-3 transition-all">
@@ -339,7 +341,7 @@ export const GenerationDropdown: React.FC = () => {
               </button>
             </div>
             <Slider label="Exponent" value={exponent}
-              onChange={v => gp.setScheduler(`power:${v.toFixed(2)}`)} min={0.25} max={4.0} step={0.05} showInput
+              onChange={v => gp.setScheduler(`power:${formatDecimal(v, 2)}`)} min={0.25} max={4.0} step={0.05} showInput
               defaultValue={2.0}
               infoMeta="default 2.0 · range 0.25-4.0"
               info="Exponent of the power-law schedule. Above 1 front-loads steps toward the noisy end, favouring structure; at 1 the schedule is linear; below 1 it back-loads toward the clean end, favouring detail." />
@@ -356,7 +358,7 @@ export const GenerationDropdown: React.FC = () => {
         const crossover = parseFloat(parts[2] || '0.5');
         const split = parseFloat(parts[3] || '0.5');
         const update = (a: string, b: string, c: number, s: number) => {
-          gp.setScheduler(`composite:${a}+${b}:${c.toFixed(2)}:${s.toFixed(2)}`);
+          gp.setScheduler(`composite:${a}+${b}:${formatDecimal(c, 2)}:${formatDecimal(s, 2)}`);
         };
         return (
           <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 transition-all overflow-hidden">
@@ -552,7 +554,7 @@ export const GenerationDropdown: React.FC = () => {
                     { value: '', label: 'None (use mastering ref if enabled)' },
                     ...timbreRefs.map(r => ({
                       value: r.name,
-                      label: `${r.name} (${r.size < 1024 * 1024 ? `${(r.size / 1024).toFixed(1)} KB` : `${(r.size / (1024 * 1024)).toFixed(1)} MB`})`,
+                      label: `${r.name} (${formatBytes(r.size)})`,
                     })),
                   ]}
                 />
@@ -891,7 +893,7 @@ export const GenerationBadge: React.FC = () => {
 
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
-      {gp.inferenceSteps}s · {solver} · {schedule} · {guidance} {gp.guidanceScale.toFixed(1)} · σ{shiftLabel} · Seed {seedLabel}
+      {gp.inferenceSteps}s · {solver} · {schedule} · {guidance} {formatDecimal(gp.guidanceScale, 1)} · σ{shiftLabel} · Seed {seedLabel}
     </span>
   );
 };

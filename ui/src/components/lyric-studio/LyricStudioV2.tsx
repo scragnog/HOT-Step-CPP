@@ -13,48 +13,48 @@
  */
 
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { snapshotOptions } from '../../queries/cover-lyrics/reads';
-import type { AlbumPreset } from '../../services/lireekApi';
+import { snapshotOptions } from '@/queries/cover-lyrics/reads';
+import type { AlbumPreset } from '@/services/lireekApi';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ChevronLeft } from 'lucide-react';
-import { notify } from '../shared/Toast';
+import { notify } from '@/components/shared/feedback/Toast';
 import { useTranslation } from 'react-i18next';
-import { lireekApi } from '../../services/lireekApi';
-import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
-import { ArtistGrid } from './ArtistGrid';
-import { ArtistSidebar } from './ArtistSidebar';
-import { ArtistPageSidebar } from './ArtistPageSidebar';
-import { AlbumGrid } from './AlbumGrid';
-import { AlbumHeader } from './AlbumHeader';
-import { FetchLyricsModal } from './FetchLyricsModal';
-import { AddArtistModal } from './AddArtistModal';
-import { AddAlbumModal } from './AddAlbumModal';
-import { AddSongModal } from './AddSongModal';
-import { CuratedProfileModal } from './CuratedProfileModal';
-import { PresetSettingsModal } from './PresetSettingsModal';
-import { ContentTabs } from './ContentTabs';
-import type { TabId } from './ContentTabs';
-import { SourceLyricsTab } from './SourceLyricsTab';
-import { ProfilesTab } from './ProfilesTab';
-import { WrittenSongsTab } from './WrittenSongsTab';
-import { WriteLyricsTab } from './WriteLyricsTab';
-import { RecordingsTab } from './RecordingsTab';
-import { RenderAcrossModal } from './RenderAcrossModal';
-import type { RenderTarget } from './RenderAcrossModal';
-import { useAudioGeneration } from './useAudioGeneration';
-import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
-import { usePlaybackSelector } from '../../stores/playbackStore';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { QueuePanel } from './QueuePanel';
-import { PromptEditor } from './PromptEditor';
-import { restoreLyricQueue } from '../../stores/streamingStore';
-import { loadSelections, saveSelections, type ModelSelections } from './ProviderSelector';
-import { useDisguiseMode } from '../../hooks/useDisguiseMode';
-import { cacheMm3SourceTracks, collectMm3SourceTracks } from '../../utils/mm3CaptionSource';
-import { useBackendStore } from '../../stores/backendStore';
-import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
-import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
+import { lireekApi } from '@/services/lireekApi';
+import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '@/services/lireekApi';
+import { ArtistGrid } from './artists/ArtistGrid';
+import { ArtistSidebar } from './artists/ArtistSidebar';
+import { ArtistPageSidebar } from './artists/ArtistPageSidebar';
+import { AlbumGrid } from './albums/AlbumGrid';
+import { AlbumHeader } from './albums/AlbumHeader';
+import { FetchLyricsModal } from './artists/FetchLyricsModal';
+import { AddArtistModal } from './artists/AddArtistModal';
+import { AddAlbumModal } from './albums/AddAlbumModal';
+import { AddSongModal } from './albums/AddSongModal';
+import { CuratedProfileModal } from './artists/CuratedProfileModal';
+import { PresetSettingsModal } from './write/PresetSettingsModal';
+import { ContentTabs } from './write/ContentTabs';
+import type { TabId } from './write/ContentTabs';
+import { SourceLyricsTab } from './write/SourceLyricsTab';
+import { ProfilesTab } from './artists/ProfilesTab';
+import { WrittenSongsTab } from './albums/WrittenSongsTab';
+import { WriteLyricsTab } from './write/WriteLyricsTab';
+import { RecordingsTab } from './albums/RecordingsTab';
+import { RenderAcrossModal } from './queue/RenderAcrossModal';
+import type { RenderTarget } from './queue/RenderAcrossModal';
+import { useAudioGeneration } from './queue/useAudioGeneration';
+import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '@/stores/audioGenQueueStore';
+import { usePlaybackSelector } from '@/stores/playbackStore';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { QueuePanel } from './queue/QueuePanel';
+import { PromptEditor } from './write/PromptEditor';
+import { restoreLyricQueue } from '@/stores/streamingStore';
+import { loadSelections, saveSelections, type ModelSelections } from './write/ProviderSelector';
+import { useDisguiseMode } from '@/hooks/useDisguiseMode';
+import { cacheMm3SourceTracks, collectMm3SourceTracks } from '@/utils/lyrics/mm3CaptionSource';
+import { useBackendStore } from '@/stores/backendStore';
+import { MM3_BACKEND_ID } from '@/utils/lyrics/captionForBackend';
+import { YUE2_BACKEND_ID } from '@/utils/lyrics/yue2CaptionSource';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 
@@ -477,7 +477,6 @@ export const LyricStudioV2: React.FC = () => {
 
   // ── Audio generation ──
   const { sendToCreate } = useAudioGeneration({ profiles, showToast });
-  const globalParams = useGlobalParamsStore();
 
   /** `renderAs`: render with another album's preset and caption source, and
    *  list the recording there ("Render as" / "Render from"). */
@@ -489,7 +488,7 @@ export const LyricStudioV2: React.FC = () => {
     // Capture globalParams snapshot NOW — same as Create page's getGlobalParams().
     // This ensures every engine param (solver, guidance, DCW, latent, LM, etc.)
     // flows through identically to the Create page path.
-    const paramsSnapshot = globalParams.getGlobalParams();
+    const paramsSnapshot = useGlobalParamsStore.getState().getGlobalParams();
     await enqueueAudioGen(gen, renderAs ? {
       ...renderAs,
       profileId: gen.profile_id,
@@ -504,7 +503,7 @@ export const LyricStudioV2: React.FC = () => {
     showToast(renderAs
       ? `Queued: ${gen.title || 'Untitled'} as ${disguiseArtist(renderAs.artistName)}`
       : `Queued: ${gen.title || 'Untitled'}`);
-  }, [token, profiles, nav.selectedArtist, globalParams, showToast, disguiseArtist]);
+  }, [token, profiles, nav.selectedArtist, showToast, disguiseArtist]);
 
   // ── Render as / Render from ──
   const [renderAcross, setRenderAcross] = useState<{ mode: 'as' | 'from'; gen?: Generation } | null>(null);

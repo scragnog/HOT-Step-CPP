@@ -14,7 +14,7 @@
 //   </wrapper>
 
 import React, { useRef, useEffect } from 'react';
-import { usePulseIntensity, useSnarePulse, useDiscoMode } from '../../stores/discoStore';
+import { usePulseIntensity, useSnarePulse, useDiscoMode } from '@/stores/discoStore';
 
 interface DiscoPulseWrapperProps {
   /** Base hue for this panel's glow (0-360). Each panel gets a different hue. */

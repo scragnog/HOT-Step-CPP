@@ -186,7 +186,7 @@ only what it says it does.
 
 ## Collapsible sections
 
-`Fold` (`ui/src/components/shared/Fold.tsx`) is a titled section that opens and closes from its
+`Fold` (`ui/src/components/shared/controls/Fold.tsx`) is a titled section that opens and closes from its
 header row and remembers that state across page loads in localStorage under `storageKey`.
 `defaultOpen` sets the state on a first visit. Create and Cover Studio use it for their optional
 blocks (drafts, the negative prompt, dataset caption options). Give each fold its own key.
@@ -212,7 +212,7 @@ fixture, including child-dialog keyboard and focus checks.
 ## Error boundaries
 
 A render-time throw no longer blanks the tab. `ErrorBoundary`
-(`ui/src/components/shared/ErrorBoundary.tsx`) wraps the whole app in `main.tsx`, and the studio
+(`ui/src/components/shared/feedback/ErrorBoundary.tsx`) wraps the whole app in `main.tsx`, and the studio
 area in `App.tsx` with `resetKey={activeView}`. A broken studio shows the error with Try again and
 Reload page, the sidebar and player keep working, and switching studio clears it. Wrap a new
 independent region in its own boundary only if one failing part should not take its neighbours

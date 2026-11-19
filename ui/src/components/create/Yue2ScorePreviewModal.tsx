@@ -18,7 +18,9 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw, X } from 'lucide-react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
-import { followNoteInBox } from '../../utils/abcFollow';
+import { followNoteInBox } from '@/utils/abc/abcFollow';
+import { saveText } from '@/utils/storage/saveFile';
+import { formatClock } from '@/utils/format/format';
 
 export interface Yue2ScorePreviewData {
   abc: string;
@@ -80,14 +82,7 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
     // Anything that is not a letter, number, underscore or hyphen becomes a
     // hyphen — so accented titles survive and slashes never reach the OS.
     const slug = (title.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '') || 'lead-sheet').slice(0, 60);
-    const url = URL.createObjectURL(new Blob([data.abc], { type: "text/plain;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${slug}.abc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    saveText(data.abc, `${slug}.abc`, "text/plain;charset=utf-8");
   };
 
   if (!open) return null;
@@ -131,7 +126,7 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
                 {verdict === 'healthy' ? <CheckCircle2 size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
                 <span>
                   <span className="font-semibold uppercase tracking-wider">{verdict}</span> — {data.health.reason}
-                  {data.health.estSeconds ? ` · ~${Math.floor(data.health.estSeconds / 60)}:${String(data.health.estSeconds % 60).padStart(2, '0')}` : ''}
+                  {data.health.estSeconds ? ` · ~${formatClock(data.health.estSeconds)}` : ''}
                   {` · seed ${data.seed}`}
                   {data.health.sections.length ? ` · ${data.health.sections.join(' → ')}` : ''}
                 </span>

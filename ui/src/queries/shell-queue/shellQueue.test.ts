@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { QueryObserver } from '@tanstack/react-query';
-import { createQueryClient, queryClient } from '../client';
-import { resourceKey, serverKey, sharedKeys, startAuthSession } from '../keys';
+import { createQueryClient, queryClient } from '@/queries/client';
+import { resourceKey, serverKey, sharedKeys, startAuthSession } from '@/queries/keys';
 import {
   invalidateSongs, patchSong, postProcessStatusOptions, recentSongsOptions, removeSongs, songsOptions,
 } from './songs';
@@ -10,8 +10,8 @@ import { readAudioQueue, readGenerationStatus } from './queue';
 import { queriedPresetsApi, queriedSettingsApi } from './preferences';
 import { ENGINE_WORKERS_POLL_MS, engineWorkersOptions, gpusOptions } from './settings';
 import { lrcOptions, lyricsJsonOptions, scoreAbcOptions } from './lyrics';
-import { fetchPeaks, forgetPeaks, peaksCached } from '../../audio/peaksClient';
-import { queryManager } from '../invalidation';
+import { fetchPeaks, forgetPeaks, peaksCached } from '@/audio/peaksClient';
+import { queryManager } from '@/queries/invalidation';
 
 const clients: ReturnType<typeof createQueryClient>[] = [];
 const client = () => { const c = createQueryClient(); clients.push(c); return c; };
