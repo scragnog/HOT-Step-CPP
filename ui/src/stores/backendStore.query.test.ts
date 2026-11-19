@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { pendingSelection, useBackendStore } from './backendStore';
-import { yue2PickAtEnqueue } from '../utils/yue2CaptionSource';
-import { queryClient } from '../queries/client';
-import { capabilitiesOptions } from '../queries/global-models/options';
+import { yue2PickAtEnqueue } from '@/utils/lyrics/yue2CaptionSource';
+import { queryClient } from '@/queries/client';
+import { capabilitiesOptions } from '@/queries/global-models/options';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { queryClient.clear(); globalThis.fetch = originalFetch; });

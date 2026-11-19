@@ -76,11 +76,28 @@ export function createCoverStemCache(opts: { root: string; level: number; separa
     return wav;
   }
 
+  /** Content-addressed, so a re-upload under a new path is the same stem. */
+  function baseOf(audioPath: string): string {
+    const hash = crypto.createHash('sha256').update(fs.readFileSync(audioPath)).digest('hex');
+    return path.join(opts.root, `${hash}-L${opts.level}-v${version}`);
+  }
+
   return {
+    /**
+     * The stem already on disk for this audio, or null. Never separates.
+     *
+     * Alignment uses this to take a free improvement when cover or stem work
+     * has already produced one, instead of spending a GPU job on the chance
+     * that separation helps.
+     */
+    find(audioPath: string): string | null {
+      const wav = `${baseOf(audioPath)}.wav`;
+      return fs.existsSync(wav) && isCompleteWav(wav) ? wav : null;
+    },
+
     /** The cached vocal stem for this audio; throws NoVocalsError for a silent source. */
     async vocalStem(audioPath: string): Promise<string> {
-      const hash = crypto.createHash('sha256').update(fs.readFileSync(audioPath)).digest('hex');
-      const base = path.join(opts.root, `${hash}-L${opts.level}-v${version}`);
+      const base = baseOf(audioPath);
       let run = inflight.get(base);
       if (!run) {
         run = produce(audioPath, base).finally(() => inflight.delete(base));

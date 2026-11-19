@@ -4,10 +4,10 @@
 // encodes them itself. The chips report what is verified on disk (assets.sa3,
 // server/src/contracts/training.ts), never what a finished run implies.
 
-import { Sa3TrainCard } from '../Sa3TrainCard';
+import { Sa3TrainCard } from '@/components/training-studio/cards/Sa3TrainCard';
 import { sa3Chips, sa3Readiness } from './chips';
-import { TRAINING_TARGETS } from '../trainingTargets';
-import type { TrainingPlugin } from '../trainingPluginTypes';
+import { TRAINING_TARGETS } from '@/components/training-studio/lib/trainingTargets';
+import type { TrainingPlugin } from '@/components/training-studio/lib/trainingPluginTypes';
 
 export const sa3Plugin: TrainingPlugin = {
   ...TRAINING_TARGETS.sa3,

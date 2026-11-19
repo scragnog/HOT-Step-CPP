@@ -1,0 +1,387 @@
+// Mm3RunsPanel.tsx — previous MM3 LM training runs for this dataset, and the
+// control that carries one on.
+//
+// A run directory has always held everything needed to continue: checkpoints,
+// the optimizer state, and the log. What it never had was a way to ASK. This is
+// that: the runs that exist, how far each got, whether it stopped on purpose,
+// and a "continue" that reuses the recipe the run was trained with rather than
+// whatever the form above happens to say now.
+//
+// TWO THINGS THIS DELIBERATELY SURFACES rather than hiding:
+//
+//   * `behindBy` — the saved state can sit behind the last step the run
+//     reached. Runs finished before the engine learned to save state on a clean
+//     exit hold state from their last preview pause, so continuing them
+//     retrains the steps in between. Better said than silently repeated.
+//   * `optionsSource` — a run with no recorded recipe is continued with what
+//     its log states plus today's defaults for what the log does not carry.
+//     That is a weaker claim than "the recipe it was trained with" and reads as
+//     one.
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, History, Loader2, PlayCircle, RefreshCw, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useReload } from '@/queries/training-runs/hooks';
+import { runQueries, trainingWritePlan } from '@/queries/training-runs/queries';
+
+import { deleteMm3Run, type Mm3RunSummary } from '@/services/trainingApi';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { formatDateTime } from '@/utils/format/dateUtils';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { Mm3CheckpointLadder } from './Mm3CheckpointLadder';
+import { MM3_DELETE_CONFIRM, WorkerMirrorStatus } from './ReviewPanel';
+import { TrainingRunPicker } from '@/components/training-studio/panels/TrainingPreviewPanel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { useActiveTrainingJob } from '@/queries/training-runs/hooks';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { formatLoss, formatTrainingSize } from '@/utils/format/format';
+import { CARD } from '@/components/training-studio/lib/yue2CardUi';
+import { RUN_OUTCOME } from '@/components/training-studio/lib/runOutcome';
+import { isPresent } from '@/utils/guards';
+
+const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
+            + 'dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none '
+            + 'focus:border-amber-500/50';
+
+/** The run folder a pasted resume record names: the folder itself, or the
+ *  folder of its resume-state.bin / .json or hotstep-run.json. */
+export function runNameFromResumePath(p: string): string {
+  const parts = p.trim().replace(/^["']|["']$/g, '').split(/[\\/]+/).filter(isPresent);
+  if (parts.length && /^(resume-state\.(bin|json)|hotstep-run\.json)$/i.test(parts[parts.length - 1])) parts.pop();
+  return parts[parts.length - 1] ?? '';
+}
+
+export const Mm3RunsPanel: React.FC<{
+  datasetId: string;
+  /** The form's preview length and MLP scale, for the ladder's Render. */
+  renderOpts?: { seconds?: number; scaleMlp?: number };
+}> = ({ datasetId, renderOpts }) => {
+  const { t } = useTranslation();
+  const client = useQueryClient();
+  const resumeMm3TrainLm = useTrainingStore(s => s.resumeMm3TrainLm);
+  const activeJob = useActiveTrainingJob();
+
+  const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
+  const query = useQuery(runQueries.mm3Runs(datasetId));
+  const runs = query.data?.runs ?? null;
+  const error = query.error?.message ?? null;
+  const [open, setOpen] = useState<string | null>(null);
+  const [addSteps, setAddSteps] = useState(250);
+  const [mode, setMode] = useState<'steps' | 'loss'>('steps');
+  const [targetLoss, setTargetLoss] = useState(0.4);
+  const [busy, setBusy] = useState(false);
+  const [manualPath, setManualPath] = useState('');
+  const [commandError, setCommandError] = useState('');
+  // Whose checkpoint ladder shows: the run picked here or opened from the
+  // Review page (the store's ladder pick, as YuE2's), else the newest finished
+  // run with checkpoints, so a reload lands on its ladder. The live run's
+  // ladder is the Train card's.
+  const picked = useTrainingStore(s => s.refineLadderRun);
+  const setPicked = useTrainingStore(s => s.setRefineLadderRun);
+  const ladderRuns = (runs ?? []).filter(r => !r.running && r.checkpoints.length > 0);
+  const ladderRun = ladderRuns.find(r => r.runName === picked) ?? ladderRuns[0];
+
+  const load = () => query.refetch();
+  useReload(runQueries.mm3Runs(datasetId).queryKey, activeJob ? `${activeJob.id}:${activeJob.status}` : undefined);
+  const removeMut = useMutation({
+    mutationFn: (run: string) => deleteMm3Run(datasetId, run),
+    onSuccess: () => void trainingWritePlan(client, null),
+    onError: err => setCommandError(errorMessage(err)),
+  });
+  const remove = (run: Mm3RunSummary) => {
+    if (!window.confirm(t('trainingStudio.mm3.deleteRunConfirm', MM3_DELETE_CONFIRM))) return;
+    setCommandError('');
+    removeMut.mutate(run.runName);
+  };
+
+  if (runs !== null && runs.length === 0 && !error) return null;
+
+  // Why Continue cannot run, as YuE2's resume list says on a disabled choice.
+  const cannotContinue = (run: Mm3RunSummary): string | null =>
+    !run.resume ? t('trainingStudio.mm3.runsNoStateShort', 'No saved optimizer state, so there is nothing to continue from.')
+      : jobRunning ? t('trainingStudio.mm3.runsJobActive', 'A training job is running; continue this run when it ends.')
+      : null;
+
+  const start = async (run: Pick<Mm3RunSummary, 'runName'>) => {
+    setBusy(true);
+    try {
+      await resumeMm3TrainLm({
+        runName: run.runName,
+        addSteps: Math.max(1, addSteps),
+        stopMode: mode,
+        ...(mode === 'loss' ? { targetLoss } : {}),
+      });
+      setOpen(null);
+    } finally {
+      setBusy(false);
+      void load();
+    }
+  };
+
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 mb-2">
+        <History size={15} className="text-amber-500" />
+        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.mm3.runsTitle', 'Previous runs')}
+        </h3>
+        <button onClick={() => void load()}
+          className="ml-auto text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+          title={t('trainingStudio.mm3.runsRefresh', 'Refresh') as string}>
+          <RefreshCw size={13} />
+        </button>
+      </div>
+      <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
+        {t('trainingStudio.mm3.runsBlurb',
+          'Every run this dataset has produced, with its checkpoints still on disk. A run that saved '
+          + 'its optimizer state can be carried on: the weights, the momentum, the shuffled pass and '
+          + 'the crop RNG all come back, so it continues rather than starts again. The learning-rate '
+          + 'schedule is laid out over the NEW step cap, so raising the cap restarts the tail of the '
+          + 'cosine curve rather than continuing it.')}
+      </p>
+
+      <div className="mb-2"><WorkerMirrorStatus /></div>
+      {(error || commandError) && (
+        <div className="text-xs text-rose-500 mb-2">{commandError || error}</div>
+      )}
+      {runs === null && (
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <Loader2 size={13} className="animate-spin" /> …
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        {(runs ?? []).map(run => {
+          const o = RUN_OUTCOME[run.outcome];
+          const last = run.checkpoints.length
+            ? run.checkpoints[run.checkpoints.length - 1] : undefined;
+          return (
+            <div key={run.runName}
+              className="rounded-lg border border-zinc-200 dark:border-white/10 p-2.5">
+              <div className="flex items-start gap-2 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200 break-all">
+                    {run.runName}
+                    {run.origin && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                      title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{run.origin}</span>}
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                    <span className={run.running ? 'text-amber-500' : o.tone}>
+                      {run.running ? t('trainingStudio.mm3.runsRunning', 'Running now') : o.label}
+                    </span>
+                    <span>
+                      {t('trainingStudio.mm3.runsSteps', 'step {{done}} of {{cap}}',
+                        { done: run.lastStep, cap: run.configuredSteps || run.lastStep })}
+                    </span>
+                    <span>
+                      {t('trainingStudio.mm3.runsCkpts', '{{n}} checkpoints', {
+                        n: run.checkpoints.length,
+                      })}
+                    </span>
+                    {run.best && (
+                      <span>
+                        {t('trainingStudio.mm3.runsBest', 'best held-out {{loss}} at {{step}}', {
+                          loss: formatLoss(run.best.loss), step: run.best.step,
+                        })}
+                      </span>
+                    )}
+                    {last?.loss !== undefined && !run.best && (
+                      <span>
+                        {t('trainingStudio.mm3.runsLastLoss', 'last loss {{loss}}',
+                          { loss: formatLoss(last.loss) })}
+                      </span>
+                    )}
+                    <span>{formatTrainingSize(run.sizeBytes)}</span>
+                    <span>{formatDateTime(run.updatedAt)}</span>
+                    {run.launches > 1 && (
+                      <span>
+                        {t('trainingStudio.mm3.runsLaunches', 'continued {{n}}x',
+                          { n: run.launches - 1 })}
+                      </span>
+                    )}
+                  </div>
+                  {run.failure && (
+                    <div className="text-[10px] text-rose-500 mt-1 break-words">{run.failure}</div>
+                  )}
+                </div>
+                {!run.running && (
+                  <button
+                    onClick={() => setOpen(open === run.runName ? null : run.runName)}
+                    disabled={!!cannotContinue(run)}
+                    title={cannotContinue(run) ?? undefined}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                  >
+                    <PlayCircle size={12} />
+                    {t('trainingStudio.mm3.runsContinue', 'Continue')}
+                  </button>
+                )}
+                {!run.running && (
+                  <button onClick={() => remove(run)} disabled={removeMut.isPending}
+                    title={t('trainingStudio.refine.deleteRun', 'Delete run') as string}
+                    aria-label={t('trainingStudio.refine.deleteRun', 'Delete run') as string}
+                    className="shrink-0 p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40 transition-colors">
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
+
+              {!run.running && cannotContinue(run) && (
+                <div className="text-[10px] text-zinc-500 mt-1.5">
+                  {!run.resume ? t('trainingStudio.mm3.runsNoState',
+                    'No saved optimizer state in this run, so it cannot be continued — only runs that '
+                    + 'paused for a preview, or finished after this feature shipped, have one. Its '
+                    + 'checkpoints are still usable in the adapter picker.') : cannotContinue(run)}
+                </div>
+              )}
+
+              {open === run.runName && run.resume && (
+                <div className="mt-2.5 pt-2.5 border-t border-zinc-200 dark:border-white/10 flex flex-col gap-2">
+                  <div className="text-[10px] text-zinc-500 leading-snug">
+                    {t('trainingStudio.mm3.runsResumeFrom',
+                      'Continuing from step {{step}}, saved {{when}}{{how}}.', {
+                        step: run.resume.step,
+                        when: formatDateTime(run.resume.savedAt),
+                        how: run.resume.reason === 'final'
+                          ? ' on a clean exit' : ' at a preview pause',
+                      })}
+                    {' '}
+                    {t('trainingStudio.mm3.runsResumeShape',
+                      'rank {{rank}} {{type}} on {{opt}}, {{songs}} songs (+{{held}} held out).', {
+                        rank: run.resume.rank, type: run.resume.adapterType.toUpperCase(),
+                        opt: run.resume.optimizer, songs: run.resume.samples,
+                        held: run.resume.holdout,
+                      })}
+                  </div>
+                  {run.resume.behindBy > 0 && (
+                    <div className="flex items-start gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 leading-snug">
+                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
+                      <span>
+                        {t('trainingStudio.mm3.runsBehind',
+                          'The saved state is {{n}} steps behind where this run got to (step {{last}}), '
+                          + 'so those steps get trained again. That is not damage — the run simply '
+                          + 'repeats ground it covered — but it is time you pay twice.', {
+                            n: run.resume.behindBy, last: run.lastStep,
+                          })}
+                      </span>
+                    </div>
+                  )}
+                  {run.optionsSource !== 'manifest' && (
+                    <div className="flex items-start gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 leading-snug">
+                      <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
+                      <span>
+                        {t('trainingStudio.mm3.runsReconstructed',
+                          'This run predates recipe recording, so it will be continued with what its '
+                          + 'training log states (rank, optimizer, crop policy, the held-out split) '
+                          + 'and today’s defaults for the rest — learning rate, seed and trigger '
+                          + 'among them. The engine refuses the resume outright if anything it '
+                          + 'fingerprints does not match.')}
+                      </span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <label className="flex flex-col gap-1">
+                      <ParamLabel
+                        className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                        label={t('trainingStudio.mm3.runsAddSteps', 'Train this many more')}
+                        meta={t('trainingStudio.mm3.runsAddStepsMeta', 'default 250 · step 50 · min 1')}
+                        info={t('trainingStudio.mm3.runsAddStepsInfo',
+                          'How many further steps to run past where this run stopped, on top of the '
+                          + 'step it already reached. Raising it trains longer before the run stops '
+                          + 'again; lowering it stops sooner, sacrificing convergence for a quicker '
+                          + 'checkpoint.')}
+                      />
+                      <input type="number" className={INPUT} step={50} min={1}
+                        value={addSteps}
+                        onChange={e => setAddSteps(Math.max(1, Number(e.target.value)))} />
+                      <span className="text-[10px] text-zinc-500">
+                        {t('trainingStudio.mm3.runsNewCap', 'new cap: step {{n}}',
+                          { n: run.resume.step + Math.max(1, addSteps) })}
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <ParamLabel
+                        className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                        label={t('trainingStudio.mm3.runsStopMode', 'Stop on')}
+                        info={t('trainingStudio.mm3.runsStopModeInfo',
+                          'Whether the continued run stops once it has trained the step count above, '
+                          + 'or once its held-out loss reaches a target you set below. Step count gives '
+                          + 'a fixed, predictable run length; target loss keeps training until the '
+                          + 'quality bar is met, with the step count above only as the upper cap so it '
+                          + 'cannot run forever.')}
+                      />
+                      <StyledSelect
+                        accent="amber"
+                        value={mode}
+                        onChange={setMode}
+                        options={[
+                          { value: 'steps', label: t('trainingStudio.mm3.stopSteps', 'Step count') },
+                          { value: 'loss', label: t('trainingStudio.mm3.stopLoss', 'Target loss') },
+                        ]}
+                        className="w-full"
+                      />
+                    </label>
+                    {mode === 'loss' && (
+                      <label className="flex flex-col gap-1">
+                        <ParamLabel
+                          className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                          label={t('trainingStudio.mm3.runsTargetLoss', 'Target loss')}
+                          meta={t('trainingStudio.mm3.runsTargetLossMeta', 'default 0.4 · step 0.05 · min 0')}
+                          info={t('trainingStudio.mm3.runsTargetLossInfo',
+                            'The held-out loss value the run stops at, once "Stop on" is set to target '
+                            + 'loss. The step count above becomes the cap it cannot exceed rather than '
+                            + 'the exact stopping point — the run stops at whichever comes first, the '
+                            + 'target loss or that cap. Lower is a harder target and can take much '
+                            + 'longer to reach.')}
+                        />
+                        <input type="number" className={INPUT} step={0.05} min={0}
+                          value={targetLoss}
+                          onChange={e => setTargetLoss(Math.max(0, Number(e.target.value)))} />
+                      </label>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => void start(run)}
+                    disabled={busy || jobRunning}
+                    className="self-start px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 transition-colors flex items-center gap-1.5"
+                  >
+                    {busy ? <Loader2 size={12} className="animate-spin" /> : <PlayCircle size={12} />}
+                    {t('trainingStudio.mm3.runsGo', 'Continue training')}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* A run not listed above (a record copied in by hand, another
+          dataset's name): continued the same way, by its folder name. */}
+      <div className="mt-2 flex items-center gap-2">
+        <input className={INPUT} value={manualPath} onChange={e => setManualPath(e.target.value)}
+          placeholder={t('trainingStudio.mm3.resumeManual', 'Or paste a resume record path (optional)')}
+          title={t('trainingStudio.mm3.resumeManualInfo', 'The resume-state.bin of a previous run, or its run folder, to continue it without picking it above. It continues with this many more steps (250 unless a run above was set otherwise) and that run\'s own recipe.') as string} />
+        <button onClick={() => void start({ runName: runNameFromResumePath(manualPath) }).then(() => setManualPath(''))}
+          disabled={busy || jobRunning || !runNameFromResumePath(manualPath)}
+          title={jobRunning ? t('trainingStudio.mm3.runsJobActive', 'A training job is running; continue this run when it ends.') as string : undefined}
+          className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+          <PlayCircle size={12} />
+          {t('trainingStudio.mm3.runsContinue', 'Continue')}
+        </button>
+      </div>
+
+      {ladderRun && (
+        <Mm3CheckpointLadder key={ladderRun.runName} datasetId={datasetId} run={ladderRun.runName} reloadKey={ladderRun.updatedAt} renderOpts={renderOpts}
+          picker={ladderRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
+            <TrainingRunPicker label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
+              info={t('trainingStudio.mm3.ladderRunInfo', 'This dataset has more than one finished run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')}
+              value={ladderRun.runName} onChange={setPicked}
+              options={ladderRuns.map(r => ({ value: r.runName,
+                label: `${formatDateTime(r.startedAt ?? r.updatedAt)} · ${RUN_OUTCOME[r.outcome].label} · ${r.checkpoints.length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin}` : ''}` }))} />
+          </div>} />
+      )}
+    </div>
+  );
+};
+
+export default Mm3RunsPanel;

@@ -19,7 +19,7 @@
 
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { hashKey } from '@tanstack/react-query';
-import { subscribeEventSource } from '../services/sharedEventSource';
+import { subscribeEventSource } from '@/services/sharedEventSource';
 import { invalidateKeys } from './invalidation';
 
 export interface BridgeEffect {

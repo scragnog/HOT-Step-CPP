@@ -1,4 +1,4 @@
-import { resourceKey, serverKey } from '../keys';
+import { resourceKey, serverKey } from '@/queries/keys';
 
 // Lives in the training-runs area: previews are run records read per worker.
 const RESOURCE = 'training-runs/sa3-previews';

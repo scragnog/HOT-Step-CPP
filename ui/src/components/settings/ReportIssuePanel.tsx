@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { gpusOptions, healthOptions, reportFailedJobOptions, reportLogsOptions } from '../../queries/shell-queue/settings';
-import { useBackendStore } from '../../stores/backendStore';
-import { backendModelsOptions } from '../../queries/global-models/options';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { ParamLabel } from '../shared/ParamLabel';
+import { gpusOptions, healthOptions, reportFailedJobOptions, reportLogsOptions } from '@/queries/shell-queue/settings';
+import { useBackendStore } from '@/stores/backendStore';
+import { backendModelsOptions } from '@/queries/global-models/options';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { buildReport, modelLines, redact, renderBody, type LogSection } from './reportIssue';
+import { copyTextThen } from '@/utils/storage/clipboard';
+import { useCopiedFlag } from '@/hooks/useCopyFeedback';
+import { isPresent } from '@/utils/guards';
 
 const osName = () => {
   const ua = navigator.userAgent;
@@ -25,7 +28,7 @@ export function ReportIssuePanel() {
   const catalogue = useQuery({ ...backendModelsOptions(backendId), enabled: !!backendId && backendId !== 'ace' }).data;
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copied, markCopied] = useCopiedFlag(2000);
   const unknown = t('settings.report.unknown', 'unknown');
   const b = health?.build;
   const system = [
@@ -36,7 +39,7 @@ export function ReportIssuePanel() {
     ['Update channel', b?.channel || unknown],
     ['OS', osName()],
     ['GPU', gpus?.length ? gpus.map(g => `${g.name} (${Math.round(g.memoryMB / 1024)} GB)`).join(', ') : unknown],
-    ['Compute backend', [health?.engine.backend, health?.engine.device].filter(Boolean).join(' / ') || unknown],
+    ['Compute backend', [health?.engine.backend, health?.engine.device].filter(isPresent).join(' / ') || unknown],
     ['Engine', backendId || unknown],
     ...modelLines(backendId, { ditModel, lmModel, vaeModel }, catalogue, unknown),
   ].map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -59,10 +62,8 @@ export function ReportIssuePanel() {
   const parts = { title: title.trim() || 'Issue report from the app', description, system, sections: sections.short };
   const report = useMemo(() => buildReport(parts), [title, description, system, sections]); // eslint-disable-line react-hooks/exhaustive-deps
   const send = () => window.open(report.url, '_blank', 'noopener,noreferrer');
-  const copyFull = async () => {
-    await navigator.clipboard.writeText(`${parts.title}\n\n${renderBody({ ...parts, sections: sections.full })}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyFull = () => {
+    copyTextThen(`${parts.title}\n\n${renderBody({ ...parts, sections: sections.full })}`, markCopied);
   };
 
   return <section className="settings-section">

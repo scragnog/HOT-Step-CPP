@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   mm3AdaptersOptions,
   type Mm3LmAdapterScales,
-} from '../../queries/global-models/options';
+} from '@/queries/global-models/options';
 // Mm3LmAdapterDropdown.tsx — Adapters cluster for a backend whose adapters are
 // RUNTIME LM LoRAs rather than ACE's DiT adapter stack.
 //
@@ -31,11 +31,12 @@ import {
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { isPresent } from '@/utils/guards';
 
 /** The Adapters section's own colour (GlobalParamBar.tsx accentColor="emerald"). */
 const ACCENT = 'emerald' as const;
@@ -172,7 +173,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               entry.dataset,
               entry.rank ? `rank ${entry.rank}` : '',
               entry.trainedSteps ? `${entry.trainedSteps} steps` : '',
-            ].filter(Boolean).join(' · ')}
+            ].filter(isPresent).join(' · ')}
           </p>
           {entry.trigger && entry.triggerPrepend === false && (
             <p className="text-[10px] text-amber-600 dark:text-amber-500/80 leading-relaxed">

@@ -25,13 +25,15 @@
 //     worse than one that never offered it.
 
 import React from 'react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { usePluginRegistry } from '../../hooks/usePluginRegistry';
-import { useCapabilities } from '../../hooks/useCapabilities';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { usePluginRegistry } from '@/hooks/usePluginRegistry';
+import { useCapabilities } from '@/hooks/useCapabilities';
 import { PluginControls } from './PluginControls';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { isPresent } from '@/utils/guards';
 
 const NATIVE = '';
 
@@ -40,7 +42,12 @@ const NATIVE = '';
 const ACCENT = 'sky';
 
 export const SamplerPluginControls: React.FC = () => {
-  const gp = useGlobalParams() as any;
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    guidanceMode: s.guidanceMode, inferMethod: s.inferMethod, scheduler: s.scheduler,
+    pluginParams: s.pluginParams,
+    setGuidanceMode: s.setGuidanceMode, setInferMethod: s.setInferMethod, setScheduler: s.setScheduler,
+    setPluginParam: s.setPluginParam, resetPluginParams: s.resetPluginParams,
+  })));
   const { registry, findSolver, findScheduler, findGuidance } = usePluginRegistry();
   const { capabilities } = useCapabilities();
 
@@ -61,7 +68,7 @@ export const SamplerPluginControls: React.FC = () => {
   // Each picker's hover card is the selected plugin's own description plus any
   // caveat that selection earns.
   const join = (...parts: (string | false | undefined)[]) =>
-    parts.filter(Boolean).join(' ') || undefined;
+    parts.filter(isPresent).join(' ') || undefined;
 
   const solverInfo = join(
     solverMeta?.description,

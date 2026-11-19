@@ -3,7 +3,7 @@
 // state, so a follow started while a project is being opened reloads that
 // project; once the user has moved to another project (isCurrent false) its
 // results are dropped.
-import { followStudioJob as followJob } from '../../queries/studios/workflows';
+import { followStudioJob as followJob } from '@/queries/studios/workflows';
 import type { WorkflowJobStatus } from '../../../../server/src/contracts/workflow';
 
 export interface FollowSectionHandlers<V> {

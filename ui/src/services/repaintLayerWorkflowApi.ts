@@ -1,4 +1,5 @@
-import { followStudioJob as followJob, studioWorkflowApi as workflowApi } from '../queries/studios/workflows';
+import { followStudioJob as followJob, studioWorkflowApi as workflowApi } from '@/queries/studios/workflows';
+import { newId } from '@/utils/id';
 export type SourceRef = { kind: 'asset' | 'song'; id: string; expectedUrl: string };
 interface CommonCapture { source: SourceRef; expectedBackend: string; engineParams: Record<string, unknown> }
 export interface RepaintCapture extends CommonCapture {
@@ -14,7 +15,7 @@ export interface RenderResult {
 }
 
 export async function submitStudioRender(kind: 'repaint-render' | 'layer-render',
-  input: RepaintCapture | LayerCapture, idempotencyKey = crypto.randomUUID()) {
+  input: RepaintCapture | LayerCapture, idempotencyKey = newId()) {
   return workflowApi.submit(kind, idempotencyKey, input as unknown as Record<string, unknown>);
 }
 

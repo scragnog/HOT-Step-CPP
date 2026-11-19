@@ -11,6 +11,11 @@
 // that is why `useWordGestures` is handed this function instead of keeping its
 // own copy of the toast.
 //
+// The timeline scrolls on two axes, so `revealWord` and `frameWord` do too: a
+// row can be off screen below the fold even when its time is in the window.
+// "Frame" is reveal plus zoom, which is why framing a word also jumps to it
+// rather than leaving the selected row out of view.
+//
 // Every distance here is a named constant in `timingModel` rather than a number
 // in the middle of an expression: "35% of the window" is a decision, and it
 // should be findable and changeable beside the other ones.
@@ -21,10 +26,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'react-toastify';
 import {
-  ANCHOR_RATIO, clampPx, DEFAULT_PX, FOLLOW_KEY, FOLLOW_LEAD_PX, FOLLOW_REVEAL_RATIO,
-  FOLLOW_TAIL_PX, MIN_SPAN_SEC, PAGE_PAD_PX, pageTargetTime, readFlag, readNumber, ZOOM_KEY,
-  type EditLine,
+  ANCHOR_RATIO, clampPx, DEFAULT_PX, FOLLOW_LEAD_PX, FOLLOW_REVEAL_RATIO, FOLLOW_TAIL_PX,
+  FRAME_MIN_SPAN, FRAME_SPAN_FACTOR, MIN_SPAN_SEC, PAGE_PAD_PX, ROW_H, RULER_H,
+  pageTargetTime, type EditLine,
 } from './timingModel';
+import { editorPrefs } from '@/storage/lyricEditorSettings';
 
 export interface TimelineViewOptions {
   scrollerRef: React.RefObject<HTMLDivElement | null>;
@@ -36,13 +42,35 @@ export interface TimelineViewOptions {
   anchorTime: number;
 }
 
+/** Keep a left offset inside the element's scrollable range. */
+function clampScrollLeft(el: HTMLElement, left: number): number {
+  return Math.max(0, Math.min(Math.max(0, el.scrollWidth - el.clientWidth), left));
+}
+
+/** Centre one timeline row vertically, clamped to the scrollable range. */
+function scrollLineIntoView(el: HTMLElement, lineIndex: number): void {
+  // Rows are no longer all ROW_H: an alignment preview expands one row with a
+  // second lane, moving every row below it. Measure the rendered row instead of
+  // assuming index * ROW_H, so the row a review click selects is actually centred.
+  const row = el.querySelector<HTMLElement>(`[data-line-index="${Math.max(0, lineIndex)}"]`);
+  const rowRect = row?.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const y = rowRect
+    ? rowRect.top - elRect.top + el.scrollTop + rowRect.height / 2
+    : RULER_H + Math.max(0, lineIndex) * ROW_H + ROW_H / 2;
+  el.scrollTop = Math.max(
+    0,
+    Math.min(Math.max(0, el.scrollHeight - el.clientHeight), y - el.clientHeight / 2),
+  );
+}
+
 export function useTimelineView({
   scrollerRef, lines, currentTime, total, anchorTime,
 }: TimelineViewOptions) {
   const { t } = useTranslation();
-  const [pxPerSec, setPxPerSecState] = useState(() => clampPx(readNumber(ZOOM_KEY, DEFAULT_PX)));
+  const [pxPerSec, setPxPerSecState] = useState(() => clampPx(editorPrefs.zoom.read(DEFAULT_PX)));
   const [scrollLeft, setScrollLeft] = useState(0);
-  const [follow, setFollow] = useState(() => readFlag(FOLLOW_KEY, true));
+  const [follow, setFollow] = useState(() => editorPrefs.follow.read(true));
   const [viewportPx, setViewportPx] = useState(0);
 
   // The window's width drives paging, so it is measured rather than assumed:
@@ -57,12 +85,10 @@ export function useTimelineView({
     return () => observer.disconnect();
   }, [scrollerRef]);
 
-  useEffect(() => {
-    try { localStorage.setItem(FOLLOW_KEY, follow ? '1' : '0'); } catch { /* storage blocked */ }
-  }, [follow]);
-  useEffect(() => {
-    try { localStorage.setItem(ZOOM_KEY, String(pxPerSec)); } catch { /* storage blocked */ }
-  }, [pxPerSec]);
+  // The versioned stores read a legacy `hs-lyricEditor*` key once and write the
+  // new one; nothing below knows whether the value came from an old build.
+  useEffect(() => { editorPrefs.follow.write(follow); }, [follow]);
+  useEffect(() => { editorPrefs.zoom.write(pxPerSec); }, [pxPerSec]);
 
   const setPxPerSec = useCallback((value: number) => setPxPerSecState(clampPx(value)), []);
   const zoomBy = useCallback((factor: number) => setPxPerSecState(p => clampPx(p * factor)), []);
@@ -70,14 +96,31 @@ export function useTimelineView({
   const goToPlayhead = useCallback(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    el.scrollLeft = Math.max(0, currentTime * pxPerSec - el.clientWidth * ANCHOR_RATIO);
+    el.scrollLeft = clampScrollLeft(el, currentTime * pxPerSec - el.clientWidth * ANCHOR_RATIO);
   }, [scrollerRef, currentTime, pxPerSec]);
 
-  /** Fill the window with a span of seconds, for framing one word. */
-  const zoomToSpan = useCallback((span: number) => {
+  /** Bring a word's time across and its row down, without zooming or seeking. */
+  const revealWord = useCallback((time: number, lineIndex: number) => {
     const el = scrollerRef.current;
     if (!el) return;
-    setPxPerSecState(clampPx(el.clientWidth / Math.max(MIN_SPAN_SEC, span)));
+    el.scrollLeft = clampScrollLeft(el, time * pxPerSec - el.clientWidth * ANCHOR_RATIO);
+    scrollLineIntoView(el, lineIndex);
+  }, [scrollerRef, pxPerSec]);
+
+  /**
+   * Frame one word: zoom so it fills most of the window, then reveal it on both
+   * axes. The zoom effect below re-centres on `anchorTime`; when this word is
+   * the anchor that lands on the same place, and when it is not the explicit
+   * scroll is what makes the button keep its promise.
+   */
+  const frameWord = useCallback((start: number, end: number, lineIndex: number) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const span = Math.max(FRAME_MIN_SPAN, (end - start) * FRAME_SPAN_FACTOR);
+    const next = clampPx(el.clientWidth / Math.max(MIN_SPAN_SEC, span));
+    setPxPerSecState(next);
+    el.scrollLeft = clampScrollLeft(el, start * next - el.clientWidth * ANCHOR_RATIO);
+    scrollLineIntoView(el, lineIndex);
   }, [scrollerRef]);
 
   /**
@@ -130,8 +173,9 @@ export function useTimelineView({
 
   return {
     data: { pxPerSec, scrollLeft, follow, canPageLeft, canPageRight },
-    setPxPerSec, zoomBy, zoomToSpan,
+    setPxPerSec, zoomBy,
     setScrollLeft, setFollow, goToPlayhead,
+    revealWord, frameWord,
     releaseFollow, pageBy,
   };
 }

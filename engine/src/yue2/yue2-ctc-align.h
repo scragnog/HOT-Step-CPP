@@ -32,12 +32,47 @@
 // Tie-breaking in the backtrack is the one place two correct implementations
 // can legitimately differ by a frame; the acceptance gate is stated in
 // seconds for that reason.
+//
+// TWO LATTICES, AND WHY THEY MUST STAY APART
+//
+//   yue2_cursor_align        what cursor_prep.py does, byte for byte. `ace-train
+//                           yue2-align` writes the trainer's cursor_words with
+//                           it and POST /yue2/align read it too, so its output
+//                           is a published target, not an implementation
+//                           detail.
+//   yue2_cursor_align_star   the same alignment with one extra escape symbol:
+//                           sung audio that is not one of the lyric's words
+//                           (an ad-lib, a backing "ah" pad, an outro chant, a
+//                           held note under a line). Without it the only filler
+//                           is blank, which means SILENCE to the acoustic model
+//                           — so on a passage where somebody is audibly singing
+//                           the wrong words, the path pays less by stretching a
+//                           lyric character over it, and the word grows to two
+//                           or three times its sung length. The star scores
+//                           (frame's best letter - margin), so it is chosen
+//                           exactly where the character the path needs scores
+//                           worse than e^-margin of the best letter available.
+//
+// The star is used by the align ENDPOINT only. It is deliberately a separate
+// function rather than a flag on yue2_cursor_align: the trainer's cursor_words
+// are compared against the twelve torchaudio fixtures above, and to the AR
+// trainer's --cursor-weight loss, so that path may not move. Two consequences
+// of keeping them apart are accepted on purpose: the rows5 tail is duplicated
+// rather than factored out, and yue2_cursor_align is not touched at all (the
+// regression fixture in tools/yue2-ctc-align pins its output).
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+// The star's score is the frame's best letter score minus this many nats:
+// e^-1.5 ~= 0.22, so garbage is chosen exactly where the character the path
+// needs scores worse than about a fifth of the best letter on offer. 1.5 is the
+// value pdoom-video's alignment settled on for its own sung audio
+// (analysis/ctcalign.py, `margin`).
+static constexpr double YUE2_ALIGN_STAR_MARGIN = 1.5;
 
 struct Yue2CtcSpan {
     int    token = 0;   // label index (never blank in the merged output)
@@ -162,14 +197,16 @@ static const char * yue2_romanize_cyrillic(uint32_t cp) {
 struct Yue2LyricWord {
     int64_t     c0 = 0, c1 = 0;  // codepoint span in the original lyrics
     std::string norm;            // [a-z'] only
+    int64_t     line = 0;        // index of the lyric line this word is on
 };
 
 static std::vector<Yue2LyricWord> yue2_cursor_words_of(const std::string & lyrics) {
     // Walk codepoints, tracking line starts and whitespace runs.
     std::vector<Yue2LyricWord> out;
     // Split into lines on '\n' (byte-safe: '\n' never occurs inside a UTF-8 sequence).
-    int64_t cp_pos = 0;  // codepoint index of the current line start
-    size_t  b      = 0;
+    int64_t cp_pos     = 0;  // codepoint index of the current line start
+    int64_t line_index = 0;  // read by the star lattice, ignored by the trainer path
+    size_t  b          = 0;
     while (b <= lyrics.size()) {
         size_t e = lyrics.find('\n', b);
         if (e == std::string::npos) {
@@ -213,7 +250,7 @@ static std::vector<Yue2LyricWord> yue2_cursor_words_of(const std::string & lyric
                     bool has_letter = false;
                     for (char ch : norm) has_letter |= (ch >= 'a' && ch <= 'z');
                     if (has_letter) {
-                        out.push_back({ cp_pos + w0, cp_pos + cp, norm });
+                        out.push_back({ cp_pos + w0, cp_pos + cp, norm, line_index });
                     }
                 }
             }
@@ -224,6 +261,7 @@ static std::vector<Yue2LyricWord> yue2_cursor_words_of(const std::string & lyric
         cp_pos += n + 1;
         if (e == lyrics.size()) break;
         b = e + 1;
+        line_index++;
     }
     return out;
 }
@@ -270,6 +308,188 @@ static bool yue2_cursor_align(const float * log_probs, int64_t T, int C, double 
         return false;
     }
     const double fps = audio_seconds / (double) T;  // seconds per frame, cursor_prep's `fps`
+    rows5->clear();
+    size_t k = 0;
+    for (size_t i : keep) {
+        const size_t n = toks[i].size();
+        double       sc = 0.0;
+        for (size_t j = 0; j < n; j++) sc += spans[k + j].score;
+        rows5->push_back((float) (spans[k].start * fps));
+        rows5->push_back((float) (spans[k + n - 1].end * fps));
+        rows5->push_back((float) (sc / (double) n));
+        rows5->push_back((float) ws[i].c0);
+        rows5->push_back((float) ws[i].c1);
+        k += n;
+    }
+    return true;
+}
+
+// Same lattice as yue2_ctc_forced_align, plus one symbol that has no column of
+// its own: the id `C`, meaning "sung audio that is not one of my words". Its
+// frame score is the frame's best letter score minus `margin`, so it is taken
+// where the lyric character the path needs is a poor match but the audio clearly
+// contains a letter — the case blank cannot cover, because blank means silence.
+//
+// `targets` may contain the id `C` anywhere; the caller decides where (this path
+// puts one at each end and between lines). Everything else, including the
+// tie-breaking in the backtrack and the end-state choice, is yue2_ctc_forced_align
+// unchanged.
+static bool yue2_ctc_forced_align_star(const float * log_probs, int64_t T, int C,
+                                       const std::vector<int> & targets, int blank, double margin,
+                                       std::vector<int> * path_tok, std::vector<float> * path_lp) {
+    const int64_t N = (int64_t) targets.size();
+    const int64_t S = 2 * N + 1;
+    if (T <= 0 || N < 0) {
+        return false;
+    }
+    const int star = C;  // not a real column; scored against `best` below
+    auto      sym  = [&](int64_t s) -> int { return (s % 2 == 0) ? blank : targets[(size_t) (s / 2)]; };
+
+    // The frame's best letter, once per frame: the star's score is defined
+    // against it, and asking for it inside the sweep would cost O(T*S*C).
+    std::vector<double> best((size_t) T, 0.0);
+    for (int64_t t = 0; t < T; t++) {
+        double m = (double) log_probs[(size_t) (t * C)];
+        for (int c = 1; c < C; c++) {
+            m = std::max(m, (double) log_probs[(size_t) (t * C + c)]);
+        }
+        best[(size_t) t] = m;
+    }
+    auto LP = [&](int64_t t, int s) -> double {
+        return (s == star) ? best[(size_t) t] - margin : (double) log_probs[(size_t) (t * C + s)];
+    };
+
+    const double NEG = -1e30;
+    std::vector<double> alpha((size_t) (T * S), NEG);
+    std::vector<int8_t> from((size_t) (T * S), 0);  // 0 = stay, 1 = s-1, 2 = s-2
+    auto A = [&](int64_t t, int64_t s) -> double & { return alpha[(size_t) (t * S + s)]; };
+    auto F = [&](int64_t t, int64_t s) -> int8_t & { return from[(size_t) (t * S + s)]; };
+
+    A(0, 0) = LP(0, blank);
+    if (S > 1) {
+        A(0, 1) = LP(0, sym(1));
+    }
+    for (int64_t t = 1; t < T; t++) {
+        for (int64_t s = 0; s < S; s++) {
+            double best_prev = A(t - 1, s);
+            int8_t arg       = 0;
+            if (s >= 1 && A(t - 1, s - 1) > best_prev) {
+                best_prev = A(t - 1, s - 1);
+                arg       = 1;
+            }
+            if (s >= 2 && sym(s) != blank && sym(s) != sym(s - 2) && A(t - 1, s - 2) > best_prev) {
+                best_prev = A(t - 1, s - 2);
+                arg       = 2;
+            }
+            if (best_prev <= NEG / 2) {
+                continue;
+            }
+            A(t, s) = best_prev + LP(t, sym(s));
+            F(t, s) = arg;
+        }
+    }
+    int64_t s = S - 1;
+    if (S >= 2 && A(T - 1, S - 2) > A(T - 1, S - 1)) {
+        s = S - 2;
+    }
+    if (A(T - 1, s) <= NEG / 2) {
+        return false;  // no valid path: T too short for N (+ repeats)
+    }
+    path_tok->assign((size_t) T, blank);
+    path_lp->assign((size_t) T, 0.0f);
+    for (int64_t t = T - 1; t >= 0; t--) {
+        (*path_tok)[(size_t) t] = sym(s);
+        (*path_lp)[(size_t) t]  = (float) LP(t, sym(s));
+        if (t > 0) {
+            s -= F(t, s);
+        }
+    }
+    return true;
+}
+
+// yue2_cursor_align with the star lattice, for the align ENDPOINT only.
+//
+// A star is placed before the first line and between consecutive lines — not
+// between words: a line is the unit a singer breathes and pauses inside, so a
+// star per word would let the path float every word independently and a bar
+// would start showing words out of order. A star at each end lets the audio
+// before the first line and after the last one (an intro chant, an outro hook)
+// be garbage instead of the first/last word's opening or closing syllable.
+//
+// The rows are cursor_prep's: start, end, mean score, char0, char1, in
+// codepoints of the ORIGINAL lyrics. Star spans are dropped before the count
+// check, so every row still corresponds to a word.
+//
+// The rows-building tail below is a deliberate copy of yue2_cursor_align's
+// rather than a shared helper: that function is gated against torchaudio's own
+// output and its rows are the trainer's cursor_words, so the one thing this file
+// must not do is refactor it.
+static bool yue2_cursor_align_star(const float * log_probs, int64_t T, int C, double audio_seconds,
+                                   const std::vector<std::string> & labels, const std::string & lyrics,
+                                   double margin, std::vector<float> * rows5, std::string * err) {
+    std::vector<int> label_of(256, -1);
+    for (size_t i = 1; i < labels.size(); i++) {
+        if (labels[i].size() == 1) {
+            label_of[(unsigned char) labels[i][0]] = (int) i;
+        }
+    }
+    const int                        star = C;
+    const std::vector<Yue2LyricWord> ws   = yue2_cursor_words_of(lyrics);
+    std::vector<std::vector<int>>    toks(ws.size());
+    std::vector<size_t>              keep;
+    for (size_t i = 0; i < ws.size(); i++) {
+        for (char ch : ws[i].norm) {
+            const int l = label_of[(unsigned char) ch];
+            if (l >= 0) {
+                toks[i].push_back(l);
+            }
+        }
+        if (!toks[i].empty()) {
+            keep.push_back(i);
+        }
+    }
+    if (keep.empty()) {
+        *err = "no alignable characters in the lyrics";
+        return false;
+    }
+
+    std::vector<int> flat;
+    int64_t          line = -1;
+    flat.push_back(star);
+    for (size_t i : keep) {
+        if (ws[i].line != line) {
+            if (line >= 0) {
+                flat.push_back(star);
+            }
+            line = ws[i].line;
+        }
+        flat.insert(flat.end(), toks[i].begin(), toks[i].end());
+    }
+    flat.push_back(star);
+
+    std::vector<int>   ptok;
+    std::vector<float> plp;
+    if (!yue2_ctc_forced_align_star(log_probs, T, C, flat, /*blank=*/0, margin, &ptok, &plp)) {
+        *err = "forced alignment has no valid path (audio too short for the text?)";
+        return false;
+    }
+    const std::vector<Yue2CtcSpan> all = yue2_ctc_merge_tokens(ptok, plp, 0);
+    std::vector<Yue2CtcSpan>       spans;
+    spans.reserve(all.size());
+    for (const Yue2CtcSpan & span : all) {
+        if (span.token != star) {
+            spans.push_back(span);
+        }
+    }
+    size_t chars = 0;
+    for (size_t i : keep) {
+        chars += toks[i].size();
+    }
+    if (spans.size() != chars) {
+        *err = "span count " + std::to_string(spans.size()) + " != target length " + std::to_string(chars);
+        return false;
+    }
+    const double fps = audio_seconds / (double) T;
     rows5->clear();
     size_t k = 0;
     for (size_t i : keep) {

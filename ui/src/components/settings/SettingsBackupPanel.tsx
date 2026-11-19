@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import type { BackupPreview, SettingsBackup } from '../../../../server/src/services/settingsBackup';
 import type { AppSettings } from './SettingsPanel';
-import { http } from '../../services/axiosClient';
-import { queryManager } from '../../queries/invalidation';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
-import { ParamLabel } from '../shared/ParamLabel';
+import { http } from '@/services/axiosClient';
+import { queryManager } from '@/queries/invalidation';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { Archive } from 'lucide-react';
+import { saveJson } from '@/utils/storage/saveFile';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 interface Props { settings: AppSettings; onSettingsChange: (settings: AppSettings) => void }
 const MAX_BYTES = 500 * 1024 * 1024; // server accepts 512 MB (BACKUP_BODY_LIMIT)
@@ -28,17 +30,12 @@ export function SettingsBackupPanel({ settings, onSettingsChange }: Props) {
     running.current = true;
     setBusy(true); setError(''); setSaved(false);
     try { await action(); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    catch (err) { setError(errorMessage(err)); }
     finally { running.current = false; setBusy(false); }
   };
   const download = () => run(async () => {
     const { data } = await http.post<SettingsBackup>('/settings/backup/export', { app: settings });
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `hotstep-settings-${data.exportedAt.slice(0, 10)}.json`;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveJson(data, `hotstep-settings-${data.exportedAt.slice(0, 10)}.json`);
   });
   const choose = (file: File) => run(async () => {
     setPending(null);

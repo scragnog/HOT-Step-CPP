@@ -1,18 +1,18 @@
 import type { HeartmulaStatusResponse } from '../../../../../server/src/contracts/heartmulaTraining';
-import { HeartmulaPrepareCard, type HeartmulaPrepareCardProps } from '../HeartmulaPrepareCard';
-import { HeartmulaPreviewCard, type HeartmulaPreviewCardProps } from '../HeartmulaPreviewCard';
-import { HeartmulaTrainCard, type HeartmulaTrainCardProps } from '../HeartmulaTrainCard';
-import type { TrainingPlugin, TrainingRenderContext } from '../trainingPluginTypes';
+import { HeartmulaPrepareCard, type HeartmulaPrepareCardProps } from '@/components/training-studio/cards/HeartmulaPrepareCard';
+import { HeartmulaPreviewCard, type HeartmulaPreviewCardProps } from '@/components/training-studio/cards/HeartmulaPreviewCard';
+import { HeartmulaTrainCard, type HeartmulaTrainCardProps } from '@/components/training-studio/cards/HeartmulaTrainCard';
+import type { TrainingPlugin, TrainingRenderContext } from '@/components/training-studio/lib/trainingPluginTypes';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { trainingQueries } from '../../../queries/training-data/queries';
-import { queryManager } from '../../../queries/invalidation';
-import { useTrainingStore } from '../../../stores/trainingStore';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { queryManager } from '@/queries/invalidation';
+import { useTrainingStore } from '@/stores/trainingStore';
 import { Cpu, Loader2, RefreshCw } from 'lucide-react';
-import { TrainingReviewHeader, TrainingReviewRunRow } from '../ReviewPanel';
-import { TrainingAllStagesCard } from '../Yue2StageCard';
-import { Yue2ClearPreparedCard } from '../Yue2ClearPreparedCard';
+import { TrainingReviewHeader, TrainingReviewRunRow } from '@/components/training-studio/runs/ReviewPanel';
+import { TrainingAllStagesCard } from '@/components/training-studio/cards/Yue2StageCard';
+import { Yue2ClearPreparedCard } from '@/components/training-studio/cards/Yue2ClearPreparedCard';
 
 /** The integration owns Query snapshots, captured targets, commands and errors.
  * No leaf starts a second reader or job lifecycle beside that owner. */

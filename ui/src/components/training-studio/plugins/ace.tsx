@@ -1,42 +1,38 @@
 // ACE owns its recipe forms, tensor gates, training progress and Audition.
 // The shared Train panel dispatches here only for the ACE target.
 import { aceChips, aceReadiness } from './chips';
-import { TRAINING_TARGETS } from '../trainingTargets';
-import type { TrainingPlugin } from '../trainingPluginTypes';
+import { TRAINING_TARGETS } from '@/components/training-studio/lib/trainingTargets';
+import type { TrainingPlugin } from '@/components/training-studio/lib/trainingPluginTypes';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Check, Copy, Cpu, Database, FileCode2, Flag, Headphones, Layers, Loader2, PauseCircle, Target, Waves, XCircle,
 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
-import { usePersistedState } from '../../../hooks/usePersistedState';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { useTranslation } from 'react-i18next';
-import { trainingQueries } from '../../../queries/training-data/queries';
-import { runQueries } from '../../../queries/training-runs/queries';
-import type { TrainDitOptions, TrainLmOptions } from '../../../services/trainingApi';
-import { assertRecipeWorker, resolveTrainingRecipe } from '../../../services/trainingRecipesApi';
-import { useTrainingStore } from '../../../stores/trainingStore';
-import { formatDurationMs, totalEpochMs } from '../../../utils/trainingEta';
-import { AuditionCard, type MilestoneAuditionRequest } from '../AuditionCard';
-import { Yue2StageCard } from '../Yue2StageCard';
-import { JobProgress } from '../JobProgress';
-import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from '../TrainDitForm';
-import { TrainingChart } from '../TrainingChart';
-import { TrainingRunStats } from '../TrainingRunStats';
-import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from '../TrainLmForm';
-import { aceDitRecipeInput, aceLmRecipeInput, resolveTrainGate } from '../trainGates';
-import { useActiveTrainingJob } from '../../../queries/training-runs/hooks';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { runQueries } from '@/queries/training-runs/queries';
+import type { TrainDitOptions, TrainLmOptions } from '@/services/trainingApi';
+import { assertRecipeWorker, resolveTrainingRecipe } from '@/services/trainingRecipesApi';
+import { copyTextThen } from '@/utils/storage/clipboard';
+import { formatBytes, formatDecimal } from '@/utils/format/format';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { formatDurationMs, totalEpochMs } from '@/utils/training/trainingEta';
+import { AuditionCard, type MilestoneAuditionRequest } from '@/components/training-studio/cards/AuditionCard';
+import { Yue2StageCard } from '@/components/training-studio/cards/Yue2StageCard';
+import { JobProgress } from '@/components/training-studio/panels/JobProgress';
+import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from '@/components/training-studio/panels/TrainDitForm';
+import { TrainingChart } from '@/components/training-studio/charts/TrainingChart';
+import { TrainingRunStats } from '@/components/training-studio/charts/TrainingRunStats';
+import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from '@/components/training-studio/panels/TrainLmForm';
+import { aceDitRecipeInput, aceLmRecipeInput, resolveTrainGate } from '@/components/training-studio/lib/trainGates';
+import { useActiveTrainingJob } from '@/queries/training-runs/hooks';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { formatLoss } from '@/utils/format/format';
+import { useCopiedFlag } from '@/hooks/useCopyFeedback';
+import { CARD } from '@/components/training-studio/lib/yue2CardUi';
 
-const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const STATUS_RELOAD_DEBOUNCE_MS = 400;
-
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
-}
 
 export const AceTrainingPage: React.FC = () => {
   const { t } = useTranslation();
@@ -96,8 +92,8 @@ export const AceTrainingPage: React.FC = () => {
   }, [trainingWorker, lmRecipe.data, ditRecipe.data]);
   const [starting, setStarting] = useState(false);
   const [ditStarting, setDitStarting] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [ditCopied, setDitCopied] = useState(false);
+  const [copied, markCopied] = useCopiedFlag();
+  const [ditCopied, markDitCopied] = useCopiedFlag();
   // A milestone badge cannot start an audition on its own — the prompt lives in
   // the AuditionCard. Clicking one hands the milestone dir down; the nonce lets
   // a repeat click on the SAME milestone re-trigger.
@@ -105,7 +101,7 @@ export const AceTrainingPage: React.FC = () => {
   const auditionMilestone = (path: string, loss: number, epoch: number) => {
     setMilestoneRequest(prev => ({
       path,
-      label: `loss ${loss.toFixed(1)} · #${epoch}`,
+      label: `loss ${formatDecimal(loss, 1)} · #${epoch}`,
       nonce: (prev?.nonce ?? 0) + 1,
     }));
   };
@@ -155,7 +151,7 @@ export const AceTrainingPage: React.FC = () => {
         throw new Error(t('trainingStudio.ace.datasetChanged', 'Dataset changed while the recipe was resolved. Review the form and start again.'));
       }
       await startTrainLm(recipe.execution as TrainLmOptions);
-    } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setStarting(false); }
+    } catch (err) { useTrainingStore.setState({ error: errorMessage(err) }); } finally { setStarting(false); }
   };
 
   const handleStartDit = async () => {
@@ -167,25 +163,19 @@ export const AceTrainingPage: React.FC = () => {
         throw new Error(t('trainingStudio.ace.datasetChanged', 'Dataset changed while the recipe was resolved. Review the form and start again.'));
       }
       await startTrainDit(recipe.execution as TrainDitOptions);
-    } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setDitStarting(false); }
+    } catch (err) { useTrainingStore.setState({ error: errorMessage(err) }); } finally { setDitStarting(false); }
   };
 
   const copyAdapterDir = () => {
     const dir = trainLmStatus?.adapterDir;
     if (!dir) return;
-    void navigator.clipboard?.writeText(dir).then(
-      () => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); },
-      () => { /* clipboard blocked — the path is selectable on screen anyway */ },
-    );
+    copyTextThen(dir, markCopied); // the path is selectable on screen anyway
   };
 
   const copyDitAdapterDir = () => {
     const dir = trainDitStatus?.adapterDir;
     if (!dir) return;
-    void navigator.clipboard?.writeText(dir).then(
-      () => { setDitCopied(true); window.setTimeout(() => setDitCopied(false), 1500); },
-      () => { /* clipboard blocked — the path is selectable on screen anyway */ },
-    );
+    copyTextThen(dir, markDitCopied); // the path is selectable on screen anyway
   };
 
   const header = (
@@ -448,7 +438,7 @@ export const AceTrainingPage: React.FC = () => {
             <div className={`${CARD} grid grid-cols-2 sm:grid-cols-3 gap-3`}>
               <div className="flex flex-col">
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.epochLoss')}</span>
-                <span className="text-sm font-bold tabular-nums text-zinc-900 dark:text-white">{trainLmLast.loss.toFixed(4)}</span>
+                <span className="text-sm font-bold tabular-nums text-zinc-900 dark:text-white">{formatLoss(trainLmLast.loss)}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.learningRateShort')}</span>
@@ -492,7 +482,7 @@ export const AceTrainingPage: React.FC = () => {
           <div className="flex items-center gap-3 flex-wrap text-[11px] text-zinc-600 dark:text-zinc-400">
             {status.finalLoss >= 0 && (
               <span className="tabular-nums">
-                {t('trainingStudio.train.finalLoss')}: <strong>{status.finalLoss.toFixed(4)}</strong>
+                {t('trainingStudio.train.finalLoss')}: <strong>{formatLoss(status.finalLoss)}</strong>
               </span>
             )}
             {status.epochsRun > 0 && (
@@ -550,7 +540,7 @@ export const AceTrainingPage: React.FC = () => {
                     title={`${m.path}\n${t('trainingStudio.audition.milestoneButton')}`}
                     className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-sky-500 bg-sky-500/10 border-sky-500/20 hover:bg-sky-500/20 transition-colors tabular-nums"
                   >
-                    <Flag size={10} /> {m.loss.toFixed(1)} · #{m.epoch}
+                    <Flag size={10} /> {formatDecimal(m.loss, 1)} · #{m.epoch}
                     <Headphones size={10} className="text-amber-500" />
                   </button>
                 ))}
@@ -674,12 +664,12 @@ export const AceTrainingPage: React.FC = () => {
             <div className={`${CARD} grid grid-cols-2 sm:grid-cols-4 gap-3`}>
               <div className="flex flex-col">
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.dit.epochLoss')}</span>
-                <span className="text-sm font-bold tabular-nums text-zinc-900 dark:text-white">{trainDitLast.loss.toFixed(4)}</span>
+                <span className="text-sm font-bold tabular-nums text-zinc-900 dark:text-white">{formatLoss(trainDitLast.loss)}</span>
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.dit.ma5')}</span>
                 <span className="text-sm font-bold tabular-nums text-zinc-900 dark:text-white">
-                  {trainDitLast.ma5 > 0 ? trainDitLast.ma5.toFixed(4) : '—'}
+                  {trainDitLast.ma5 > 0 ? formatLoss(trainDitLast.ma5) : '—'}
                 </span>
               </div>
               <div className="flex flex-col">
@@ -745,14 +735,14 @@ export const AceTrainingPage: React.FC = () => {
           <div className="flex items-center gap-3 flex-wrap text-[11px] text-zinc-600 dark:text-zinc-400">
             {ditStatus.finalLoss >= 0 && (
               <span className="tabular-nums">
-                {t('trainingStudio.train.dit.finalLoss')}: <strong>{ditStatus.finalLoss.toFixed(4)}</strong>
+                {t('trainingStudio.train.dit.finalLoss')}: <strong>{formatLoss(ditStatus.finalLoss)}</strong>
               </span>
             )}
             {ditStatus.bestLoss >= 0 && (
               <>
                 <span className="text-zinc-400 dark:text-zinc-600">·</span>
                 <span className="tabular-nums">
-                  {t('trainingStudio.train.dit.bestLoss')}: <strong>{ditStatus.bestLoss.toFixed(4)}</strong>
+                  {t('trainingStudio.train.dit.bestLoss')}: <strong>{formatLoss(ditStatus.bestLoss)}</strong>
                 </span>
               </>
             )}
@@ -815,7 +805,7 @@ export const AceTrainingPage: React.FC = () => {
                     title={m.path}
                     className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border text-sky-500 bg-sky-500/10 border-sky-500/20 tabular-nums"
                   >
-                    <Flag size={10} /> {m.loss.toFixed(1)} · #{m.epoch}
+                    <Flag size={10} /> {formatDecimal(m.loss, 1)} · #{m.epoch}
                   </span>
                 ))}
               </div>

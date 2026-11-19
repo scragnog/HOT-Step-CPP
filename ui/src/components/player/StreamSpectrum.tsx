@@ -21,7 +21,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import AudioMotionAnalyzer from 'audiomotion-analyzer';
-import { useMm3StreamAudio, mm3StreamGraph } from '../../stores/mm3StreamStore';
+import { useMm3StreamAudio, mm3StreamGraph } from '@/stores/mm3StreamStore';
 
 interface StreamSpectrumProps {
   visible: boolean;

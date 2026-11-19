@@ -7,6 +7,11 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
 
+    /* `@/x` is src/x — the frontend imports across folders by alias, not ../.
+       `paths` resolves against this file's directory, so no baseUrl is needed
+       (and baseUrl is deprecated in TypeScript 6). */
+    "paths": { "@/*": ["./src/*"] },
+
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

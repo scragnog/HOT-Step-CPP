@@ -6,10 +6,11 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Scissors, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
-import { stemStatsOptions } from '../../queries/shell-queue/settings';
-import { queryManager } from '../../queries/invalidation';
-import { QueryError } from '../shared/QueryError';
+import { deleteAllJobs, formatBytes, type StemStats } from '@/services/stemStudioApi';
+import { stemStatsOptions } from '@/queries/shell-queue/settings';
+import { queryManager } from '@/queries/invalidation';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { plural } from '@/utils/format/plural';
 
 export const StemStorage: React.FC = () => {
   const { t } = useTranslation();
@@ -54,7 +55,7 @@ export const StemStorage: React.FC = () => {
           <div className="setting-description">
             {stemStats ? (
               <>
-                {stemStats.jobCount} extraction{stemStats.jobCount !== 1 ? 's' : ''} · {stemStats.stemCount} stem{stemStats.stemCount !== 1 ? 's' : ''} · {formatBytes(stemStats.totalBytes)}
+                {stemStats.jobCount} {plural(stemStats.jobCount, 'extraction')} · {stemStats.stemCount} {plural(stemStats.stemCount, 'stem')} · {formatBytes(stemStats.totalBytes)}
               </>
             ) : (
               t('settings.storage.loading')

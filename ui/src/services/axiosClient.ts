@@ -20,8 +20,9 @@
 
 import axios, { AxiosError, CanceledError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
 import { toast } from 'react-toastify';
-import i18n from '../i18n';
+import i18n from '@/i18n';
 import { ApiError, HttpStatus } from './apiError';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 /** Default per-request timeout. Known-slow routes pass SLOW_ROUTE_TIMEOUT_MS
  *  instead — a blanket short timeout would break them. */
@@ -142,7 +143,7 @@ function toAxiosError(err: unknown, config?: InternalAxiosRequestConfig): AxiosE
   const name = (err as any)?.name;
   if (name === 'TimeoutError') return new AxiosError(`timeout of ${config?.timeout}ms exceeded`, 'ECONNABORTED', config);
   if (name === 'AbortError' || config?.signal?.aborted) return new CanceledError(undefined, config);
-  return new AxiosError(err instanceof Error ? err.message : String(err), 'ERR_NETWORK', config);
+  return new AxiosError(errorMessage(err), 'ERR_NETWORK', config);
 }
 
 /** The axios response interceptor: normalize, log/toast per the filters, rethrow. */

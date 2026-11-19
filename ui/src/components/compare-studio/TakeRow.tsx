@@ -1,15 +1,15 @@
 // TakeRow.tsx - one take in a Compare session: waveform, metrics, seeds, scores.
 
 import React, { useEffect, useState } from 'react';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
-import type { CompareAnalysis, CompareCriterion, CompareTake } from '../../services/compareApi';
-import { useRemoveCompareTake, useSetCompareScore } from '../../queries/compare/writes';
+import type { CompareAnalysis, CompareCriterion, CompareTake } from '@/services/compareApi';
+import { useRemoveCompareTake, useSetCompareScore } from '@/queries/compare/writes';
 import type { AbEngine } from './useAbEngine';
 import { Waveform } from './Waveform';
-import { Toggle } from '../shared/Toggle';
-import { QueryError } from '../shared/QueryError';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { QueryError } from '@/components/shared/feedback/QueryError';
 
 interface Props {
   /** Session the take belongs to; commands patch its cache entry. */

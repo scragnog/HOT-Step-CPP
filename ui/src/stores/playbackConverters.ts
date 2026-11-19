@@ -5,13 +5,13 @@
  * PlaybackTrack format used by playbackStore. Zero dependencies on store state.
  */
 
-import type { Song } from '../types';
-import type { PlaylistItem } from '../components/lyric-studio/playlistStore';
+import type { Song } from '@/types';
+import type { PlaylistItem } from '@/components/lyric-studio/playlistStore';
 import type { PlaybackTrack } from './playbackStore';
 
 // ── Duration Coercion ────────────────────────────────────────────────────────
 
-function coerceDuration(d: string | number | undefined | null): number | undefined {
+export function coerceDuration(d: string | number | undefined | null): number | undefined {
   if (d == null) return undefined;
   if (typeof d === 'number') return d;
   if (typeof d === 'string') {

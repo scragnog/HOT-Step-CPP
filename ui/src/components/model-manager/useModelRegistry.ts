@@ -2,8 +2,9 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { registryOptions } from '../../queries/global-models/options';
-import type { RegistryFile } from '../../types';
+import { registryOptions } from '@/queries/global-models/options';
+import type { RegistryFile } from '@/types';
+import { isPresent } from '@/utils/guards';
 
 export function useModelRegistry() {
   const query = useQuery(registryOptions());
@@ -24,7 +25,7 @@ export function useModelRegistry() {
       console.warn(`[ModelRegistry] Pack "${packId}" has no fileIds array — nothing to download.`);
       return [];
     }
-    return pack.fileIds.map(id => registry.files.find(f => f.id === id)).filter(Boolean) as RegistryFile[];
+    return pack.fileIds.map(id => registry.files.find(f => f.id === id)).filter(isPresent) as RegistryFile[];
   };
 
   return { registry, loading: query.isPending, error: query.error?.message ?? null, installedFiles, getPackFiles };

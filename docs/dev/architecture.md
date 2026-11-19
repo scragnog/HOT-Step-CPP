@@ -313,7 +313,7 @@ The server can drive five model families through one interface. The registry is
 Each backend reports a capability manifest (duration limits, whether it has an LM, plugins,
 adapters and so on). The UI reads it from `GET /api/capabilities` and hides controls a
 backend does not support (`ui/src/stores/backendStore.ts`,
-`ui/src/components/shared/BackendCapabilityGate.tsx`). The active backend id is stored in
+`ui/src/components/shared/status/BackendCapabilityGate.tsx`). The active backend id is stored in
 the SQLite `settings` table under `active_backend_id` and switched with
 `POST /api/backends/active`. User-facing detail is in [../user/backends.md](../user/backends.md).
 

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { midiNotesOptions, midiJobsOptions } from '../../queries/studios/midi';
-import { queryManager } from '../../queries/invalidation';
+import { midiNotesOptions, midiJobsOptions } from '@/queries/studios/midi';
+import { queryManager } from '@/queries/invalidation';
 // MidiPlayer.tsx — live piano roll + synced playback for MIDI Studio
 //
 // Plays the ORIGINAL track (audio element) and the transcribed MIDI (WebAudio
@@ -14,9 +14,10 @@ import { Pause, Play, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
   getMidiStreamUrl, channelLabel,
-} from '../../services/midiStudioApi';
+} from '@/services/midiStudioApi';
 import { MidiSynth, type PlayNote } from './midiSynth';
-import { QueryError } from '../shared/QueryError';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { formatClock } from '@/utils/format/format';
 
 const PPS = 40;          // px per second
 const ROLL_H = 230;
@@ -294,7 +295,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
     return () => cancelAnimationFrame(rafRef.current);
   }, [isPlaying, draw]);
 
-  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const fmt = (s: number) => formatClock(s);
 
   return (
     <div className="mt-3">

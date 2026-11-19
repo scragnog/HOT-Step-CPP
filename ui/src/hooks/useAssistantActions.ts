@@ -3,9 +3,9 @@
 // Maps action field names to GlobalParamsContext setters, provides
 // preview diffs and one-click apply functionality.
 
-import { useGlobalParams } from '../context/GlobalParamsContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
 import { writePersistedState } from './usePersistedState';
-import type { AssistantAction } from '../services/assistantApi';
+import type { AssistantAction } from '@/services/assistantApi';
 
 export interface ActionDiff {
   key: string;
@@ -106,7 +106,9 @@ const LABEL_MAP: Record<string, string> = {
 };
 
 export function useAssistantActions() {
-  const gp = useGlobalParams();
+  // Actions only: reading a snapshot avoids subscribing this hook to every
+  // global parameter for the lifetime of the assistant panel.
+  const gp = useGlobalParamsStore.getState();
 
   // Map field names → setter functions
   const setterMap: Record<string, (v: any) => void> = {

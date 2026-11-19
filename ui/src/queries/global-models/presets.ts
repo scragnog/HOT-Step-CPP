@@ -1,9 +1,9 @@
 import { queryOptions } from '@tanstack/react-query';
-import { queryClient } from '../client';
-import { queryManager } from '../invalidation';
+import { queryClient } from '@/queries/client';
+import { queryManager } from '@/queries/invalidation';
 import { localOptions } from './options';
-import { preferencesApi, type PresetFamily, type ImportPreferenceItem } from '../../services/preferencesApi';
-import type { TypedDocument } from '../../services/workflowApi';
+import { preferencesApi, type PresetFamily, type ImportPreferenceItem } from '@/services/preferencesApi';
+import type { TypedDocument } from '@/services/workflowApi';
 
 const options = <T>(family: PresetFamily) => queryOptions({
   ...localOptions<{ documents: TypedDocument<T>[] }>('vst-presets', `/preferences/presets/${family}`, { family }),

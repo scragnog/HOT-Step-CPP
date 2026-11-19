@@ -7,6 +7,7 @@ import { listBackends } from '../backends/registry.js';
 import { runYue2CoverSheetJob } from './yue2ArTrainRunner.js';
 import { createJob, type TrainingJob } from './labelingQueue.js';
 import { gpuLaneOwner, runOnGpuLane } from '../generation/gpuLane.js';
+import { _setEvictionBackends } from '../generation/residency.js';
 import { type RelayState, runYue2AceTrain } from './yue2TrainRunner.js';
 import {
   buildYue2SheetArgs, readYue2CoverAbc, setSheetTranscriberSource, writeYue2CoverSheetManifest,
@@ -30,6 +31,11 @@ beforeEach(t => {
 const trainingOptions: ResolvedYue2SheetOptions = {
   manifest: 'training.json', only: '', force: false, fast: false, datasetSlug: 'fixture',
 };
+
+// The fallback path evicts the other families before it retries. These tests
+// are about the engine stop and the queue, and no engine is listening here, so
+// give the eviction nothing to free instead of timing out on HTTP.
+_setEvictionBackends(() => []);
 
 test('dataset sheet arguments keep the full-score default', () => {
   const args = buildYue2SheetArgs(trainingOptions);

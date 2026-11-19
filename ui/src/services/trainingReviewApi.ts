@@ -1,5 +1,6 @@
 import type { Mm3AlbumScore, Mm3CleanupPlan, Mm3RungScore, Yue2CleanupChoice, Yue2CleanupPlan, Yue2TrainedDirection } from './trainingApi';
 import { snapshotFor, trainingOperation, type TrainingSnapshot } from './trainingOperations';
+import { newId } from '@/utils/id';
 
 export interface ReviewRung {
   step: number;
@@ -48,7 +49,7 @@ export function pickFromLadder(ladder: ReviewLadder, step: number): ReviewPick {
 }
 
 function snapshot<P>(kind: string, payload: P, picks: ReviewPick[]): TrainingSnapshot<P> {
-  return snapshotFor({ kind, idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' },
+  return snapshotFor({ kind, idempotencyKey: newId(), worker: { kind: 'local' },
     ...(picks.length === 1 ? { dataset: { id: picks[0].datasetId, revision: picks[0].datasetRevision } } : {}),
     sources: picks.map(pick => ({ kind: 'yue2-run', id: pick.runId, revision: String(pick.runRevision) })), payload });
 }
@@ -83,14 +84,14 @@ export function decideReviewUse(pick: ReviewPick, narFurther: boolean, nar: {
  *  `step`. Returns the adapter reference the global LM adapter should take. */
 export function selectMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number) {
   return trainingOperation<{ ref: string; presets: number; plan: Mm3CleanupPlan | null }>('mm3', '/select', { body: snapshotFor({
-    kind: 'mm3:select', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
+    kind: 'mm3:select', idempotencyKey: newId(), worker: { kind: 'local' }, dataset,
     sources: [], payload: { datasetId: dataset.id, runName, step } }), silent: true });
 }
 /** Cleanup around the MM3 checkpoint just chosen, while it is still linked. */
 export function cleanupMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number,
   choice: Yue2CleanupChoice, blindLabel?: string) {
   return trainingOperation<{ freedBytes: number; done: string[] }>('mm3', '/cleanup', { body: snapshotFor({
-    kind: 'mm3:cleanup', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
+    kind: 'mm3:cleanup', idempotencyKey: newId(), worker: { kind: 'local' }, dataset,
     sources: [], payload: { datasetId: dataset.id, runName, step, choice, ...(blindLabel ? { blindLabel } : {}) } }), silent: true });
 }
 /** A rung's likeness, corruption or notes; a field not sent keeps its value. */

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { queryClient } from '../client';
-import { sharedKeys, startAuthSession } from '../keys';
+import { queryClient } from '@/queries/client';
+import { sharedKeys, startAuthSession } from '@/queries/keys';
 import { followStudioJob, workflowOptions, documentOptions } from './workflows';
 
 const frame = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;

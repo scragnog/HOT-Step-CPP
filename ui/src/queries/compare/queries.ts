@@ -9,8 +9,8 @@ import { keepPreviousData, queryOptions } from '@tanstack/react-query';
 import {
   compareApi, searchCompareSongs,
   type CompareAnalysis, type CompareDiff, type CompareSession, type CompareSessionSummary,
-} from '../../services/compareApi';
-import { serverKey, type Resource } from '../keys';
+} from '@/services/compareApi';
+import { serverKey, type Resource } from '@/queries/keys';
 
 /** Key names, declared once so invalidation and the factories cannot drift. */
 export const CMP = {

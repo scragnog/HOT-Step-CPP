@@ -13,8 +13,9 @@
 //   The user then takes the server's value or reapplies theirs over it.
 import type { ImportPreferenceItem, SettingsFamily } from './preferencesApi';
 import { hashImportValue, preferencesApi } from './preferencesApi';
-import { queriedSettingsApi } from '../queries/shell-queue/preferences';
+import { queriedSettingsApi } from '@/queries/shell-queue/preferences';
 import { ApiError, HttpStatus } from './apiError';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 export type SettingStatus = 'loading' | 'idle' | 'saving' | 'conflict' | 'failed';
 
@@ -41,7 +42,7 @@ export interface SettingDocumentOptions {
   api?: SettingsApi;
 }
 
-const message = (err: unknown) => err instanceof Error ? err.message : String(err);
+const message = (err: unknown) => errorMessage(err);
 
 export class SettingDocument {
   private snap: SettingSnapshot;

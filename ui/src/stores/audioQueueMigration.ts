@@ -1,3 +1,4 @@
+import { newId } from '@/utils/id';
 /** Browser queue backup and rollback data. This module has no browser globals
  * so the exact readback/restore path can be tested with an in-memory store. */
 
@@ -39,7 +40,7 @@ export function parseQueueBackup(value: unknown): QueueBackup {
   return backup;
 }
 
-export async function exportQueueBackup(store: QueueBackupStore, id = crypto.randomUUID()): Promise<QueueBackup> {
+export async function exportQueueBackup(store: QueueBackupStore, id = newId()): Promise<QueueBackup> {
   const legacyRaw = store.readLegacy();
   const indexedDb = await store.readIndexedDb();
   let legacy: unknown = null;

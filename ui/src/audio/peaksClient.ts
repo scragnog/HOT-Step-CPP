@@ -5,9 +5,9 @@
 // is ~25 KB against the 48–96 MB the file itself weighs.
 
 import { queryOptions } from '@tanstack/react-query';
-import { queryClient } from '../queries/client';
-import { resourceKey, sharedKeys, SHARED } from '../queries/keys';
-import { ApiError } from '../services/httpClient';
+import { queryClient } from '@/queries/client';
+import { resourceKey, sharedKeys, SHARED } from '@/queries/keys';
+import { ApiError } from '@/services/httpClient';
 
 export interface Peaks {
   version: number;

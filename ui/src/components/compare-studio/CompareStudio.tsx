@@ -4,16 +4,17 @@ import React, { useDeferredValue, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Plus, Search, X, GitCompare } from 'lucide-react';
-import { compareQueries } from '../../queries/compare/queries';
-import { useCreateCompareSession } from '../../queries/compare/writes';
+import { compareQueries } from '@/queries/compare/queries';
+import { useCreateCompareSession } from '@/queries/compare/writes';
 import {
   takePendingCompareSongs,
   type CompareSessionSummary, type CompareStatus,
-} from '../../services/compareApi';
+} from '@/services/compareApi';
 import { SessionView } from './SessionView';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
-import { QueryError } from '../shared/QueryError';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { formatDateTime } from '@/utils/format/dateUtils';
 
 const DOT: Record<CompareStatus, string> = {
   scored: 'bg-emerald-400', partial: 'bg-amber-400', unscored: 'bg-zinc-400',
@@ -50,7 +51,7 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
   const submit = () => {
     if (picked.length < 2 || create.isPending) return;
     create.mutate({
-      name: name.trim() || t('compare.defaultName', 'Comparison {{date}}', { date: new Date().toLocaleString() }),
+      name: name.trim() || t('compare.defaultName', 'Comparison {{date}}', { date: formatDateTime(new Date()) }),
       group: group.trim(), songIds: picked,
     }, { onSuccess: s => onCreated(s.id) });
   };

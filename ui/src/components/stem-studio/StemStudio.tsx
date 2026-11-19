@@ -1,7 +1,7 @@
-import { extractResultOptions, extractionsOptions } from '../../queries/studios/resources';
+import { extractResultOptions, extractionsOptions } from '@/queries/studios/resources';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { modelsOptions } from '../../queries/studios/shared';
-import { queryManager } from '../../queries/invalidation';
+import { modelsOptions } from '@/queries/studios/shared';
+import { queryManager } from '@/queries/invalidation';
 // StemStudio.tsx — Main Stem Studio orchestrator
 //
 // Composes: SourceSelector, TrackSelector, StemMixer, RecentExtractions
@@ -20,18 +20,20 @@ import {
   submitExtraction, submitSupersep, waitForExtraction,
   getStemUrl, getDownloadAllUrl, TRACK_CATEGORIES,
   type ExtractProgress, type ExtractJobResult,
-} from '../../services/stemStudioApi';
-import { type SeparationLevel } from '../../services/supersepApi';
-import { StemMixer, type StemControl, type MixerStemInfo } from '../shared/StemMixer';
+} from '@/services/stemStudioApi';
+import { type SeparationLevel } from '@/services/supersepApi';
+import { StemMixer, type StemControl, type MixerStemInfo } from '@/components/shared/StemMixer';
 import { SourceSelector } from './SourceSelector';
 import { TrackSelector } from './TrackSelector';
 import { RecentExtractions } from './RecentExtractions';
-import { Section } from '../shared/ActivitySidebar';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
+import { Section } from '@/components/shared/ActivitySidebar';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { InlineAudioQueue } from '@/components/lyric-studio/queue/InlineAudioQueue';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useAudioGenQueueSelector } from '@/stores/audioGenQueueStore';
+import { saveUrl } from '@/utils/storage/saveFile';
+import { readString } from '@/utils/storage/storageJson';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -62,8 +64,8 @@ export const StemStudio: React.FC = () => {
   }, []);
 
   // Source audio (persisted across sessions for testing convenience)
-  const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => localStorage.getItem('hs-stem-sourceUrl') || '');
-  const [sourceFileName, _setSourceFileName] = useState(() => localStorage.getItem('hs-stem-sourceFile') || '');
+  const [sourceAudioUrl, _setSourceAudioUrl] = useState(() => readString('hs-stem-sourceUrl'));
+  const [sourceFileName, _setSourceFileName] = useState(() => readString('hs-stem-sourceFile'));
   const setSourceAudioUrl = (url: string) => { localStorage.setItem('hs-stem-sourceUrl', url); _setSourceAudioUrl(url); };
   const setSourceFileName = (name: string) => { localStorage.setItem('hs-stem-sourceFile', name); _setSourceFileName(name); };
 
@@ -245,18 +247,12 @@ export const StemStudio: React.FC = () => {
 
   const handleDownloadStem = useCallback((stem: MixerStemInfo) => {
     if (!activeJobId) return;
-    const a = document.createElement('a');
-    a.href = getStemUrl(activeJobId, stem.name);
-    a.download = `${stem.name}.wav`;
-    a.click();
+    saveUrl(getStemUrl(activeJobId, stem.name), `${stem.name}.wav`);
   }, [activeJobId]);
 
   const handleDownloadAll = useCallback(() => {
     if (!activeJobId) return;
-    const a = document.createElement('a');
-    a.href = getDownloadAllUrl(activeJobId);
-    a.download = 'stems.zip';
-    a.click();
+    saveUrl(getDownloadAllUrl(activeJobId), 'stems.zip');
   }, [activeJobId]);
 
   // Sidebar resize handler — identical to CoverStudio

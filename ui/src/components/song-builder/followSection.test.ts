@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { followSection } from './followSection';
-import type { followJob } from '../../services/workflowApi';
+import type { followJob } from '@/services/workflowApi';
 import type { WorkflowJob, WorkflowEvent } from '../../../../server/src/contracts/workflow';
 
 /** A followJob that plays a snapshot, then the given events, then ends. */

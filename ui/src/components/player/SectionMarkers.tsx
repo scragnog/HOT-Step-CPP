@@ -8,8 +8,8 @@
 
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { parseSectionMarkers, type SectionMarker } from '../../utils/lrcUtils';
-import { lrcOptions, lyricsJsonOptions } from '../../queries/shell-queue/lyrics';
+import { parseSectionMarkers, type SectionMarker } from '@/utils/lyrics/lrcUtils';
+import { lrcOptions, lyricsJsonOptions } from '@/queries/shell-queue/lyrics';
 
 interface SectionMarkersProps {
   audioUrl?: string;

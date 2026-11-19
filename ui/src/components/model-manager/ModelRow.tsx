@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { Download, Trash2, CheckCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { DownloadProgressBar } from './DownloadProgressBar';
-import type { RegistryFile, DownloadJob } from '../../types';
+import type { RegistryFile, DownloadJob } from '@/types';
+import { formatBytes } from '@/utils/format/format';
 
 interface Props {
   file: RegistryFile;
@@ -13,14 +14,6 @@ interface Props {
   onCancel: (jobId: string) => void;
   onResume: (jobId: string) => void;
   onDelete: (filename: string) => void;
-}
-
-/** Format bytes to human-readable string (0 = size unknown) */
-function formatSize(bytes: number): string {
-  if (bytes <= 0) return '—';
-  if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(1) + ' GB';
-  if (bytes >= 1_048_576) return (bytes / 1_048_576).toFixed(0) + ' MB';
-  return (bytes / 1024).toFixed(0) + ' KB';
 }
 
 const quantColors: Record<string, string> = {
@@ -63,7 +56,7 @@ export const ModelRow: React.FC<Props> = ({ file, downloadJob, onDownload, onCan
 
         {/* Size */}
         <span className="text-xs text-zinc-500 font-mono flex-shrink-0 w-16 text-right">
-          {formatSize(file.sizeBytes)}
+          {formatBytes(file.sizeBytes, { zero: '—' })}
         </span>
 
         {/* Actions */}

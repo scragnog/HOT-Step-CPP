@@ -13,13 +13,13 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { UnifiedRecentSongs } from './UnifiedRecentSongs';
-import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
-import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
-import { PlaylistSidebar } from '../playlist/PlaylistSidebar';
-import { TerminalPanel } from '../terminal/TerminalPanel';
-import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { UnifiedRecentSongs } from './songs/UnifiedRecentSongs';
+import { InlineAudioQueue } from '@/components/lyric-studio/queue/InlineAudioQueue';
+import { useAudioGenQueueSelector } from '@/stores/audioGenQueueStore';
+import { PlaylistSidebar } from '@/components/playlist/PlaylistSidebar';
+import { TerminalPanel } from '@/components/terminal/TerminalPanel';
+import { usePlaylist, type PlaylistItem } from '@/components/lyric-studio/playlistStore';
+import { usePersistedState } from '@/hooks/usePersistedState';
 
 /** Smallest a section may be dragged to, and the room left for the one below. */
 const MIN_SECTION = 90;

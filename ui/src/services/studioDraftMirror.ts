@@ -13,6 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StudioDraftBody } from '../../../server/src/contracts/studioDrafts';
 import { studioDraftsApi, type StudioDraftDocument } from './studioDraftsApi';
 import { HttpStatus } from './apiError';
+import { readJson, writeJson } from '@/utils/storage/storageJson';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 export interface DraftPointer { id: string; revision: number; saved: string }
 
@@ -23,7 +25,7 @@ export interface DraftMirrorDeps {
 }
 
 const statusOf = (err: unknown) => (err as { status?: number } | null)?.status;
-const messageOf = (err: unknown) => err instanceof Error ? err.message : String(err);
+const messageOf = (err: unknown) => errorMessage(err);
 
 export function createDraftMirror(deps: DraftMirrorDeps) {
   // This editor's draft. Read once: another editor's later writes to the
@@ -128,12 +130,10 @@ const pointerKey = (studio: string) => `hs-studioDraft:${studio}`;
 function localPointer(studio: StudioDraftBody['studio']): DraftMirrorDeps['pointer'] {
   return {
     read() {
-      try {
-        const value = JSON.parse(localStorage.getItem(pointerKey(studio)) ?? 'null');
-        return value && typeof value.id === 'string' && Number.isInteger(value.revision) ? value : null;
-      } catch { return null; }
+      const value = readJson<DraftPointer | null>(pointerKey(studio), null);
+      return value && typeof value.id === 'string' && Number.isInteger(value.revision) ? value : null;
     },
-    write(value) { try { localStorage.setItem(pointerKey(studio), JSON.stringify(value)); } catch { /* storage full */ } },
+    write(value) { writeJson(pointerKey(studio), value); },
   };
 }
 

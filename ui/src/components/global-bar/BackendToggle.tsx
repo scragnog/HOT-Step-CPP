@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { backendsOptions } from '../../queries/global-models/options';
+import { backendsOptions } from '@/queries/global-models/options';
 // BackendToggle.tsx — the generation-engine picker at the top of the left
 // sidebar, directly under the logo.
 //
@@ -12,12 +12,13 @@ import { backendsOptions } from '../../queries/global-models/options';
 // CRITICAL: renders null while only one backend is registered — see
 // docs/plans/multi-backend-architecture.md §4.5.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Layers, Check, ChevronDown } from 'lucide-react';
-import { useBackendStore } from '../../stores/backendStore';
-import { useCapabilities } from '../../hooks/useCapabilities';
+import { useBackendStore } from '@/stores/backendStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { useClickOutside } from '@/hooks/useClickOutside';
 
 export const BackendToggle: React.FC<{ collapsed?: boolean }> = ({ collapsed = false }) => {
   const { t } = useTranslation();
@@ -31,15 +32,7 @@ export const BackendToggle: React.FC<{ collapsed?: boolean }> = ({ collapsed = f
 
   useQuery(backendsOptions());
 
-  useEffect(() => {
-    if (!pos) return;
-    const onDocClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (!buttonRef.current?.contains(target) && !listRef.current?.contains(target)) setPos(null);
-    };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, [pos]);
+  useClickOutside([buttonRef, listRef], () => setPos(null), pos !== null);
 
   // The whole feature must be invisible until a second backend is registered.
   if (backends.length < 2) return null;

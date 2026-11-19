@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import i18n from '../i18n';
+import i18n from '@/i18n';
 
 type FakeResponse = { ok: boolean; status: number; statusText: string; headers: Headers; json: () => Promise<any> };
 function jsonResponse(status: number, body: unknown): FakeResponse {

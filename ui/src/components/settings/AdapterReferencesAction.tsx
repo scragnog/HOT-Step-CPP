@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { queryManager } from '../../queries/invalidation';
-import { lireekApi } from '../../services/lireekApi';
+import { queryManager } from '@/queries/invalidation';
+import { lireekApi } from '@/services/lireekApi';
 
 export function AdapterReferencesAction() {
   const { t } = useTranslation();

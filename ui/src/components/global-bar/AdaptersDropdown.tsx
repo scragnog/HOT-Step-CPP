@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { aceModelsOptions, lmAdaptersOptions } from '../../queries/global-models/options';
-import { QueryError } from '../shared/QueryError';
-import { queryManager } from '../../queries/invalidation';
+import { aceModelsOptions, lmAdaptersOptions } from '@/queries/global-models/options';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { queryManager } from '@/queries/invalidation';
 // AdaptersDropdown.tsx — Adapter configuration UI for the global param bar
 //
 // Adapted from create/AdaptersAccordion.tsx to read from GlobalParamsContext.
@@ -10,18 +10,21 @@ import { queryManager } from '../../queries/invalidation';
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen, X, Tag, Search, Circle, ChevronDown, RotateCcw } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { adapterApi } from '../../services/api';
-import { FileBrowserModal } from '../shared/FileBrowserModal';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Toggle } from '../shared/Toggle';
+import { useGlobalParams } from '@/context/GlobalParamsContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { adapterApi } from '@/services/api';
+import { FileBrowserModal } from '@/components/shared/overlays/FileBrowserModal';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { Toggle } from '@/components/shared/controls/Toggle';
 import { ModelSelect, getModelFormat } from './ModelSelect';
 import { formatDitModel } from './modelLabels';
-import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
-import { GLOBAL_PARAM_DEFAULTS, useGlobalParamsStore } from '../../stores/globalParamsStore';
-import type { AdapterFile } from '../../types';
+import { DEFAULT_SETTINGS, type AppSettings } from '@/components/settings/SettingsPanel';
+import { GLOBAL_PARAM_DEFAULTS, useGlobalParamsStore } from '@/stores/globalParamsStore';
+import type { AdapterFile } from '@/types';
+import { formatBytes, formatDecimal } from '@/utils/format/format';
+import { isPresent } from '@/utils/guards';
 
 // Select styling applied inline where needed
 
@@ -38,12 +41,6 @@ function deriveTriggerWord(adapterPath: string): string {
   if (!adapterPath) return '';
   const filename = adapterPath.split(/[\\/]/).pop() || '';
   return filename.replace(/\.safetensors$/i, '');
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export const AdaptersDropdown: React.FC = () => {
@@ -101,7 +98,7 @@ export const AdaptersDropdown: React.FC = () => {
   const triggerWord = deriveTriggerWord(primaryPath);
   // Every stacked adapter contributes its trigger word (matches what is injected
   // into the caption server-side).
-  const stackTriggerWords = stack.map(e => deriveTriggerWord(e.path)).filter(Boolean).join(', ');
+  const stackTriggerWords = stack.map(e => deriveTriggerWord(e.path)).filter(isPresent).join(', ');
   const adapterFilename = gp.adapter ? gp.adapter.split(/[\\/]/).pop() || '' : '';
   const fileLabel = (p: string) => p.split(/[\\/]/).pop() || p;
 
@@ -283,7 +280,7 @@ export const AdaptersDropdown: React.FC = () => {
                       {file.name}
                     </span>
                     <span className="text-zinc-600 flex-shrink-0" style={{ fontSize: '10px' }}>
-                      {formatSize(file.size)}
+                      {formatBytes(file.size)}
                     </span>
                   </button>
                 );
@@ -351,9 +348,12 @@ export const AdaptersDropdown: React.FC = () => {
                       {fileLabel(entry.path)}
                     </span>
                     {multiStack && isBlend && (
-                      <span className="text-[10px] text-zinc-500 font-mono flex-shrink-0" title="Effective scale sent to the engine">
-                        → {effectiveScale(entry.scale).toFixed(3)}
-                      </span>
+                      <ParamLabel label={t('adapter.effectiveScale', 'Effective scale')}
+                        info={t('adapter.effectiveScaleInfo', 'The scale actually sent to the engine after group scaling and blend mode.')}>
+                        <span className="text-[10px] text-zinc-500 font-mono flex-shrink-0">
+                          → {effectiveScale(entry.scale).toFixed(3)}
+                        </span>
+                      </ParamLabel>
                     )}
                     <button
                       onClick={() => gp.toggleAdapterInStack(entry.path)}
@@ -446,11 +446,13 @@ export const AdaptersDropdown: React.FC = () => {
           <ParamLabel label="Planner Adapter (LM)" underline={false}
             className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider"
             info="An artist-trained song-structure adapter applied to the planner LM at runtime. Pairs with the matching DiT adapter, which carries timbre — same trigger word." />
-          <button type="button" onClick={refreshLmAdapters}
-            className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
-            title="Rescan adapters/lm for new planner adapters">
+          <HintButton label={t('adapter.rescanPlanner', 'Rescan adapters/lm')}
+            info={t('adapter.rescanPlannerInfo', 'Looks for new planner adapters in the LM adapter folder.')}
+            ariaLabel={t('adapter.rescan', 'Rescan')}
+            onClick={refreshLmAdapters}
+            className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
             <RotateCcw size={12} />
-          </button>
+          </HintButton>
         </div>
         <input
           type="text"
@@ -512,7 +514,7 @@ export const AdaptersDropdown: React.FC = () => {
                     </span>
                   )}
                   <span className="text-zinc-600 flex-shrink-0" style={{ fontSize: '10px' }}>
-                    {formatSize(a.size)}
+                    {formatBytes(a.size)}
                   </span>
                 </button>
               );
@@ -525,13 +527,16 @@ export const AdaptersDropdown: React.FC = () => {
               <span className="text-xs text-violet-400 font-medium truncate flex-1" title={gp.lmAdapter}>
                 {lmAdapters.find(a => a.path === gp.lmAdapter)?.name || gp.lmAdapter}
               </span>
-              <button
+              <HintButton
+                label={t('adapter.unloadPlanner', 'Unload planner adapter')}
+                info={t('adapter.unloadPlannerInfo', 'Clears the planner adapter from this session. The adapter file stays on disk.')}
+                ariaLabel={t('adapter.unload', 'Unload')}
                 onClick={() => gp.setLmAdapter('')}
+                rootClassName="flex-shrink-0"
                 className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors flex-shrink-0"
-                title="Unload planner adapter"
               >
                 <X size={12} />
-              </button>
+              </HintButton>
             </div>
           </div>
         )}
@@ -802,7 +807,7 @@ export const AdaptersBadge: React.FC = () => {
         <>
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
           <span className="text-[10px] text-emerald-400 font-mono">{filename}</span>
-          <span className="text-[10px] text-zinc-600">×{adapterScale.toFixed(2)}</span>
+          <span className="text-[10px] text-zinc-600">×{formatDecimal(adapterScale, 2)}</span>
         </>
       ) : (
         <span className="text-[10px] text-zinc-600">None</span>

@@ -1,8 +1,8 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
-import { listSa3Previews, renderSa3Preview, type Sa3PreviewListResponse, type Sa3PreviewRenderRequest } from '../../services/sa3PreviewApi';
-import { scopeOf } from '../keys';
-import { pollWhile } from '../contract';
-import { queryManager } from '../invalidation';
+import { listSa3Previews, renderSa3Preview, type Sa3PreviewListResponse, type Sa3PreviewRenderRequest } from '@/services/sa3PreviewApi';
+import { scopeOf } from '@/queries/keys';
+import { pollWhile } from '@/queries/contract';
+import { queryManager } from '@/queries/invalidation';
 import { sa3PreviewKeys } from './keys';
 
 /** Rows still moving: poll until every cell is settled. */

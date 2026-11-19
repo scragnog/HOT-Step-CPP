@@ -4,8 +4,8 @@
 // loading the training cards. A missing backend block renders OFF.
 
 import type { Sa3DatasetAssets } from '../../../../../server/src/contracts/training';
-import type { DatasetAssets } from '../../../services/trainingApi';
-import type { TrainingChipContext, TrainingChipSpec, TrainingReadiness } from '../trainingPluginTypes';
+import type { DatasetAssets } from '@/services/trainingApi';
+import type { TrainingChipContext, TrainingChipSpec, TrainingReadiness } from '@/components/training-studio/lib/trainingPluginTypes';
 
 type Chips = (assets: DatasetAssets, ctx: TrainingChipContext) => TrainingChipSpec[];
 type Ready = (assets: DatasetAssets | undefined) => TrainingReadiness;

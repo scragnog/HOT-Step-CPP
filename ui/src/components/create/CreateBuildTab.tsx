@@ -8,14 +8,16 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
-import { useBackendStore } from '../../stores/backendStore';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { generateApi } from '../../services/api';
-import { yue2CoverApi, type Yue2SectionReview } from '../../services/yue2CoverApi';
-import { Yue2BuildPage, buildCaption, useYue2Build, type BuildSettings } from '../cover-studio/Yue2Build';
-import { COVER_AR_DEFAULT, clampCoverAr } from '../cover-studio/Yue2CoverPanel';
-import { barRanges } from '../../utils/abcSectionMove';
-import { notify } from '../shared/Toast';
+import { useBackendStore } from '@/stores/backendStore';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { generateApi } from '@/services/api';
+import { yue2CoverApi, type Yue2SectionReview } from '@/services/yue2CoverApi';
+import { Yue2BuildPage, buildCaption, useYue2Build, type BuildSettings } from '@/components/cover-studio/build/Yue2Build';
+import { COVER_AR_DEFAULT, clampCoverAr } from '@/components/cover-studio/build/Yue2CoverPanel';
+import { barRanges } from '@/utils/abc/abcSectionMove';
+import { notify } from '@/components/shared/feedback/Toast';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { writeJson } from '@/utils/storage/storageJson';
 
 const YUE2 = 'yue2';
 const SESSION_KEY = 'hs-create-buildSessionId';
@@ -24,7 +26,7 @@ const PLAN_KEY = 'hs-create-buildPlan';
 const read = <T,>(key: string, fallback: T): T => {
   try { const raw = localStorage.getItem(key); return raw === null ? fallback : JSON.parse(raw) as T; } catch { return fallback; }
 };
-const write = (key: string, value: unknown) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage full or blocked: the build just is not remembered */ } };
+const write = (key: string, value: unknown) => { try { writeJson(key, value); } catch { /* storage full or blocked: the build just is not remembered */ } };
 
 
 /** Why Build by section is unavailable on this backend or setting, or ''. */
@@ -102,7 +104,7 @@ export const CreateBuildTab: React.FC<Props> = ({ token, getParams, onSave, onOn
     try {
       const data = await generateApi.yue2Plan({ ...params, randomSeed: true, seed: -1 } as never);
       setPlan({ abc: data.abc, seed: data.seed });
-    } catch (err) { setPlanError(err instanceof Error ? err.message : String(err)); }
+    } catch (err) { setPlanError(errorMessage(err)); }
     finally { setPlanning(false); }
   }, [getParams]);
 

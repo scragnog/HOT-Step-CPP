@@ -12,13 +12,15 @@
 
 import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { ToggleSwitch } from './BarSection';
-import type { BackendExtensionGroup, BackendExtensionParam } from '../../stores/backendStore';
+import type { BackendExtensionGroup, BackendExtensionParam } from '@/stores/backendStore';
+import { readJson, writeJson } from '@/utils/storage/storageJson';
 
 export const backendInputClasses =
   'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
@@ -41,7 +43,9 @@ export const BackendExtensionControls: React.FC<{
   /** Keys to leave out, for a knob that does nothing in the current state. */
   hide?: string[];
 }> = ({ group, accentColor = 'sky', hide }) => {
-  const gp = useGlobalParams() as any;
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    backendParams: s.backendParams, setBackendParam: s.setBackendParam,
+  })));
   const declared = useBackendExtensions(group);
 
   // `visible_when`, same schema field the Lua plugin renderer honours: a param
@@ -184,11 +188,11 @@ export const BackendExtensionControls: React.FC<{
   const backendId = capabilities?.backend ?? 'backend';
   const storageKey = `hs-ext-sections:${backendId}:${group}`;
   const [open, setOpenState] = useState<Record<string, boolean>>(() => {
-    try { return JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<string, boolean>; } catch { return {}; }
+    return readJson<Record<string, boolean>>(storageKey, {});
   });
   const setOpen = (next: Record<string, boolean>) => {
     setOpenState(next);
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* private mode etc. */ }
+    writeJson(storageKey, next);
   };
   const hintOf = (name: string) => params.find((p) => p.section === name && p.section_hint)?.section_hint;
   const changedIn = (name: string) => params.filter((p) => p.section === name && (() => {
@@ -234,7 +238,9 @@ export const BackendExtensionControls: React.FC<{
  *  actually set are worth the width, so a param sitting on its declared
  *  default is skipped — a badge that always reads the same tells you nothing. */
 export const useBackendExtensionSummary = (group: BackendExtensionGroup): string[] => {
-  const gp = useGlobalParams() as any;
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    backendParams: s.backendParams, setBackendParam: s.setBackendParam,
+  })));
   const params = useBackendExtensions(group);
   const parts: string[] = [];
   for (const p of params) {

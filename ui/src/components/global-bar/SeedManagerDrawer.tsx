@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { seedsOptions, type SavedSeed } from '../../queries/shell-queue/queue';
-import { queryManager } from '../../queries/invalidation';
-import { apiClient } from '../../services/httpClient';
+import { seedsOptions, type SavedSeed } from '@/queries/shell-queue/queue';
+import { queryManager } from '@/queries/invalidation';
+import { apiClient } from '@/services/httpClient';
 // SeedManagerDrawer.tsx — Seed save/load popover for STORM Live Controls
 // MDMAchine / A&E Concepts 2026
 // GPL v3 — safe for public repo
@@ -19,7 +19,9 @@ import { apiClient } from '../../services/httpClient';
 
 import React from 'react';
 import { X, Star, Trash2, Save, Shuffle, Loader2 } from 'lucide-react';
-import { formatDay } from '../../utils/dateUtils';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { formatDay } from '@/utils/format/dateUtils';
+import { plural } from '@/utils/format/plural';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -129,11 +131,14 @@ export const SeedManagerDrawer: React.FC<SeedManagerDrawerProps> = ({
         <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
           <span className="text-[11px] font-bold text-zinc-200">🎲 Seed Manager</span>
           <div className="flex items-center gap-1">
-            <button onClick={() => randomMut.mutate()} disabled={randomMut.isPending} title="Load a random saved seed"
+            <HintButton onClick={() => randomMut.mutate()} disabled={randomMut.isPending}
+              label="Load a random saved seed"
+              info="Picks one of your saved seeds at random and applies it to the current field."
+              ariaLabel="Load a random saved seed"
               className="text-[9px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors flex items-center gap-0.5 disabled:opacity-50 disabled:cursor-not-allowed">
               {randomMut.isPending ? <Loader2 size={9} className="animate-spin" /> : <Shuffle size={9} />} random
-            </button>
-            <button onClick={onClose}
+            </HintButton>
+            <button onClick={onClose} aria-label="Close seed manager"
               className="p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800 transition-colors">
               <X size={12} />
             </button>
@@ -274,7 +279,7 @@ export const SeedManagerDrawer: React.FC<SeedManagerDrawerProps> = ({
         {/* Footer count */}
         <div className="px-3 py-1.5 border-t border-zinc-800">
           <span className="text-[8px] text-zinc-700">
-            {seeds.length} seed{seeds.length !== 1 ? 's' : ''} saved
+            {seeds.length} {plural(seeds.length, 'seed')} saved
             {seeds.some(s => s.favorite) ? ` · ${seeds.filter(s => s.favorite).length} ★` : ''}
           </span>
         </div>

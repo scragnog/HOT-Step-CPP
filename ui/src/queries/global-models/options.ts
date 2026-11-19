@@ -1,12 +1,12 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
-import { ApiClient } from '../../services/httpClient';
-import { adapterApi, vstApi, type VstPlugin, type VstChainEntry } from '../../services/api';
-import { serverKey, sharedKeys, scopeOf, resourceKey, type ServerKey } from '../keys';
-import { pollWhile } from '../contract';
-import { queryManager } from '../invalidation';
-import type { PluginRegistry } from '../../types/pluginTypes';
-import type { ModelRegistry, AceModels } from '../../types';
-import type { BackendCapabilities, BackendInfo, BackendModelCatalogue } from '../../stores/backendStore';
+import { ApiClient } from '@/services/httpClient';
+import { adapterApi, vstApi, type VstPlugin, type VstChainEntry } from '@/services/api';
+import { serverKey, sharedKeys, scopeOf, resourceKey, type ServerKey } from '@/queries/keys';
+import { pollWhile } from '@/queries/contract';
+import { queryManager } from '@/queries/invalidation';
+import type { PluginRegistry } from '@/types/pluginTypes';
+import type { ModelRegistry, AceModels } from '@/types';
+import type { BackendCapabilities, BackendInfo, BackendModelCatalogue } from '@/stores/backendStore';
 
 export const adapterScanOptions = (folder: string) => queryOptions({
   queryKey: sharedKeys.adapterScan(folder),

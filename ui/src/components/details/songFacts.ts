@@ -8,9 +8,13 @@
 //
 // So: pick the backend first, then read only that backend's own keys.
 
-import type { Song } from '../../types';
-import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
-import { seedText } from '../../utils/seed';
+import type { Song } from '@/types';
+import { formatDitModel, formatLmModel } from '@/components/global-bar/modelLabels';
+import { seedText } from '@/utils/seed';
+import { formatClock } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
+import { plural } from '@/utils/format/plural';
+import { isPresent } from '@/utils/guards';
 
 export type Backend = 'ace' | 'minimax-m3' | 'yue2' | 'sa3';
 
@@ -58,9 +62,7 @@ export function formatDuration(value: unknown): string {
   if (typeof value === 'string' && value.includes(':')) return value;
   const secs = Number(value);
   if (!Number.isFinite(secs) || secs <= 0) return '';
-  const m = Math.floor(secs / 60);
-  const s = Math.round(secs % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+  return formatClock(secs, { round: true });
 }
 
 /** snake_case and kebab-case engine names to something readable. */
@@ -73,12 +75,12 @@ function pretty(value: string): string {
 
 /** Last path segment of an adapter or model path. */
 function basename(p: string): string {
-  return (p.split(/[\\/]/).filter(Boolean).pop() || p).replace(/^acestep-/, '');
+  return (p.split(/[\\/]/).filter(isPresent).pop() || p).replace(/^acestep-/, '');
 }
 
 /** The adapter's own name, not its timestamped run folder. */
 function adapterName(p: string): string {
-  const parts = p.split(/[\\/]/).filter(Boolean);
+  const parts = p.split(/[\\/]/).filter(isPresent);
   const last = parts[parts.length - 1] || p;
   // Runs are stored as <adapter>/<YYYY-MM-DD_run>, so the parent is the name.
   return /^\d{4}-\d{2}-\d{2}/.test(last) && parts.length > 1
@@ -230,7 +232,7 @@ function mm3Facts(gp: any): FactGroup[] {
       add(cover, 'Candidates', num(gp.mm3GuideK));
       const FIX = ['Off', 'Depth', 'Stream 0', 'Both'];
       if (gp.mm3GuideStateFix !== undefined) add(cover, 'State fix', FIX[Number(gp.mm3GuideStateFix)] ?? String(gp.mm3GuideStateFix));
-      if (gp.mm3BlendAmount !== undefined) add(cover, 'Blend', `${Math.round(Number(gp.mm3BlendAmount) * 100)}%`);
+      if (gp.mm3BlendAmount !== undefined) add(cover, 'Blend', `${formatPercent(Number(gp.mm3BlendAmount))}`);
       if (Number(gp.mm3GuideSeconds) > 0) add(cover, 'Trim', `${num(gp.mm3GuideSeconds)} s`);
     } else add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
     if (gp.mm3PlankSemanticOnly && !gp.mm3CoverMode) {
@@ -238,7 +240,7 @@ function mm3Facts(gp: any): FactGroup[] {
       const p = gp.mm3ForcePattern;
       if (p) {
         const rules = [p.prefixSeconds && `prefix ${p.prefixSeconds} s`, p.anchorEvery && `every ${p.anchorEvery} frames`,
-          p.pinnedRanges?.length && p.pinnedRanges.map((r: number[]) => `${r[0]}-${r[1]}`).join(', ')].filter(Boolean);
+          p.pinnedRanges?.length && p.pinnedRanges.map((r: number[]) => `${r[0]}-${r[1]}`).join(', ')].filter(isPresent);
         add(cover, 'Pattern', `${rules.join(' + ')}${p.invert ? ' (inverted)' : ''}`);
       }
     }
@@ -281,13 +283,13 @@ function yue2Facts(gp: any): FactGroup[] {
   }
   if (health?.bars) {
     add(plan, 'Bars', `${health.bars}${health.vocalShare !== undefined
-      ? ` · ${Math.round(Number(health.vocalShare) * 100)}% vocal` : ''}`);
+      ? ` · ${formatPercent(Number(health.vocalShare))} vocal` : ''}`);
   }
   if (health?.tempo) add(plan, 'Planned tempo', `${health.tempo} bpm`);
   if (health?.meter) add(plan, 'Meter', String(health.meter));
   const replans = Array.isArray(y.auto_replan?.attempts) ? y.auto_replan.attempts.length : 0;
   if (replans) {
-    add(plan, 'Auto-replan', `${replans} attempt${replans === 1 ? '' : 's'}`,
+    add(plan, 'Auto-replan', `${replans} ${plural(replans, 'attempt')}`,
       { tone: 'warn', title: y.auto_replan.attempts.map((a: any) => `${a.verdict}: ${a.reason}${Array.isArray(a.flags) && a.flags.length ? ` (${a.flags.join('; ')})` : ''}`).join('\n') });
   }
   // Legibility flags on the plan that was rendered (2026-09-27), and whether

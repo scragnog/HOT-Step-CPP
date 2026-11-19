@@ -8,7 +8,7 @@
 // to avoid per-message React re-renders during heavy logging.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { subscribeEventSource } from '../services/sharedEventSource';
+import { subscribeEventSource } from '@/services/sharedEventSource';
 
 export interface LogLine {
   id: number;
@@ -42,6 +42,10 @@ export function useEventSource(url: string, enabled: boolean) {
 
   useEffect(() => {
     if (!enabled) {
+      // Deliberate: disabling the stream must clear the connection indicator
+      // immediately (one bounded render), not wait for an error event that
+      // will never come.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setConnected(false);
       return;
     }

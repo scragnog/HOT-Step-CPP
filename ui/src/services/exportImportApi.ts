@@ -1,6 +1,6 @@
 import { normalizeSong } from './api';
 import { apiClient } from './httpClient';
-import type { Song } from '../types';
+import type { Song } from '@/types';
 
 export type AudioFormat = 'wav' | 'flac' | 'opus' | 'mp3';
 export type AudioVariant = 'original' | 'mastered' | 'noadapter' | 'latent';

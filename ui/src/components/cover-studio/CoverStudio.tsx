@@ -1,89 +1,92 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
 // Composes: SourcePanel, ArtistSettingsPanel
 
-import { pollWhile } from '../../queries/contract';
-import { waitForQuery } from '../../queries/wait';
-import { generationStatusOptions } from '../../queries/shell-queue/queue';
-import { songsChanged } from '../../queries/cover-lyrics/reads';
-import type { Yue2CoverResult } from '../../services/yue2CoverApi';
+import { pollWhile } from '@/queries/contract';
+import { waitForQuery } from '@/queries/wait';
+import { generationStatusOptions } from '@/queries/shell-queue/queue';
+import { songsChanged } from '@/queries/cover-lyrics/reads';
+import type { Yue2CoverResult } from '@/services/yue2CoverApi';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { snapshotOptions } from '../../queries/cover-lyrics/reads';
-import type { LyricsSet } from '../../services/lireekApi';
+import { snapshotOptions } from '@/queries/cover-lyrics/reads';
+import type { LyricsSet } from '@/services/lireekApi';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Song } from '../../types';
+import type { Song } from '@/types';
 import { Search, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
-import { generateApi } from '../../services/api';
-import type { GenerationJob } from '../../types';
-import { apiClient, ApiError } from '../../services/httpClient';
-import { useUpload } from '../../queries/writes';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
-import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { DEFAULT_SETTINGS, type AppSettings } from '@/components/settings/SettingsPanel';
+import { generateApi } from '@/services/api';
+import type { GenerationJob } from '@/types';
+import { apiClient, ApiError } from '@/services/httpClient';
+import { useUpload } from '@/queries/writes';
+import { createGenerationTimer, getGenerationTimeoutMinutes } from '@/utils/audio/generationTimer';
+import { lireekApi, type Artist, type AlbumPreset } from '@/services/lireekApi';
 import {
   recombineStems,
   type SeparationLevel,
-} from '../../services/supersepApi';
-import { SourcePanel } from './SourcePanel';
-import { ArtistSettingsPanel } from './ArtistSettingsPanel';
-import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
-import { StemMixer } from '../shared/StemMixer';
-import { useCoverStemsStore } from '../../stores/coverStemsStore';
+} from '@/services/supersepApi';
+import { SourcePanel } from './source/SourcePanel';
+import { ArtistSettingsPanel } from './source/ArtistSettingsPanel';
+import { BackendCapabilityGate } from '@/components/shared/status/BackendCapabilityGate';
+import { StemMixer } from '@/components/shared/StemMixer';
+import { useCoverStemsStore } from '@/stores/coverStemsStore';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-} from '../../stores/audioGenQueueStore';
+} from '@/stores/audioGenQueueStore';
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey, yue2CoverContentMissing,
   type AudioMetadata, type AudioAnalysis,
-} from './coverStudioUtils';
-import { useStudioDraftMirror } from '../../services/studioDraftMirror';
-import { StudioDraftPicker } from '../shared/StudioDraftPicker';
-import { Fold } from '../shared/Fold';
-import { exportPrepare, structureHash, type PrepareV2 } from '../../utils/yue2Prepare';
+} from './source/coverStudioUtils';
+import { useStudioDraftMirror } from '@/services/studioDraftMirror';
+import { StudioDraftPicker } from '@/components/shared/overlays/StudioDraftPicker';
+import { Fold } from '@/components/shared/controls/Fold';
+import { exportPrepare, structureHash, type PrepareV2 } from '@/utils/lyrics/yue2Prepare';
 import { normalizeAbc } from '../../../../server/src/contracts/yue2Prepare';
-import { LyricsSectionHighlight } from './LyricsSectionHighlight';
-import type { LatentMetadata } from '../shared/LatentImport';
-import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { stableStepAdaptersOptions } from '../../queries/global-models/options';
-import { EditableSlider } from '../shared/EditableSlider';
-import { StyledSelect } from '../shared/StyledSelect';
-import { QueryError } from '../shared/QueryError';
-import { useBackendStore } from '../../stores/backendStore';
-import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
+import { LyricsSectionHighlight } from './lyrics/LyricsSectionHighlight';
+import type { LatentMetadata } from '@/components/shared/songs/LatentImport';
+import { loadSelections, saveSelections } from '@/components/lyric-studio/write/ProviderSelector';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { stableStepAdaptersOptions } from '@/queries/global-models/options';
+import { EditableSlider } from '@/components/shared/controls/EditableSlider';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { useBackendStore } from '@/stores/backendStore';
+import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '@/utils/lyrics/yue2CaptionSource';
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
-  type Yue2ScoreSection } from '../../services/yue2CoverApi';
+  type Yue2ScoreSection } from '@/services/yue2CoverApi';
 import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../../server/src/contracts/studioWorkflows';
-import { LeadSheetSourcePicker } from './LeadSheetSourcePicker';
-import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, leadSheetScoreUpdate } from './leadSheetSource';
-import { documentOptions } from '../../queries/cover-lyrics/workflows';
-import { HeartmulaCoverPanel } from './HeartmulaCoverPanel';
-import { Mm3CoverPanel, type Mm3SourceFacts } from './Mm3CoverPanel';
-import { restoreMm3Cover, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3CoverState';
-import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './heartmulaCoverState';
-import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
-import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
-import { Yue2CoverScore } from './Yue2CoverScore';
-import { CoverResizeHandle } from './CoverResizeHandle';
-import { startDragResize } from './startDragResize';
-import { MusicXmlImport } from './MusicXmlImport';
-import { PrepareStructure } from './PrepareStructure';
-import { mainMeter, type ScoreRange } from './prepareView';
-import { PrepareLyrics } from './PrepareLyrics';
-import { useYue2Prepare, PREPARE_DRAFT_KEY, type PrepareCut } from './useYue2Prepare';
-import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './Yue2Build';
-import { barRanges } from '../../utils/abcSectionMove';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
-import { Toggle } from '../shared/Toggle';
-import { notify } from '../shared/Toast';
-import { ParamLabel } from '../shared/ParamLabel';
-import { AbcChart } from './AbcChart';
-import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
-import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
+import { LeadSheetSourcePicker } from './lyrics/LeadSheetSourcePicker';
+import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, leadSheetScoreUpdate } from './lyrics/leadSheetSource';
+import { documentOptions } from '@/queries/cover-lyrics/workflows';
+import { HeartmulaCoverPanel } from './mm3/HeartmulaCoverPanel';
+import { Mm3CoverPanel, type Mm3SourceFacts } from './mm3/Mm3CoverPanel';
+import { restoreMm3Cover, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3/mm3CoverState';
+import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './mm3/heartmulaCoverState';
+import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './build/Yue2CoverPanel';
+import { resolveYue2Render, type Yue2RenderMode } from './build/yue2RenderMode';
+import { Yue2CoverScore } from './build/Yue2CoverScore';
+import { CoverResizeHandle } from './source/CoverResizeHandle';
+import { startDragResize } from './source/startDragResize';
+import { MusicXmlImport } from './lyrics/MusicXmlImport';
+import { PrepareStructure } from './lyrics/PrepareStructure';
+import { mainMeter, type ScoreRange } from './build/prepareView';
+import { PrepareLyrics } from './lyrics/PrepareLyrics';
+import { useYue2Prepare, PREPARE_DRAFT_KEY, type PrepareCut } from './build/useYue2Prepare';
+import { Yue2BuildPage, buildCaption, buildNext, draftText, finishSavedBuild, onBuildSaved, useYue2Build, type BuildSettings } from './build/Yue2Build';
+import { barRanges } from '@/utils/abc/abcSectionMove';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { notify } from '@/components/shared/feedback/Toast';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { AbcChart } from './lyrics/AbcChart';
+import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '@/services/coverWorkflowApi';
+import { coverLyricWorkflowApi as workflowApi } from '@/queries/cover-lyrics/workflows';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { plural } from '@/utils/format/plural';
+import { isPresent } from '@/utils/guards';
 
 // ── Serial cover-generation queue ────────────────────────────────────────────
 // Lets the user stack multiple cover generations (different settings) without
@@ -96,6 +99,8 @@ const _savingBuilds = new Map<string, number>();
 // Survives Cover Studio remounts (it unmounts when you leave the tab) so a
 // previously-sent library track isn't re-applied every time you revisit (#61).
 let _lastConsumedCoverTs = 0;
+const coverSourceConsumed = (ts: number) => ts === _lastConsumedCoverTs;
+const noteCoverSourceConsumed = (ts: number) => { _lastConsumedCoverTs = ts; };
 function enqueueCoverJob(fn: () => Promise<void>) {
   _coverQueue.push(fn);
   if (!_coverRunning) _drainCoverQueue();
@@ -148,7 +153,9 @@ interface CoverStudioProps {
 export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
-  const gp = useGlobalParamsStore();
+  // Only actions are used from here; a live subscription would re-render the
+  // whole studio on every unrelated global knob change.
+  const gp = useGlobalParamsStore.getState();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
   const { capabilities } = useCapabilities();
   const audioTransformMode = capabilities?.features.cover === true && capabilities.features.coverAudioTransform === true;
@@ -696,9 +703,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // ── "Send to Cover Studio" — load a library track as the cover source (#61) ──
   useEffect(() => {
-    if (!coverSource || coverSource.timestamp === _lastConsumedCoverTs) return;
+    if (!coverSource || coverSourceConsumed(coverSource.timestamp)) return;
     setSourceMode('audio');
-    _lastConsumedCoverTs = coverSource.timestamp;
+    noteCoverSourceConsumed(coverSource.timestamp);
     const s = coverSource.song;
     captionRequestRef.current++;
     if (captionJobRef.current && token) void workflowApi.cancel(captionJobRef.current).catch(() => {});
@@ -890,7 +897,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       } catch (err) {
         // Transport failures already toast via the global handler; surface only
         // domain errors (a failed cover-draft job throws a plain Error).
-        if (!(err instanceof ApiError)) showToast(err instanceof Error ? err.message : String(err));
+        if (!(err instanceof ApiError)) showToast(errorMessage(err));
       } finally { sourceChangeRef.current = false; setSourceChanging(false); if (sourceLookupRef.current === lookup) { setIsAnalyzing(false); } }
       return;
     }
@@ -942,7 +949,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     } catch (err) {
       // Transport failures already toast via the global handler; surface only
       // domain errors (a failed cover-draft job throws a plain Error).
-      if (!(err instanceof ApiError)) showToast(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      if (!(err instanceof ApiError)) showToast(`Error: ${errorMessage(err)}`);
     } finally { sourceChangeRef.current = false; setSourceChanging(false); if (sourceLookupRef.current === lookup) { setIsAnalyzing(false); } }
   };
 
@@ -1279,7 +1286,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       current?.from === vars.from && current.pickup === vars.pickup ? { ...current, ...data } : current),
     onError: (err, vars) => setRemeter(current =>
       current?.from === vars.from && current.pickup === vars.pickup
-        ? { ...current, error: err instanceof Error ? err.message : String(err) } : current),
+        ? { ...current, error: errorMessage(err) } : current),
   });
   const previewRemeter = (pickup: boolean) => {
     if (!token) return;
@@ -1567,7 +1574,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale, arStrength: coverArStrength }}
       onSettings={s => void applyBuildSettings(s)} keyLabel={coverScoreKeyLabel(abc)}
       sourceBpm={Number(abc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120)}
-      title={[params?.artist, params?.title ?? (songTitle || 'Cover')].filter(Boolean).join(' - ')}
+      title={[params?.artist, params?.title ?? (songTitle || 'Cover')].filter(isPresent).join(' - ')}
       scoreAbc={abc} recordingUrl={sourceMode === 'audio' && prep.recordingSeekAvailable ? sourceAudioUrl : ''}
       blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
       busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
@@ -2227,7 +2234,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                   <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                     <button type="button" onClick={() => void previewBarShift(barShiftOpen.beats === 1 ? -1 : barShiftOpen.beats - 1)}
                       className="rounded-md border border-zinc-300 dark:border-white/10 px-2">−</button>
-                    <span>Bar lines {Math.abs(barShiftOpen.beats)} beat{Math.abs(barShiftOpen.beats) > 1 ? 's' : ''} {barShiftOpen.beats < 0 ? 'earlier' : 'later'}</span>
+                    <span>Bar lines {Math.abs(barShiftOpen.beats)} {plural(Math.abs(barShiftOpen.beats), 'beat')} {barShiftOpen.beats < 0 ? 'earlier' : 'later'}</span>
                     <button type="button" onClick={() => void previewBarShift(barShiftOpen.beats === -1 ? 1 : barShiftOpen.beats + 1)}
                       className="rounded-md border border-zinc-300 dark:border-white/10 px-2">+</button>
                   </div>

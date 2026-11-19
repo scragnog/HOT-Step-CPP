@@ -11,14 +11,15 @@ import {
 } from 'lucide-react';
 import { DiscoIcon } from './DiscoIcon';
 import { useTranslation } from 'react-i18next';
-import { isPitchShiftReady } from '../../audio/pitchShift';
-import type { Song } from '../../types';
-import { useDisguiseMode } from '../../hooks/useDisguiseMode';
-import { CoverImage } from '../shared/CoverImage';
-import { HintButton } from '../shared/HintButton';
-import { ParamLabel } from '../shared/ParamLabel';
-import { useIsMobile } from '../shared/BottomSheet';
+import { isPitchShiftReady } from '@/audio/pitchShift';
+import type { Song } from '@/types';
+import { useDisguiseMode } from '@/hooks/useDisguiseMode';
+import { CoverImage } from '@/components/shared/songs/CoverImage';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { useIsMobile } from '@/components/shared/overlays/BottomSheet';
 import { FullScreenPlayer } from './FullScreenPlayer';
+import { formatClock } from '@/utils/format/format';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -59,12 +60,7 @@ interface PlayerProps {
   onExitABMode: () => void;
 }
 
-const formatTime = (s: number) => {
-  if (!s || !isFinite(s)) return '0:00';
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
-};
+const formatTime = (s: number) => (!s || !isFinite(s) ? '0:00' : formatClock(s));
 
 /** One segment of the playbar's variant switch: a label that selects the
  *  variant, plus an inline download icon that grabs that exact render.

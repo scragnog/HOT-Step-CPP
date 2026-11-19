@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { dataFolderApi, type DataFolderLocation, type DataFolderOperation, type DataFolderPreview } from '../../services/dataFolderApi';
-import { shutdownApi } from '../../services/api';
-import { ParamLabel } from '../shared/ParamLabel';
-import { dataFolderOptions } from '../../queries/shell-queue/settings';
-import { queryManager } from '../../queries/invalidation';
-import { StyledSelect } from '../shared/StyledSelect';
+import { dataFolderApi, type DataFolderLocation, type DataFolderOperation, type DataFolderPreview } from '@/services/dataFolderApi';
+import { shutdownApi } from '@/services/api';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { dataFolderOptions } from '@/queries/shell-queue/settings';
+import { queryManager } from '@/queries/invalidation';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { FolderOpen } from 'lucide-react';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { formatDecimal } from '@/utils/format/format';
 
 export function DataFolderPanel() {
   const { t } = useTranslation();
@@ -25,7 +27,7 @@ export function DataFolderPanel() {
   // Writes re-read location when they settle: a failed or half-applied command
   // can change what the server reports (a pending op, blockers).
   const invalidate = () => void queryManager.invalidate(queryClient, dataFolderOptions().queryKey);
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
+  const fail = (e: unknown) => setError(errorMessage(e));
 
   const previewMut = useMutation({
     mutationFn: async ({ kind, target }: { kind: DataFolderOperation; target: string }) => {
@@ -74,7 +76,7 @@ export function DataFolderPanel() {
 
   const busy = previewMut.isPending || scheduleMut.isPending || cancelMut.isPending || restartMut.isPending;
   const change = () => { revision.current++; setPreview(null); setError(''); };
-  const bytes = (value: number) => `${(value / 1e9).toFixed(2)} GB`;
+  const bytes = (value: number) => `${formatDecimal((value / 1e9), 2)} GB`;
   const blocked = busy || !location || !!location.override || !!location.pending;
   return <section className="settings-section">
     <div className="settings-section-header"><FolderOpen size={16} className="settings-section-icon" /><span className="settings-section-title">{t('settings.dataFolder.title')}</span></div>

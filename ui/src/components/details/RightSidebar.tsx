@@ -8,11 +8,11 @@
 import React from 'react';
 import { X, Play, Pause, RotateCcw, Pencil, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Song } from '../../types';
-import { HoverFullText } from '../shared/HoverFullText';
-import { SongActionsMenu } from '../shared/SongActionsMenu';
-import { CoverImage } from '../shared/CoverImage';
-import { displayTitle, songArtist, songSubject } from '../../utils/songDisplay';
+import type { Song } from '@/types';
+import { HoverFullText } from '@/components/shared/controls/HoverFullText';
+import { SongActionsMenu } from '@/components/shared/songs/SongActionsMenu';
+import { CoverImage } from '@/components/shared/songs/CoverImage';
+import { displayTitle, songArtist, songSubject } from '@/utils/songDisplay';
 import { Yue2CoverDrift } from './Yue2CoverDrift';
 import {
   BACKEND_LABELS, buildFactGroups, buildTrackChips, songBackend,

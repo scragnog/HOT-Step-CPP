@@ -3,8 +3,8 @@ import test from 'node:test';
 
 Object.assign(globalThis, { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } });
 const { useTrainingStore } = await import('./trainingStore');
-const { queryClient } = await import('../queries/client');
-const { trainingQueries: tq } = await import('../queries/training-data/queries');
+const { queryClient } = await import('@/queries/client');
+const { trainingQueries: tq } = await import('@/queries/training-data/queries');
 
 test('a labelled sample from the job stream also lands in the cached dataset detail', () => {
   const key = tq.dataset(null, 'd1').queryKey;

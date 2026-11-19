@@ -7,9 +7,12 @@
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { studioDraftsApi, type PlaylistDocument } from '../../services/studioDraftsApi';
-import { getPlaybackState, next } from '../../stores/playbackStore';
+import { useAuth } from '@/context/AuthContext';
+import { studioDraftsApi, type PlaylistDocument } from '@/services/studioDraftsApi';
+import { getPlaybackState, next } from '@/stores/playbackStore';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { writeJson } from '@/utils/storage/storageJson';
+import { emit } from '@/utils/appEvents';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +47,7 @@ let pending: unknown[] = [];
 let draining = false;
 let status = { needsImport: false, replacingServer: false, saveError: '', saving: false };
 
-function announce(): void { window.dispatchEvent(new CustomEvent(CHANGE_EVENT)); }
+function announce(): void { emit(CHANGE_EVENT); }
 function setStatus(next: typeof status): void { status = next; announce(); }
 
 async function drain(): Promise<void> {
@@ -59,7 +62,7 @@ async function drain(): Promise<void> {
       if (!pending.length) { _snapshot = result.document.body.items; announce(); }
     }
   } catch (error) {
-    setStatus({ ...status, saveError: error instanceof Error ? error.message : String(error), saving: false });
+    setStatus({ ...status, saveError: errorMessage(error), saving: false });
   } finally {
     draining = false;
     if (!status.saveError) setStatus({ ...status, saving: false });
@@ -88,7 +91,7 @@ async function connect(token: string): Promise<void> {
       setStatus({ needsImport: false, replacingServer: false, saveError: '', saving: false });
     } catch (error) {
       initialized = false;
-      setStatus({ ...status, saveError: error instanceof Error ? error.message : String(error) });
+      setStatus({ ...status, saveError: errorMessage(error) });
     } finally { connecting = null; }
   })();
   return connecting;
@@ -114,7 +117,7 @@ async function importBrowserPlaylist(): Promise<void> {
     try { localStorage.setItem(SERVER_POINTER_KEY, serverDocument.id); }
     catch (error) { console.warn('[Playlist] Browser migration marker was not saved:', error); }
   } catch (error) {
-    setStatus({ ...status, saveError: error instanceof Error ? error.message : String(error) });
+    setStatus({ ...status, saveError: errorMessage(error) });
   }
 }
 
@@ -127,7 +130,7 @@ async function retryPlaylistSave(): Promise<void> {
     await drain();
     announce();
   } catch (error) {
-    setStatus({ ...status, saveError: error instanceof Error ? error.message : String(error) });
+    setStatus({ ...status, saveError: errorMessage(error) });
   }
 }
 
@@ -147,7 +150,7 @@ function _persistPlaylist(): void {
   if (_persistTimer) clearTimeout(_persistTimer);
   _persistTimer = setTimeout(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
+      writeJson(STORAGE_KEY, _snapshot || []);
     } catch (e) {
       console.error('[Playlist] localStorage write failed (quota?):', e);
     }
@@ -158,7 +161,7 @@ function _persistPlaylist(): void {
 function _persistPlaylistNow(): void {
   if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(_snapshot || []));
+    writeJson(STORAGE_KEY, _snapshot || []);
   } catch (e) {
     console.error('[Playlist] localStorage write failed (quota?):', e);
   }

@@ -3,11 +3,11 @@
 // Its Prepare, Optimise and Train pages all come from the stage shell
 // (Yue2TrainStages, Yue2OptimisePanel); Prepare and Train differ only by section.
 
-import { Yue2OptimisePanel } from '../Yue2OptimisePanel';
-import { Yue2TrainStages } from '../Yue2TrainStages';
+import { Yue2OptimisePanel } from '@/components/training-studio/panels/Yue2OptimisePanel';
+import { Yue2TrainStages } from '@/components/training-studio/panels/Yue2TrainStages';
 import { yue2Chips, yue2Readiness } from './chips';
-import { TRAINING_TARGETS } from '../trainingTargets';
-import type { TrainingPlugin } from '../trainingPluginTypes';
+import { TRAINING_TARGETS } from '@/components/training-studio/lib/trainingTargets';
+import type { TrainingPlugin } from '@/components/training-studio/lib/trainingPluginTypes';
 
 export const yue2Plugin: TrainingPlugin = {
   ...TRAINING_TARGETS.yue2,

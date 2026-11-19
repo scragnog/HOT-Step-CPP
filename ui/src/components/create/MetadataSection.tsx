@@ -14,12 +14,12 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Slider } from '../shared/Slider';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { VOCAL_LANGUAGES } from '../../constants/languages';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { useBackendStore } from '../../stores/backendStore';
+import { Slider } from '@/components/shared/controls/Slider';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { VOCAL_LANGUAGES } from '@/constants/languages';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { useBackendStore } from '@/stores/backendStore';
 
 /** UI-side ceiling, unchanged from before capability gating existed. Used
  *  whenever the active backend's manifest hasn't defined a duration max yet

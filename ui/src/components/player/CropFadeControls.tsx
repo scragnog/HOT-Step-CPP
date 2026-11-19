@@ -11,26 +11,24 @@ import { toast } from 'react-toastify';
 import { X, Check, Scissors } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { songApi } from '../../services/api';
-import { invalidateEvents } from '../../queries/invalidation';
-import { HintButton } from '../shared/HintButton';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { songApi } from '@/services/api';
+import { invalidateEvents } from '@/queries/invalidation';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import {
   usePlaybackSelector, setEditEnd, setEndFade, setEndCurve, setEditMode, reloadCurrentTrack,
-} from '../../stores/playbackStore';
+} from '@/stores/playbackStore';
 import type { FadeCurve, FadeKind } from '../../../../server/src/contracts/fade';
+import { formatClockFine, formatDecimal } from '@/utils/format/format';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 interface CropFadeControlsProps {
   songId: string | null;
   audioUrl: string | null;
 }
 
-const formatTime = (s: number) => {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}.${Math.floor((s % 1) * 10)}`;
-};
+const formatTime = (s: number) => formatClockFine(s);
 
 export const CropFadeControls: React.FC<CropFadeControlsProps> = ({ songId, audioUrl }) => {
   const { t } = useTranslation();
@@ -75,7 +73,7 @@ export const CropFadeControls: React.FC<CropFadeControlsProps> = ({ songId, audi
           reloadCurrentTrack(newDuration);
           void invalidateEvents(queryClient, ['song:written', 'sidecars:changed']);
           toast.error(t('cropFade.partial', 'Only part of the edit was applied: {{error}}', {
-            error: err instanceof Error ? err.message : String(err),
+            error: errorMessage(err),
           }));
         }
         throw err;
@@ -156,7 +154,7 @@ export const CropFadeControls: React.FC<CropFadeControlsProps> = ({ songId, audi
           aria-label={t('cropFade.fade', 'Fade')}
           className="w-24 accent-amber-500"
         />
-        <span className="text-[11px] font-mono text-amber-400 w-10">{fade.toFixed(1)} s</span>
+        <span className="text-[11px] font-mono text-amber-400 w-10">{formatDecimal(fade, 1)} s</span>
       </ParamLabel>
 
       <ParamLabel

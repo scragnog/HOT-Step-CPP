@@ -4,19 +4,19 @@
 // This file provides backward-compatible exports so existing consumers
 // can migrate incrementally.
 //
-// NEW CODE should import from '../stores/globalParamsStore' directly
+// NEW CODE should import from '@/stores/globalParamsStore' directly
 // and use selectors: useGlobalParamsStore(s => s.fieldName)
 
 import React from 'react';
-import { useGlobalParamsStore } from '../stores/globalParamsStore';
-import type { AdapterGroupScales } from '../stores/globalParamsStore';
-import type { GenerationParams, LmRepMode } from '../types';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import type { AdapterGroupScales } from '@/stores/globalParamsStore';
+import type { GenerationParams, LmRepMode } from '@/types';
 
 // Re-export types that consumers may import from here
-export type { AdapterGroupScales } from '../stores/globalParamsStore';
+export type { AdapterGroupScales } from '@/stores/globalParamsStore';
 
 // Re-export the Zustand store for direct selector usage
-export { useGlobalParamsStore } from '../stores/globalParamsStore';
+export { useGlobalParamsStore } from '@/stores/globalParamsStore';
 
 // ── Legacy interface (matches the old context shape) ──
 

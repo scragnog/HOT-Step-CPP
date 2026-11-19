@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import { mapKey, shouldIgnore, seekTarget, LIBRARY_ACTIONS, SEEK_STEP_SEC, type HotkeyAction } from '../utils/hotkeys';
-import { togglePlay, seek, getPlaybackState } from '../stores/playbackStore';
+import { mapKey, shouldIgnore, seekTarget, LIBRARY_ACTIONS, SEEK_STEP_SEC, type HotkeyAction } from '@/utils/hotkeys';
+import { togglePlay, seek, getPlaybackState } from '@/stores/playbackStore';
 
 /** Event the mounted SongList listens for to run list actions. */
 export const HOTKEY_EVENT = 'hs-hotkey';

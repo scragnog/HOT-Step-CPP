@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { QueryObserver } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
-import { trainingQueries } from '../training-data/queries';
-import { setTrainingWorker } from '../../services/trainingApi';
-import { pollWhile } from '../contract';
+import { createQueryClient } from '@/queries/client';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { setTrainingWorker } from '@/services/trainingApi';
+import { pollWhile } from '@/queries/contract';
 import { runQueries, trainingWritePlan, activeJob } from './queries';
-import { gpusOptions } from '../shell-queue/settings';
+import { gpusOptions } from '@/queries/shell-queue/settings';
 import { invalidateRunReads } from './events';
 
 const originalFetch = globalThis.fetch;

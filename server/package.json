@@ -12,6 +12,10 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "lyrics:fixtures": "tsx scripts/lyrics-fixtures.ts",
+    "lyrics:drift": "tsx scripts/lyrics-drift.ts",
+    "lyrics:score": "tsx scripts/lyrics-fixtures.ts score",
+    "lyrics:fixtures:list": "tsx scripts/lyrics-fixtures.ts list",
     "postinstall": "npm rebuild better-sqlite3"
   },
   "dependencies": {

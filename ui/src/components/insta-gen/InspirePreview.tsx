@@ -6,7 +6,7 @@
 import React from 'react';
 import { Music, ArrowLeft, Pencil } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { InspireResult } from '../../services/inspireApi';
+import type { InspireResult } from '@/services/inspireApi';
 
 interface InspirePreviewProps {
   result: InspireResult;

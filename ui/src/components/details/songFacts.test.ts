@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildFactGroups, buildTrackChips } from './songFacts';
-import { normalizeSong } from '../../services/api';
-import type { Song } from '../../types';
+import { normalizeSong } from '@/services/api';
+import type { Song } from '@/types';
 
 test('saved musical metadata wins and only ACE-Step falls back to request values (#344)', () => {
   for (const backend of ['ace', 'yue2', 'minimax-m3', 'sa3']) {

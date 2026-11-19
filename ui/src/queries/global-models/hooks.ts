@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { masteringApi } from '../../services/api';
+import { masteringApi } from '@/services/api';
 import { referencesOptions, vramOptions } from './options';
-import { queryManager } from '../invalidation';
+import { queryManager } from '@/queries/invalidation';
 
 export const useVram = () => useQuery(vramOptions());
 

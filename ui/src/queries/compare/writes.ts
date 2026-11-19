@@ -13,9 +13,9 @@ import {
   compareApi,
   type CompareSession, type CompareSessionSummary, type CreateSessionInput,
   type ScoreInput, type ScoreResult,
-} from '../../services/compareApi';
-import { resourceKey } from '../keys';
-import { queryManager } from '../invalidation';
+} from '@/services/compareApi';
+import { resourceKey } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
 import { CMP, compareQueries } from './queries';
 
 // ── Pure helpers (exported for testing) ──────────────────────────────────────

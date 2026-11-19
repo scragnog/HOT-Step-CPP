@@ -11,8 +11,8 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   applyServerItems, hasActiveQueueWork, useAudioGenQueueSelector, useAudioQueueOwner,
-} from '../../stores/audioGenQueueStore';
-import { ACTIVE_POLL_MS } from '../contract';
+} from '@/stores/audioGenQueueStore';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
 import { audioQueueItemsOptions } from './queue';
 
 /** The old seven-tick idle backoff, kept as one value. */

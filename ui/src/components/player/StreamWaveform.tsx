@@ -18,10 +18,10 @@
 // the waveform grows into place instead of rescaling under the playhead every
 // time a window arrives.
 
-import { ParamLabel } from '../shared/ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 import React, { useEffect, useRef } from 'react';
-import { useMm3StreamAudio, mm3StreamPeaks, mm3StreamSeek } from '../../stores/mm3StreamStore';
+import { useMm3StreamAudio, mm3StreamPeaks, mm3StreamSeek } from '@/stores/mm3StreamStore';
 
 interface StreamWaveformProps {
   height?: number;

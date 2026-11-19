@@ -4,7 +4,7 @@
  */
 
 import { apiClient, sseFailure, type ReadOptions } from './httpClient';
-import { changed, readSnapshot } from '../queries/cover-lyrics/reads';
+import { changed, readSnapshot } from '@/queries/cover-lyrics/reads';
 
 const API_BASE = '';
 

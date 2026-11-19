@@ -3,8 +3,8 @@
 // JS just spawns/removes DOM elements. Capped at 30 active particles.
 
 import React, { useRef, useEffect, useCallback } from 'react';
-import { useDiscoMode } from '../../stores/discoStore';
-import { useHihatEnergy } from '../../stores/discoStore';
+import { useDiscoMode } from '@/stores/discoStore';
+import { useHihatEnergy } from '@/stores/discoStore';
 
 const MAX_PARTICLES = 30;
 const PARTICLE_LIFETIME = 1200; // ms — matches CSS animation duration

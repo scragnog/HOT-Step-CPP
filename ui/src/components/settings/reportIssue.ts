@@ -1,3 +1,4 @@
+import { isPresent } from '@/utils/guards';
 // reportIssue.ts — redaction and the prefilled GitHub issue URL for the
 // Report an issue tab. Pure, so the redaction and the length cap are tested.
 
@@ -14,7 +15,7 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function redact(text: string, { home, user }: RedactNames = {}): string {
   let out = text;
   if (home && home.length > 3) {
-    const parts = home.replace(/^[A-Za-z]:/, '').split(/[\\/]+/).filter(Boolean).map(esc);
+    const parts = home.replace(/^[A-Za-z]:/, '').split(/[\\/]+/).filter(isPresent).map(esc);
     out = out.replace(new RegExp(`(?:[A-Za-z]:)?[\\\\/]+${parts.join('[\\\\/]+')}`, 'gi'), '~');
   }
   // Any other profile path (another drive, a log from a different account).
@@ -52,7 +53,7 @@ export function renderBody({ description, system, sections }: Omit<ReportParts, 
     description.trim() && `## Description\n\n${description.trim()}`,
     `## System\n\n\`\`\`\n${system}\n\`\`\``,
     logs.length && `## Logs\n\n${logs.join('\n\n')}`,
-  ].filter(Boolean).join('\n\n');
+  ].filter(isPresent).join('\n\n');
 }
 
 export function buildUrl(title: string, body: string): string {

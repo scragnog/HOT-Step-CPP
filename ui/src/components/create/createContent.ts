@@ -1,7 +1,7 @@
 // createContent.ts — Create's per-song content as request fields. Shared by
 // CreatePanel's Generate and by resuming a saved draft, so a resumed draft
 // produces the same request the form would.
-import type { GenerationParams } from '../../types';
+import type { GenerationParams } from '@/types';
 import type { Yue2Continuation } from '../../../../server/src/contracts/yue2Continuation';
 
 export interface CreateContent {

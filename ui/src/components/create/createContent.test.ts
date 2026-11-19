@@ -13,7 +13,7 @@ import type { BackendExtensionParam } from '../../../../server/src/services/back
 import type { AuditionPreview, AuditionSideResult } from '../../../../server/src/services/training/types.js';
 import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal, createYue2Replay, liveBackendRefusal } from './createContent';
 import { applyTrainingCreateDraft, type TrainingCreateDraftData } from './trainingCreateDraft';
-import { createDraftMirror } from '../../services/studioDraftMirror';
+import { createDraftMirror } from '@/services/studioDraftMirror';
 
 // better-sqlite3 is a server dependency; resolve it from there.
 const Database = createRequire(new URL('../../../../server/package.json', import.meta.url))('better-sqlite3') as typeof import('better-sqlite3');

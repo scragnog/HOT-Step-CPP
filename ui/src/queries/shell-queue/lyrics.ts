@@ -7,10 +7,10 @@
 // A crop or retranscription rewrites them: queryManager.sidecars.all.
 
 import { queryOptions } from '@tanstack/react-query';
-import { fetchLrc } from '../../utils/lrcUtils';
-import { fetchLyricsJson, sidecarUrl } from '../../utils/wordLrcUtils';
-import { ApiError, HttpStatus } from '../../services/httpClient';
-import { sharedKeys } from '../keys';
+import { fetchLrc } from '@/utils/lyrics/lrcUtils';
+import { fetchLyricsJson, sidecarUrl } from '@/utils/lyrics/wordLrcUtils';
+import { ApiError, HttpStatus } from '@/services/httpClient';
+import { sharedKeys } from '@/queries/keys';
 
 export const lrcOptions = (audioUrl: string) => queryOptions({
   queryKey: sharedKeys.lrc(sidecarUrl(audioUrl, '.lrc')),

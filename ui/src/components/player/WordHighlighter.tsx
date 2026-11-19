@@ -1,5 +1,5 @@
 import React from 'react';
-import type { LyricsWord } from '../../utils/wordLrcUtils';
+import type { LyricsWord } from '@/utils/lyrics/wordLrcUtils';
 
 interface WordHighlighterProps {
   words: LyricsWord[];

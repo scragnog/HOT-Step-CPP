@@ -13,11 +13,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { X, Upload, Loader2, FileAudio, AlertTriangle, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { uploadImportAsset, importAssets } from '../../services/exportImportApi';
-import { useAuth } from '../../context/AuthContext';
-import { startPostProcessing } from '../../stores/postProcessStore';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
+import { uploadImportAsset, importAssets } from '@/services/exportImportApi';
+import { useAuth } from '@/context/AuthContext';
+import { startPostProcessing } from '@/stores/postProcessStore';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { formatBytes } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
+import { emit } from '@/utils/appEvents';
 
 /** Mirrors IMPORT_EXTENSIONS in server/src/services/library/importTrack.ts —
  *  the server is the authority and re-checks every upload. */
@@ -29,12 +33,7 @@ const PP_PREF_KEY = 'hs-import-runPostProcess';
 
 /** Open the import modal from anywhere in the tree. */
 export function openImportTracks(): void {
-  window.dispatchEvent(new CustomEvent('open-import-tracks'));
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  emit('open-import-tracks');
 }
 
 function hasAcceptedExtension(name: string): boolean {
@@ -89,12 +88,7 @@ export const ImportTracksModal: React.FC = () => {
   }, []);
 
   // Escape closes, but never mid-import: the upload would carry on invisibly.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) close(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, busy, close]);
+  useEscapeKey(() => close(), open && !busy);
 
   const addFiles = useCallback((incoming: FileList | File[] | null) => {
     if (!incoming) return;
@@ -149,7 +143,7 @@ export const ImportTracksModal: React.FC = () => {
 
       // App keeps the library list; it already listens for this.
       for (const song of songs) {
-        window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
+        emit('song-created', { song });
       }
 
       if (runPp) {
@@ -245,7 +239,7 @@ export const ImportTracksModal: React.FC = () => {
               {files.map((f, i) => (
                 <div key={`${f.name}:${f.size}:${i}`} className="flex items-center gap-2 px-3 py-2">
                   <span className="flex-1 min-w-0 truncate text-xs text-zinc-700 dark:text-zinc-300">{f.name}</span>
-                  <span className="text-[10px] text-zinc-500 flex-shrink-0">{formatSize(f.size)}</span>
+                  <span className="text-[10px] text-zinc-500 flex-shrink-0">{formatBytes(f.size)}</span>
                   <button
                     onClick={() => setFiles(prev => prev.filter((_, idx) => idx !== i))}
                     disabled={busy}
@@ -310,13 +304,13 @@ export const ImportTracksModal: React.FC = () => {
               <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
                 <Loader2 size={13} className="animate-spin text-pink-400" />
                 {phase === 'uploading'
-                  ? t('library.importUploading', 'Uploading {{size}}…', { size: formatSize(totalBytes) })
+                  ? t('library.importUploading', 'Uploading {{size}}…', { size: formatBytes(totalBytes) })
                   : t('library.importConverting', 'Converting and adding to the library…')}
               </div>
               <div className="h-1 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
                 <div
                   className={`h-full bg-pink-500 transition-all ${phase === 'converting' ? 'animate-pulse' : ''}`}
-                  style={{ width: `${Math.round((phase === 'converting' ? 1 : progress) * 100)}%` }}
+                  style={{ width: formatPercent(phase === 'converting' ? 1 : progress) }}
                 />
               </div>
             </div>

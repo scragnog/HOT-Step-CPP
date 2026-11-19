@@ -63,9 +63,14 @@ export function yue2LmVariant(type: string): string {
 }
 
 /** The variant of an LM path (an adapter's base_sha, a training checkpoint).
- *  Anything that is not a yue2-lm-*.gguf name is the base model: ''. */
+ *  Anything that is not a yue2-lm-*.gguf name is the base model: ''.
+ *
+ *  Both separators are split because a base_sha can be recorded on a machine
+ *  whose path style is not the one reading it — path.basename knows only the
+ *  host's, so a Windows path read on Linux would keep its directories. */
 export function yue2AdapterHome(baseSha: string | undefined): string {
-  const m = /^yue2-lm-(.+)\.gguf$/i.exec(path.basename(baseSha ?? ''));
+  const name = (baseSha ?? '').split(/[\\/]/).pop() ?? '';
+  const m = /^yue2-lm-(.+)\.gguf$/i.exec(name);
   return m ? yue2LmVariant(m[1]) : '';
 }
 

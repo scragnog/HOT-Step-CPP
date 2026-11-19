@@ -1,0 +1,959 @@
+import { ACE_LM_FORM_DEFAULTS } from '../../../../../server/src/contracts/trainingRecipes';
+// TrainLmForm.tsx — the LM LoRA training controls
+//
+// Four controls are always visible because they are the only ones a normal run
+// needs: which base size, what the adapter is called, when to stop, and a
+// backstop epoch cap. Everything else is Side-Step's own defaults and lives
+// behind the Advanced drawer, same pattern as PreprocessOptionsForm.
+
+import React from 'react';
+import { Cpu, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import type {
+  LmSize,
+  TrainLmStage,
+  TrainingCapabilities,
+} from '@/services/trainingApi';
+
+/** Everything the panel needs to POST, with every default already resolved. */
+export interface TrainLmFormState {
+  lmSize: LmSize;
+  lmModel: string;          // '' = let the server pick the BF16 base for lmSize
+  adapterName: string;
+  targetLoss: number;
+  epochs: number;
+  adapterType: 'lora' | 'lokr';
+  optimizer: 'adamw' | 'muon' | 'prodigy';
+  muonLrScale: number;
+  rank: number;
+  alpha: number;
+  lokrDim: number;
+  lokrAlpha: number;
+  lokrFactor: number;
+  learningRate: number;
+  gradAccum: number;
+  gradClip: number;
+  warmupRatio: number;
+  weightDecay: number;
+  maxLen: number;           // 0 = auto-fit from free VRAM
+  seed: number;
+  order: 'shuffle' | 'fixed';
+  lossOnCot: boolean;
+  milestoneStep: number;
+  milestoneKeep: number;
+  stages: TrainLmStage[];
+  overwrite: boolean;
+  stopEngine: boolean;
+  /** Resume: continue from the newest non-calibrated run of this adapter name
+   *  (server resolves the 'latest' sentinel; engine adopts identity).
+   *  Default ON (Rob, 2026-08-12). */
+  resumeFromLatest: boolean;
+  /** Post-training calibration: eval old-vs-new x scales, pick under guards,
+   *  bake the winner, write the score sidecar. Default OFF (Rob, 2026-08-12);
+   *  it was ON from 2026-08-10. */
+  calibrate: boolean;
+  /** Let calibration repoint this artist's album preset(s). Default ON. */
+  calibrateRepoint: boolean;
+  /** Projection GEMM dtype (speed lever A). 'f32-window' is the default; note
+   *  that on the LM 'bf16' is also the only route to the mul_mat backward, so
+   *  this is a precision/speed trade, not a free dial. */
+  weights: 'f32-window' | 'bf16';
+  /** Micro-batch size (speed lever B). 1 is the shipped path. */
+  batch: number | 'auto';
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
+   *  'mm' is the fast tensor-core backward and the server default. */
+  bwd: 'outprod' | 'mm';
+  /** Fraction of style steps trained with the caption dropped, forcing the
+   *  planner to lean on the artist's own code statistics instead of
+   *  memorising caption -> codes (2026-09-02, ported from the MM3 LM
+   *  trainer). 0 = off. */
+  captionDropout: number;
+  /** Parameterization + soft prompt (2026-09-04). LoRA type only. The artist
+   *  token and prefix train WITH the LoRA and ship in the same file.
+   *
+   *  dora/hira/loha/pissa/hra (2026-09-05) port train-dit's method row onto
+   *  the LM trainer — same DitMethod shape (see TrainDitForm.tsx), same
+   *  mutual exclusivity, same LoRA-only restriction. ace-train's train-lm
+   *  parser does not accept the five underlying flags yet (the DiT trainer
+   *  does); a run that sets one is refused with exit 2 on an engine build
+   *  that predates the port, same "loud refusal beats a silent no-op" choice
+   *  every other new-flag rollout in this codebase makes. */
+  rslora: boolean;
+  dora: boolean;
+  hira: boolean;
+  loha: boolean;
+  pissa: boolean;
+  hotPizza: boolean;
+  hra: boolean;
+  loraPlusRatio: number;
+  artistTokenOn: boolean;    // default on (Rob, 2026-09-04: arm 05 by ear)
+  artistToken: string;       // '' = the adapter's name
+  artistTokenK: number;
+  artistTokenLr: number;
+  prefixN: number;
+  /** Prior preservation (2026-09-02): every Nth step regularises against an
+   *  UNRELATED corpus's own base-model predictions instead of the artist's
+   *  codes. 0 = off. The corpus is picked automatically server-side. */
+  regEvery: number;
+  regTopk: number;
+  regSongs: number;
+  /** Prior teacher (docs/plans/lm-attr-probe/OVERNIGHT.md "Live teacher
+   *  spec"). 'cached' is today's byte-identical top-K prior (~18% coverage of
+   *  the base's code-vocabulary mass); 'live' scores every reg step against
+   *  the frozen base's full live distribution instead — 100% coverage, no
+   *  cache, no K. Meaningless when regEvery is 0. */
+  regTeacher: 'cached' | 'live';
+  /** Attention backend (2026-09-02, docs/plans/2026-09-02-lm-flash-attn.md
+   *  Stream B) — the DiT's attnBackend ported to train-lm. 'exact' is
+   *  today's byte-identical graph; 'flash' routes through the fused
+   *  ggml_flash_attn_train/_back kernels the DiT trainer already uses.
+   *  DEFAULT OFF (Rob, 2026-09-02) — unlike the DiT's on-by-default, this is
+   *  new and unvalidated by ear on the LM. 'flash-f32' is API-only; this
+   *  form never produces it. */
+  attnBackend: 'exact' | 'flash';
+  /** Per-layer attention head block size — 0 = engine picks. No control in
+   *  this form exposes a nonzero value today (the field exists so the flash
+   *  checkbox can disable itself if a value ever arrives from stored
+   *  per-stage defaults): flash has no S² term for head-blocking to cut, and
+   *  the server 400s the pair. */
+  attnHeadBlock: number;
+}
+
+export const TRAIN_LM_DEFAULTS: TrainLmFormState = ACE_LM_FORM_DEFAULTS as TrainLmFormState;
+
+const ALL_STAGES: TrainLmStage[] = ['extract', 'train', 'export'];
+/** What each pipeline stage does, for the stage toggles' hover cards. */
+const STAGE_INFO: Record<TrainLmStage, string> = {
+  extract: 'Extracts 5 Hz codes and captions from the dataset before training starts. Skip it only when a previous run already cached them and nothing changed underneath.',
+  train: 'Runs the actual training loop that produces the adapter. Turning this off with extract or export on lets you re-run just the surrounding step.',
+  export: 'Bakes the trained checkpoint into the adapter file the app loads at generation time. Skip it to train without producing a usable adapter yet.',
+};
+const LM_SIZES: LmSize[] = ['0.6B', '1.7B', '4B'];
+// Lever B (micro-batching) was closed by its own build gate and never written:
+// ace-train refuses `--batch >1` at exit 2 and the server 400s before the job is
+// queued. Offering 2/4/8/auto would be a dropdown whose every non-default value
+// is a guaranteed failure — and, because the runner stops ace-server before it
+// spawns ace-train, a failure that bounces the user's engine on the way. The
+// control stays visible and disabled so the decision is documented where the
+// question gets asked, rather than silently vanishing.
+const BATCH_CHOICES: Array<number | 'auto'> = [1];
+
+const FIELD =
+  'rounded-lg px-3 py-2 text-sm bg-zinc-100 dark:bg-black/20 border border-zinc-300 dark:border-white/10 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed';
+const LABEL = 'text-xs font-semibold text-zinc-600 dark:text-zinc-400';
+/** Checkbox-row label text — same size as the row it sits in, not the field
+ *  label above a box, so a hoverable checkbox caption doesn't change weight. */
+const CHECK_LABEL = 'text-xs text-zinc-700 dark:text-zinc-300';
+
+/** What the adapter-type row offers (2026-09-05), same shape as train-dit's
+ *  DitMethod (TrainDitForm.tsx): LoKr is its own type; DoRA/HiRA/LoHa/HRA are
+ *  the LoRA type with one parameterization flag set, so PiSSA/rsLoRA/LoRA+
+ *  sit underneath as checkboxes rather than as buttons of their own. */
+export type LmMethod = 'lokr' | 'lora' | 'dora' | 'hira' | 'loha' | 'hra';
+const methodOf = (s: TrainLmFormState): LmMethod =>
+  s.adapterType === 'lokr' ? 'lokr' : s.dora ? 'dora' : s.hira ? 'hira' : s.loha ? 'loha' : s.hra ? 'hra' : 'lora';
+/** i18n suffixes under trainingStudio.train.lm.* for each method's button
+ *  label and hover text. dora/hira/loha/hra get their OWN Info keys — not the
+ *  DiT's — because the DiT hover text carries DiT-specific measured facts
+ *  (crop/depth findings) that say nothing about the LM. */
+const METHOD_KEYS: Record<LmMethod, { label: string; info: string }> = {
+  lokr: { label: 'adapterLokr', info: 'adapterTypeHint' },
+  lora: { label: 'adapterLora', info: 'adapterTypeHint' },
+  dora: { label: 'dora', info: 'doraInfo' },
+  hira: { label: 'hira', info: 'hiraInfo' },
+  loha: { label: 'loha', info: 'lohaInfo' },
+  hra:  { label: 'hra',  info: 'hraInfo' },
+};
+
+interface Props {
+  capabilities: TrainingCapabilities | null;
+  value: TrainLmFormState;
+  onChange: (patch: Partial<TrainLmFormState>) => void;
+  /** Locks every control (a job is running, or a start is in flight). */
+  disabled?: boolean;
+  starting?: boolean;
+  onStart: () => void;
+  /** Place the controls inside a folding stage while keeping its validated action visible. */
+  renderLayout?: (controls: React.ReactNode, action: React.ReactNode) => React.ReactNode;
+  /** The one `vram` metric event of the live/last run (4B plan §1.3). null
+   *  before the engine has reported, in which case the static per-size hint
+   *  stands on its own. */
+  vram?: {
+    mode: string; maxLen: number; estMb: number; freeMb: number;
+    baseMb: number; ckptMb: number; segPeakMb: number;
+  } | null;
+}
+
+export const TrainLmForm: React.FC<Props> = ({
+  capabilities, value, onChange, disabled, starting, onStart, vram, renderLayout,
+}) => {
+  const { t } = useTranslation();
+
+  const tl = capabilities?.trainLm;
+  const sizes = tl?.sizes?.length ? tl.sizes : LM_SIZES;
+  // Only bases whose name carries the selected size token — the same `-<size>-`
+  // rule pickLmFor() uses. All three sizes are now trainable, but the base file
+  // must still match the declared size: picking a 4B base at size 0.6B is
+  // accepted by the route, the runner then STOPS ace-server, and only then does
+  // ace-train infer the real size from the weights and exit 1.
+  const sizeToken = new RegExp(`-${value.lmSize.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-`, 'i');
+  const lmModels = (tl?.lmModels ?? []).filter(n => sizeToken.test(n));
+  // '' means "no installed base matches this size" — the server would 400.
+  const defaultForSize = tl?.defaultLmBySize?.[value.lmSize] ?? '';
+  // A cold boot with ace-server unreachable leaves the CACHED model snapshot
+  // empty, so defaultLmBySize is '' for every size even though the file is
+  // installed. Saying "download one in the Model Manager" then is simply wrong,
+  // and the POST would succeed (the route re-probes). Distinguish the two, as
+  // PreprocessOptionsForm does for its own model list.
+  const modelsUnknown = capabilities?.engine?.up === false && (tl?.lmModels?.length ?? 0) === 0;
+  const noLmForSize = !value.lmModel && defaultForSize === '' && !modelsUnknown;
+  const lock = !!disabled;
+
+  // Mirrors the server's ADAPTER_NAME_RE. The GET path sanitises the same input
+  // instead of rejecting it, so without this the panel can render a green
+  // "Adapter ready" card for a directory the POST will refuse outright.
+  const adapterNameOk = /^[A-Za-z0-9._-]{1,64}$/.test(value.adapterName.trim())
+    && !/^\.+$/.test(value.adapterName.trim())
+    && !value.adapterName.trim().startsWith('.');
+
+  const num = (raw: string, fallback: number): number => {
+    // '' -> Number('') === 0, which is finite. For every other field 0 is
+    // rejected by the server, but targetLoss 0 legitimately means "no auto-stop",
+    // so an emptied box would silently disable the panel's headline feature.
+    if (raw.trim() === '') return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const toggleStage = (stage: TrainLmStage, on: boolean) => {
+    const next = ALL_STAGES.filter(s => (s === stage ? on : value.stages.includes(s)));
+    onChange({ stages: next });
+  };
+
+  // The LM form has no per-type default BUNDLE the way TrainDitForm's pickType
+  // does (lokrDim/rank/alpha already live side by side in one flat state, only
+  // their visibility changes), so switching method here is just the flag set —
+  // no whole-form reset needed. PiSSA drops when hopping off plain LoRA; rsLoRA
+  // drops for HRA, which has no meaning for reflections.
+  const method = methodOf(value);
+  const pickMethod = (m: LmMethod) => {
+    if (m === method) return;
+    if (m === 'lokr') { onChange({ adapterType: 'lokr' }); return; }
+    onChange({
+      adapterType: 'lora',
+      dora: m === 'dora', hira: m === 'hira', loha: m === 'loha', hra: m === 'hra',
+      pissa: m === 'lora' ? value.pissa : false,
+      hotPizza: m === 'lora' ? value.hotPizza : false,
+      rslora: m === 'hra' ? false : value.rslora,
+    });
+  };
+
+  const D = TRAIN_LM_DEFAULTS;
+  const onReset = <K extends keyof TrainLmFormState>(key: K) =>
+    (!lock && value[key] !== D[key]) ? () => onChange({ [key]: D[key] } as Partial<TrainLmFormState>) : undefined;
+
+  /** Field label + hover explanation. `key` is the i18n suffix under
+   *  trainingStudio.train.*; the explanation is that key + "Info", so the two
+   *  can never drift apart. `meta` is the default/range line — numbers only,
+   *  which is why it is not a translated string. */
+  const P = (key: string, meta?: string, opts?: { className?: string; onReset?: () => void }) => (
+    <ParamLabel
+      label={t(`trainingStudio.train.${key}`)}
+      info={t(`trainingStudio.train.${key}Info`)}
+      meta={meta}
+      className={opts?.className ?? LABEL}
+      onReset={opts?.onReset}
+    />
+  );
+
+  const controls = (
+    <div className="flex flex-col gap-4">
+      {/* ── Base size ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-1.5">
+        {P('baseSize', 'Default 4B · 0.6B / 1.7B / 4B', {
+          onReset: !lock && value.lmSize !== D.lmSize ? () => onChange({ lmSize: D.lmSize, lmModel: '' }) : undefined,
+        })}
+        <div className="flex items-center gap-1.5">
+          {sizes.map(size => {
+            const active = value.lmSize === size;
+            return (
+              <button
+                key={size}
+                type="button"
+                disabled={lock}
+                onClick={() => onChange({ lmSize: size, lmModel: '' })}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  active
+                    ? 'text-amber-500 bg-amber-500/10 border-amber-500/30'
+                    : 'text-zinc-500 border-zinc-300 dark:border-white/10 hover:text-zinc-700 dark:hover:text-zinc-300'
+                }`}
+              >
+                {size}
+              </button>
+            );
+          })}
+        </div>
+        {value.lmSize === '4B' && (
+          <span className="text-[11px] text-zinc-500">
+            {t('trainingStudio.train.lmSizeHint4B')}
+          </span>
+        )}
+        {/* §1.3: the measured line, once the engine has reported. Replaces
+            nothing — the static hint above is what a user sees before a run. */}
+        {vram && (
+          <span className="text-[11px] text-zinc-500">
+            {vram.mode === 'lowvram'
+              ? t('trainingStudio.train.lmVramHintLow', {
+                  est: vram.estMb, free: vram.freeMb, maxLen: vram.maxLen,
+                  base: vram.baseMb, ckpt: vram.ckptMb, seg: vram.segPeakMb,
+                })
+              : t('trainingStudio.train.lmVramHintNaive', {
+                  est: vram.estMb, free: vram.freeMb, maxLen: vram.maxLen,
+                })}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* ── Adapter name ────────────────────────────────────────────── */}
+        <label className="flex flex-col gap-1.5">
+          {P('adapterName')}
+          <div className="flex items-stretch">
+            <input
+              type="text"
+              value={value.adapterName}
+              disabled={lock}
+              spellCheck={false}
+              onChange={(e) => onChange({ adapterName: e.target.value })}
+              className={`${FIELD} flex-1 min-w-0 rounded-r-none border-r-0${
+                value.adapterName.trim() && !adapterNameOk ? ' border-red-500/50' : ''}`}
+            />
+            {/* Per-base layout: the size lives in the parent folder, not a
+                name suffix — show where the adapter will land. */}
+            <span className="flex items-center px-2.5 rounded-r-lg border border-l-0 border-zinc-300 dark:border-white/10 bg-zinc-200/60 dark:bg-white/5 text-[11px] font-mono font-semibold text-zinc-500 whitespace-nowrap">
+              → lm-{value.lmSize.toLowerCase().replace('.', '')}/
+            </span>
+          </div>
+          {value.adapterName.trim() && !adapterNameOk && (
+            <span className="text-[11px] text-red-500 dark:text-red-400">
+              {t('trainingStudio.train.adapterNameInvalid')}
+            </span>
+          )}
+        </label>
+
+        {/* ── Target loss ─────────────────────────────────────────────── */}
+        <label className="flex flex-col gap-1.5">
+          {P('targetLoss', 'Default 4.0 with the soft prompt (arm 05) · 1.5 for LoRA-only · lower rungs loop · 0 = no auto-stop', { onReset: onReset('targetLoss') })}
+          <input
+            type="number"
+            min={0}
+            max={20}
+            step={0.05}
+            value={value.targetLoss}
+            disabled={lock}
+            onChange={(e) => onChange({ targetLoss: num(e.target.value, 1.5) })}
+            className={FIELD}
+          />
+        </label>
+      </div>
+
+      <span className="text-[11px] text-zinc-500 -mt-2">{t('trainingStudio.train.targetLossHelp')}</span>
+
+      {/* ── Max epochs ────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1.5">
+          {P('maxEpochs', 'Default 150 · 1–200', { onReset: onReset('epochs') })}
+          <input
+            type="number"
+            min={1}
+            max={200}
+            step={1}
+            value={value.epochs}
+            disabled={lock}
+            onChange={(e) => onChange({ epochs: num(e.target.value, 150) })}
+            className={FIELD}
+          />
+          <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.maxEpochsHelp')}</span>
+        </label>
+      </div>
+
+      {/* ── Resume + calibration (2026-08-10) ─────────────────────────── */}
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <Toggle
+          accent="amber"
+          checked={value.resumeFromLatest}
+          disabled={lock}
+          onChange={(v) => onChange({ resumeFromLatest: v })}
+          label={t('trainingStudio.train.resumeFromLatest')}
+          info={t('trainingStudio.train.resumeFromLatestInfo')}
+          meta="Default on"
+          defaultValue={D.resumeFromLatest}
+        />
+        <Toggle
+          accent="amber"
+          checked={value.calibrate}
+          disabled={lock}
+          onChange={(v) => onChange({ calibrate: v })}
+          label={t('trainingStudio.train.calibrate')}
+          info={t('trainingStudio.train.calibrateInfo')}
+          meta="Default off"
+          defaultValue={D.calibrate}
+        />
+        {value.calibrate && (
+          <Toggle
+            accent="amber"
+            checked={value.calibrateRepoint}
+            disabled={lock}
+            onChange={(v) => onChange({ calibrateRepoint: v })}
+            label={t('trainingStudio.train.calibrateRepoint')}
+            info={t('trainingStudio.train.calibrateRepointInfo')}
+            meta="Default on"
+            className="pl-6"
+            defaultValue={D.calibrateRepoint}
+          />
+        )}
+      </div>
+
+      {/* ── Soft prompt + parameterization (2026-09-04) ──────────────────
+          A named artist token adds k learned embedding vectors behind a
+          placeholder in every caption; a prefix adds n K/V columns per
+          layer. Both train alongside the LoRA and live in the same adapter
+          file; the engine applies them automatically at generation. The
+          soft prompt learns ~50x faster than the LoRA, so the 1.5 target
+          loss fires early — 0 (no auto-stop) is the honest setting here. */}
+      {value.adapterType === 'lora' && (
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.softPromptGroup')}</span>
+        <Toggle
+          accent="amber"
+          checked={value.artistTokenOn}
+          disabled={lock}
+          onChange={(v) => onChange({ artistTokenOn: v })}
+          label={t('trainingStudio.train.artistTokenOn')}
+          info={t('trainingStudio.train.artistTokenOnInfo')}
+          meta="Default on"
+          defaultValue={D.artistTokenOn}
+        />
+        <label className="flex flex-col gap-1.5">
+          {P('artistToken', 'Blank = the adapter name · letters, digits, _ -', {
+            onReset: !lock && value.artistTokenOn && value.artistToken !== D.artistToken ? () => onChange({ artistToken: D.artistToken }) : undefined,
+          })}
+          <input
+            type="text" maxLength={64} placeholder={value.adapterName.replace(/[^A-Za-z0-9_-]/g, '') || 'same as the adapter name'}
+            value={value.artistToken} disabled={lock || !value.artistTokenOn}
+            onChange={(e) => onChange({ artistToken: e.target.value.replace(/[^A-Za-z0-9_-]/g, '') })}
+            className={FIELD}
+          />
+        </label>
+        <div className="grid grid-cols-3 gap-2">
+          <label className="flex flex-col gap-1.5">
+            {P('artistTokenK', 'Default 32 · 1–256', { onReset: value.artistTokenOn ? onReset('artistTokenK') : undefined })}
+            <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistTokenOn}
+              onChange={(e) => onChange({ artistTokenK: num(e.target.value, 32) })} className={FIELD} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            {P('artistTokenLr', 'Default 0.005', { onReset: value.artistTokenOn ? onReset('artistTokenLr') : undefined })}
+            <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistTokenOn}
+              onChange={(e) => onChange({ artistTokenLr: num(e.target.value, 0.005) })} className={FIELD} />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            {P('prefixN', 'Default 8 · 0 = off · 0–64', { onReset: onReset('prefixN') })}
+            <input type="number" min={0} max={64} step={1} value={value.prefixN} disabled={lock}
+              onChange={(e) => onChange({ prefixN: num(e.target.value, 0) })} className={FIELD} />
+          </label>
+        </div>
+        <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.softPromptGroupHelp')}</span>
+      </div>
+      )}
+
+      {/* ── Caption dropout + prior preservation (2026-09-02) ───────────
+          Ported from the MM3 LM trainer's two levers — see
+          docs/plans/lm-attr-probe/HANDOFF.md. Both default ON since
+          2026-09-03 (measured best recipe, RESULTS.md §6-7); not yet
+          validated by ear. */}
+      <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <label className="flex flex-col gap-1.5">
+          {P('captionDropout', 'Default 30% · 0–100 · 0 = off', { onReset: onReset('captionDropout') })}
+          <input
+            type="number" min={0} max={100} step={1}
+            value={Math.round(value.captionDropout * 100)}
+            disabled={lock}
+            onChange={(e) => onChange({ captionDropout: Math.min(1, Math.max(0, num(e.target.value, 0) / 100)) })}
+            className={FIELD}
+          />
+        </label>
+        <Toggle
+          accent="amber"
+          checked={value.regEvery > 0}
+          disabled={lock}
+          onChange={(v) => onChange({ regEvery: v ? 3 : 0 })}
+          label={t('trainingStudio.train.priorPreservation')}
+          info={t('trainingStudio.train.priorPreservationInfo')}
+          meta="Default off · every 3rd step when on"
+          className="mt-1"
+          defaultValue={D.regEvery > 0}
+        />
+        {value.regEvery > 0 && (
+          <div className="grid grid-cols-2 gap-3 pl-6">
+            <label className="flex flex-col gap-1.5">
+              {P('regEvery', 'Default 3 · every Nth step, min 2', { onReset: onReset('regEvery') })}
+              <input
+                type="number" min={2} max={50} step={1}
+                value={value.regEvery} disabled={lock}
+                onChange={(e) => onChange({ regEvery: Math.max(2, num(e.target.value, 3)) })}
+                className={FIELD}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              {P('regTopk', 'Default 64 · 1–256', { onReset: onReset('regTopk') })}
+              <input
+                type="number" min={1} max={256} step={1}
+                value={value.regTopk} disabled={lock}
+                onChange={(e) => onChange({ regTopk: num(e.target.value, 64) })}
+                className={FIELD}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 col-span-2">
+              {P('regTeacher', 'Default cached', { onReset: onReset('regTeacher') })}
+              <StyledSelect
+                accent="amber"
+                value={value.regTeacher}
+                disabled={lock}
+                onChange={(v) => onChange({ regTeacher: v as 'cached' | 'live' })}
+                options={[
+                  { value: 'cached', label: t('trainingStudio.train.regTeacherCached') },
+                  { value: 'live', label: t('trainingStudio.train.regTeacherLive') },
+                ]}
+              />
+            </label>
+          </div>
+        )}
+      </div>
+
+      {/* ── Attention backend (2026-09-02) ───────────────────────────────
+          The DiT's flash-attention port to train-lm. Unlike the DiT's
+          checkbox, this ships OFF: it is new and unvalidated by ear on the
+          LM. Disabled when a nonzero attnHeadBlock is in effect — flash has
+          no S² term for head-blocking to cut, and the server 400s the pair. */}
+      <div className="flex flex-col gap-1.5 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
+        <Toggle
+          accent="amber"
+          checked={value.attnBackend === 'flash'}
+          disabled={lock || value.attnHeadBlock > 0}
+          onChange={(v) => onChange({ attnBackend: v ? 'flash' : 'exact' })}
+          label={t('trainingStudio.train.lm.attnBackend')}
+          info={t('trainingStudio.train.lm.attnBackendInfo')}
+          meta="Default on · untick for the exact graph (bit-identical to older runs)"
+          defaultValue={D.attnBackend === 'flash'}
+        />
+        <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.lm.attnBackendHelp')}</span>
+        {value.attnHeadBlock > 0 && (
+          <span className="text-[11px] text-amber-500 pl-6">
+            {t('trainingStudio.train.lm.attnBackendHeadBlockHint')}
+          </span>
+        )}
+      </div>
+
+      {/* ── Advanced ──────────────────────────────────────────────────── */}
+      <details className="rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-semibold text-zinc-600 dark:text-zinc-400 select-none">
+          {t('trainingStudio.train.advanced')}
+        </summary>
+
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            {P('lmModel')}
+            <StyledSelect
+              accent="amber"
+              value={value.lmModel}
+              disabled={lock}
+              onChange={(v) => onChange({ lmModel: v })}
+              options={[
+                { value: '', label: defaultForSize || '—' },
+                ...lmModels.map(n => ({ value: n, label: n })),
+              ]}
+              searchPlaceholder="Filter bases…"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {P('lm.optimizer', 'Default AdamW · Prodigy (auto step size) and Muon supported', { onReset: onReset('optimizer') })}
+            <StyledSelect
+              accent="amber"
+              value={value.optimizer}
+              disabled={lock}
+              onChange={(v) => onChange({ optimizer: v })}
+              options={[
+                { value: 'prodigy' as const, label: t('trainingStudio.train.lm.optimizerProdigy') },
+                { value: 'muon' as const, label: t('trainingStudio.train.lm.optimizerMuon') },
+                { value: 'adamw' as const, label: t('trainingStudio.train.lm.optimizerAdamw') },
+              ]}
+            />
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.lm.optimizerHint')}</span>
+          </div>
+
+          {value.optimizer === 'muon' && (
+            <label className="flex flex-col gap-1.5">
+              {P('lm.muonLrScale', 'Default 20 · multiplies the LR for Muon params only', { onReset: onReset('muonLrScale') })}
+              <input
+                type="number" min={0.001} max={1000} step={1}
+                value={value.muonLrScale} disabled={lock}
+                onChange={(e) => onChange({ muonLrScale: num(e.target.value, 20) })}
+                className={FIELD}
+              />
+            </label>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            {P('lm.adapterType', 'Default LoRA', { onReset: method !== 'lora' && !lock ? () => pickMethod('lora') : undefined })}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as LmMethod[]).map(m => {
+                const active = method === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={lock}
+                    onClick={() => pickMethod(m)}
+                    title={t(`trainingStudio.train.lm.${METHOD_KEYS[m].info}`)}
+                    className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      active
+                        ? 'text-amber-500 bg-amber-500/10 border-amber-500/30'
+                        : 'text-zinc-500 border-zinc-300 dark:border-white/10 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    }`}
+                  >
+                    {t(`trainingStudio.train.lm.${METHOD_KEYS[m].label}`)}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.lm.adapterTypeHint')}</span>
+          </div>
+
+          {/* LoRA-family options next to the type they modify (moved out of the
+              soft-prompt group, 2026-09-05; DoRA/HiRA/LoHa/HRA joined the row
+              above the same day, porting train-dit's method row here — see
+              LmMethod). */}
+          {value.adapterType === 'lora' && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2">
+              <Toggle
+                accent="amber"
+                checked={value.pissa && value.hotPizza}
+                disabled={lock || method !== 'lora'}
+                onChange={(v) => onChange(v ? { hotPizza: true, pissa: true } : { hotPizza: false })}
+                label={t('trainingStudio.train.lm.hotPizza')}
+                info={t('trainingStudio.train.lm.hotPizzaInfo')}
+                meta={method === 'lora' ? 'MM3 default; unheard here' : 'Plain LoRA only'}
+                defaultValue={D.hotPizza}
+              />
+              <Toggle
+                accent="amber"
+                checked={value.pissa}
+                disabled={lock || method !== 'lora'}
+                onChange={(v) => onChange(v ? { pissa: true } : { pissa: false, hotPizza: false })}
+                label={t('trainingStudio.train.lm.pissa')}
+                info={t('trainingStudio.train.lm.pissaInfo')}
+                meta={method === 'lora' ? 'Default off' : 'Plain LoRA only'}
+                defaultValue={D.pissa}
+              />
+              <Toggle
+                accent="amber"
+                checked={value.rslora}
+                disabled={lock || method === 'hra'}
+                onChange={(v) => onChange({ rslora: v })}
+                label={t('trainingStudio.train.rslora')}
+                info={t('trainingStudio.train.rsloraInfo')}
+                meta={method === 'hra' ? 'Not with HRA' : 'Default off'}
+                defaultValue={D.rslora}
+              />
+              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+                {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', { className: CHECK_LABEL, onReset: onReset('loraPlusRatio') })}
+                <input type="number" min={1} max={64} step={1} value={value.loraPlusRatio} disabled={lock}
+                  onChange={(e) => onChange({ loraPlusRatio: Math.max(1, num(e.target.value, 1)) })} className={`${FIELD} w-20`} />
+              </label>
+            </div>
+          )}
+
+          {value.adapterType === 'lokr' && (
+            <label className="flex flex-col gap-1.5">
+              {P('lm.lokrDim', 'Default 128 · 4–4096 · keep alpha equal to it', { onReset: onReset('lokrDim') })}
+              <input
+                type="number" min={4} max={4096} step={1}
+                value={value.lokrDim} disabled={lock}
+                onChange={(e) => onChange({ lokrDim: num(e.target.value, 128) })}
+                className={FIELD}
+              />
+            </label>
+          )}
+          {value.adapterType === 'lokr' && (
+            <label className="flex flex-col gap-1.5">
+              {P('lm.lokrFactor', 'Default 6 · -1 or 2–64', { onReset: onReset('lokrFactor') })}
+              <input
+                type="number" min={-1} max={64} step={1}
+                value={value.lokrFactor} disabled={lock}
+                onChange={(e) => onChange({ lokrFactor: num(e.target.value, 6) })}
+                className={FIELD}
+              />
+            </label>
+          )}
+
+          {value.adapterType === 'lora' && (
+          <label className="flex flex-col gap-1.5">
+            {P('rank', 'Default 16 · 1–256', { onReset: onReset('rank') })}
+            <input
+              type="number" min={1} max={256} step={1}
+              value={value.rank} disabled={lock}
+              onChange={(e) => onChange({ rank: num(e.target.value, 16) })}
+              className={FIELD}
+            />
+          </label>
+          )}
+
+          {value.adapterType === 'lora' && (
+          <label className="flex flex-col gap-1.5">
+            {P('alpha', 'Default 32 · 1–1024', { onReset: onReset('alpha') })}
+            <input
+              type="number" min={1} max={1024} step={1}
+              value={value.alpha} disabled={lock}
+              onChange={(e) => onChange({ alpha: num(e.target.value, 32) })}
+              className={FIELD}
+            />
+          </label>
+          )}
+
+          <label className="flex flex-col gap-1.5">
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : 'Default 1e-4', { onReset: onReset('learningRate') })}
+            <input
+              type="number" min={0} max={1} step={0.00001}
+              value={value.learningRate} disabled={lock}
+              onChange={(e) => onChange({ learningRate: num(e.target.value, 0.0001) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('gradAccum', 'Default 2 · 1–64', { onReset: onReset('gradAccum') })}
+            <input
+              type="number" min={1} max={64} step={1}
+              value={value.gradAccum} disabled={lock}
+              onChange={(e) => onChange({ gradAccum: num(e.target.value, 2) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('gradClip', 'Default 1.0 · 0 = off', { onReset: onReset('gradClip') })}
+            <input
+              type="number" min={0} max={100} step={0.1}
+              value={value.gradClip} disabled={lock}
+              onChange={(e) => onChange({ gradClip: num(e.target.value, 1) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('warmupRatio', 'Default 0.05 · 0–0.5', { onReset: onReset('warmupRatio') })}
+            <input
+              type="number" min={0} max={0.5} step={0.01}
+              value={value.warmupRatio} disabled={lock}
+              onChange={(e) => onChange({ warmupRatio: num(e.target.value, 0.05) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('weightDecay', 'Default 0.01 · 0–1', { onReset: onReset('weightDecay') })}
+            <input
+              type="number" min={0} max={1} step={0.005}
+              value={value.weightDecay} disabled={lock}
+              onChange={(e) => onChange({ weightDecay: num(e.target.value, 0.01) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('maxLen', 'Default 0 (auto) · 0–16384 tokens', { onReset: onReset('maxLen') })}
+            <input
+              type="number" min={0} max={16384} step={64}
+              value={value.maxLen} disabled={lock}
+              onChange={(e) => onChange({ maxLen: num(e.target.value, 0) })}
+              className={FIELD}
+            />
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.maxLenAuto')}</span>
+          </label>
+
+          {/* ── Speed levers (2026-07-28 plan §1.4) ───────────────────────
+              Both ship at their default value, and the server omits the CLI
+              flag entirely at that value, so leaving these alone reproduces
+              today's run exactly. */}
+          <div className="flex flex-col gap-1.5">
+            {P('weights', undefined, { onReset: onReset('weights') })}
+            <StyledSelect
+              accent="amber"
+              value={value.weights}
+              disabled={lock}
+              onChange={(v) => onChange({ weights: v })}
+              options={[
+                { value: 'f32-window' as const, label: 'f32-window' },
+                { value: 'bf16' as const, label: 'bf16' },
+              ]}
+            />
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.weightsHint')}</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {P('bwd', 'Default outprod (LM)', { onReset: onReset('bwd') })}
+            <StyledSelect
+              accent="amber"
+              value={value.bwd}
+              disabled={lock}
+              onChange={(v) => onChange({ bwd: v })}
+              options={[
+                { value: 'mm' as const, label: t('trainingStudio.train.bwdMm') },
+                { value: 'outprod' as const, label: t('trainingStudio.train.bwdOutprod') },
+              ]}
+            />
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.bwdHintLm')}</span>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            {P('batch', 'Fixed at 1')}
+            <StyledSelect
+              accent="amber"
+              value={String(value.batch)}
+              disabled
+              onChange={(v) => onChange({ batch: v === 'auto' ? 'auto' : Number(v) })}
+              options={BATCH_CHOICES.map(b => ({ value: String(b), label: String(b) }))}
+            />
+            <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.batchHint')}</span>
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            {P('seed', 'Default 42', { onReset: onReset('seed') })}
+            <input
+              type="number" min={0} step={1}
+              value={value.seed} disabled={lock}
+              onChange={(e) => onChange({ seed: num(e.target.value, 42) })}
+              className={FIELD}
+            />
+          </label>
+
+          <div className="flex flex-col gap-1.5">
+            {P('order', 'Default shuffle', { onReset: onReset('order') })}
+            <StyledSelect
+              accent="amber"
+              value={value.order}
+              disabled={lock}
+              onChange={(v) => onChange({ order: v })}
+              options={[
+                { value: 'shuffle' as const, label: 'shuffle' },
+                { value: 'fixed' as const, label: 'fixed' },
+              ]}
+            />
+          </div>
+
+          <label className="flex flex-col gap-1.5">
+            {P('milestoneStep', 'Default 0 (off) · the best adapter is kept regardless', { onReset: onReset('milestoneStep') })}
+            <input
+              type="number" min={0} max={5} step={0.05}
+              value={value.milestoneStep} disabled={lock}
+              onChange={(e) => onChange({ milestoneStep: num(e.target.value, 0) })}
+              className={FIELD}
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            {P('milestoneKeep', 'Default 6 · 0–64', { onReset: onReset('milestoneKeep') })}
+            <input
+              type="number" min={0} max={64} step={1}
+              value={value.milestoneKeep} disabled={lock}
+              onChange={(e) => onChange({ milestoneKeep: num(e.target.value, 6) })}
+              className={FIELD}
+            />
+          </label>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-2">
+          {P('stages')}
+          <div className="flex items-center gap-4 flex-wrap">
+            {ALL_STAGES.map(stage => (
+              <Toggle
+                key={stage}
+                size="sm"
+                accent="amber"
+                checked={value.stages.includes(stage)}
+                disabled={lock}
+                onChange={(v) => toggleStage(stage, v)}
+                label={stage}
+                info={STAGE_INFO[stage]}
+                defaultValue={D.stages.includes(stage)}
+              />
+            ))}
+          </div>
+
+          <Toggle
+            accent="amber"
+            checked={value.lossOnCot}
+            disabled={lock}
+            onChange={(v) => onChange({ lossOnCot: v })}
+            label={t('trainingStudio.train.lossOnCot')}
+            info={t('trainingStudio.train.lossOnCotInfo')}
+            meta="Default on"
+            defaultValue={D.lossOnCot}
+          />
+
+          <Toggle
+            accent="amber"
+            checked={value.overwrite}
+            disabled={lock}
+            onChange={(v) => onChange({ overwrite: v })}
+            label={t('trainingStudio.train.reextract')}
+            info={t('trainingStudio.train.reextractInfo')}
+            meta="Default off"
+            defaultValue={D.overwrite}
+          />
+
+          <Toggle
+            accent="amber"
+            checked={value.stopEngine}
+            disabled={lock}
+            onChange={(v) => onChange({ stopEngine: v })}
+            label={t('trainingStudio.train.stopEngine')}
+            info={t('trainingStudio.train.stopEngineInfo')}
+            meta="Default on"
+            defaultValue={D.stopEngine}
+          />
+          <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.preprocess.stopEngineHelp')}</span>
+        </div>
+      </details>
+
+      {noLmForSize && (
+        <div className="px-3 py-2 rounded-lg border border-amber-500/25 bg-amber-500/10 text-xs text-amber-600 dark:text-amber-400">
+          {t('trainingStudio.train.noLmForSize', { size: value.lmSize })}
+        </div>
+      )}
+
+      {modelsUnknown && (
+        <div className="px-3 py-2 rounded-lg border border-amber-500/25 bg-amber-500/10 text-xs text-amber-600 dark:text-amber-400">
+          {t('trainingStudio.preprocess.engineDownForModels')}
+        </div>
+      )}
+    </div>
+  );
+  const action = (
+      <button
+        onClick={onStart}
+        disabled={lock || noLmForSize || !adapterNameOk || value.stages.length === 0}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        {starting ? <Loader2 size={15} className="animate-spin" /> : <Cpu size={15} />}
+        {t('trainingStudio.train.start')}
+      </button>
+  );
+  return <>{renderLayout ? renderLayout(controls, action) : <div className="flex flex-col gap-4">{controls}{action}</div>}</>;
+};
+
+export default TrainLmForm;

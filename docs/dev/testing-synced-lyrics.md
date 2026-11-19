@@ -9,8 +9,8 @@ audio file, and the operations that have to keep the two sidecars in step
 
 Run it after touching `server/src/services/lrcExport.ts`, `server/src/routes/download.ts`,
 `server/src/routes/songs.ts` (retranscribe, crop and the delete routes),
-`server/src/services/audioCrop.ts`, `ui/src/utils/downloadTrack.ts`,
-`ui/src/utils/lrcUtils.ts` or `ui/src/components/shared/SongActionsMenu.tsx`.
+`server/src/services/audioCrop.ts`, `ui/src/utils/audio/downloadTrack.ts`,
+`ui/src/utils/lyrics/lrcUtils.ts` or `ui/src/components/shared/songs/SongActionsMenu.tsx`.
 
 ## What this covers
 
@@ -399,7 +399,7 @@ The writer emits a subset of the LRC format. What is standard, and what is not:
 A line may carry several timestamps (`[00:12.00][01:20.00]line`), which is how hand-made
 files spell a chorus that returns. The app's parsers expand that into one entry per time
 and drop enhanced word stamps from the text, and the crop path shifts every timestamp it
-finds. See `parseLrcEntries` in `ui/src/utils/lrcUtils.ts` and `splitLrcLine` in
+finds. See `parseLrcEntries` in `ui/src/utils/lyrics/lrcUtils.ts` and `splitLrcLine` in
 `server/src/services/lrcExport.ts`.
 
 ## Pass and fail

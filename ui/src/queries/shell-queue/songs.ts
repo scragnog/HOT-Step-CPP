@@ -3,11 +3,11 @@
 // (docs/dev/ui-server-state.md); other areas query them by the shared keys.
 
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
-import { getSongPostProcessingStatus, songApi, type PostProcessJobStatus } from '../../services/api';
-import type { Song } from '../../types';
-import { pollWhile } from '../contract';
-import { resourceKey, serverKey, sharedKeys, SHARED, SONG_VIEWS } from '../keys';
-import { queryManager } from '../invalidation';
+import { getSongPostProcessingStatus, songApi, type PostProcessJobStatus } from '@/services/api';
+import type { Song } from '@/types';
+import { pollWhile } from '@/queries/contract';
+import { resourceKey, serverKey, sharedKeys, SHARED, SONG_VIEWS } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
 
 export const songsOptions = () => queryOptions({
   queryKey: sharedKeys.songs(),

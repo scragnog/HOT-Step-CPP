@@ -4,7 +4,7 @@
 // `trainingQueries.job(worker, id)` is the job's one owner; the store keeps the
 // selected id and its sample/log/preview/metric reducers, never a job copy.
 
-import type { TrainingJobSummary, TrainingStreamEvent } from '../../services/trainingApi';
+import type { TrainingJobSummary, TrainingStreamEvent } from '@/services/trainingApi';
 
 type ProgressFrame = Extract<TrainingStreamEvent, { type: 'progress' }>;
 type StatusFrame = Extract<TrainingStreamEvent, { type: 'status' }>;
