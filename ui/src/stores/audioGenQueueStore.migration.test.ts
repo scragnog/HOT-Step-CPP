@@ -1,6 +1,7 @@
 // audioGenQueueStore.migration.test.ts — the real store logic behind queue
-// ownership: never-decided -> server/migrate, a migration interrupted by
-// reload, retry, and explicit rollback. Exercises the actual exported
+// ownership: the one-shot import of a v1.3.x browser queue, from every state a
+// profile can load in (never decided, a v1.4.x rollback's 'browser', a stuck
+// 'migrating'), and a migration interrupted by reload. Exercises the actual exported
 // functions (not just the pure decision table in audioQueueOwnerDecision.ts)
 // against fake IndexedDB/localStorage/fetch.
 //
@@ -17,7 +18,7 @@ import type { AudioQueueItem } from './audioGenQueueStore.js';
 
 register('./cssStubLoader.mjs', import.meta.url);
 
-// downloadQueueExport() (migrateAudioQueue/rollbackAudioQueue) schedules a
+// downloadQueueExport() (migrateAudioQueue) schedules a
 // bare 60s setTimeout to revoke its object URL — harmless in a browser tab,
 // but under node:test it is a real, un-unref'd handle that keeps the process
 // alive for a full minute after every test that downloads anything. unref
@@ -40,7 +41,7 @@ const initialIdb = createFakeIndexedDB();
 (globalThis as any).indexedDB = initialIdb.indexedDB;
 
 const {
-  migrateAudioQueue, retryQueueMigration, rollbackAudioQueue, resumeQueue,
+  retryQueueMigration, resumeQueue,
   ensureQueueOwnerDecided, getAudioQueueOwner, _resetAudioQueueForTests,
   OWNER_KEY, BACKUP_KEY, PENDING_IMPORT_KEY,
 } = await import('./audioGenQueueStore.js') as any;
@@ -72,11 +73,11 @@ async function withFakeQueue(
   }
 }
 
-/** Seeds the browser backup `rollbackAudioQueue` reads back by id — as if
- *  `exportQueueBackup` had produced it for the interrupted attempt. */
-function seedBackup(idbData: Map<string, unknown>, id: string, itemIds: string[]): void {
-  idbData.set(`${BACKUP_KEY}:${id}`, { version: 1, id, exportedAt: Date.now(), legacyRaw: null, indexedDb: null, itemIds, jobIds: [] });
-}
+/** The v1.3.x queue as the browser stored it, which the import reads. */
+const seedBrowserQueue = (idbData: Map<string, unknown>, items: AudioQueueItem[]) =>
+  idbData.set('state', { items, completionCounter: 0 });
+const importCalls = (api: AudioQueueApiFake) => api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import');
+const importedIds = (api: AudioQueueApiFake) => importCalls(api).flatMap((c: any) => c.body.items.map((i: any) => i.legacyId));
 
 test('a never-decided profile with nothing pending becomes server-owned silently, no network call', async () => {
   await withFakeQueue([], async ({ api }) => {
@@ -86,11 +87,53 @@ test('a never-decided profile with nothing pending becomes server-owned silently
   });
 });
 
-test('a never-decided profile with pending items migrates once, silently', async () => {
-  await withFakeQueue([fixtureItem('a')], async ({ api }) => {
+test('start state: never decided, items pending — imported once, silently, and server-owned', async () => {
+  const items = [fixtureItem('a'), fixtureItem('b')];
+  await withFakeQueue(items, async ({ idbData, api }) => {
+    seedBrowserQueue(idbData, items);
     await ensureQueueOwnerDecided('tok');
     assert.equal(getAudioQueueOwner(), 'server');
-    assert.equal(api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import').length, 1);
+    assert.equal(importCalls(api).length, 1);
+    assert.deepEqual(importedIds(api), ['a', 'b']);
+    assert.ok(idbData.get('state'), 'the browser copy is kept');
+  });
+});
+
+test("start state: 'browser' (a v1.4.x rollback), items pending — imported, not left for an executor that is gone", async () => {
+  const items = [fixtureItem('a')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'browser');
+    seedBrowserQueue(idbData, items);
+    await ensureQueueOwnerDecided('tok');
+    assert.equal(getAudioQueueOwner(), 'server');
+    assert.deepEqual(importedIds(api), ['a']);
+  });
+});
+
+test("'browser' after a rollback: items the first import already landed are not sent again", async () => {
+  const items = [fixtureItem('old'), fixtureItem('new')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'browser');
+    seedBrowserQueue(idbData, items);
+    // The pre-rollback import's receipt: 'old' is on the server already.
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-0', items: [{ legacyId: 'old', itemId: 'srv-old', status: 'cancelled' }] });
+    await ensureQueueOwnerDecided('tok');
+    assert.equal(getAudioQueueOwner(), 'server');
+    assert.deepEqual(importedIds(api), ['new']);
+  });
+});
+
+test("start state: 'migrating' — the load retries the import, even with a v1.4.x rollback marker left over", async () => {
+  const items = [fixtureItem('a')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'migrating');
+    storage.setItem('lireek-audio-queue-rollback-requested-v1', 'bk-x');
+    // No persisted payload: the earlier attempt died before its POST, so the
+    // retry rebuilds it from the browser copy.
+    seedBrowserQueue(idbData, items);
+    await ensureQueueOwnerDecided('tok');
+    assert.equal(getAudioQueueOwner(), 'server');
+    assert.deepEqual(importedIds(api), ['a']);
   });
 });
 
@@ -101,7 +144,6 @@ test('import landed before an interrupted reload: a failed replay stays fenced, 
       backupId: 'bk-1', choice: 'resume',
       items: [{ legacyId: 'a', request: { prompt: 'test' }, meta: { view: items[0] }, status: 'pending' }],
     };
-    seedBackup(idbData, 'bk-1', ['a']);
     // The original attempt's POST actually reached the server...
     await fetch('/api/audio-queue/migration/import', { method: 'POST', body: JSON.stringify(payload) });
     assert.equal(api.calls.length, 1);
@@ -120,6 +162,7 @@ test('import landed before an interrupted reload: a failed replay stays fenced, 
     assert.equal(getAudioQueueOwner(), 'migrating', 'still fenced after Resume');
     assert.equal(items[0].status, 'pending');
     assert.equal(items[0].jobId, undefined, 'Resume did not resubmit the item locally');
+    assert.equal(api.calls.filter((c: any) => c.path.startsWith('/api/generate')).length, 0);
   });
 });
 
@@ -135,135 +178,12 @@ test('a stuck migration recovers once the replay succeeds', async () => {
 
     await retryQueueMigration('tok');
     assert.equal(getAudioQueueOwner(), 'server');
-    assert.equal(api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import').length, 1);
+    assert.equal(importCalls(api).length, 1);
 
     await resumeQueue('tok');
     assert.equal(getAudioQueueOwner(), 'server', 'resumeQueue takes the server branch, not local execution');
   });
 });
-
-test('an explicit rollback is the only way back to browser ownership from a stuck migration', async () => {
-  const items = [fixtureItem('a')];
-  await withFakeQueue(items, async ({ storage, idbData, api }) => {
-    const payload = {
-      backupId: 'bk-3', choice: 'resume',
-      items: [{ legacyId: 'a', request: { prompt: 'test' }, meta: { view: items[0] }, status: 'pending' }],
-    };
-    seedBackup(idbData, 'bk-3', ['a']);
-    storage.setItem(OWNER_KEY, 'migrating');
-    idbData.set(PENDING_IMPORT_KEY, payload);
-
-    // Even a repeatedly-failing retry must not unblock rollback's own path.
-    api.failAlways((c: any) => c.path === '/api/audio-queue/migration/import');
-    await assert.rejects(() => retryQueueMigration('tok'));
-    assert.equal(getAudioQueueOwner(), 'migrating');
-
-    await rollbackAudioQueue();
-    assert.equal(getAudioQueueOwner(), 'browser');
-    assert.equal(api.rollbackCalls, 1);
-
-    // Browser ownership is no longer fenced — resumeQueue may now run locally.
-    await resumeQueue('tok');
-    assert.equal(getAudioQueueOwner(), 'browser');
-  });
-});
-
-// ── Rollback failures (round 4): every failure stays 'migrating', fenced ──
-
-const { ROLLBACK_PLAN_KEY, isAudioQueueRollbackPending } = await import('./audioGenQueueStore.js') as any;
-const restoredItems = (idbData: Map<string, unknown>) => (idbData.get('state') as { items: AudioQueueItem[] } | undefined)?.items ?? [];
-/** A server queue item imported from browser item `legacyId`. */
-const srvItem = (legacyId: string, status: string) =>
-  ({ id: `srv-${legacyId}`, status, meta: { legacyId }, request: { title: legacyId }, createdAt: 1 });
-const generateCalls = (api: AudioQueueApiFake) => api.calls.filter((c: any) => c.path.startsWith('/api/generate'));
-
-test('rollback refused with 409 (submission in flight) stays fenced; reload neither replays the import nor runs locally; a later rollback succeeds', async () => {
-  const items = [fixtureItem('a')];
-  await withFakeQueue(items, async ({ storage, idbData, api }) => {
-    storage.setItem(OWNER_KEY, 'server');
-    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r1' });
-    seedBackup(idbData, 'bk-r1', ['a']);
-    api.serverItems = [srvItem('a', 'submitting')];
-
-    await assert.rejects(() => rollbackAudioQueue(), /in flight/);
-    assert.equal(getAudioQueueOwner(), 'migrating', 'never back to server after a failed rollback');
-    assert.equal(isAudioQueueRollbackPending(), true);
-    assert.equal(api.paused, true, 'the server queue stays paused, as the real route leaves it');
-
-    // Reload: the load-time decision must not replay the import over the
-    // user's rollback, and Resume must not run anything in the browser.
-    _resetAudioQueueForTests(items);
-    await ensureQueueOwnerDecided('tok');
-    await resumeQueue('tok');
-    assert.equal(getAudioQueueOwner(), 'migrating');
-    assert.equal(api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import').length, 0);
-    assert.deepEqual(generateCalls(api), []);
-    assert.equal(items[0].jobId, undefined);
-
-    // The submission settles; the user retries the rollback.
-    api.serverItems[0].status = 'pending';
-    await rollbackAudioQueue();
-    assert.equal(getAudioQueueOwner(), 'browser');
-    assert.equal(isAudioQueueRollbackPending(), false);
-    assert.equal(api.serverItems[0].status, 'cancelled');
-    assert.deepEqual(restoredItems(idbData).map(i => [i.status, i.stage]), [['pending', 'Held after rollback']]);
-    assert.equal(idbData.get(ROLLBACK_PLAN_KEY), null, 'the finished plan is cleared');
-  });
-});
-
-test('a rollback that fails part-way through its cancels finishes the same plan on retry, without re-exporting', async () => {
-  await withFakeQueue([fixtureItem('a'), fixtureItem('b')], async ({ storage, idbData, api }) => {
-    storage.setItem(OWNER_KEY, 'server');
-    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r2' });
-    seedBackup(idbData, 'bk-r2', ['a', 'b']);
-    api.serverItems = [
-      srvItem('a', 'pending'),
-      srvItem('b', 'pending'),
-    ];
-    api.failNext((c: any) => c.path === '/api/audio-queue/items/srv-b/cancel');
-
-    await assert.rejects(() => rollbackAudioQueue());
-    assert.equal(getAudioQueueOwner(), 'migrating');
-    assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'pending']);
-    assert.ok(idbData.get(ROLLBACK_PLAN_KEY), 'the plan was saved before the first cancel');
-
-    await rollbackAudioQueue();
-    assert.equal(api.rollbackCalls, 1, 'the retry reuses the plan instead of exporting a half-cancelled server');
-    assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'cancelled']);
-    assert.equal(getAudioQueueOwner(), 'browser');
-    // Both come back pending: the first one's cancel by the earlier attempt
-    // does not turn it into a failed item.
-    assert.deepEqual(restoredItems(idbData).map(i => i.status), ['pending', 'pending']);
-  });
-});
-
-test('after a failed rollback, choosing Retry hands the queue back to the server and clears the rollback state', async () => {
-  const items = [fixtureItem('a')];
-  await withFakeQueue(items, async ({ storage, idbData, api }) => {
-    const payload = {
-      backupId: 'bk-r3', choice: 'resume',
-      items: [{ legacyId: 'a', request: { prompt: 'test' }, meta: { view: items[0] }, status: 'pending' }],
-    };
-    storage.setItem(OWNER_KEY, 'server');
-    idbData.set(PENDING_IMPORT_KEY, payload);
-    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r3' });
-    seedBackup(idbData, 'bk-r3', ['a']);
-    api.serverItems = [srvItem('a', 'pending')];
-    api.failNext((c: any) => c.path === '/api/audio-queue/migration/rollback-export');
-
-    await assert.rejects(() => rollbackAudioQueue());
-    assert.equal(getAudioQueueOwner(), 'migrating');
-    assert.equal(isAudioQueueRollbackPending(), true);
-
-    await retryQueueMigration('tok');
-    assert.equal(getAudioQueueOwner(), 'server');
-    assert.equal(isAudioQueueRollbackPending(), false);
-    assert.equal(idbData.get(ROLLBACK_PLAN_KEY), null);
-    assert.equal(api.serverItems[0].status, 'pending', 'nothing was cancelled');
-  });
-});
-
-// ── Interrupted cleanup (round 5): recovery data outlives the ownership change ──
 
 /** Make the next matching localStorage write throw once, like a tab dying at that line. */
 function crashOnce(storage: MemoryStorage, method: 'setItem' | 'removeItem', match: (key: string, value?: string) => boolean) {
@@ -275,55 +195,7 @@ function crashOnce(storage: MemoryStorage, method: 'setItem' | 'removeItem', mat
   };
 }
 
-const { ROLLBACK_REQUESTED_KEY } = await import('./audioGenQueueStore.js') as any;
-
-test('a rollback interrupted before browser ownership is recorded keeps its plan; the retry restores the saved pending state', async () => {
-  await withFakeQueue([fixtureItem('a')], async ({ storage, idbData, api }) => {
-    storage.setItem(OWNER_KEY, 'server');
-    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-c1' });
-    seedBackup(idbData, 'bk-c1', ['a']);
-    api.serverItems = [srvItem('a', 'pending')];
-    crashOnce(storage, 'setItem', (key, value) => key === OWNER_KEY && value === 'browser');
-
-    await assert.rejects(() => rollbackAudioQueue(), /tab closed/);
-    assert.equal(getAudioQueueOwner(), 'migrating');
-    assert.equal(api.serverItems[0].status, 'cancelled', 'the cancel already happened');
-    assert.ok(idbData.get(ROLLBACK_PLAN_KEY), 'the plan survives the interruption');
-
-    _resetAudioQueueForTests([fixtureItem('a')]);
-    await rollbackAudioQueue();
-    assert.equal(api.rollbackCalls, 1, 'no second export of the already-cancelled server');
-    assert.equal(getAudioQueueOwner(), 'browser');
-    assert.deepEqual(restoredItems(idbData).map(i => i.status), ['pending'], 'not restored as failed');
-  });
-});
-
-test('a rollback interrupted after browser ownership is recorded stands; the next migration clears its leftovers', async () => {
-  await withFakeQueue([fixtureItem('a')], async ({ storage, idbData, api }) => {
-    storage.setItem(OWNER_KEY, 'server');
-    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-c2' });
-    seedBackup(idbData, 'bk-c2', ['a']);
-    api.serverItems = [srvItem('a', 'pending')];
-    crashOnce(storage, 'removeItem', key => key === ROLLBACK_REQUESTED_KEY);
-
-    await rollbackAudioQueue();
-    assert.equal(getAudioQueueOwner(), 'browser', 'a failed tidy-up does not reopen the rollback');
-    assert.equal(isAudioQueueRollbackPending(), true, 'the marker was left behind');
-
-    _resetAudioQueueForTests([fixtureItem('a')]);
-    await ensureQueueOwnerDecided('tok');
-    assert.equal(getAudioQueueOwner(), 'browser', 'browser ownership is final');
-    // Later, the browser queue holds new work and moves to the server again.
-    idbData.set('state', { items: [fixtureItem('b')], completionCounter: 0 });
-    _resetAudioQueueForTests([fixtureItem('b')]);
-    await migrateAudioQueue('tok', 'resume', false);
-    assert.equal(getAudioQueueOwner(), 'server');
-    assert.equal(isAudioQueueRollbackPending(), false);
-    assert.equal(idbData.get(ROLLBACK_PLAN_KEY), null);
-  });
-});
-
-test('an import interrupted after clearing the rollback state but before server ownership is replayed on reload', async () => {
+test('an import interrupted before server ownership is recorded is replayed on reload', async () => {
   const items = [fixtureItem('a')];
   await withFakeQueue(items, async ({ storage, idbData, api }) => {
     const payload = {
@@ -331,17 +203,15 @@ test('an import interrupted after clearing the rollback state but before server 
       items: [{ legacyId: 'a', request: { prompt: 'test' }, meta: { view: items[0] }, status: 'pending' }],
     };
     storage.setItem(OWNER_KEY, 'migrating');
-    storage.setItem(ROLLBACK_REQUESTED_KEY, 'bk-c3');
     idbData.set(PENDING_IMPORT_KEY, payload);
     crashOnce(storage, 'setItem', (key, value) => key === OWNER_KEY && value === 'server');
 
     await assert.rejects(() => retryQueueMigration('tok'), /tab closed/);
     assert.equal(getAudioQueueOwner(), 'migrating');
-    assert.equal(isAudioQueueRollbackPending(), false);
 
     _resetAudioQueueForTests(items);
     await ensureQueueOwnerDecided('tok');
-    assert.equal(getAudioQueueOwner(), 'server', 'no rollback pending, so reload replays the import');
-    assert.equal(api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import').length, 2);
+    assert.equal(getAudioQueueOwner(), 'server', 'reload replays the import');
+    assert.equal(importCalls(api).length, 2);
   });
 });

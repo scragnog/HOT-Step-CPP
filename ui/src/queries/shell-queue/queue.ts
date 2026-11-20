@@ -112,12 +112,6 @@ export const songIdsOptions = () => queryOptions({
   retry: false,
 });
 
-export const selectedPathOptions = () => queryOptions({
-  queryKey: serverKey('shell-queue/selected-path', { auth: true }),
-  queryFn: ({ signal }) => generateApi.selectedPath({ signal }),
-  retry: false,
-});
-
 /** The server queue's items. `maxAgeMs` 0 always asks the server (joining a
  *  request already in flight); a waiter that only needs "recent" passes the
  *  poll cadence and rides the projection's own reads. */
@@ -139,8 +133,3 @@ export const readSong = (id: string) =>
 
 export const readSongIds = () =>
   queryClient.query({ ...songIdsOptions(), staleTime: 0 });
-
-/** Which submit path the server runs. Asked fresh: Settings can switch it,
- *  and the next submit must follow. */
-export const readSelectedPath = () =>
-  queryClient.query({ ...selectedPathOptions(), staleTime: 0 });

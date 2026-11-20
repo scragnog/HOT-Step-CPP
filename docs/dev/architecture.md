@@ -252,12 +252,12 @@ to shut down first. See [building.md](building.md#engine-rebuild-rules).
 
 1. The UI builds a camelCase parameter object from the Create panel and the global bar
    (`ui/src/stores/globalParamsStore.ts`, `ui/src/types.ts`) and posts it to
-   `POST /api/generate` through `ui/src/services/api.ts`. For Create and written-song
-   requests the client queue (`ui/src/stores/audioGenQueueStore.ts`) first posts the
-   intent to `POST /api/resolve/preview` (`server/src/routes/resolve.ts`), which returns
-   the exact `/api/generate` body with `expectedBackend` set, unless
-   `GENERATION_INTENT_PATH=old`. When the server owns the queue, that body is enqueued on
-   `/api/audio-queue` instead of posted directly. [api-contracts.md](api-contracts.md)
+   `POST /api/generate` through `ui/src/services/api.ts`. For Create the client queue
+   (`ui/src/stores/audioGenQueueStore.ts`) first posts the intent to
+   `POST /api/resolve/preview` (`server/src/routes/resolve.ts`), which returns the exact
+   `/api/generate` body with `expectedBackend` set, and enqueues that body on
+   `/api/audio-queue`. Lyric Studio posts written-song intents to
+   `POST /api/lireek/workflow-renders`, and the server resolves and queues them. [api-contracts.md](api-contracts.md)
    has the shapes.
 2. `server/src/routes/generate.ts` checks that the engine is ready, builds a job envelope
    that names the backend (`services/generation/envelope.ts`), and queues the job. Jobs run

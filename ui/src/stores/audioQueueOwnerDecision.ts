@@ -8,27 +8,25 @@ export type QueueOwner = 'browser' | 'migrating' | 'server';
 export type OwnerDecisionAction = 'none' | 'set-server' | 'migrate' | 'retry';
 
 /** What to do with a browser's audio queue ownership on load.
- *  - `'server'`/`'browser'` are terminal: already decided, nothing to do.
+ *  - `'server'` is terminal: already decided, nothing to do.
  *  - `'migrating'` means an attempt was already made and may have reached
- *    the server — per the rule that once an import has started the browser
- *    executor never runs again on its own, this always retries (replaying
- *    the persisted payload is idempotent), never reverts to `'browser'`.
- *  - A missing/unrecognised key (never decided): no pending work goes
- *    straight to server-owned, pending work migrates fresh. */
-export function decideQueueOwnerAction(raw: string | null, hasPending: boolean, rollbackRequested = false): OwnerDecisionAction {
-  if (raw === 'server' || raw === 'browser') return 'none';
-  // A failed rollback also leaves 'migrating'. Replaying the import on load
-  // would quietly undo the user's rollback: leave it fenced for the banner.
-  if (raw === 'migrating') return rollbackRequested ? 'none' : 'retry';
+ *    the server, so it always retries (replaying the persisted payload is
+ *    idempotent). A rollback left unfinished by v1.4.x retries too.
+ *  - Anything else is never decided. That includes `'browser'`, which only a
+ *    v1.4.x rollback wrote: the browser no longer runs a queue, so its items
+ *    would otherwise wait forever. No pending work goes straight to
+ *    server-owned, pending work migrates fresh. */
+export function decideQueueOwnerAction(raw: string | null, hasPending: boolean): OwnerDecisionAction {
+  if (raw === 'server') return 'none';
+  if (raw === 'migrating') return 'retry';
   return hasPending ? 'migrate' : 'set-server';
 }
 
 /** Pure visibility rule for AudioQueueMigrationBanner: silent/successful
- *  ownership (server-owned, or browser-owned with nothing pending) never
- *  shows anything. The only state needing the user's attention is a stuck
- *  `'migrating'` — an attempt that's already failed once (the silent retry
- *  on load didn't resolve it), where only a manual Retry or an explicit
- *  rollback can move it forward. */
+ *  ownership never shows anything. The only state needing the user's
+ *  attention is a stuck `'migrating'` — an attempt that's already failed once
+ *  (the silent retry on load didn't resolve it), where only a manual Retry
+ *  can move it forward. */
 export function shouldShowMigrationBanner(hasToken: boolean, ready: boolean, owner: QueueOwner): boolean {
   return hasToken && ready && owner === 'migrating';
 }

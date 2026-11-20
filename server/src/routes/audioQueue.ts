@@ -71,11 +71,6 @@ export function createAudioQueueRouter(queue: AudioIntentQueue, userIdOf: (req: 
     }
     handle(() => { const items = queue.resumeHeld(ids); queue.setPaused(false); void queue.tick(); return { items }; })(req, res);
   });
-  router.post('/migration/rollback-export', handle(() => {
-    queue.setPaused(true);
-    if (queue.list('submitting').length) throw new AudioQueueError(409, 'Submission still in flight; retry export when it settles');
-    return { version: 1, exportedAt: Date.now(), state: queue.state(), items: queue.list() };
-  }));
   router.get('/state', handle(() => queue.state()));
   router.post('/pause', handle(() => queue.setPaused(true)));
   router.post('/resume', handle(() => { const s = queue.setPaused(false); void queue.tick(); return s; }));

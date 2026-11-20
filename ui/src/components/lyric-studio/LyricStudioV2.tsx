@@ -42,7 +42,10 @@ import { RecordingsTab } from './RecordingsTab';
 import { RenderAcrossModal } from './RenderAcrossModal';
 import type { RenderTarget } from './RenderAcrossModal';
 import { useAudioGeneration } from './useAudioGeneration';
-import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
+import {
+  captureWrittenSongIntent, ensureQueueOwnerDecided, getAudioQueueOwner, useResumeQueue, useAudioGenQueueSelector,
+} from '../../stores/audioGenQueueStore';
+import { lyricWorkflowApi } from '../../services/lyricWorkflowApi';
 import { usePlaybackSelector } from '../../stores/playbackStore';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
@@ -486,11 +489,13 @@ export const LyricStudioV2: React.FC = () => {
     const profile = profiles.find(p => p.id === gen.profile_id);
     const sourceLyricsSetId = profile?.lyrics_set_id ?? gen.lyrics_set_id;
     if (!renderAs && !profile) { showToast('Profile not found'); return; }
+    await ensureQueueOwnerDecided(token);
+    if (getAudioQueueOwner() !== 'server') { showToast('Audio queue migration is in progress'); return; }
     // Capture globalParams snapshot NOW — same as Create page's getGlobalParams().
     // This ensures every engine param (solver, guidance, DCW, latent, LM, etc.)
     // flows through identically to the Create page path.
     const paramsSnapshot = globalParams.getGlobalParams();
-    await enqueueAudioGen(gen, renderAs ? {
+    const intent = await captureWrittenSongIntent(gen, renderAs ? {
       ...renderAs,
       profileId: gen.profile_id,
       sourceLyricsSetId,
@@ -500,7 +505,13 @@ export const LyricStudioV2: React.FC = () => {
       artistImageUrl: nav.selectedArtist?.image_url || '',
       profileId: profile!.id,
       lyricsSetId: profile!.lyrics_set_id,
-    }, paramsSnapshot, token);
+    }, paramsSnapshot);
+    // A batch of one on the bulk renderer's route: the server resolves and
+    // queues it, and lists the recording under the song when it finishes.
+    const job = await lyricWorkflowApi.submitRenders([intent]);
+    void lyricWorkflowApi.follow(job.id, { onEvent: event => {
+      if (event.type === 'item-error') showToast(`Render failed: ${(event.data as { error?: string })?.error || 'Unknown error'}`);
+    } }).catch(err => showToast(`Render status unavailable: ${err.message}`));
     showToast(renderAs
       ? `Queued: ${gen.title || 'Untitled'} as ${disguiseArtist(renderAs.artistName)}`
       : `Queued: ${gen.title || 'Untitled'}`);

@@ -209,7 +209,12 @@ and submit the job:
   album?, maxSongs? }` (default 50, at most 200). `count` (1 to 50) repeats a
   request, and the expanded batch holds at most 10,000 items.
 - `POST /api/lireek/workflow-renders` with `{ intents, idempotencyKey? }`: 1
-  to 200 written-song intents to render.
+  to 200 written-song intents to render. The job's kind is `lyric-render`,
+  the same input and runner with no limit on jobs at once, so a render never
+  waits behind another job and songs submitted one at a time reach the audio
+  queue together. Each queued render carries `meta.view` (the song, its
+  artist and album) for the queue row. The bundled UI sends a single render as
+  a batch of one.
 
 Both need the token and answer `{ job, created }`: 201 for a new job, 200
 when the idempotency key repeats it (a key is made up when none is sent), 409

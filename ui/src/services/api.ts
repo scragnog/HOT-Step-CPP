@@ -185,25 +185,17 @@ export function withIntentTimeout<T extends ResolveIntent>(intent: T): T {
     : { ...intent, params };
 }
 
+/** A rendered file (`/audio/...`, outside `/api`) as a blob, or null when the
+ *  server does not have it. */
+export async function fetchAudioBlob(url: string): Promise<Blob | null> {
+  const res = await fetch(url);
+  return res.ok ? res.blob() : null;
+}
+
 export const generateApi = {
   preview: (intent: ResolveIntent) => post<ResolvePreviewResponse>('/resolve/preview', intent),
-  /** A missing switch endpoint is an older server and keeps the legacy path. */
-  selectedPath: async (opts?: ReadOptions): Promise<'old' | 'resolved'> => {
-    try {
-      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { signal: opts?.signal });
-      return path === 'resolved' ? 'resolved' : 'old';
-    } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.status === HttpStatus.notFound) return 'old';
-        throw new Error((err.body as { error?: string } | null)?.error || 'Cannot read generation path');
-      }
-      throw err;
-    }
-  },
   previewIntent: (intent: ResolveIntent): Promise<ResolvePreviewResponse> =>
     generateApi.preview(withIntentTimeout(intent)),
-  resolveIfSelected: async (intent: ResolveIntent): Promise<ResolvePreviewResponse | null> =>
-    (await generateApi.selectedPath()) === 'resolved' ? generateApi.previewIntent(intent) : null,
   submit: (params: GenerationParams) => post<{ jobId: string; status: string }>('/generate', withTimeout(params)),
   /** YuE2 score preview: plan the lead sheet only and return it, no audio.
    *  `seed` is the one the plan used, so the follow-up render can pin it. */

@@ -330,16 +330,12 @@ everywhere; changes to the manifest are proposed separately before they land her
 
 ## Caption and content resolution
 
-`GET /api/resolve/path` returns `{ "path": "old" | "resolved" }` to an authenticated
-client. The server setting `GENERATION_INTENT_PATH` defaults to `resolved`; only the exact
-value `old` rolls back to the legacy client builder, and any other value (including unset)
-selects resolved. Create, and the Lyric Studio written-song queue while the browser owns it,
-read this before each submission. When Node owns the queue, a written song is always resolved
-before it is queued. A missing path endpoint on an older server selects the old path.
-Changing the setting does not replay existing jobs or rewrite browser drafts. A selected
-resolved path previews a typed intent and submits its returned request; preview errors stop
-that submission. Where Node owns the queue, that request is what the
-[durable audio queue](#durable-audio-queue) stores.
+The bundled UI resolves every Create render, the Build tab's Save included, by previewing a
+typed intent and queuing the returned request; a preview error stops that submission. That
+request is what the [durable audio queue](#durable-audio-queue) stores. Lyric Studio does not
+preview: it posts written-song intents to `POST /api/lireek/workflow-renders`, and the server
+resolves them ([Studio workflows](frontend-studios.md#lyric-studio-batch-lyric-batch)). The old
+browser-side request builder and its `GENERATION_INTENT_PATH=old` switch are gone.
 
 `POST /api/resolve/preview` builds the body Create or the Lyric Studio queue would send to
 `/api/generate`, without queuing anything. Node resolves the caption, wildcards, compose
@@ -450,7 +446,6 @@ bearer token.
 | `GET /state`, `POST /pause`, `POST /resume` | `{ paused, maxInFlight, counts }` |
 | `POST /migration/import` | Import a verified browser backup by `backupId` with `choice: hold`, `resume`, or `discard`; returns a persistent receipt `{ backupId, imported, existing, items: [{ legacyId, itemId, status }] }`. A repeated backup id returns the same receipt. Invalid items return `400` with field paths or item ids; conflicting items return `409` |
 | `POST /migration/resume-held` | `{ ids }`: explicitly release imported held items and resume the executor; `{ items }`. `409` for an id that is not held |
-| `POST /migration/rollback-export` | Pause submissions and export everything as `{ version: 1, exportedAt, state, items }`. Returns `409` while a submission is in flight; retry after it settles |
 | `DELETE /items/:id` | Dismiss a terminal item; `{ removed: true }`, or `409` while active |
 
 `request` is the exact body for `/api/generate`, normally a resolve preview's `request`. It is
@@ -511,14 +506,11 @@ that has never settled who owns its queue becomes server-owned at once when noth
 pending, and otherwise migrates its pending items with `choice: resume` and no download
 ([Create's queue ownership](build-a-frontend.md#creates-queue-ownership)).
 New queue items then go to `/api/audio-queue`; the browser reads its status, takes and job
-results. Reloads and other tabs read the same server list. To roll back, the browser pauses
-the server, exports and verifies its current items, reconciles submitted and terminal job ids
-into the saved browser queue, cancels the server items still pending or held, and holds that
-pending work for an explicit resume. Moving the queue
-back to the server clears that pause whatever the import choice: `hold` and `discard` apply to
-the imported items' own status, and new work runs as soon as it is queued. A submitting
-item cannot be exported until its submission settles. Submitted or interrupted jobs are
-never automatically replayed by the browser.
+results. Reloads and other tabs read the same server list. An import clears a paused queue
+whatever the import choice: `hold` and `discard` apply to the imported items' own status, and
+new work runs as soon as it is queued. The browser no longer runs a queue, so there is no way
+back to it: the v1.4.x rollback and its `/migration/rollback-export` route are gone. Submitted
+or interrupted jobs are never automatically replayed.
 
 ## Workflow jobs and revisions
 
@@ -635,8 +627,7 @@ reason?)` (`ui/src/services/apiError.ts`):
 (`reason`) detail of a `409`, and it absorbed `workflowApi.ts`'s old `WorkflowRequestError`.
 Song Builder section commands (`builderOp`) throw it too, and a post-processing refusal for an
 already processed song attaches `alreadyProcessed` and `masteredAudioUrl` to it
-(`runSongPostProcessing` in `api.ts`). `generateApi.selectedPath` keeps its
-404-means-older-server fallback.
+(`runSongPostProcessing` in `api.ts`).
 
 `upload()` stays on XHR, because only XHR reports upload progress, and its failures go through
 the same `handleFailure`. SSE stays on `fetch`, since axios does not stream response bodies.

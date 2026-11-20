@@ -496,25 +496,10 @@ async function withRouter(run: (post: (body: unknown, token?: string) => Promise
   try { await run(post, pathGet); } finally { await new Promise(resolve => server.close(resolve)); }
 }
 
-test('path switch is authenticated and defaults to resolved unless explicitly old', async () => {
-  const previous = process.env.GENERATION_INTENT_PATH;
-  try {
-    await withRouter(async (_post, pathGet) => {
-      delete process.env.GENERATION_INTENT_PATH;
-      assert.equal((await pathGet()).status, 401);
-      assert.deepEqual(await (await pathGet('good')).json(), { path: 'resolved' });
-      process.env.GENERATION_INTENT_PATH = 'resolved';
-      assert.deepEqual(await (await pathGet('good')).json(), { path: 'resolved' });
-      process.env.GENERATION_INTENT_PATH = 'old';
-      assert.deepEqual(await (await pathGet('good')).json(), { path: 'old' });
-      // An invalid value falls back to resolved rather than being rejected.
-      process.env.GENERATION_INTENT_PATH = 'other';
-      assert.deepEqual(await (await pathGet('good')).json(), { path: 'resolved' });
-    });
-  } finally {
-    if (previous === undefined) delete process.env.GENERATION_INTENT_PATH;
-    else process.env.GENERATION_INTENT_PATH = previous;
-  }
+test('the old/resolved path switch is gone: every client resolves through /preview', async () => {
+  await withRouter(async (_post, pathGet) => {
+    assert.equal((await pathGet('good')).status, 404);
+  });
 });
 
 test('preview route: auth, validation, unknown engine, unknown song, conflicting assertion', async () => {

@@ -595,23 +595,19 @@ re-runs from the Library wait in the same line.
 - The queue survives a page reload and a full restart of the app, because the server keeps
   it in its database. Songs that had not been sent to the engine yet carry on once it is
   ready. A song that was rendering when the app stopped is marked interrupted, with a note
-  to check the Library, and only Retry renders it again. A browser-owned queue (see
-  below) reconnects running jobs after a page reload instead; after a full restart it
-  holds unstarted and interrupted songs and a banner offers Resume or Discard.
+  to check the Library, and only Retry renders it again.
 - The Queue section has Retry for failed items, Clear Done for finished ones, and Reset,
   which cancels everything active and pending on the server. Send To Playlist (off by
   default) adds each finished song to the playlist.
-- The queue itself lives either in your browser or on the server; a fresh install is
-  server-owned from the start. An older browser-owned queue with pending work moves to
+- The queue lives on the server; a fresh install is server-owned from the start. An
+  older browser-owned queue with pending work moves to
   the server automatically the next time you load the app, keeping each item's state
   (queued work keeps running, nothing needs a manual Resume); finished history stays
   where it is. A versioned backup is kept regardless, and nothing is deleted. You only
-  see a banner about this if the move gets stuck, with Retry and Export and roll back
-  buttons. Once a move has started, the browser queue stays paused — it does not pick
-  back up on its own — until one of those two resolves it, so nothing can run twice.
-  The same banner appears if a roll back fails, for example because the server was
-  still submitting an item: the server queue stays paused and the browser queue stays
-  paused until you retry the roll back or move the queue to the server again.
+  see a banner about this if the move gets stuck, with a Retry button. Until the move
+  finishes, Create and Lyric Studio don't queue new songs, so nothing can run twice.
+  A queue that was rolled back to the browser in an earlier version moves to the server
+  the same way, since the browser no longer runs a queue of its own.
 
 An external agent (Claude Code, Codex) can also submit and poll generations through the
 `hotstep` MCP server, on ACE-Step 1.5, MiniMax-Music3 and YuE2. Stable Audio 3 is not

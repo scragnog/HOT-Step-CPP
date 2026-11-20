@@ -377,10 +377,6 @@ export const lireekApi = {
     api('/api/lireek/purge-profiles', { method: 'POST' }),
 
   // ── Audio Generations ───────────────────────────────────────────────────
-  /** `lyricsSetId`: the album the recording was rendered as (and is listed under). */
-  linkAudio: (generationId: number, jobId: string, lyricsSetId?: number): Promise<any> =>
-    api(`/api/lireek/generations/${generationId}/audio`, { method: 'POST', body: { job_id: jobId, lyrics_set_id: lyricsSetId || null } }),
-
   /** `lyricsSetId` limits the list to recordings listed under that album. */
   getAudioGenerations: (generationId: number, lyricsSetId?: number, options: ReadOptions = {}): Promise<{ audio_generations: AudioGeneration[] }> =>
     api(`/api/lireek/generations/${generationId}/audio${lyricsSetId ? `?lyrics_set_id=${lyricsSetId}` : ''}`, options),
@@ -397,20 +393,6 @@ export const lireekApi = {
       method: 'PATCH',
       body: { job_id: jobId, audio_url: audioUrl, cover_url: coverUrl || null },
     }),
-
-  // ── Direct Audio Generation (via cpp engine) ────────────────────────────
-  submitAudioGeneration: (params: {
-    lyrics: string;
-    prompt: string;
-    bpm?: number;
-    key_scale?: string;
-    audio_duration?: number;
-    lireek_adapter_path?: string;
-    lireek_adapter_scale?: number;
-    lireek_group_scales?: { self_attn: number; cross_attn: number; mlp: number };
-    mastering_params?: { mode: string; reference_file?: string };
-  }): Promise<{ job_id: string }> =>
-    api('/api/generate', { method: 'POST', body: params }),
 
   // ── Prompts ───────────────────────────────────────────────────────────
   listPrompts: (options: ReadOptions = {}): Promise<{ prompts: { name: string; default_content: string; custom: string | null }[] }> =>

@@ -1173,7 +1173,12 @@ const AppContent: React.FC = () => {
       {createTab === 'build' && <CreateBuildTab token={token} getParams={() => {
         const content = createParamsRef.current?.();
         return content ? enrichCreateParams(content) as Record<string, unknown> : null;
-      }} onSave={(params) => { if (token) void enqueueSimpleGen(enrichCreateParams(params as Partial<GenerationParams>), token, handleSongCreated); }}
+      }} onSave={(params) => {
+        if (!token) return;
+        const body = enrichCreateParams(params as Partial<GenerationParams>);
+        // An intent like the one-shot's; false keeps the build session's own YuE2 dials.
+        void enqueueSimpleGen(body, token, handleSongCreated, { kind: 'create', params: body }, false);
+      }}
         savedSessions={savedBuildSessions}
         onOneShot={() => setCreateTab('oneshot')} />}
       <div className={`flex flex-1 min-w-0 min-h-0

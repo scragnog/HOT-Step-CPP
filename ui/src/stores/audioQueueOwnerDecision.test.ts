@@ -12,11 +12,14 @@ test('decideQueueOwnerAction: a never-decided profile with pending work migrates
   assert.equal(decideQueueOwnerAction('garbage', true), 'migrate');
 });
 
-test('decideQueueOwnerAction: server and browser are terminal, regardless of pending work', () => {
+test('decideQueueOwnerAction: server is terminal, regardless of pending work', () => {
   assert.equal(decideQueueOwnerAction('server', true), 'none');
   assert.equal(decideQueueOwnerAction('server', false), 'none');
-  assert.equal(decideQueueOwnerAction('browser', true), 'none');
-  assert.equal(decideQueueOwnerAction('browser', false), 'none');
+});
+
+test('decideQueueOwnerAction: a rolled-back browser owner is never decided, since nothing runs it now', () => {
+  assert.equal(decideQueueOwnerAction('browser', true), 'migrate');
+  assert.equal(decideQueueOwnerAction('browser', false), 'set-server');
 });
 
 test('decideQueueOwnerAction: a migration interrupted by reload always retries, regardless of pending work', () => {
@@ -30,7 +33,7 @@ test('decideQueueOwnerAction: a migration interrupted by reload always retries, 
 
 test('shouldShowMigrationBanner: hidden for a successful/silent outcome', () => {
   assert.equal(shouldShowMigrationBanner(true, true, 'server'), false, 'server-owned stays silent');
-  assert.equal(shouldShowMigrationBanner(true, true, 'browser'), false, 'browser-owned (never attempted, or rolled back) stays silent');
+  assert.equal(shouldShowMigrationBanner(true, true, 'browser'), false, 'never decided stays silent');
 });
 
 test('shouldShowMigrationBanner: hidden before the owner decision has landed, or with no token', () => {
@@ -40,10 +43,4 @@ test('shouldShowMigrationBanner: hidden before the owner decision has landed, or
 
 test('shouldShowMigrationBanner: shown only once stuck in migrating — the silent retry on load already failed', () => {
   assert.equal(shouldShowMigrationBanner(true, true, 'migrating'), true);
-});
-
-test('decideQueueOwnerAction: an unfinished rollback is left for the user, never replayed over', () => {
-  assert.equal(decideQueueOwnerAction('migrating', true, true), 'none');
-  assert.equal(decideQueueOwnerAction('migrating', false, true), 'none');
-  assert.equal(decideQueueOwnerAction('migrating', true, false), 'retry');
 });

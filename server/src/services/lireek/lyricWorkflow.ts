@@ -164,13 +164,31 @@ const defaultDeps: LyricWorkflowDeps = {
 const dep = <K extends keyof LyricWorkflowDeps>(key: K): LyricWorkflowDeps[K] =>
   (runtimeOverrides[key] ?? defaultDeps[key]) as LyricWorkflowDeps[K];
 
+/** What the queue row shows for a render (`meta.view`, read by the UI's
+ *  projectServerItem): the song, and the artist of the album it renders as. */
+function renderView(intent: WrittenSongIntent): Record<string, unknown> {
+  const gen = db.getGeneration(intent.generationId) ?? {};
+  const set = db.getLireekDb().prepare('SELECT artist_id FROM lyrics_sets WHERE id = ?').get(intent.lyricsSetId) as { artist_id: number } | undefined;
+  const artist = set ? db.getArtist(set.artist_id) : undefined;
+  return {
+    generation: {
+      id: gen.id ?? intent.generationId, profile_id: gen.profile_id ?? 0, provider: gen.provider ?? '', model: gen.model ?? '',
+      title: gen.title ?? '', caption: gen.caption ?? '', lyrics: gen.lyrics ?? '', subject: gen.subject,
+      bpm: gen.bpm, key: gen.key, duration: gen.duration, created_at: gen.created_at ?? '',
+    },
+    artistId: artist?.id ?? 0, artistName: intent.artistName || artist?.name || '',
+    artistImageUrl: artist?.image_url || undefined, preset: null, profileId: gen.profile_id ?? 0,
+    lyricsSetId: intent.lyricsSetId, sourceLyricsSetId: intent.sourceLyricsSetId, status: 'pending',
+  };
+}
+
 async function queueRender(item: z.infer<typeof render>, ctx: WorkflowContext<LyricBatchInput>, index: number): Promise<AudioIntentItem> {
   const engine = item.intent.engine!;
   const data = await loadWrittenSongData(item.intent, engine);
   const resolved = resolveWrittenSongIntent(item.intent, engine, data);
   if (revision(resolved.request) !== item.sourceRevision) throw new Error('Written song or preset changed since submission');
   ctx.throwIfCancelled();
-  return ctx.audio.enqueue(`render-${index}`, resolved.request);
+  return ctx.audio.enqueue(`render-${index}`, resolved.request, { source: 'lyric-studio', view: renderView(item.intent) });
 }
 
 async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index: number, prepared?: AudioIntentItem) {
@@ -325,3 +343,9 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
 // A bulk run of hundreds of songs takes hours. Each LLM call has its own
 // timeout (LLM_TIMEOUT_MS), so this only bounds a run that never ends.
 registerWorkflowKind({ kind: 'lyric-batch', input: lyricBatchInput, run: runLyricBatch, maxConcurrent: 1, timeoutMs: 7 * 24 * 60 * 60_000 });
+// Render-only batches (POST /workflow-renders) run as their own kind. A job
+// only enqueues its renders and waits for them, so songs clicked one at a time
+// reach the audio queue together, where it batches them, instead of each
+// waiting behind the last render or behind a long lyric-writing batch.
+export const LYRIC_RENDER_KIND = 'lyric-render';
+registerWorkflowKind({ kind: LYRIC_RENDER_KIND, input: lyricBatchInput, run: runLyricBatch, maxConcurrent: Infinity, timeoutMs: 7 * 24 * 60 * 60_000 });

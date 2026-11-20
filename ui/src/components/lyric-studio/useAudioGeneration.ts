@@ -4,9 +4,9 @@
  * Handles: preset loading → localStorage writes → page navigation.
  *
  * NOTE: The generateAudio function and mergeCreatePanelSettings helper
- * were removed — all audio generation now flows through
- * audioGenQueueStore.enqueueAudioGen() which takes a getGlobalParams()
- * snapshot, ensuring 100% parity with the Create page path.
+ * were removed — Lyric Studio renders are written-song intents
+ * (audioGenQueueStore.captureWrittenSongIntent, over a getGlobalParams()
+ * snapshot) that the server resolves and queues via /api/lireek/workflow-renders.
  */
 
 import { useCallback } from 'react';
@@ -65,8 +65,8 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // two goes in it depends on the backend that is about to render it.
     const backendId = useBackendStore.getState().activeBackendId;
     if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(lyricsSetId);
-    // YuE2's equivalent, in the order the queue runner uses for the same reason
-    // (audioGenQueueStore._executeItem).
+    // YuE2's equivalent, in the order the old browser queue runner used for
+    // the same reason.
     //
     // The album's two adapter halves go first — the adapter is merged into the
     // resident LM, so it is engine state rather than a request param and has to

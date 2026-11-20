@@ -15,20 +15,12 @@
 
 import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import { lireekApi } from '../services/lireekApi';
-import { generateApi, healthApi, withIntentTimeout } from '../services/api';
-import { useGlobalParamsStore } from './globalParamsStore';
-import { writePersistedState } from '../hooks/usePersistedState';
+import { generateApi, withIntentTimeout, fetchAudioBlob } from '../services/api';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import { addToPlaylist } from '../components/lyric-studio/playlistStore';
 import type { GenerationParams, GenerationJob } from '../types';
-import { resolveDuration } from '../utils/estimateDuration';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
-import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
-import {
-  ensureYue2CaptionSource, yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID,
-} from '../utils/yue2CaptionSource';
-import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
-import { normalizeKeyScale } from '../utils/keyScale';
+import { MM3_BACKEND_ID } from '../utils/captionForBackend';
+import { yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID } from '../utils/yue2CaptionSource';
 import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
 import { masterToAlbumEnabled } from '../utils/masterToAlbumPref';
 import { useBackendStore } from './backendStore';
@@ -40,10 +32,10 @@ import { audioQueueApi } from '../services/audioQueueApi';
 import { queryClient } from '../queries/client';
 import { ACTIVE_POLL_MS } from '../queries/contract';
 import {
-  readAudioQueue, readGenerationStatus, readSelectedPath, readSong, readSongIds, readWorkflowJob,
+  readAudioQueue, readGenerationStatus, readSong, readWorkflowJob,
 } from '../queries/shell-queue/queue';
 import { workflowApi } from '../services/workflowApi';
-import { exportQueueBackup, restoreQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
+import { exportQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
 import { decideQueueOwnerAction } from './audioQueueOwnerDecision';
 import type { AudioIntentItem, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
 
@@ -143,15 +135,8 @@ export interface AudioGenQueueState {
 // ── MM3 live audio ───────────────────────────────────────────────────────────
 
 /** Copy the MiniMax-Music3 streaming flags off a status poll onto the item.
- *
- *  THERE ARE THREE POLL LOOPS IN THIS FILE — enqueueSimpleGen has its own,
- *  _pollUntilDone has another, and _tryReconnect a third — and every one of them
- *  needs this. The first cut of the streaming player set the flag in
- *  _pollUntilDone alone, so the Create page (which goes through
- *  enqueueSimpleGen) never showed a player at all while the engine was
- *  streaming perfectly: 20 windows of audio rendered and nothing to play them.
- *  A fourth poll loop would need this line too, which is why it is a function
- *  and not two statements. */
+ *  Every loop that polls a job for a row needs this, or the Create page shows
+ *  no player while the engine streams; hence a function, not two statements. */
 function _captureMm3Stream(item: AudioQueueItem, status: GenerationJob): void {
   if (status.mm3_streaming === true && !item.mm3Streaming) item.mm3Streaming = true;
   if (status.mm3_interleaved !== null && status.mm3_interleaved !== undefined) {
@@ -246,10 +231,11 @@ function _syncTakeSiblings(item: AudioQueueItem, status?: GenerationJob): void {
   }
 }
 
-// ── Persistence (IndexedDB — no 5MB cap) ─────────────────────────────────────
-// localStorage has a hard 5MB browser limit that large queues (600+ items with
-// lyrics/prompts) easily exceed. IndexedDB has virtually unlimited storage
-// (~50% of available disk space). Writes are async and non-blocking.
+// ── The v1.3.x browser queue (IndexedDB, read only) ──────────────────────────
+// Releases before v1.4.0 ran the queue in the browser and kept it here. The
+// server queue owns every render now; this store is only read once, by the
+// one-shot import below, and never written or deleted: it and its backups are
+// the user's only copy of what they had queued.
 
 const IDB_NAME = 'lireek-queue-store';
 const IDB_STORE = 'queue';
@@ -257,17 +243,15 @@ const IDB_KEY = 'state';
 const LS_KEY = 'lireek-audio-gen-queue'; // legacy localStorage key for migration
 export const OWNER_KEY = 'lireek-audio-queue-owner-v1';
 export const BACKUP_KEY = 'server-migration-backup-v1';
+/** The exact resolved import request, persisted before the POST so a reload can replay it verbatim. */
 export const PENDING_IMPORT_KEY = `${BACKUP_KEY}:pending-import`;
-export const ROLLBACK_PLAN_KEY = `${BACKUP_KEY}:rollback-plan`;
-/** Set while an explicit rollback is unfinished (localStorage, read at load). */
-export const ROLLBACK_REQUESTED_KEY = 'lireek-audio-queue-rollback-requested-v1'; // the exact resolved import request, persisted before the POST so a reload can replay it verbatim
+/** 'browser' is the never-decided state: no key, or a v1.3.x/rolled-back
+ *  'browser' value, which the load-time decision imports like any other. */
 type QueueOwner = 'browser' | 'migrating' | 'server';
 function queueOwner(): QueueOwner {
   const value = localStorage.getItem(OWNER_KEY);
   return value === 'server' || value === 'migrating' ? value : 'browser';
 }
-
-let _persistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function _openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -301,40 +285,6 @@ async function _idbSet(key: string, value: unknown): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-}
-
-/** Prepare queue data for persistence.
- *
- *  globalParams MUST be persisted with the item. It carries the engine settings
- *  the song was queued with — including which LM and DiT model to load. Stripping
- *  it meant a restored item submitted with server defaults while still carrying
- *  its album preset's adapter, so e.g. an lm-4b adapter arrived against the
- *  default 0.6B LM and the engine refused it outright ("LM adapter has 36 layers
- *  but model has 28"). Every item failed that way after a reload or restart.
- *
- *  Stripping was originally to stay under the 5MB localStorage cap, which no
- *  longer applies now the queue lives in IndexedDB. */
-function _dataForStorage(): { items: AudioQueueItem[]; completionCounter: number } {
-  return {
-    items: _state.items,
-    completionCounter: _state.completionCounter,
-  };
-}
-
-/** Debounced persistence — avoids writes on every 2.5s poll tick. */
-function _persist(): void {
-  if (_persistTimer) clearTimeout(_persistTimer);
-  _persistTimer = setTimeout(() => {
-    _idbSet(IDB_KEY, _dataForStorage()).catch(e =>
-      console.error('[AudioGenQueue] IDB write failed:', e));
-  }, 2000);
-}
-
-/** Force-flush persistence immediately (status transitions). */
-function _persistNow(): void {
-  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
-  _idbSet(IDB_KEY, _dataForStorage()).catch(e =>
-    console.error('[AudioGenQueue] IDB write failed:', e));
 }
 
 /** Sanitize restored items — reset in-flight items to pending. */
@@ -403,7 +353,7 @@ const _manualIds = new Set<string>();
 const _listeners = new Set<() => void>();
 
 /** Ready gate — resolves when IDB restore is complete.
- *  resumeQueue() awaits this before processing items. */
+ *  The owner decision awaits this before reading what is pending. */
 const _idbReady: Promise<void> = _restoreFromIDB().then(() => { void _hydrateFinishedItems(); });
 
 function migrationStore(): QueueBackupStore {
@@ -484,10 +434,15 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
 }
 
 /** Finished items are already reflected in the library; nothing needs to
- *  re-run them, so skip importing them into the live server queue. */
+ *  re-run them, so skip importing them into the live server queue. Items an
+ *  earlier import already landed (a profile rolled back to the browser in
+ *  v1.4.x) are on the server, where Retry reaches them; sending them again
+ *  would fail the whole import if a written song now resolves differently. */
 async function _resolveImportItems(backup: QueueBackup): Promise<ImportAudioQueue['items']> {
+  const prior = await _idbGet<{ items?: { legacyId: string }[] }>(`${BACKUP_KEY}:receipt`);
+  const landed = new Set(prior?.items?.map(i => i.legacyId));
   const items: ImportAudioQueue['items'] = [];
-  for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed')) {
+  for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed' && !landed.has(i.id))) {
     items.push({
       legacyId: item.id,
       request: await resolvedRequestForImport(item),
@@ -501,39 +456,26 @@ async function _resolveImportItems(backup: QueueBackup): Promise<ImportAudioQueu
 /** POSTs an already-resolved, already-persisted import payload. Only called
  *  once OWNER_KEY is `'migrating'` and `PENDING_IMPORT_KEY` holds this exact
  *  payload — on failure this deliberately does NOT revert OWNER_KEY. Once an
- *  import has started it may already have reached the server, so the
- *  browser executor stays fenced until an explicit retry or rollback
- *  resolves it (never a silent fall back to running locally again). */
+ *  import has started it may already have reached the server, so the queue
+ *  stays fenced until a retry lands it. */
 async function _submitImport(token: string, payload: ImportAudioQueue): Promise<Awaited<ReturnType<typeof audioQueueApi.importLegacy>>> {
   const receipt = await audioQueueApi.importLegacy(payload);
   await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
-  // The server owns the queue again: an unfinished rollback no longer
-  // describes it. Marker and plan go before the owner changes. A crash in
-  // between leaves 'migrating' with no rollback pending, which reload
-  // resolves by replaying this same, idempotent import.
-  localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
-  await _idbSet(ROLLBACK_PLAN_KEY, null);
   localStorage.setItem(OWNER_KEY, 'server');
   _lastToken = token;
   _startServerProjection(token);
   return receipt;
 }
 
-/** Explicit handoff. Browser originals are retained; no server item can run
- * until the backup is saved, read back, and the browser executor is frozen. */
+/** One-shot import of a v1.3.x browser queue. The browser originals are kept;
+ *  the backup is saved and read back before anything is sent. */
 export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume' | 'discard' = 'hold', download = true): Promise<{
   backup: QueueBackup; receipt: Awaited<ReturnType<typeof audioQueueApi.importLegacy>>;
 }> {
   await _idbReady;
   if (queueOwner() !== 'browser') throw new Error('The queue is already migrating or server-owned');
-  if (_running || _state.items.some(item => item.status === 'generating' || item.status === 'loading-adapter')) {
-    throw new Error('Wait for active browser generations to finish before moving the queue');
-  }
   const backup = await exportQueueBackup(migrationStore());
   if (download) downloadQueueExport(`audio-queue-backup-${backup.id}.json`, backup);
-  // A fresh move: nothing left from an earlier rollback applies to it.
-  localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
-  await _idbSet(ROLLBACK_PLAN_KEY, null);
   localStorage.setItem(OWNER_KEY, 'migrating');
   const items = await _resolveImportItems(backup);
   const payload: ImportAudioQueue = { backupId: backup.id, choice, items };
@@ -612,9 +554,11 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
     noAdapterAudioUrls?: string[]; durations?: number[]; duration?: number } | null;
   const take = base.mm3Take ?? 0;
   return {
-    ...base, ...previous, id: base.id, serverQueueId: server.id, status,
+    // A server-built view (a Lyric Studio workflow render) has no browser row id.
+    ...base, ...previous, id: base.id ?? server.id, serverQueueId: server.id, status,
     generation: { ...(previous?.generation ?? base.generation), title: serverItemTitle(server, take) },
     jobId: server.jobId ?? undefined,
+    globalParams: base.globalParams ?? server.request,
     stage: server.waiting ?? (server.status === 'held' ? 'Waiting for resume' : status === 'succeeded' ? 'Complete!' : previous?.stage),
     error: server.error ?? undefined,
     progress: status === 'succeeded' ? 100 : previous?.progress,
@@ -749,13 +693,11 @@ export async function refreshServerProjection(): Promise<void> {
  *  one read now. The cadence itself is Query's refetchInterval. */
 function _startServerProjection(token: string): void {
   _lastToken = token;
-  _emit(true);
+  _emit();
   void refreshServerProjection();
 }
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
-/** True while an explicit rollback started but has not finished. */
-export function isAudioQueueRollbackPending(): boolean { return localStorage.getItem(ROLLBACK_REQUESTED_KEY) !== null; }
 
 /** Test-only: resets every module-level singleton this file keeps (state,
  *  the resume/owner-decision call-once guards, timers) so each test in the
@@ -767,7 +709,6 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _state = { items, completionCounter: 0, awaitingResume: 0 };
   _manualIds.clear();
   _resumeCalled = false;
-  _running = false;
   _lastToken = null;
   _ownerDecision = null;
   _heldIds.clear();
@@ -776,118 +717,6 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _applyChain = Promise.resolve();
   _deliveredSongIds.clear();
   queryClient.clear();
-  if (_persistTimer) clearTimeout(_persistTimer);
-  _persistTimer = null;
-}
-
-/** What a rollback will do (ROLLBACK_PLAN_KEY), saved before its first
- *  destructive step: the reconciled browser queue to restore and the server
- *  items to cancel. A retried rollback finishes this same plan rather than
- *  recomputing it from a server export its own earlier, partial attempt
- *  already changed. */
-interface RollbackPlan {
-  backupId: string;
-  restored: { items: AudioQueueItem[]; completionCounter: number };
-  cancelIds: string[];
-}
-
-/** Pause the Node executor, save its latest jobs, then restore browser
- * ownership. Any item that reached Node remains held for review on rollback.
- * Also the escape hatch from a stuck `'migrating'`: `rollbackExport` asks the
- * server what it actually has, authoritatively, regardless of whether this
- * browser ever learned the outcome of its own import attempt.
- *
- * The only way back to browser ownership. Any failure leaves the owner
- * `'migrating'` (browser execution fenced, Retry and rollback offered); it
- * never falls back to `'server'` or `'browser'`, because by then the server
- * may be paused or partly cancelled. Safe to retry: the plan is saved before
- * anything is changed, and only items still pending or held are cancelled. */
-export async function rollbackAudioQueue(): Promise<void> {
-  if (queueOwner() === 'browser') throw new Error('The browser already owns the audio queue');
-  const receipt = await _idbGet<{ backupId: string }>(`${BACKUP_KEY}:receipt`);
-  const pending = receipt ? undefined : await _idbGet<ImportAudioQueue>(PENDING_IMPORT_KEY);
-  const backupId = receipt?.backupId ?? pending?.backupId;
-  if (!backupId) {
-    // Neither a completed import nor a persisted attempt — nothing was ever
-    // sent, so there is nothing to reconcile. Just release the fence.
-    localStorage.setItem(OWNER_KEY, 'browser');
-    _emit(true);
-    return;
-  }
-  const backup = await migrationStore().readBackup(backupId);
-  if (!backup) throw new Error('Original browser backup is missing; browser ownership was not changed');
-  localStorage.setItem(ROLLBACK_REQUESTED_KEY, backupId);
-  localStorage.setItem(OWNER_KEY, 'migrating');
-  _emit(true);
-  try {
-    let plan = await _idbGet<RollbackPlan>(ROLLBACK_PLAN_KEY);
-    if (!plan || plan.backupId !== backupId) {
-      const serverExport = await audioQueueApi.rollbackExport();
-      const exportKey = `${BACKUP_KEY}:rollback:${serverExport.exportedAt}`;
-      await _idbSet(exportKey, serverExport);
-      if (JSON.stringify(await _idbGet(exportKey)) !== JSON.stringify(serverExport)) {
-        throw new Error('Post-import queue export failed readback');
-      }
-      downloadQueueExport(`audio-queue-server-export-${serverExport.exportedAt}.json`, serverExport);
-      const byId = new Map(backupItems(backup).map(item => [item.id, item]));
-      for (const server of serverExport.items) {
-        const legacyId = String(server.meta?.legacyId ?? (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id);
-        const view = byId.get(legacyId) ?? projectServerItem(server);
-        view.serverQueueId = undefined;
-        view.jobId = server.jobId ?? view.jobId;
-        if (server.status === 'succeeded') {
-          const projected = projectServerItem(server, view);
-          Object.assign(view, projected, { status: 'succeeded', serverQueueId: undefined });
-        } else if (server.status === 'failed' || server.status === 'cancelled') {
-          view.status = 'failed'; view.error = server.error ?? server.status;
-        } else if (['submitted', 'submitting', 'interrupted'].includes(server.status)) {
-          view.status = 'failed';
-          view.error = `Server job ${server.jobId ?? '(id pending)'} may have rendered; check the library before retrying`;
-        } else {
-          view.status = 'pending'; view.stage = 'Held after rollback';
-        }
-        byId.set(legacyId, view);
-      }
-      plan = {
-        backupId,
-        restored: { items: [...byId.values()], completionCounter: _state.completionCounter },
-        cancelIds: serverExport.items.filter(item => item.status === 'pending' || item.status === 'held').map(item => item.id),
-      };
-      await _idbSet(ROLLBACK_PLAN_KEY, plan);
-      if (JSON.stringify(await _idbGet(ROLLBACK_PLAN_KEY)) !== JSON.stringify(plan)) throw new Error('Rollback plan failed readback');
-    }
-    await restoreQueueBackup(migrationStore(), backup);
-    await _idbSet(IDB_KEY, plan.restored);
-    if (JSON.stringify(await _idbGet(IDB_KEY)) !== JSON.stringify(plan.restored)) throw new Error('Reconciled browser queue failed readback');
-    // Cancel what is still waiting on the server. An earlier, partial attempt
-    // may have cancelled some already; those are now terminal and skipped.
-    const live = new Map((await readAudioQueue()).items.map(item => [item.id, item.status]));
-    for (const id of plan.cancelIds) {
-      const status = live.get(id);
-      if (status === 'pending' || status === 'held') await audioQueueApi.cancel(id);
-    }
-    _state.items = plan.restored.items;
-    _heldIds.clear();
-    for (const item of plan.restored.items) if (item.status === 'pending') _heldIds.add(item.id);
-    _state.awaitingResume = _heldIds.size;
-    // Ownership first, recovery data after: a crash in between leaves a
-    // finished rollback with a stale plan and marker, which the next
-    // migrateAudioQueue clears. The reverse would leave 'migrating' with no
-    // plan, and a retry would rebuild the queue from a server export this
-    // rollback has already cancelled.
-    localStorage.setItem(OWNER_KEY, 'browser');
-  } catch (err) {
-    // Fenced: no browser execution, and the banner keeps Retry and rollback.
-    localStorage.setItem(OWNER_KEY, 'migrating');
-    _emit(true);
-    throw err;
-  }
-  // The rollback is done; failing to tidy up must not reopen it.
-  try {
-    localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
-    await _idbSet(ROLLBACK_PLAN_KEY, null);
-  } catch (err) { console.warn('[AudioGenQueue] rollback finished; clearing its plan failed:', err); }
-  _emit(true);
 }
 
 window.addEventListener('storage', event => {
@@ -956,14 +785,11 @@ async function _hydrateFinishedItems(limit = 80): Promise<void> {
     }
   });
   await Promise.all(workers);
-  if (dirty) _emit(true);
+  if (dirty) _emit();
 }
 
-function _emit(immediate = false) {
+function _emit() {
   _state = { ..._state, items: [..._state.items] };
-  if (queueOwner() === 'browser') {
-    if (immediate) _persistNow(); else _persist();
-  }
   _listeners.forEach(fn => fn());
 }
 
@@ -980,7 +806,7 @@ function _syncMastered(songId: string, masteredAudioUrl: string): void {
       touched = true;
     }
   }
-  if (touched) _emit(true);
+  if (touched) _emit();
 }
 
 window.addEventListener('song-postprocessed', (e: Event) => {
@@ -1003,7 +829,7 @@ window.addEventListener('song-renamed', (e: Event) => {
     touched = true;
     return { ...item, generation: { ...item.generation, title } };
   });
-  if (touched) _emit(true);
+  if (touched) _emit();
 });
 
 function _getSnapshot(): AudioGenQueueState { return _state; }
@@ -1019,56 +845,31 @@ function _genId(): string { return `aq-${Date.now()}-${_nextId++}`; }
 
 let _resumeCalled = false;
 
-/** Ids of restored items the runner must not touch until the user says so.
+/** Rows whose server item is 'held', waiting on the user's Resume or Discard.
  *
  *  Kept out of AudioQueueStatus deliberately: a sixth status would have to be
  *  handled by every render site that switches on it, and a missed one shows a
- *  blank row. These items stay 'pending' and simply are not selected. */
+ *  blank row. These items stay 'pending'. */
 const _heldIds = new Set<string>();
 
 /** True while restored items are waiting on the user's answer. */
 export function isHeldQueueItem(id: string): boolean { return _heldIds.has(id); }
 
 /** Last auth token the queue was handed. Lets actions that aren't wired to the
- *  auth context — the Retry button — restart the runner. */
+ *  auth context — the Retry button — reach the server queue. */
 let _lastToken: string | null = null;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
 type LyricQueueOpts = { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number; sourceLyricsSetId?: number };
 
-/** Capture what enqueueAudioGen would send for this song, as an intent the
- *  server resolves itself (resolveWrittenSongIntent). For server-side bulk
- *  renders: capture one per song at submit time, resolve each when it runs. */
+/** Capture a written song as an intent the server resolves itself
+ *  (resolveWrittenSongIntent), for POST /api/lireek/workflow-renders: the
+ *  browser settings, backend pick and caption selections it cannot read. */
 export async function captureWrittenSongIntent(
   gen: Generation, opts: LyricQueueOpts, globalParams: Partial<GenerationParams>,
 ): Promise<WrittenSongIntent> {
   return withIntentTimeout(writtenSongIntentFor(await newLyricQueueItem(gen, opts, globalParams)));
-}
-
-export async function enqueueAudioGen(
-  gen: Generation,
-  opts: LyricQueueOpts,
-  globalParams: Partial<GenerationParams>,
-  token: string,
-): Promise<void> {
-  const item = await newLyricQueueItem(gen, opts, globalParams);
-
-  if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
-  if (queueOwner() === 'server') {
-    const request = await resolvedRequestForImport(item);
-    if (!request) throw new Error('Cannot resolve written-song request for server queue');
-    await audioQueueApi.enqueue(item.id, request, { view: item });
-    _lastToken = token;
-    await refreshServerProjection();
-    return;
-  }
-
-  _state.items.push(item);
-  _lastEnqueueAt = Date.now();
-  _emit(true);
-  _lastToken = token;
-  _processQueue();
 }
 
 async function newLyricQueueItem(
@@ -1113,7 +914,7 @@ export function removeFromAudioQueue(id: string): void {
   }
   _state.items = _state.items.filter(i => i.id !== id);
   if (_heldIds.delete(id)) _state.awaitingResume = _heldIds.size;
-  _emit(true);
+  _emit();
 }
 
 /** Force-dismiss an active/generating item (user clicked X).
@@ -1139,7 +940,7 @@ export function forceFailQueueItem(id: string): void {
     item.error = 'Cancelled by user';
     item.stage = undefined;
     item.progress = undefined;
-    _emit(true);
+    _emit();
   }
 }
 
@@ -1154,37 +955,17 @@ export function clearFinishedFromAudioQueue(): void {
     return;
   }
   _state.items = _state.items.filter(i => i.status !== 'succeeded' && i.status !== 'failed');
-  _emit(true);
+  _emit();
 }
 
-/** Put every failed item back in the queue and restart the runner. The jobId is
- *  cleared so each one is submitted fresh — the old server job either failed or
- *  no longer exists, so there is nothing worth reconnecting to. */
+/** Put every failed server item back in the queue. */
 export function retryFailedInAudioQueue(): number {
-  if (queueOwner() === 'server') {
-    // A failed take row (a dropped candidate) belongs to its owner's render.
-    const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId && !item.mm3TakeOf);
-    if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
-      .then(() => refreshServerProjection());
-    return failed.length;
-  }
-  let retried = 0;
-  for (const item of _state.items) {
-    if (item.status !== 'failed') continue;
-    item.status = 'pending';
-    item.error = undefined;
-    item.jobId = undefined;
-    item.progress = undefined;
-    item.stage = 'Queued…';
-    _engineWaits.delete(item.id);
-    retried++;
-  }
-  if (retried > 0) {
-    _emit(true);
-    if (_lastToken) _processQueue();
-    else console.warn('[AudioQueue] Retry requested before any token was seen — items are pending but idle');
-  }
-  return retried;
+  if (queueOwner() !== 'server') return 0;
+  // A failed take row (a dropped candidate) belongs to its owner's render.
+  const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId && !item.mm3TakeOf);
+  if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
+    .then(() => refreshServerProjection());
+  return failed.length;
 }
 
 // ── Manual queue API (for Cover Studio and other non-Lyric-Studio modules) ───
@@ -1214,7 +995,7 @@ export function addManualQueueItem(opts: {
   };
   _manualIds.add(id);
   _state.items.push(item);
-  _emit(true);
+  _emit();
   return id;
 }
 
@@ -1243,7 +1024,7 @@ export function updateManualQueueItem(id: string, update: {
   if (update.stage !== undefined) item.stage = update.stage;
   if (update.elapsed !== undefined) item.elapsed = update.elapsed;
   if (update.status !== undefined) item.status = update.status;
-  _emit(true);
+  _emit();
 }
 
 /** A studio's workflow-backed row (Cover, Auto-Gen) hears only its workflow's
@@ -1302,7 +1083,7 @@ export function completeManualQueueItem(id: string, result: {
   item.progress = 100;
   item.stage = 'Complete!';
   _state.completionCounter++;
-  _emit(true);
+  _emit();
   _maybeAutoAddToPlaylist(item);
 
   // Notify App.tsx so Library updates in real-time
@@ -1322,7 +1103,7 @@ export function failManualQueueItem(id: string, error: string): void {
   item.error = error;
   item.progress = undefined;
   item.stage = undefined;
-  _emit(true);
+  _emit();
 }
 
 /** Force-reset the server's generation queue and mark all local active items as failed. */
@@ -1337,7 +1118,7 @@ export async function resetServerQueue(): Promise<{ cancelled: number; drained: 
       item.progress = undefined;
     }
   }
-  _emit(true);
+  _emit();
   return result;
 }
 // ── Auto-add to playlist ─────────────────────────────────────────────────────
@@ -1381,23 +1162,6 @@ function _maybeAutoAddToPlaylist(item: AudioQueueItem): void {
  * Also backfills the queue item's coverUrl from the song's cover_url so the
  * playback backdrop shows the track's cover art instead of the artist image.
  */
-/**
- * Notify the library of EVERY song a finished item produced: its own, plus
- * the sibling take entries an MM3 ensemble / natural-ending render fanned out
- * (mm3TakeOf). Until 2026-09-11 the Lyric Studio queue notified `item.songId`
- * alone, so a render that saved two ended takes put one in the library and
- * the other appeared only after a reload; the Create page's poll had always
- * delivered them all.
- */
-function _notifyItemSongs(item: AudioQueueItem): void {
-  const ids = new Set<string>();
-  if (item.songId) ids.add(item.songId);
-  for (const s of _state.items) {
-    if (s.mm3TakeOf === item.id && s.songId) ids.add(s.songId);
-  }
-  for (const id of ids) _notifySongCreated(id);
-}
-
 async function _notifySongCreated(songId: string): Promise<void> {
   try {
     const { song } = await readSong(songId);
@@ -1430,7 +1194,7 @@ async function _notifySongCreated(songId: string): Promise<void> {
           item.audioDuration = dur;
           dirty = true;
         }
-        if (dirty) _emit(true);
+        if (dirty) _emit();
       }
     }
   } catch {
@@ -1447,9 +1211,8 @@ async function _notifySongCreated(songId: string): Promise<void> {
 async function _probeAudioDuration(itemId: string, url: string): Promise<void> {
   let blobUrl: string | undefined;
   try {
-    const res = await fetch(url);
-    if (!res.ok) return;
-    const blob = await res.blob();
+    const blob = await fetchAudioBlob(url);
+    if (!blob) return;
     blobUrl = URL.createObjectURL(blob);
 
     const audio = new Audio();
@@ -1461,7 +1224,7 @@ async function _probeAudioDuration(itemId: string, url: string): Promise<void> {
         const item = _state.items.find(i => i.id === itemId);
         if (item) {
           item.audioDuration = Math.round(dur);
-          _emit(true);
+          _emit();
         }
       }
       cleanup();
@@ -1505,17 +1268,18 @@ export function withCreateYue2Pick(request: Record<string, unknown>, oneShot: bo
 }
 
 /**
- * Enqueue a simple generation from the Create page.
- * Submits to the generate API, tracks progress in the shared queue,
- * and calls onSongCreated for each resulting song.
- *
- * This replaces useGenerationStore for unified queue management.
+ * Enqueue a Create render on the server queue and call onSongCreated for each
+ * song it produces. The server resolves the request: `intent` when the caller
+ * has one (CreatePanel), else a plain Create intent over `params`, which also
+ * supply the row's title, caption and lyrics. `oneShot` picks the YuE2 rule in
+ * withCreateYue2Pick; a build save passes false to keep its session's dials.
  */
 export async function enqueueSimpleGen(
   params: Record<string, any>,
   token: string,
   onSongCreated?: (song: any) => void,
   intent?: CreateIntent,
+  oneShot = !!intent,
 ): Promise<void> {
   const title = (params.title as string) || 'Untitled';
   const id = _genId();
@@ -1535,155 +1299,42 @@ export async function enqueueSimpleGen(
     status: 'generating',
     stage: 'Submitting…',
   };
-  if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
-  if (queueOwner() === 'server') {
-    const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
-    const request = withCreateYue2Pick((preview?.request ?? params) as Record<string, unknown>, !!intent);
-    await audioQueueApi.enqueue(id, request, { view: item });
-    _lastToken = token;
-    await refreshServerProjection();
-    if (onSongCreated) {
-      void (async () => {
-        for (;;) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          // Rides the projection's reads: a list younger than one poll is reused.
-          const server = (await readAudioQueue(ACTIVE_POLL_MS)).items.find(entry => entry.idempotencyKey === id);
-          if (!server || ['failed', 'cancelled', 'interrupted'].includes(server.status)) return;
-          if (server.status !== 'succeeded') continue;
-          const ids = (server.result?.songIds as string[] | undefined) ?? [];
-          for (const songId of ids) {
-            // Claim only once the row is in hand: a failed read leaves the
-            // song for the projection's own delivery.
-            try {
-              const { song } = await readSong(songId);
-              if (_claimSongDelivery(songId)) onSongCreated(song);
-            } catch { /* projection still updates library */ }
-          }
-          return;
+  await ensureQueueOwnerDecided(token);
+  if (queueOwner() !== 'server') throw new Error('Audio queue migration is in progress');
+  const preview = await generateApi.previewIntent(intent ?? { kind: 'create', params });
+  const request = withCreateYue2Pick(preview.request as Record<string, unknown>, oneShot);
+  await audioQueueApi.enqueue(id, request, { view: item });
+  _lastToken = token;
+  await refreshServerProjection();
+  if (onSongCreated) {
+    void (async () => {
+      for (;;) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Rides the projection's reads: a list younger than one poll is reused.
+        const server = (await readAudioQueue(ACTIVE_POLL_MS)).items.find(entry => entry.idempotencyKey === id);
+        if (!server || ['failed', 'cancelled', 'interrupted'].includes(server.status)) return;
+        if (server.status !== 'succeeded') continue;
+        const ids = (server.result?.songIds as string[] | undefined) ?? [];
+        for (const songId of ids) {
+          // Claim only once the row is in hand: a failed read leaves the
+          // song for the projection's own delivery.
+          try {
+            const { song } = await readSong(songId);
+            if (_claimSongDelivery(songId)) onSongCreated(song);
+          } catch { /* projection still updates library */ }
         }
-      })();
-    }
-    return;
-  }
-  _state.items.push(item);
-  _emit(true);
-
-  try {
-    const preview = intent ? await generateApi.resolveIfSelected(intent) : null;
-    if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit(withCreateYue2Pick(
-      (preview?.request ?? params) as Record<string, unknown>, !!intent) as unknown as GenerationParams);
-    item.jobId = res.jobId;
-    item.stage = 'Queued…';
-    _emit(true);
-
-    // Poll until done. Timer ignores server-queue wait — only counts real
-    // generation time so deep queues don't inflate elapsed / trip the timeout.
-    const timer = createGenerationTimer();
-    while (true) {
-      await new Promise(r => setTimeout(r, 1500));
-      try {
-        const status = await readGenerationStatus(res.jobId);
-        const t = timer.tick(status.status);
-        item.progress = status.progress !== undefined
-          ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
-          : undefined;
-        item.stage = status.stage || 'Generating…';
-        item.elapsed = t.elapsed;
-        _captureMm3Stream(item, status);
-    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
-        _syncTakeSiblings(item, status);
-        _emit();  // progress tick — debounced persistence
-
-        if (status.status === 'succeeded') {
-          const audioUrls = status.result?.audioUrls || [];
-          const audioUrl = audioUrls[0] || '';
-          const songIds = status.result?.songIds || [];
-          const takeMastered = status.result?.masteredAudioUrls ?? [];
-          const takeNoAdapter = status.result?.noAdapterAudioUrls ?? [];
-          const takeDuration = (t: number) =>
-            status.result?.durations?.[t] || status.result?.duration;
-          const masteredUrl = takeMastered[0] || status.result?.masteredAudioUrl;
-          item.status = 'succeeded';
-          item.audioUrl = audioUrl;
-          item.songId = songIds[0];
-          item.masteredAudioUrl = masteredUrl;
-          // Each take entry takes the song at ITS index. The server returns them
-          // in take order, so entry t owns songIds[t] — anything else would give
-          // three entries the same track.
-          if (item.mm3TakeCount && item.mm3TakeCount > 1) {
-            for (const s of _state.items) {
-              if (s.mm3TakeOf !== item.id) continue;
-              const t = s.mm3Take ?? 0;
-              if (t >= songIds.length) continue;   // dropped candidate, already marked
-              s.status = 'succeeded';
-              s.progress = 100;
-              s.stage = 'Complete!';
-              s.audioUrl = audioUrls[t] || '';
-              s.songId = songIds[t];
-              // Take t's own master, reference and LENGTH — see the live path.
-              s.masteredAudioUrl = takeMastered[t] || '';
-              s.noAdapterAudioUrl = takeNoAdapter[t] || '';
-              s.audioDuration = takeDuration(t);
-            }
-          }
-          item.noAdapterAudioUrl = takeNoAdapter[0] || status.result?.noAdapterAudioUrl;
-          item.audioDuration = takeDuration(0);
-          item.progress = 100;
-          item.stage = 'Complete!';
-          _state.completionCounter++;
-          _emit(true);
-          _maybeAutoAddToPlaylist(item);
-
-          // If server didn't provide duration, probe the audio file
-          if (!item.audioDuration && audioUrl) {
-            _probeAudioDuration(item.id, audioUrl);
-          }
-
-          // Fetch and deliver songs to the library
-          if (onSongCreated) {
-            for (const songId of songIds) {
-              try {
-                const { song } = await readSong(songId);
-                if (_claimSongDelivery(songId)) onSongCreated(song);
-              } catch { /* non-fatal */ }
-            }
-          }
-          return;
-        }
-        if (status.status === 'failed' || status.status === 'cancelled') {
-          throw new Error(status.error || (status.status === 'cancelled' ? 'Cancelled' : 'Generation failed'));
-        }
-        // Safety: configurable timeout (default 30 min), measured from
-        // generation start — queue wait does not count.
-        if (t.timedOut) {
-          throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-        }
-      } catch (e) {
-        if ((e as Error).message.includes('failed') || (e as Error).message.includes('timed out') || (e as Error).message.includes('Cancelled')) {
-          throw e;
-        }
-        // Transient network error — keep polling
+        return;
       }
-    }
-  } catch (err) {
-    item.status = 'failed';
-    item.error = (err as Error).message;
-    item.progress = undefined;
-    item.stage = undefined;
-    _emit(true);
+    })();
   }
 }
 
-/** One-time, silent owner decision for a browser that has never chosen, or
- *  whose last migration attempt never finished (page closed/reloaded with
- *  OWNER_KEY stuck at `'migrating'`). No pending items goes straight to
- *  server-owned — nothing to lose. Pending items migrate via the existing
- *  `resume` choice, no download and no held-for-review step. A stuck
- *  `'migrating'` retries via `retryQueueMigration` instead — see that
- *  function and `decideQueueOwnerAction` for why that never falls back to
- *  `'browser'` on failure. Either way, a failure leaves the banner as the
- *  only sign anything happened. Idempotent and safe to call from both
+/** One-time, silent owner decision on load. No pending items goes straight to
+ *  server-owned — nothing to lose. Pending items (a v1.3.x browser queue, or a
+ *  profile rolled back to the browser in v1.4.x) are imported via the `resume`
+ *  choice, no download and no held-for-review step. A stuck `'migrating'`
+ *  retries via `retryQueueMigration`. Either way, a failure leaves the banner
+ *  as the only sign anything happened. Idempotent and safe to call from both
  *  `resumeQueue()` and the banner. */
 let _ownerDecision: Promise<void> | null = null;
 export function ensureQueueOwnerDecided(token: string): Promise<void> {
@@ -1691,9 +1342,9 @@ export function ensureQueueOwnerDecided(token: string): Promise<void> {
     _ownerDecision = (async () => {
       await _idbReady;
       const hasPending = _state.items.some(item => item.status !== 'succeeded' && item.status !== 'failed');
-      const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending, isAudioQueueRollbackPending());
+      const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending);
       if (action === 'none') return;
-      if (action === 'set-server') { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
+      if (action === 'set-server') { localStorage.setItem(OWNER_KEY, 'server'); _emit(); return; }
       if (action === 'retry') {
         try { await retryQueueMigration(token); }
         catch (e) { console.error('[AudioGenQueue] migration retry failed, staying fenced:', e); }
@@ -1710,868 +1361,28 @@ export async function resumeQueue(token: string): Promise<void> {
   if (_resumeCalled) return;
   _resumeCalled = true;
   _lastToken = token;
-
-  // Wait for IndexedDB restore to complete before processing
-  await _idbReady;
   await ensureQueueOwnerDecided(token);
-
-  if (queueOwner() === 'server') { _startServerProjection(token); return; }
-  if (queueOwner() === 'migrating') return;
-
-  _pruneDeletedSongs();
-
-  // Items that were mid-flight when the page went away are RECONNECTED, not
-  // resubmitted, IF the server still knows the job (browser-only reload —
-  // the ace-server process never stopped). Reattaching then costs nothing
-  // and loses nothing. Handled by the runner's _tryReconnect path and needs
-  // no permission.
-  //
-  // But when the server has forgotten the job (a full app restart, not just
-  // a page reload — issue #146), _tryReconnect's 404 used to fall through to
-  // a silent from-scratch re-submit: a full LM+synth run starting itself with
-  // nobody at the machine and nothing clicked. _processQueue now holds that
-  // case exactly like a never-submitted item instead.
-  //
-  // Items that were never submitted are a different question. The queue is
-  // persisted, so it survives a browser restart, an OS reboot, or a tab the
-  // browser restores by itself days later. Auto-starting them meant a full
-  // generation could begin with nobody at the machine and nothing clicked
-  // (issue #100: a reporter's tab came back after an OS update and started a
-  // render on stale Lyric Studio state). Hold them and ask instead.
-  // _sanitizeItems() has already turned anything that was in flight back into
-  // 'pending', so status cannot tell the two apart. The jobId can: an item that
-  // reached the server has one, an item that never left the browser does not.
-  const pending = _state.items.filter(i => i.status === 'pending');
-  const reconnectable = pending.filter(i => i.jobId);
-  const neverSubmitted = pending.filter(i => !i.jobId);
-
-  if (neverSubmitted.length > 0) {
-    for (const i of neverSubmitted) _heldIds.add(i.id);
-    _state.awaitingResume = neverSubmitted.length;
-    console.log(`[AudioQueue] ${neverSubmitted.length} unstarted item(s) restored from a previous session — waiting for the user`);
-    _emit(true);
-  }
-
-  if (reconnectable.length === 0) return;
-
-  // Start the runner unconditionally. If the engine is still booting it answers
-  // 503 and the runner parks the item and waits for it — deliberately NOT gated
-  // on a health check here, because a slow or hanging /api/health would then be
-  // able to stop the queue from ever starting.
-  console.log(`[AudioQueue] Resuming — ${reconnectable.length} to reconnect, ${neverSubmitted.length} held`);
-  _processQueue();
+  if (queueOwner() === 'server') _startServerProjection(token);
 }
 
-/** User answered the restored-queue prompt with Resume. Release the held items
- *  and start the runner. */
+/** User answered the restored-queue prompt with Resume: release the server's
+ *  held items. */
 export function resumeRestoredQueue(token?: string): void {
-  if (_state.awaitingResume === 0) return;
-  if (queueOwner() === 'server') {
-    const t = token ?? _lastToken;
-    if (t) {
-      const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
-      void audioQueueApi.resumeHeld(ids).then(() => refreshServerProjection());
-    }
-    return;
-  }
-  console.log(`[AudioQueue] Resuming ${_heldIds.size} restored item(s) on user request`);
-  _heldIds.clear();
-  _state.awaitingResume = 0;
+  if (_state.awaitingResume === 0 || queueOwner() !== 'server') return;
   const t = token ?? _lastToken;
-  _emit(true);
-  if (t) { _lastToken = t; _processQueue(); }
+  if (!t) return;
+  const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
+  void audioQueueApi.resumeHeld(ids).then(() => refreshServerProjection());
 }
 
 /** User answered the restored-queue prompt with Discard. Drop only the items
- *  that were held. Anything reconnected or added since is untouched. */
+ *  that were held. Anything added since is untouched. */
 export function discardRestoredQueue(): void {
-  if (_state.awaitingResume === 0) return;
-  if (queueOwner() === 'server') {
-    const t = _lastToken;
-    if (t) {
-      const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
-      void Promise.all(ids.map(id => audioQueueApi.cancel(id).then(() => audioQueueApi.dismiss(id))))
-        .then(() => refreshServerProjection());
-    }
-    return;
-  }
-  const before = _state.items.length;
-  _state.items = _state.items.filter(i => !_heldIds.has(i.id));
-  _heldIds.clear();
-  _state.awaitingResume = 0;
-  console.log(`[AudioQueue] Discarded ${before - _state.items.length} restored item(s)`);
-  _emit(true);
+  if (_state.awaitingResume === 0 || queueOwner() !== 'server' || !_lastToken) return;
+  const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
+  void Promise.all(ids.map(id => audioQueueApi.cancel(id).then(() => audioQueueApi.dismiss(id))))
+    .then(() => refreshServerProjection());
 }
-
-/**
- * Drop succeeded items whose song no longer exists in the DB — the queue is
- * persisted in IndexedDB, so entries survive nukes/deletes done before this
- * page load or from another tab. Candidates are captured BEFORE the fetch so
- * an item that completes mid-fetch can never be pruned by a stale id list.
- */
-async function _pruneDeletedSongs(): Promise<void> {
-  const candidates = _state.items
-    .filter(i => i.status === 'succeeded' && i.songId)
-    .map(i => i.id);
-  if (candidates.length === 0) return;
-
-  try {
-    const { ids } = await readSongIds();
-    const existing = new Set(ids);
-    const candidateSet = new Set(candidates);
-    const before = _state.items.length;
-    _state.items = _state.items.filter(i =>
-      !candidateSet.has(i.id) || existing.has(i.songId!)
-    );
-    if (_state.items.length !== before) {
-      console.log(`[AudioGenQueue] Pruned ${before - _state.items.length} queue entries for deleted songs`);
-      _emit(true);
-    }
-  } catch {
-    // Non-fatal — server unreachable, keep entries as-is
-  }
-}
-
-// ── Engine availability ──────────────────────────────────────────────────────
-// The server's job queue is in-memory, so a Node restart drops it and ace-server
-// then cold-boots for a minute or more reloading models. Throughout that window
-// /api/generate answers 503 "Engine not ready". A 503 is not the song's fault,
-// so the runner parks the item and waits instead of failing it — otherwise the
-// while-loop marks every remaining item failed at network speed and the whole
-// queue is gone seconds after a restart.
-
-const ENGINE_POLL_MS = 3000;
-/** Cap on a single health probe — see _probeEngine. */
-const ENGINE_PROBE_TIMEOUT_MS = 5000;
-/** Longest a single park may last before the item is failed for real. */
-const ENGINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
-/** Parks allowed per item before we treat the engine as genuinely dead. */
-const MAX_ENGINE_WAITS = 3;
-
-/** Per-item park count. Module-level rather than persisted — a page reload is
- *  a fresh start, and these should not survive one. */
-const _engineWaits = new Map<string, number>();
-
-/** True when the failure means "the engine can't take work right now" rather
- *  than "this song is bad": engine booting, engine suspended for training, or
- *  the server process unreachable mid-restart. */
-function _isEngineUnavailable(msg: string): boolean {
-  return /Engine not ready|Engine is paused|Failed to fetch|NetworkError|Load failed|API error: 50[023]/i.test(msg);
-}
-
-/** One health probe, bounded. /api/health reaches through to ace-server, which
- *  can be slow to answer while it is busy, and fetch has no default timeout —
- *  an unbounded probe here would wedge the wait loop. */
-async function _probeEngine(): Promise<{ ready: boolean; status: string }> {
-  try {
-    const health = await Promise.race([
-      healthApi.check(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('health probe timed out')), ENGINE_PROBE_TIMEOUT_MS)),
-    ]);
-    return { ready: health.engine?.ready === true, status: health.engine?.bootStatus || 'Starting engine…' };
-  } catch {
-    // Server still down mid-restart, or too busy to answer in time.
-    return { ready: false, status: 'Waiting for server…' };
-  }
-}
-
-/** Poll /api/health until the engine reports ready. Resolves true once it is,
- *  false if it never came back inside ENGINE_WAIT_TIMEOUT_MS. */
-async function _waitForEngine(onTick?: (status: string) => void): Promise<boolean> {
-  const deadline = Date.now() + ENGINE_WAIT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, ENGINE_POLL_MS));
-    const { ready, status } = await _probeEngine();
-    if (ready) return true;
-    onTick?.(status);
-  }
-  return false;
-}
-
-// ── Queue runner ─────────────────────────────────────────────────────────────
-
-/** Queued YuE2 songs submitted in one wave. The server batches compatible
- *  waiting jobs into a single engine call, up to the engine's own ceiling
- *  (max_lm_batch, 4); sending them together is what makes them "waiting
- *  together". A wave is one album's songs: same preset adapters, same
- *  caption source, so the server's compatibility check passes. */
-const YUE2_QUEUE_WAVE = 4;
-/** How long after the last Generate click a not-yet-full YuE2 wave waits for
- *  more songs before going up. */
-const YUE2_QUEUE_HOLD_MS = 5_000;
-let _lastEnqueueAt = 0;
-
-/** ACE: songs queued together go up together so the server can plan them in
- *  one LM pass (backends/ace/lmCoalesce.ts). 4 = the songs one pass holds. */
-const ACE_QUEUE_WAVE = 4;
-
-function _submitWave(next: AudioQueueItem, pending: AudioQueueItem[]): AudioQueueItem[] {
-  const backend = useBackendStore.getState().activeBackendId;
-  if (backend !== YUE2_BACKEND_ID && backend !== 'ace') return [next];
-  const size = backend === 'ace' ? ACE_QUEUE_WAVE : YUE2_QUEUE_WAVE;
-  const wave = [next];
-  for (const item of pending) {
-    if (wave.length >= size) break;
-    if (item === next || item.jobId) continue;
-    if (backend === YUE2_BACKEND_ID && item.lyricsSetId !== next.lyricsSetId) continue;
-    wave.push(item);
-  }
-  // Tells the ACE server a lone first song that the rest are on the way.
-  for (const item of wave) item.lmWave = wave.length;
-  return wave;
-}
-
-/** Run one item to completion. 'done' whether it succeeded or failed; the
- *  engine-unavailable message when it was parked for a retry instead. */
-async function _runQueueItem(next: AudioQueueItem): Promise<'done' | string> {
-  try {
-    await _executeItem(next);
-    next.status = 'succeeded';
-    _engineWaits.delete(next.id);
-    _state.completionCounter++;
-    // Notify App.tsx so Library updates in real-time — every take, not
-    // just the first (see _notifyItemSongs).
-    _notifyItemSongs(next);
-    _maybeAutoAddToPlaylist(next);
-  } catch (err) {
-    const msg = (err as Error).message || '';
-    const waits = _engineWaits.get(next.id) ?? 0;
-
-    if (_isEngineUnavailable(msg) && waits < MAX_ENGINE_WAITS) {
-      // Park this item; the runner holds the whole queue until the engine is
-      // back. Keep any jobId: on retry _tryReconnect re-attaches if the server
-      // still knows the job, and re-submits if it doesn't.
-      _engineWaits.set(next.id, waits + 1);
-      next.status = 'pending';
-      next.progress = undefined;
-      next.stage = 'Waiting for engine…';
-      _emit(true);
-      console.warn(`[AudioQueue] Engine unavailable (${msg}) — holding queue`);
-      return msg || 'engine unavailable';
-    }
-    next.status = 'failed';
-    next.error = msg;
-    _engineWaits.delete(next.id);
-    console.error(`[AudioQueue] Item ${next.id} failed:`, next.error);
-  }
-  _emit(true);
-  return 'done';
-}
-
-let _running = false;
-
-/** A pending row this queue submits itself: not held, and not a studio's own
- *  row (addManualQueueItem), which shows as pending while its studio waits. */
-const _runnable = (i: AudioQueueItem) => i.status === 'pending' && !_heldIds.has(i.id) && !_manualIds.has(i.id);
-
-async function _processQueue(): Promise<void> {
-  if (queueOwner() !== 'browser') return;
-  if (_running) return;
-  _running = true;
-
-  try {
-    while (true) {
-      if (queueOwner() !== 'browser') break;
-      const pending = _state.items.filter(_runnable);
-      if (pending.length === 0) break;
-
-      // Artist batching: prefer items with same adapter as last completed
-      const next = pending[0];
-
-      try {
-        // If the item has a jobId from a previous session, try to reconnect
-        // to the server job (browser-only reload). If the server doesn't know
-        // about it (404 = full restart), clear the jobId and re-submit.
-        if (next.jobId) {
-          const reconnected = await _tryReconnect(next);
-          if (reconnected) {
-            // _tryReconnect already set the item's status, audioUrl, songId, etc.
-            // Just ensure it's counted and notified.
-            if (next.status === 'succeeded') {
-              _state.completionCounter++;
-              _notifyItemSongs(next);
-              _maybeAutoAddToPlaylist(next);
-            }
-            _emit(true);
-            continue;
-          }
-          // Server doesn't know about this job — the process that was running
-          // it is gone (a full app restart, not just a page reload), so this
-          // is no longer a reconnect: starting it now means beginning a brand
-          // new LM+synth run with nobody at the machine and nothing clicked —
-          // the exact hazard issue #100 already fixed for never-submitted
-          // items (see RestoredQueueBanner.tsx). Hold it the same way instead
-          // of silently re-submitting.
-          console.log(`[AudioQueue] Job ${next.jobId} not found on server (full restart) — holding for user resume`);
-          next.jobId = undefined;
-          next.stage = 'Interrupted — needs resume';
-          next.progress = undefined;
-          _heldIds.add(next.id);
-          _state.awaitingResume = _heldIds.size;
-          _emit(true);
-          continue;
-        }
-
-        // YuE2: the songs queued behind this one from the same album go up in
-        // the same wave, so the server finds them waiting together and renders
-        // them as one engine batch (backends/yue2/generate.ts coalescing).
-        // Every other backend keeps the one-at-a-time flow.
-        // The first Generate of an album used to go up alone: this loop
-        // picked it before the next clicks landed, and the rest only joined
-        // after it finished. So a wave that is not full and whose newest
-        // item was queued moments ago waits out the rest of a short hold,
-        // then re-reads the queue; songs queued a while ago never wait.
-        let wave = _submitWave(next, pending);
-        if (useBackendStore.getState().activeBackendId === YUE2_BACKEND_ID && wave.length < YUE2_QUEUE_WAVE) {
-          // Each further click restarts the hold, so it ends a few seconds
-          // after the last one.
-          let waited = false;
-          for (let hold = YUE2_QUEUE_HOLD_MS - (Date.now() - _lastEnqueueAt); hold > 0; hold = YUE2_QUEUE_HOLD_MS - (Date.now() - _lastEnqueueAt)) {
-            await new Promise(r => setTimeout(r, hold));
-            waited = true;
-          }
-          if (waited) {
-            if (_heldIds.has(next.id) || next.status !== 'pending') continue;
-            wave = _submitWave(next, _state.items.filter(_runnable));
-          }
-        }
-        if (wave.length > 1) console.log(`[AudioQueue] Submitting ${wave.length} songs together for server-side batching`);
-        const results = await Promise.all(wave.map(item => _runQueueItem(item)));
-        const held = wave.filter((_, i) => results[i] !== 'done');
-        if (held.length) {
-          // Park them and hold the whole queue until the engine is back.
-          if (await _waitForEngine(s => { for (const item of held) item.stage = s; _emit(); })) {
-            for (const item of held) item.stage = 'Retrying…';
-            _emit(true);
-            continue;
-          }
-          for (const [i, item] of wave.entries()) {
-            if (results[i] === 'done') continue;
-            item.status = 'failed';
-            item.error = `Engine did not come back: ${results[i]}`;
-            _engineWaits.delete(item.id);
-            console.error(`[AudioQueue] Item ${item.id} failed:`, item.error);
-          }
-          _emit(true);
-        }
-      } catch (err) {
-        // Only the reconnect path above can throw; _runQueueItem settles its own item.
-        next.status = 'failed';
-        next.error = (err as Error).message || '';
-        console.error(`[AudioQueue] Item ${next.id} failed:`, next.error);
-        _emit(true);
-      }
-    }
-  } finally {
-    _running = false;
-    console.log('[AudioQueue] Queue processor stopped');
-  }
-}
-
-/**
- * Try to reconnect to a server job from a previous browser session.
- * Returns true if the job was found and polled to completion, false if
- * the server doesn't know about it (needs re-submit).
- */
-async function _tryReconnect(item: AudioQueueItem): Promise<boolean> {
-  const jobId = item.jobId!;
-  console.log(`[AudioQueue] Attempting to reconnect to job ${jobId}...`);
-
-  try {
-    const status = await readGenerationStatus(jobId);
-    // Server knows about this job — reconnect!
-    if (status.status === 'succeeded') {
-      // Already done — just collect the results
-      const audioUrl = status.result?.audioUrls?.[0];
-      const songId = status.result?.songIds?.[0];
-      const masteredUrl = status.result?.masteredAudioUrls?.[0] || status.result?.masteredAudioUrl;
-      const noAdapterUrl = status.result?.noAdapterAudioUrls?.[0] || status.result?.noAdapterAudioUrl;
-      const dur = status.result?.durations?.[0] || status.result?.duration;
-      if (audioUrl) {
-        item.audioUrl = audioUrl;
-        if (songId) item.songId = songId;
-        if (masteredUrl) item.masteredAudioUrl = masteredUrl;
-        if (noAdapterUrl) item.noAdapterAudioUrl = noAdapterUrl;
-        if (dur) item.audioDuration = dur;
-      }
-      item.status = 'succeeded';
-      item.progress = 100;
-      item.stage = 'Complete!';
-      console.log(`[AudioQueue] Reconnected to job ${jobId} — already succeeded`);
-      return true;
-    }
-    if (status.status === 'failed' || status.status === 'cancelled') {
-      item.status = 'failed';
-      item.error = status.error || (status.status === 'cancelled' ? 'Cancelled' : 'Failed');
-      console.log(`[AudioQueue] Reconnected to job ${jobId} — ${status.status}`);
-      return true; // Don't re-submit a failed job
-    }
-
-    // Still running — resume polling
-    console.log(`[AudioQueue] Reconnected to job ${jobId} — resuming poll (status=${status.status})`);
-    _captureMm3Stream(item, status);
-    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
-    item.status = 'generating';
-    item.stage = status.stage || 'Reconnected…';
-    item.progress = status.progress;
-    _emit(true);
-
-    await _pollUntilDone(item);
-
-    // _pollUntilDone sets audioUrl etc. on success, or throws on failure.
-    // Mark succeeded here (poll doesn't set status).
-    item.status = 'succeeded';
-    item.progress = 100;
-    item.stage = 'Complete!';
-
-    // Resolve audio generation in Lireek DB if applicable
-    if (item.audioUrl && jobId) {
-      try {
-        await lireekApi.resolveAudioGeneration(jobId, item.audioUrl);
-      } catch { /* non-fatal */ }
-    }
-
-    return true;
-  } catch (err) {
-    // 404 or network error — server doesn't know about this job
-    const msg = (err as Error).message || '';
-    if (msg.includes('404') || msg.includes('not found') || msg.includes('Job not found')) {
-      console.log(`[AudioQueue] Job ${jobId} not found on server (server restarted?)`);
-      return false;
-    }
-    // Transient network error — try once more
-    console.warn(`[AudioQueue] Reconnect probe failed for ${jobId}:`, msg);
-    return false;
-  }
-}
-
-async function _executeItem(item: AudioQueueItem): Promise<void> {
-  const gen = item.generation;
-  // The preset as it is NOW, not as it was when the item was queued: a
-  // training run that finishes while songs wait in the queue assigns its
-  // adapter to the album preset, and the queued songs should render with it.
-  // The enqueue-time copy stays as the fallback when the lookup fails.
-  if (item.lyricsSetId) {
-    try {
-      const res = await lireekApi.getPreset(item.lyricsSetId);
-      item.preset = res.preset;
-    } catch { /* offline or deleted set: keep the snapshot */ }
-  }
-  const preset = item.preset;
-
-  // 1) Start with globalParams snapshot — identical to Create page's getGlobalParams().
-  //    This includes ALL engine params: inference, guidance, solver, DCW, latent,
-  //    LM, adapter (global), mastering, trigger word, etc.
-  //    Items persisted before globalParams was included in storage come back
-  //    without one; fall back to the live settings rather than submitting an
-  //    empty param set, which would pick server defaults and mismatch the
-  //    preset's adapter.
-  const snapshot = item.globalParams && Object.keys(item.globalParams).length > 0
-    ? item.globalParams
-    : useGlobalParamsStore.getState().getGlobalParams();
-  const backendId = useBackendStore.getState().activeBackendId;
-  if ((await readSelectedPath()) === 'resolved') {
-    if (backendId === YUE2_BACKEND_ID) await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
-    const appSettings = (() => {
-      try { return JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>; }
-      catch { return {} as Record<string, unknown>; }
-    })();
-    const storedSetting = (key: string, fallback: string) => {
-      try { return JSON.parse(localStorage.getItem(key) || '') as string; }
-      catch { return fallback; }
-    };
-    const datasetId = backendId === YUE2_BACKEND_ID ? readYue2DatasetForLyricsSet(item.lyricsSetId) : '';
-    const intent: WrittenSongIntent = {
-      kind: 'written-song', engine: backendId, generationId: gen.id,
-      lyricsSetId: item.lyricsSetId,
-      sourceLyricsSetId: item.sourceLyricsSetId,
-      artistName: item.artistName,
-      params: snapshot,
-      settings: {
-        useLlmDuration: getUseLlmDuration(), useLmAdapter: useLmAdapterEnabled(),
-        triggerUseFilename: appSettings.triggerUseFilename === true,
-        triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
-          ? appSettings.triggerPlacement : 'prepend',
-        randomizeTimbreRef: (() => {
-          try { return JSON.parse(localStorage.getItem('lireek-randomizeTimbreRef') || 'false') === true; }
-          catch { return false; }
-        })(),
-        masterToAlbumTrack: masterToAlbumEnabled(),
-        timeSignature: storedSetting('hs-timeSignature', ''),
-        vocalLanguage: storedSetting('hs-vocalLanguage', 'en'),
-        app: appSettings,
-      },
-      ...(backendId === MM3_BACKEND_ID ? { mm3Selection: readMm3CaptionSelection(gen.id) } : {}),
-      ...(datasetId ? { yue2Selection: readYue2SongSelection(datasetId, gen.id,
-        !!yue2CaptionAdapterPath(item.yue2Pick ?? yue2PickAtEnqueue(preset))) } : {}),
-      ...(backendId === YUE2_BACKEND_ID ? {
-        yue2Pick: item.yue2Pick ?? yue2PickAtEnqueue(preset),
-        yue2Defaults: useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {},
-      } : {}),
-    };
-    const preview = await generateApi.previewIntent(intent);
-    for (const effect of preview.uiEffects) {
-      if (effect.key === 'backendParams.mm3LmAdapter') {
-        try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', effect.value); } catch { /* store not ready */ }
-      } else if (typeof effect.value === 'string' || typeof effect.value === 'boolean') {
-        writePersistedState(effect.key, effect.value);
-      }
-    }
-    item.status = 'generating';
-    item.stage = 'Submitting to audio engine…';
-    _emit(true);
-    if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-    const res = await generateApi.submit({
-      ...(preview.request as Record<string, unknown>),
-      ...((item.lmWave ?? 1) > 1 ? { lmBatchWave: item.lmWave } : {}),
-    } as unknown as GenerationParams);
-    item.jobId = res.jobId;
-    _emit(true);
-    if (res.jobId) await lireekApi.linkAudio(gen.id, res.jobId, item.lyricsSetId);
-    await _pollUntilDone(item);
-    return;
-  }
-  const params: Record<string, any> = { ...snapshot };
-
-  // 2) Overlay content fields from the written song
-  params.lyrics = gen.lyrics || '';
-  // Two captions on the generation, one caption field on the request — pick the
-  // one the backend that will actually render this was trained on.
-  //
-  // Read the live backendStore selection when submitting. The server freezes
-  // its active backend at POST time, so select the caption for that family.
-  // Later selector changes cannot redirect the accepted server-side job.
-  //
-  // The lyrics-set id is what lets the MM3 side resolve the song's caption
-  // SOURCE — automatic-by-tempo from the album's own captioned tracks, a
-  // specific track, or the song's own caption (utils/mm3CaptionSource.ts).
-  // Items from Create/Cover Studio carry lyricsSetId 0 and simply get the
-  // song's own caption.
-  if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(item.lyricsSetId);
-  // YuE2's equivalent, in two parts.
-  //
-  // First the song's own model pick, captured when it was queued (#204): the
-  // album's adapters at that moment, with the picker's dials. It travels with
-  // the request and the engine applies it when the job starts, so a later
-  // picker change, or a training run assigning a new adapter to the album while
-  // the song waits, does not change what it renders with. Items queued before
-  // the pick existed take it now, which is what they did before.
-  //
-  // Then the caption source, resolved by the album's lyrics-set id — a handle
-  // that survives a moved run folder or a swept prepared cache, unlike the
-  // adapter path this used to key on. The cache fill has to happen here rather
-  // than in the picker: captionForBackend below reads it out of the cache
-  // fetchYue2CaptionSource fills, so a song generated from Lyric Studio
-  // without that panel ever being opened would otherwise resolve to the
-  // written caption and the album's own captions would never reach the model.
-  let yue2AdapterInForce: boolean | undefined;
-  if (backendId === YUE2_BACKEND_ID) {
-    const pick = item.yue2Pick ?? yue2PickAtEnqueue(preset);
-    params.yue2Pick = pick;
-    yue2AdapterInForce = !!yue2CaptionAdapterPath(pick);
-    await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
-  }
-  const renderingAs = !!item.sourceLyricsSetId && item.sourceLyricsSetId !== item.lyricsSetId;
-  params.caption = captionForBackend(gen, backendId, item.lyricsSetId, yue2AdapterInForce, renderingAs);
-  params.title = gen.title || '';
-  params.instrumental = gen.lyrics?.trim() === '[Instrumental]';
-  // Duration is an ACE-only field now.
-  //
-  // The lyric-derived estimate is a TARGET for ACE, which is told a length and
-  // aims for it. MM3 has no such input: the number becomes a frame cap and
-  // nothing else, so it can only truncate — and 7d574365's "send Auto instead"
-  // was reverted because the planner ran to the 300s ceiling instead of ending.
-  // The ending arbitration fixes the actual problem (candidates that never
-  // reach EOS are dropped and re-planned), which leaves the cap with nothing
-  // left to do except cut songs short. So MM3 renders are always auto.
-  if (backendId !== MM3_BACKEND_ID) {
-    params.duration = resolveDuration(gen.duration, gen.lyrics || '', gen.bpm || 120);
-  } else {
-    params.duration = -1;
-  }
-  if (gen.bpm) params.bpm = gen.bpm;
-  // Canonical spelling — the engine's metadata FSM only accepts a lower-case
-  // mode, and 99.6% of stored generations carry a capitalised one.
-  if (gen.key) params.keyScale = normalizeKeyScale(gen.key);
-  if (item.artistName) params.artist = item.artistName;
-  if (gen.subject) params.subject = gen.subject;
-
-  // 2b) Per-song params that the Create page sends from its local state.
-  //     Read from the same localStorage keys to maintain parity.
-  //     Fallbacks match CreatePanel defaults: '' (auto) for timesig, 'en' for language.
-  if (!params.timeSignature) {
-    try {
-      const stored = localStorage.getItem('hs-timeSignature');
-      params.timeSignature = stored ? JSON.parse(stored) : '';
-    } catch { params.timeSignature = ''; }
-  }
-  if (!params.vocalLanguage) {
-    try {
-      const stored = localStorage.getItem('hs-vocalLanguage');
-      params.vocalLanguage = stored ? JSON.parse(stored) : 'en';
-    } catch { params.vocalLanguage = 'en'; }
-  }
-
-  // 2c) Settings flags — Create page adds these from App settings.
-  //     Read from localStorage (same key as App.tsx / SettingsPanel).
-  try {
-    const settingsRaw = localStorage.getItem('ace-settings');
-    if (settingsRaw) {
-      const appSettings = JSON.parse(settingsRaw);
-      params.coResident = appSettings.coResident;
-      params.cacheLmCodes = appSettings.cacheLmCodes;
-      params.parallelWhisper = appSettings.parallelWhisper;
-      params.parallelQualityEval = appSettings.parallelQualityEval;
-      params.parallelCoverArt = appSettings.parallelCoverArt;
-      // Pass timeout to server so server-side wall-clock limit matches user preference
-      if (typeof appSettings.generationTimeoutMinutes === 'number') {
-        params.generationTimeoutMinutes = appSettings.generationTimeoutMinutes;
-      }
-    }
-  } catch { /* ignore parse errors */ }
-
-  // 3) Adapter override from album preset (path from preset, scale/groups from globalParams)
-  if (preset?.adapter_path) {
-    item.status = 'loading-adapter';
-    item.stage = `Preparing adapter for ${item.artistName}…`;
-    _emit(true);
-
-    // Update the top bar to reflect the adapter being used
-    writePersistedState('hs-adapter', preset.adapter_path);
-
-    // Override adapter path from preset; scale, group scales, mode, and
-    // trigger word settings are already correct from globalParams.
-    params.loraPath = preset.adapter_path;
-    // loraStack supersedes loraPath in translateParams (req.adapters wins in
-    // the engine), and getGlobalParams folds even a single top-bar adapter
-    // into a stack — so the stack must be replaced too, or whatever was
-    // loaded in the top panel keeps playing instead of the preset adapter.
-    params.loraStack = [{
-      path: preset.adapter_path,
-      scale: typeof params.loraScale === 'number' ? params.loraScale : 1.0,
-    }];
-
-    // Re-derive trigger word from the PRESET adapter filename (globalParams
-    // has the trigger word for the GLOBAL adapter, which may differ).
-    const settingsRaw = localStorage.getItem('ace-settings');
-    const triggerSettings = settingsRaw ? JSON.parse(settingsRaw) : {};
-    const useFilename = triggerSettings.triggerUseFilename === true;
-    const placement = (triggerSettings.triggerPlacement as 'prepend' | 'append' | 'replace') || 'prepend';
-    // Clear the snapshot's trigger words first: translateParams prefers the
-    // plural triggerWords (derived from the global adapter stack) over the
-    // singular triggerWord set below, so stale globals must not survive.
-    delete params.triggerWord;
-    delete params.triggerWords;
-    delete params.triggerPlacement;
-    if (useFilename) {
-      const fileName = preset.adapter_path.replace(/\\/g, '/').split('/').pop() || '';
-      const triggerWord = fileName.replace(/\.safetensors$/i, '');
-      if (triggerWord) {
-        params.triggerWord = triggerWord;
-        params.triggerWords = [triggerWord];
-        params.triggerPlacement = placement;
-      }
-    }
-  }
-
-  // 3b) Planner-LM adapter from album preset (song structure; local HOT-Step
-  // feature). Same semantics as the DiT adapter above: PATH from the preset,
-  // STRENGTH from globalParams (params.lmAdapterScale is already in the
-  // snapshot — the global Adapters-menu slider governs preset adapters too).
-  // A preset without one leaves the global Planner Adapter selection active.
-  //
-  // Gated on the sidebar's "Use LM Adapter" toggle, which is OFF by default.
-  // When it is off the preset's LM adapter is skipped AND params.lmAdapter is
-  // cleared: this same function writes hs-lmAdapter, so the global carries the
-  // last preset's planner adapter, and skipping alone would silently keep
-  // applying it — the toggle would look broken.
-  if (useLmAdapterEnabled()) {
-    if (preset?.lm_adapter_path) {
-      writePersistedState('hs-lmAdapter', preset.lm_adapter_path);
-      params.lmAdapter = preset.lm_adapter_path;
-    }
-  } else {
-    delete params.lmAdapter;
-  }
-
-  // 3c) MM3 adapter from album preset (2026-09-11). The preset GOVERNS in MM3
-  // mode: its adapter plans the song, and an album with none gets the base
-  // model — never the global dropdown's last pick. Until this existed the
-  // global value rode along, and a queue of one album's songs rendered with
-  // another album's adapter (two songs on 2026-09-11 08:48). The global is
-  // written to match so the dropdown shows what actually ran.
-  if (backendId === MM3_BACKEND_ID) {
-    const ref = preset?.mm3_adapter_path || '';
-    params.mm3LmAdapter = ref;
-    try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', ref); } catch { /* store not ready */ }
-  }
-
-  // 4) Mastering reference from album preset (does NOT force-enable — respects global toggle)
-  if (preset?.reference_track_path) {
-    // Update the top bar to reflect the mastering reference
-    writePersistedState('hs-masteringReference', preset.reference_track_path);
-    writePersistedState('hs-timbreReference', true);
-
-    params.masteringReference = preset.reference_track_path;
-    // Timbre: use dedicated timbre path from globalParams if set,
-    // otherwise default to preset reference track
-    if (typeof item.globalParams?.timbreReference === 'string' && item.globalParams.timbreReference) {
-      params.timbreReference = item.globalParams.timbreReference;  // dedicated timbre audio path
-    } else {
-      params.timbreReference = true;  // use preset reference track as timbre
-    }
-
-    // Randomize Timbre: pick a random track from the same folder instead of the exact file
-    try {
-      const raw = localStorage.getItem('lireek-randomizeTimbreRef');
-      if (raw && JSON.parse(raw) === true) {
-        params.randomizeTimbreRef = true;
-      }
-    } catch { /* ignore */ }
-  }
-
-  // 4b) Master to Album Track: mastering on, VST chain off; the server draws
-  // the album track at render time (same as resolveIntent.ts).
-  if (masterToAlbumEnabled()) {
-    params.postProcessingEnabled = true;
-    params.masteringEnabled = true;
-    params.masterToAlbumLyricsSet = item.lyricsSetId;
-  }
-
-  // 5) Submit generation
-  params.taskType = 'text2music';
-  params.source = 'lyric-studio';
-  item.status = 'generating';
-  item.stage = 'Submitting to audio engine…';
-  _emit(true);
-
-  if (queueOwner() !== 'browser') throw new Error('Browser queue no longer owns submissions');
-  const res = await generateApi.submit(params as any);
-  const jobId = res.jobId;
-  item.jobId = jobId;
-  _emit(true); // persist jobId immediately
-
-  // 6) Link audio to Lireek generation
-  if (jobId) {
-    await lireekApi.linkAudio(gen.id, jobId, item.lyricsSetId);
-  }
-
-  // 7) Poll until done
-  await _pollUntilDone(item);
-}
-
-async function _pollUntilDone(item: AudioQueueItem): Promise<void> {
-  const jobId = item.jobId!;
-  item.stage = 'Generating audio…';
-  // Resume the clock from any persisted elapsed (reconnect after reload);
-  // a fresh item starts counting only once the engine picks the job up.
-  const timer = createGenerationTimer({ resumeElapsedSec: item.elapsed });
-  _emit(true);
-
-  let notFound = 0;
-  while (true) {
-    await new Promise(r => setTimeout(r, 2500));
-    // The user dismissed the row (forceFailQueueItem). The server cancel is
-    // already sent; keep polling and the clock keeps running on a row that
-    // says "Cancelled by user" until the engine acknowledges (#140).
-    if (item.status === 'failed') return;
-    try {
-      const status = await readGenerationStatus(jobId);
-      const t = timer.tick(status.status);
-      item.progress = status.progress !== undefined
-        ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
-        : undefined;
-      item.stage = status.stage || 'Generating…';
-      item.elapsed = t.elapsed;
-      _captureMm3Stream(item, status);
-    if (status.batch?.lead) { item.batchId = status.batch.lead; item.batchKind = status.batch.kind; }
-      _syncTakeSiblings(item, status);
-      _emit();  // progress tick — debounced persistence
-
-      if (status.status === 'succeeded') {
-        const audioUrls = status.result?.audioUrls || [];
-        const songIds = status.result?.songIds || [];
-        const audioUrl = audioUrls[0];
-        const songId = songIds[0];
-        const takeMastered = status.result?.masteredAudioUrls ?? [];
-        const takeNoAdapter = status.result?.noAdapterAudioUrls ?? [];
-        // Per-track length where the backend reports it, else the render-wide
-        // scalar — which is right for a single take and the best we have for
-        // an older job that predates the array.
-        const takeDuration = (t: number) =>
-          status.result?.durations?.[t] || status.result?.duration;
-        const masteredUrl = takeMastered[0] || status.result?.masteredAudioUrl;
-        // Ensemble / natural-ending candidates: the server returns the rendered
-        // takes in take order, so sibling t owns audioUrls[t] and songIds[t] —
-        // the same split the Create page does. Until 2026-09-09 this loop only
-        // ever took index 0, so a Lyric Studio render that produced three
-        // ended candidates showed one and silently lost two.
-        if (item.mm3TakeCount && item.mm3TakeCount > 1) {
-          for (const s of _state.items) {
-            if (s.mm3TakeOf !== item.id) continue;
-            const t = s.mm3Take ?? 0;
-            if (t >= songIds.length) continue;   // dropped candidate, already marked
-            s.status = 'succeeded';
-            s.progress = 100;
-            s.stage = 'Complete!';
-            s.audioUrl = audioUrls[t] || '';
-            s.songId = songIds[t];
-            // Take t's own master, reference and LENGTH. The scalars are take
-            // 0's, so using them gave three cards one duration and one master.
-            s.masteredAudioUrl = takeMastered[t] || '';
-            s.noAdapterAudioUrl = takeNoAdapter[t] || '';
-            s.audioDuration = takeDuration(t);
-          }
-        }
-        if (audioUrl) {
-          item.audioUrl = audioUrl;
-          if (songId) item.songId = songId;
-          if (masteredUrl) item.masteredAudioUrl = masteredUrl;
-          if (status.result?.noAdapterAudioUrl) item.noAdapterAudioUrl = status.result.noAdapterAudioUrl;
-          if (takeDuration(0)) item.audioDuration = takeDuration(0);
-          _emit(true);
-          // If server didn't provide duration, probe the audio file
-          if (!item.audioDuration) _probeAudioDuration(item.id, audioUrl);
-        }
-        // Resolve audio generation in Lireek DB
-        if (audioUrl && jobId) {
-          try {
-            await lireekApi.resolveAudioGeneration(jobId, audioUrl);
-          } catch { /* non-fatal */ }
-        }
-        return;
-      }
-      if (status.status === 'failed' || status.status === 'cancelled') throw new Error(status.error || (status.status === 'cancelled' ? 'Cancelled' : 'Generation failed'));
-
-      // Safety: configurable timeout (default 30 min), measured from
-      // generation start — queue wait does not count.
-      if (t.timedOut) {
-        throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-      }
-    } catch (e) {
-      const msg = (e as Error).message;
-      if ((msg.includes('failed') || msg.includes('Cancelled') || msg.includes('timed out')) && !msg.includes('fetch')) {
-        throw e;
-      }
-      // A job the server has never heard of died with the process that owned it.
-      // Allow a few ticks in case the server is mid-restart, then surface it as
-      // an engine outage so the runner parks and re-checks once the engine is
-      // back, rather than polling a dead id forever behind a spinner that
-      // never resolves. The re-check goes through _tryReconnect again, which
-      // now holds the item for user resume instead of silently re-submitting
-      // (issue #146) once it confirms the job is really gone.
-      if (msg.includes('Job not found')) {
-        if (++notFound >= 4) throw new Error('Engine not ready: job was lost when the server restarted');
-      } else {
-        notFound = 0;
-      }
-      // Transient network error — keep polling
-    }
-  }
-}
-
-
 
 // ── React hooks ──────────────────────────────────────────────────────────────
 

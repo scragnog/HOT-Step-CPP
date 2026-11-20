@@ -25,9 +25,6 @@ export const audioQueueApi = {
     items: { legacyId: string; itemId: string; status: string }[];
   }>('/migration/import', body, { silent: true }),
   resumeHeld: (ids: string[]) => call('/migration/resume-held', { ids }),
-  // Silent like importLegacy: the banner renders a failed rollback itself.
-  rollbackExport: () => call<{ version: number; exportedAt: number; state: AudioQueueState; items: AudioIntentItem[] }>(
-    '/migration/rollback-export', {}, { silent: true }),
   pause: () => call<AudioQueueState>('/pause', {}),
   resume: () => call<AudioQueueState>('/resume', {}),
 };

@@ -53,8 +53,7 @@ below means that one, or the active backend when there is none.
   `resolveCreateIntent()`
   (`services/generation/resolve/resolveIntent.ts:76-145`) applies the
   caption source, compose helpers and the duration rule, and the UI submits
-  the returned `request` unchanged. With `GENERATION_INTENT_PATH=old` the UI
-  submits its own merged params instead
+  the returned `request` unchanged
   ([Caption and content resolution](api-contracts.md#caption-and-content-resolution)).
 
 On ACE, `translateParams.ts` then maps either shape (camelCase UI params to

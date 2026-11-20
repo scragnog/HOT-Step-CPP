@@ -43,6 +43,8 @@ test('server-owned render: one submission, and the finished song is delivered on
     const method = init?.method ?? 'GET';
     const path = new URL(url, 'http://local').pathname;
     calls.push(`${method} ${path}`);
+    // Create always resolves on the server; this fake resolves to the params as sent.
+    if (path === '/api/resolve/preview') return ok({ request: JSON.parse(String(init!.body)).params, uiEffects: [] });
     if (path === '/api/audio-queue/items' && method === 'POST') {
       const { idempotencyKey, request, meta } = JSON.parse(String(init!.body));
       const item = { id: 'srv1', idempotencyKey, status: 'submitted', jobId: 'job1', request, meta, createdAt: 1 };
@@ -56,6 +58,8 @@ test('server-owned render: one submission, and the finished song is delivered on
   }) as typeof fetch;
   _resetAudioQueueForTests([]);
   const delivered: string[] = [];
+  // The app's projection hook, polling at the active cadence.
+  const stop = startProjectionForTests(refreshServerProjection);
   try {
     await resumeQueue('t');
     await enqueueSimpleGen({ title: 'Done' } as never, 't', song => delivered.push(song.id));
@@ -67,6 +71,7 @@ test('server-owned render: one submission, and the finished song is delivered on
     // pick the row up at the active cadence, not wait out the idle one.
     assert.equal(_queueItemsForTests().find(item => item.serverQueueId === 'srv1')?.status, 'succeeded');
   } finally {
+    stop();
     _resetAudioQueueForTests();
     globalThis.fetch = saved;
   }
@@ -84,6 +89,8 @@ test('a failed song read by the enqueue waiter does not stop the projection deli
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const path = new URL(url, 'http://local').pathname;
+    // Create always resolves on the server; this fake resolves to the params as sent.
+    if (path === '/api/resolve/preview') return ok({ request: JSON.parse(String(init!.body)).params, uiEffects: [] });
     if (path === '/api/audio-queue/items' && method === 'POST') {
       const { idempotencyKey, request, meta } = JSON.parse(String(init!.body));
       const item = { id: 'srv1', idempotencyKey, status: 'submitted', jobId: 'job1', request, meta, createdAt: 1 };

@@ -201,7 +201,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 
   // Written songs folded into one row per album. /generations/all returns artist_id and
   // artist_name but NOT lyrics_set_id, so the album is recovered via the profile — which
-  // is also what enqueueAudioGen needs in order to look the album preset up.
+  // is also what captureWrittenSongIntent needs in order to look the album preset up.
   const audioAlbums = useMemo<AudioAlbumRow[]>(() => {
     const profileToSet = new Map(profiles.map(p => [p.id, p.lyrics_set_id]));
     const rows = new Map<number, AudioAlbumRow>();

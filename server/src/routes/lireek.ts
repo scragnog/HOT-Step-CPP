@@ -19,7 +19,7 @@ import {
 import { registerCrudRoutes } from './lireek/crudRoutes.js';
 import { registerLlmRoutes } from './lireek/llmRoutes.js';
 import { registerMm3Routes } from './lireek/mm3Routes.js';
-import { captureLyricItems, captureRenderItems, type LyricRequest } from '../services/lireek/lyricWorkflow.js';
+import { captureLyricItems, captureRenderItems, LYRIC_RENDER_KIND, type LyricRequest } from '../services/lireek/lyricWorkflow.js';
 import type { WrittenSongIntent } from '../contracts/resolution.js';
 import { workflowJobs } from './workflows.js';
 import { getUserId } from './auth.js';
@@ -64,7 +64,7 @@ router.post('/workflow-renders', async (req: Request, res: Response) => {
     const input = await captureRenderItems(req.body.intents as WrittenSongIntent[]);
     const key = typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.length > 0
       ? req.body.idempotencyKey : randomUUID();
-    const out = workflowJobs().submit({ kind: 'lyric-batch', idempotencyKey: key, input }, userId);
+    const out = workflowJobs().submit({ kind: LYRIC_RENDER_KIND, idempotencyKey: key, input }, userId);
     res.status(out.created ? 201 : 200).json(out);
   } catch (error: any) {
     res.status(error?.status === 409 ? 409 : 400).json({ error: error instanceof Error ? error.message : String(error) });
