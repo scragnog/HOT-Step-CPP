@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generationIntentSchema } from './generation.js';
-import { generationControlsSchema, parseGenerationControls } from './generationControls.js';
+import { GENERATION_DEFAULTS, generationControlsSchema, parseGenerationControls } from './generationControls.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const goldenPath = path.join(__dirname, '../services/generation/fixtures/batch1-intent-golden.json');
@@ -95,5 +95,30 @@ test('type-mismatched and null values on known fields parse identically under bo
       newResult.success, oldResult.success,
       `${JSON.stringify(fixture)}: generationControlsSchema (${newResult.success}) diverged from generationIntentSchema (${oldResult.success})`,
     );
+  }
+});
+
+
+test('defaults endpoint returns the resolver contract and requires authentication', async () => {
+  const express = (await import('express')).default;
+  const { createGenerationControlsRouter } = await import('../routes/generationControls.js');
+  const { resolveGenerationParams } = await import('../services/generation/defaults.js');
+  const app = express();
+  app.use('/api/generation-controls', createGenerationControlsRouter(req => req.headers.authorization === 'Bearer test' ? 'test' : null));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const url = `http://127.0.0.1:${address.port}/api/generation-controls/defaults`;
+    assert.equal((await fetch(url)).status, 401);
+    const response = await fetch(url, { headers: { authorization: 'Bearer test' } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), GENERATION_DEFAULTS);
+    const resolved = resolveGenerationParams({}, { backendId: 'ace' });
+    assert.equal(resolved.inferenceSteps, GENERATION_DEFAULTS.inferenceSteps);
+    assert.equal(resolveGenerationParams({ inferenceSteps: 7 }, { backendId: 'ace' }).inferenceSteps, 7);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });

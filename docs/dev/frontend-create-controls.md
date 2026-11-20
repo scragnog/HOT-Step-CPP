@@ -11,6 +11,15 @@ Arbitrary backend and plugin parameters (`backendParams`, `pluginParams`)
 stay free-form: see "Extension channels" below rather than an enumerated field
 list.
 
+## Defaults discovery
+
+`GET /api/generation-controls/defaults` returns the shared defaults object as
+JSON. It requires the same authentication as other Create endpoints. The bundled
+UI imports the synchronous constant from `server/src/contracts/generationControls.ts`;
+the intent resolver uses that same object. Explicit intent parameters override
+these values, and backend-specific conditional emission still applies. Existing
+locally saved UI values take precedence over the defaults.
+
 ## Two submission shapes
 
 `POST /api/generate` accepts two body shapes, both ending up at the same
@@ -27,7 +36,7 @@ below means that one, or the active backend when there is none.
   `isGenerationIntent()` (`contracts/generation.ts:34-37`) and expands it
   through `resolveGenerationIntent()` (`services/generation/intent.ts:18-53`),
   which merges `params` over `GENERATION_DEFAULTS`
-  (`services/generation/defaults.ts:4-148`, 138 fields) and runs
+  (`contracts/generationControls.ts`) and runs
   `resolveGenerationParams()` (`defaults.ts:155-422`), the conditional
   emission layer described below. That layer returns a fixed set of keys, so
   a `params` key it does not emit is dropped. `input` is then laid over the
