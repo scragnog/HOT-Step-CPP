@@ -23,6 +23,7 @@ export function installTrainerFixtures(): void {
   put(path.join(root, 'engine', process.platform === 'win32' ? 'ace-train.exe' : 'ace-train'), 'fixture');
   put(path.join(models, 'fake-dit.gguf'), 'fixture');
   put(path.join(models, 'mm3', 'mm3-lm-q8_0.gguf'), 'fixture');
+  put(path.join(models, 'mm3', 'mm3-lm-q8_0.pissa-r128.safetensors'), 'fixture');
   put(path.join(models, 'mm3', 'mm3-depth-f16.gguf'), 'fixture');
   put(path.join(models, 'yue2', 'yue2-lm-bf16.gguf'), 'fixture');
   put(path.join(models, 'yue2', 'yue2-vae-standard-f32.gguf'), 'fixture');

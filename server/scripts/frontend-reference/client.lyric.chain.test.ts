@@ -36,8 +36,8 @@ test.before(async () => {
       calls.fetch++;
       if (artist === 'Unknown Band') throw new Error('Genius: artist not found');
       return { artist, album: album ?? null, total_songs: 2, songs: [
-        { title: 'First Song', album: album ?? null, lyrics: '[Verse]\nfixture line one\nfixture line two' },
-        { title: 'Second Song', album: album ?? null, lyrics: '[Chorus]\nfixture chorus' },
+        { title: 'First Song', album: album ?? null, lyrics: '[Verse]\nfixture line one\nfixture line two', source: 'genius', url: 'https://example.invalid/first-song' },
+        { title: 'Second Song', album: album ?? null, lyrics: '[Chorus]\nfixture chorus', source: 'genius', url: 'https://example.invalid/second-song' },
       ] };
     },
     getArtistImageUrl: async () => null,

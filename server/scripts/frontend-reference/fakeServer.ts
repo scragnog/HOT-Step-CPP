@@ -53,6 +53,9 @@ export async function startFakeServer(options: { dataDir?: string } = {}): Promi
 
   const dataDir = options.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-'));
   process.env.DATA_DIR = dataDir;
+  // Keep data-root bootstrap and settings reads inside the fixture as well.
+  process.env.HOT_STEP_DATA_ROOT = dataDir;
+  process.env.ACESTEPCPP_WORKER_GPUS = '';
   // The server's own port, chosen now: some services call Node's routes over
   // loopback at config.server.port (the YuE2 preparation pipeline's stages,
   // yue2PreparationPipeline.ts), and config reads SERVER_PORT once, at import.
@@ -76,6 +79,7 @@ export async function startFakeServer(options: { dataDir?: string } = {}): Promi
   // Cover's open step calls through to — is always false, with no change to
   // coverWorkflow.ts or essentiaClient.ts.
   process.env.HOT_STEP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-root-'));
+  process.env.HOT_STEP_INSTALL_ROOT = process.env.HOT_STEP_ROOT;
 
   // Delete every binary-path/model-path override the parent shell or an
   // inherited .env might have exported — each of these overrides PROJECT_ROOT
@@ -106,6 +110,9 @@ export async function startFakeServer(options: { dataDir?: string } = {}): Promi
 
   const { initDb, closeDb } = await import('../../src/db/database.js');
   initDb();
+  // index.ts performs this explicitly at startup, after imports have loaded.
+  const { recoverStaleJobs } = await import('../../src/services/training/labelingQueue.js');
+  recoverStaleJobs();
 
   // index.ts only flips this to true after the real ace-server child reports
   // healthy (setEngineReady, called post-spawn). There's no child here, so

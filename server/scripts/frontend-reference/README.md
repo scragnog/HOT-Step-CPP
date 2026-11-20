@@ -66,6 +66,20 @@ the resulting error and degrades gracefully — the exact shape `essentiaClient.
 its last test checks `server.violations`, and `client.restart.test.ts` checks each harness
 life's report.
 
+Read-only Git `rev-parse` and `status` calls receive fixed fixture output through
+both `execFileSync` and callback-based `execFile`, including promisified callers.
+They never launch Git. Other subprocess calls remain blocked. The fake engine
+confirms `/yue2/unload` with `unloaded: true` and zero freed memory, allowing the
+real residency arbiter to switch families without allocating GPU memory.
+LM results include fixture audio codes for the real planner validation. Data-root
+and install-root overrides point into fixture directories, and worker GPU
+selection is empty. The exact GPU-discovery and training-capacity subprocess calls
+receive empty fixture results, so preflight sees no NVIDIA cards without probing hardware.
+ACE's `/models/loaded` likewise returns an empty resident list. Trainer fixtures
+include the PiSSA initialization file checked before MM3 training starts. The
+harness calls production training-job recovery explicitly at startup, as `index.ts`
+does, so restart tests reconcile interrupted training records.
+
 A route that cannot be isolated without a production change is reported as blocked, with the
 exact call site and a proposed dependency seam, in the test file's own header comment — never
 worked around with a fake response standing in for the route being qualified. The currently

@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import http from 'node:http';
+import { promisify } from 'node:util';
 import { allowedOrigins, installNetworkGuard, installSubprocessGuard, violations } from './safetyGuards.js';
 
 const cp = createRequire(import.meta.url)('node:child_process') as typeof import('node:child_process');
@@ -51,6 +52,51 @@ test('Subprocess guard: git rev-parse/status return a fixture, with no exec and 
 
 test('Subprocess guard: a non-fixture git subcommand still blocks (not a blanket git allowlist)', () => {
   assert.throws(() => cp.execFileSync('git', ['push']));
+  assert.equal(violations.length, 1);
+});
+
+test('Subprocess guard: async git status supports the worker health check without spawning', async () => {
+  const execFileAsync = promisify(cp.execFile);
+  const { stdout, stderr } = await execFileAsync('git', ['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'],
+    { encoding: 'utf8', windowsHide: true });
+  assert.equal(stdout, '');
+  assert.equal(stderr, '');
+  const { stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { encoding: 'buffer' });
+  assert.ok(Buffer.isBuffer(head));
+  assert.equal(head.toString(), '0000000000000000000000000000000000000000');
+  assert.equal(violations.length, 0);
+});
+
+test('Subprocess guard: callback git fixtures complete asynchronously without a child PID', async () => {
+  let returned = false;
+  await new Promise<void>((resolve, reject) => {
+    const child = cp.execFile('git', ['rev-parse', 'HEAD'], (error, stdout, stderr) => {
+      try {
+        assert.equal(error, null);
+        assert.equal(returned, true);
+        assert.equal(stdout, '0000000000000000000000000000000000000000');
+        assert.equal(stderr, '');
+        resolve();
+      } catch (failure) { reject(failure); }
+    });
+    assert.equal(child.pid, undefined);
+    returned = true;
+  });
+  assert.equal(violations.length, 0);
+});
+
+test('Subprocess guard: async non-fixture git commands and other programs remain blocked', async () => {
+  const execFileAsync = promisify(cp.execFile);
+  await assert.rejects(execFileAsync('git', ['push']), /safety-guard/);
+  await assert.rejects(execFileAsync('other-program', ['status']), /safety-guard/);
+  assert.equal(violations.length, 2);
+});
+
+test('Subprocess guard: GPU discovery reports no cards, while other hardware queries stay blocked', () => {
+  assert.equal(cp.execFileSync('nvidia-smi', ['--query-gpu=index,uuid,name,memory.total', '--format=csv,noheader,nounits']), '');
+  assert.equal(cp.execFileSync('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits']), '');
+  assert.equal(violations.length, 0);
+  assert.throws(() => cp.execFileSync('nvidia-smi', ['--gpu-reset']), /safety-guard/);
   assert.equal(violations.length, 1);
 });
 

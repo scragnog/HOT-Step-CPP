@@ -26,6 +26,7 @@
 // createRequire(), not a default ESM import.
 
 import { createRequire } from 'node:module';
+import { promisify } from 'node:util';
 const cp = createRequire(import.meta.url)('node:child_process') as typeof import('node:child_process');
 
 export const violations: string[] = [];
@@ -33,7 +34,7 @@ export const violations: string[] = [];
 const SUBPROCESS_FNS = ['execFile', 'exec', 'spawn', 'execFileSync', 'spawnSync', 'execSync', 'fork'] as const;
 
 // requestCapture.ts's checkoutState() and workerUpdate.ts's startupCommit
-// both call `execFileSync('git', ['rev-parse'|'status', ...])` to stamp a
+// call `execFileSync('git', ['rev-parse'|'status', ...])` to stamp a
 // commit/dirty flag on a captured fixture or a training status read. A real
 // git process is still a real subprocess — round 2's "isolated but real" git
 // call was wrong per the plan's explicit "no real subprocess" limit, not
@@ -41,13 +42,15 @@ const SUBPROCESS_FNS = ['execFile', 'exec', 'spawn', 'execFileSync', 'spawnSync'
 // read-only subcommands instead of ever invoking git. Not a violation: it's
 // a deliberate substitute answer, the same shape fakeEngine.ts is for the
 // real ace-server.
+// workerUpdate.ts's cachedDirtyCheckout also reads status through promisified
+// execFile. Supply the same fixture through its callback, without spawning.
 const GIT_FIXTURE: Record<string, string> = {
   'rev-parse': '0000000000000000000000000000000000000000',
   status: '',
 };
 function gitFixture(file: unknown, args: unknown): string | undefined {
   if (file !== 'git' || !Array.isArray(args) || typeof args[0] !== 'string') return undefined;
-  return GIT_FIXTURE[args[0]];
+  return Object.hasOwn(GIT_FIXTURE, args[0]) ? GIT_FIXTURE[args[0]] : undefined;
 }
 
 /** Replaces every process-spawning entry point in node:child_process with one
@@ -56,14 +59,44 @@ function gitFixture(file: unknown, args: unknown): string | undefined {
  *  runners are all either unreached or must be fixtured instead. */
 export function installSubprocessGuard(): void {
   for (const name of SUBPROCESS_FNS) {
-    (cp as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => {
+    const guarded = (...args: unknown[]) => {
       if (name === 'execFileSync') {
         const fixture = gitFixture(args[0], args[1]);
         if (fixture !== undefined) return fixture;
+        // LM batch sizing and training preflight read card capacity even for
+        // fake jobs. Model an absent card for exactly those read-only probes.
+        if (args[0] === 'nvidia-smi' && Array.isArray(args[1])
+          && args[1].length === 2
+          && ['--query-gpu=index,uuid,name,memory.total', '--query-gpu=memory.total'].includes(args[1][0])
+          && args[1][1] === '--format=csv,noheader,nounits') return '';
+      }
+      if (name === 'execFile') {
+        const fixture = gitFixture(args[0], args[1]);
+        const callback = args.at(-1);
+        if (fixture !== undefined && typeof callback === 'function') {
+          const options = args[2] as { encoding?: string | null } | undefined;
+          const encoded = options?.encoding !== 'buffer' && options?.encoding !== null;
+          queueMicrotask(() => callback(null, encoded ? fixture : Buffer.from(fixture), encoded ? '' : Buffer.alloc(0)));
+          return new cp.ChildProcess();
+        }
       }
       violations.push(`child_process.${name}(${args.map(a => (typeof a === 'string' ? a : typeof a)).slice(0, 2).join(', ')})`);
       throw new Error(`[safety-guard] child_process.${name}() blocked — fixture it, never exec a real subprocess here`);
     };
+    if (name === 'execFile') {
+      // Node's execFile has a custom promisifier returning both output streams.
+      Object.defineProperty(guarded, promisify.custom, { value: (...args: unknown[]) => {
+        let child: ReturnType<typeof guarded>;
+        const promise = new Promise((resolve, reject) => {
+          child = guarded(...args, (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => {
+            if (error) reject(error);
+            else resolve({ stdout, stderr });
+          });
+        });
+        return Object.assign(promise, { child: child! });
+      } });
+    }
+    (cp as unknown as Record<string, unknown>)[name] = guarded;
   }
 }
 

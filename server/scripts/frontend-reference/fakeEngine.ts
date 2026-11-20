@@ -87,6 +87,13 @@ export async function startFakeAceEngine(): Promise<FakeAceEngine> {
 
   app.get('/health', (_req, res) => { res.json({ status: 'ok' }); });
 
+  // Residency arbitration requires confirmation before another family loads.
+  // This fake engine never allocates GPU memory.
+  app.post('/yue2/unload', (_req, res) => {
+    res.json({ unloaded: true, freed_mb: 0 });
+  });
+  app.get('/models/loaded', (_req, res) => { res.json({ loaded: [] }); });
+
   app.get('/props', (_req, res) => {
     res.json({
       models: { lm: ['fake-lm'], embedding: ['fake-embedding'], dit: ['fake-dit'], vae: ['fake-vae'] },
@@ -150,7 +157,10 @@ export async function startFakeAceEngine(): Promise<FakeAceEngine> {
     if (req.query.result !== undefined) {
       if (job.status === 'cancelled') { res.status(409).send('job was cancelled'); return; }
       if (job.status === 'failed') { res.status(500).send('fake engine: forced failure'); return; }
-      if (job.kind === 'lm') { res.json(job.requests); return; }
+      if (job.kind === 'lm') {
+        res.json(job.requests.map(request => ({ ...request, audio_codes: request.audio_codes || '1,2,3,4' })));
+        return;
+      }
       if (job.kind === 'understand') {
         const r = job.requests[0] ?? {};
         res.json({
