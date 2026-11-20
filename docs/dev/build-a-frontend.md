@@ -6,6 +6,14 @@ repeat them. [`server/scripts/frontend-reference/`](../../server/scripts/fronten
 is a headless reference client built from exactly these contracts, exercising the real Node
 routes end to end against a fake engine and fake trainer runners, never `ui/src`.
 
+The bundled UI uses the same HTTP routes, generation intents and studio workflow inputs
+as any other client. Node owns request resolution, execution and generation defaults.
+UI imports from the server are limited to shared `server/src/contracts/` modules;
+HTTP transports live in `ui/src/services/` and `ui/src/queries/`, enforced by UI lint.
+The known exception is the SA3 training audition in
+`ui/src/components/training-studio/Sa3TrainCard.tsx:153`, which still builds a flat
+`/api/generate` body. It is outside this decoupling pass.
+
 This page proves the contracts are enough to build and orchestrate a client under fake
 dependencies. It does not qualify trainer/engine correctness, audio quality, or human
 acceptance of the running app; those are separate gates, listed at the end.
@@ -74,31 +82,22 @@ preparation pipelines and batches have their own routes and restart rules
 
 ## Create's queue ownership
 
-A fresh Create submission goes through one of two paths, and a new client must pick the
-right one rather than assume either. The bundled UI decides with one `localStorage` key,
-`lireek-audio-queue-owner-v1` (`ui/src/stores/audioGenQueueStore.ts`):
+Create resolves a generation intent and submits the resolved request to the durable
+Node [audio queue](api-contracts.md#durable-audio-queue). Lyric Studio sends single and
+bulk renders through `POST /api/lireek/workflow-renders`. No browser executor or rollback
+path remains. Node holds execution when the browser closes.
 
-| Value | Meaning | Submission path |
-|---|---|---|
-| `server` | Durable Node ownership; a fresh install ends up here | The browser submits through [`/api/audio-queue`](api-contracts.md#durable-audio-queue); Node holds the queue and survives a browser close or server restart |
-| `browser`, missing, or any other value | Not decided yet | Nothing runs in the browser. The value is settled on load, below |
-| `migrating` | Import of a v1.3.x browser queue in progress | Create and Lyric Studio refuse new renders (`Audio queue migration is in progress`). It becomes `server` when the import succeeds; a failed attempt stays `migrating` |
+The bundled UI retains a one-shot import for unfinished v1.3.x browser queues.
+`ensureQueueOwnerDecided` in `ui/src/stores/audioGenQueueStore.ts` settles the private
+`lireek-audio-queue-owner-v1` key on load: missing, unrecognised and old `browser` values
+import unfinished items or become `server` when none remain. A stuck `migrating` retries
+its saved import. New renders wait until migration succeeds; a failed import leaves the
+queue blocked with Retry. IndexedDB data and backups are preserved.
 
-A missing or unrecognised value does not stay that way. On load, the bundled UI settles it
-once (`ensureQueueOwnerDecided`, with the rule in `decideQueueOwnerAction`,
-`ui/src/stores/audioQueueOwnerDecision.ts`): with nothing unfinished in the browser queue it
-writes `server`, and otherwise it migrates the queue to Node with the `resume` choice. A
-stored `migrating` is retried by replaying the saved import. A stored `browser`, which only a
-v1.4.x rollback wrote, is settled the same way as a missing value; items an earlier import
-already landed are not sent again. The key and its values are
-the bundled UI's own state, not a server contract: a new client does not read or migrate
-another client's queue, and Node accepts both submission paths.
-
-Both submission paths are exercised with fake execution in `client.test.ts`: the legacy
-direct-submit path and the resolved durable-queue path (`client.test.ts:58`, resolve ->
-`/api/audio-queue` -> a finished generation). Node cannot prove which `localStorage` value a
-real browser would read or write; that remains a UI-side behavioural gate, not something an
-HTTP-only client can demonstrate for itself.
+This key is the bundled UI's migration state, not a server contract. A new frontend uses
+the server queue directly and does not read or migrate another client's browser data.
+The reference client exercises legacy direct submission and resolved durable submission;
+the UI migration tests cover undecided, old browser-owned and stuck migrating states.
 
 ## Import and export
 

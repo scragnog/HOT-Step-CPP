@@ -1,3 +1,4 @@
+import { readMedia } from '../services/mediaTransport';
 // mm3StreamStore.ts — a transport for a MiniMax-Music3 render that is still rendering.
 //
 // MM3 renders in 200-frame windows, and a window's audio is FINAL the moment it
@@ -449,7 +450,7 @@ async function open(jobId: string, take: number, expected: number, autoPlay: boo
 
   try {
     const url = `/api/generate/mm3/stream/${encodeURIComponent(jobId)}${take > 0 ? `?take=${take}` : ''}`;
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await readMedia(url, ctrl.signal);
     if (!res.ok || !res.body) {
       // 409 is the engine declining (not a streaming job, already finished,
       // already has a reader). Surface its own sentence — those are written to

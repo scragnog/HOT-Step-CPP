@@ -1,3 +1,4 @@
+import { readMedia } from '../../services/mediaTransport';
 /**
  * useAbEngine.ts - Web Audio A/B engine for the Compare studio.
  *
@@ -313,7 +314,7 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
     if (!take) return Promise.resolve(null);
     const ctx = ensureCtx();
     setLoading(l => [...l, id]);
-    const p = fetch(take.url)
+    const p = readMedia(take.url)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
       .then(ab => new Promise<AudioBuffer>((res, rej) => { ctx.decodeAudioData(ab, res, rej); }))
       .then(buf => {

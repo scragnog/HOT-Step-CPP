@@ -1,3 +1,4 @@
+import { readMedia } from '../services/mediaTransport';
 // discoStore.ts — Disco mode state + multi-stem beat detection engine.
 //
 // SYNC STRATEGY: Pre-analyzed disco data is loaded as a tiny JSON file
@@ -83,7 +84,7 @@ function loadDiscoData(url: string): void {
 
   console.log(`[Disco] Loading disco data: ${url}`);
 
-  fetch(url)
+  readMedia(url)
     .then(res => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();

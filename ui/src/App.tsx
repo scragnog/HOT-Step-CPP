@@ -1,3 +1,4 @@
+import { probeServerHealth, revealDownload, exportSongsZip } from './services/shellTransport';
 // App.tsx — Root application component
 //
 // Ported from hot-step-9000: 3-panel resizable layout with
@@ -350,7 +351,7 @@ const AppContent: React.FC = () => {
       if (checking) return;
       checking = true;
       try {
-        const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+        const res = await probeServerHealth();
         if (!res.ok && !disposed) setIsOffline(true);
       } catch {
         if (!disposed) setIsOffline(true);
@@ -416,9 +417,7 @@ const AppContent: React.FC = () => {
           <span className="break-all">{t('download.savedTo', 'Saved to {{path}}', { path })}</span>
           <button
             className="self-start text-sm font-medium text-pink-500 hover:text-pink-400 underline"
-            onClick={() => { void fetch('/api/download/reveal', {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
-            }); }}
+            onClick={() => { void revealDownload(path); }}
           >
             {t('download.openFolder', 'Open folder')}
           </button>
@@ -1118,11 +1117,7 @@ const AppContent: React.FC = () => {
               onCompare={(ids) => { setPendingCompareSongs(ids); navigateTo('compare-studio'); }}
               onExportZip={async (ids) => {
                 try {
-                  const res = await fetch('/api/songs/export-zip', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-                    body: JSON.stringify({ ids }),
-                  });
+                  const res = await exportSongsZip(ids, token);
                   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `HTTP ${res.status}`);
                   const blob = await res.blob();
                   const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'hotstep-library.zip';

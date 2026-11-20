@@ -1,3 +1,4 @@
+import { probeServerHealth } from '../services/shellTransport';
 // useServerHealthReload.ts — wait for the server to answer, then reload.
 // The only component-owned interval left in the UI (a liveness probe that
 // must not pollute the query cache).
@@ -17,7 +18,7 @@ export function useServerHealthReload(startDelayMs: number, onWaiting?: () => vo
         if (checking) return;
         checking = true;
         try {
-          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+          const res = await probeServerHealth();
           if (res.ok && !cancelled) {
             window.clearInterval(poll);
             onReconnected?.();

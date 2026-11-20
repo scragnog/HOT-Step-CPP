@@ -1,3 +1,4 @@
+import { openStormStream } from '../services/stormStreamTransport';
 import { useRef, useState, useCallback, useEffect } from 'react';
 // Moved out to utils/wavStream.ts when the MM3 player needed the same parser —
 // same function, same behaviour, one copy.
@@ -115,12 +116,7 @@ export function useStreamAudio(streamId = 'default') {
     rafRef.current = requestAnimationFrame(tick);
 
     try {
-      const res = await fetch('/api/generate/storm/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, streamId }),
-        signal: abort.signal,
-      });
+      const res = await openStormStream(params, streamId, abort.signal);
       if (!res.ok || !res.body) throw new Error(`Stream failed: ${res.status}`);
       setState(p => ({ ...p, sessionId: res.headers.get('X-Stream-Session') }));
 

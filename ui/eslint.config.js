@@ -79,4 +79,14 @@ export default defineConfig([
       'no-restricted-syntax': ['error', noFetchQuery, noComponentQuery],
     },
   },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/services/**', 'src/queries/**', '**/*.test.{ts,tsx}', 'src/stores/audioQueueStoreTestFake.ts'],
+    rules: {
+      'no-restricted-globals': ['error', { name: 'fetch', message: 'Use a service in src/services/ for HTTP transport.' }],
+      'no-restricted-properties': ['error', ...['window', 'globalThis', 'self'].map(object => ({
+        object, property: 'fetch', message: 'Use a service in src/services/ for HTTP transport.',
+      }))],
+    },
+  },
 ])

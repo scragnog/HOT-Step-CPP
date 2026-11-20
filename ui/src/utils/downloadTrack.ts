@@ -1,3 +1,4 @@
+import { saveDownload } from '../services/shellTransport';
 // downloadTrack.ts — Instant download utility using settings-page preferences
 //
 // Reads format, bitrate, version, and latent settings from AppSettings (localStorage).
@@ -64,10 +65,9 @@ function triggerBrowserDownload(url: string): void {
  * `hotstep:download-saved` event; with none set (409) it is the browser download.
  */
 async function triggerDownload(url: string): Promise<void> {
-  const [pathname, query] = url.split('?');
   let res: Response;
   try {
-    res = await fetch(`${pathname}/save${query ? `?${query}` : ''}`, { method: 'POST' });
+    res = await saveDownload(url);
   } catch {
     triggerBrowserDownload(url);
     return;

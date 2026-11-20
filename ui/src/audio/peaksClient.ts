@@ -1,3 +1,4 @@
+import { readAudioPeaks } from '../services/mediaTransport';
 // peaksClient.ts — waveform envelopes, fetched from the server and cached.
 //
 // The server computes these once per file (see server/src/services/audio/peaks.ts)
@@ -28,7 +29,7 @@ export interface Peaks {
 const peaksOptions = (url: string) => queryOptions({
   queryKey: sharedKeys.peaks(url),
   queryFn: async ({ signal }) => {
-    const res = await fetch(`/api/audio/peaks?url=${encodeURIComponent(url)}`, { signal, cache: 'no-cache' });
+    const res = await readAudioPeaks(url, signal);
     if (!res.ok) throw new ApiError(res.status, `peaks ${res.status} for ${url}`, null);
     return await res.json() as Peaks;
   },

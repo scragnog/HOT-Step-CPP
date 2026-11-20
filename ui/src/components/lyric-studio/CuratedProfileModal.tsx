@@ -1,3 +1,4 @@
+import { openCuratedProfile } from '../../services/curatedProfileTransport';
 import { useQueries } from '@tanstack/react-query';
 import { changed, snapshotOptions } from '../../queries/cover-lyrics/reads';
 import React, { useState, useEffect, useCallback } from 'react';
@@ -94,22 +95,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
     const { profiling } = loadSelections();
 
     try {
-      // This stays on raw fetch, not apiClient, for two reasons: the response
-      // is (or will be) an SSE stream — streaming reads stay on fetch by design
-      // of the transport split — and the endpoint is still a 501 stub on the
-      // server (llmRoutes.ts, '/artists/:id/curated-profile(-stream)'). Note
-      // the path below does not match that stub; when the backend lands, point
-      // this at the -stream route under the artist id.
-      const res = await fetch('/api/lireek/curated-profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          artist_id: artistId,
-          selections: selectionList,
-          provider: profiling.provider,
-          model: profiling.model || undefined,
-        }),
-      });
+      const res = await openCuratedProfile(artistId, selectionList, profiling.provider, profiling.model || undefined);
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));

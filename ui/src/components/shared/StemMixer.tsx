@@ -1,3 +1,4 @@
+import { readMedia } from '../../services/mediaTransport';
 // StemMixer.tsx — Shared interactive stem mixer
 //
 // Controlled component: parent owns volume/mute state.
@@ -122,7 +123,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
       }
       try {
         const url = stem.audioUrl;
-        const res = await fetch(url);
+        const res = await readMedia(url);
         const arrayBuf = await res.arrayBuffer();
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
         buffersRef.current.set(stem.index, audioBuf);

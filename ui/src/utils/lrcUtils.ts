@@ -1,3 +1,4 @@
+import { readMedia } from '../services/mediaTransport';
 // lrcUtils.ts — Shared LRC parsing and manipulation utilities
 //
 // Used by: LyricsBar, SectionMarkers, RepaintStudio (RegionLyricsEditor)
@@ -229,7 +230,7 @@ export function lrcToPlainLyrics(allLines: RegionLrcLine[]): string {
  */
 export async function fetchLrc(audioUrl: string, opts: { signal?: AbortSignal } = {}): Promise<string | null> {
   if (!audioUrl) return null;
-  const res = await fetch(sidecarUrl(audioUrl, '.lrc'), { signal: opts.signal });
+  const res = await readMedia(sidecarUrl(audioUrl, '.lrc'), opts.signal);
   if (res.status === HttpStatus.notFound) return null;
   if (!res.ok) throw new ApiError(res.status, `Lyrics fetch failed (${res.status})`, null);
   // A built UI answers a missing /audio file with the SPA's index.html and a
