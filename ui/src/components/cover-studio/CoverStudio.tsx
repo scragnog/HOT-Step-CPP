@@ -30,6 +30,7 @@ import {
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey, yue2CoverContentMissing,
   type AudioMetadata, type AudioAnalysis,
+  renderOwnsBusy, sourceDraftPending,
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
@@ -1388,8 +1389,31 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
    *  draft made now (the score is its whole source, and it comes approved). */
   const scoreDraftRef = useRef<{ abc: string; documentId: string; revision: number } | null>(null);
   const scoreOnly = yue2Mode && sourceMode === 'musicxml';
+  /** A library send, or a restored source whose draft is gone, has no asset or draft: upload it and open one
+   *  now. For YuE2 the approved score is approved on the new draft too. */
+  const registerSourceDraft = async (): Promise<{ documentId: string; revision: number }> => {
+    const lookup = sourceLookupRef.current;
+    let assetId = sourceAssetId;
+    if (!assetId) {
+      const audio = await apiClient.get<Blob>(sourceAudioUrl, { baseURL: '', responseType: 'blob' });
+      const uploaded = await uploadMut.mutateAsync({ path: '/upload/audio', files: [{ field: 'audio', file: audio,
+        name: sourceAudioUrl.split('/').pop() || 'cover-source.wav' }] });
+      if (lookup !== sourceLookupRef.current) throw new Error('Source changed');
+      assetId = uploaded.asset_id || '';
+      setSourceAssetId(assetId);
+    }
+    if (!assetId) throw new Error('Source upload did not return an asset. Retry.');
+    const opened = await openUploadedAsset(assetId, lookup);
+    if (!opened) throw new Error('Source changed');
+    if (!yue2Mode || !approvedSheet) return { documentId: opened.documentId, revision: opened.revision };
+    const approved = await coverWorkflowApi.approveScore(opened.documentId, opened.revision, approvedSheet.abc);
+    setCoverDraftRevision(approved.document.revision);
+    return { documentId: opened.documentId, revision: approved.document.revision };
+  };
   const coverDraftFor = async (): Promise<{ documentId: string; revision: number }> => {
-    if (!scoreOnly) return { documentId: coverDraftId, revision: coverDraftRevision };
+    if (!scoreOnly) {
+      return coverDraftId && coverDraftRevision ? { documentId: coverDraftId, revision: coverDraftRevision } : registerSourceDraft();
+    }
     const abc = approvedSheet?.abc ?? '';
     const held = scoreDraftRef.current;
     if (held?.abc === abc) return held;
@@ -1475,7 +1499,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       failManualQueueItem(qId, err.message || 'Generation failed');
       return err.message || 'Generation failed';
     } finally {
-      if (workflowId && coverRenderJobRef.current === workflowId) {
+      if (renderOwnsBusy(workflowId, coverRenderJobRef.current)) {
         setIsGenerating(false); setActiveJobId(null); setQueueItemId(null); setGenStage('');
         coverRenderJobRef.current = '';
       }
@@ -1483,7 +1507,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const submitCoverWorkflow = () => {
-    if (!token || (!scoreOnly && (!coverDraftId || !coverDraftRevision))) return;
+    if (!token) return;
     const backend = useBackendStore.getState().activeBackendId;
     const renderSourceKey = sourceKey;
     setHeartmulaError('');
@@ -1628,7 +1652,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       return;
     }
     if (!token || (sourceMode === 'audio' && !sourceAudioUrl)) { showToast(t('cover.missingSrcOrLyrics')); return; }
-    if (sourceMode === 'audio' && (!coverDraftId || !coverDraftRevision)) {
+    if (sourceDraftPending({ sourceMode, sourceAssetId, coverDraftId, coverDraftRevision })) {
       showToast('Source is still being prepared'); return;
     }
     if (yue2Mode && !confirmedPair) { showToast(prepareBlock || 'Confirm the score structure and lyrics first'); return; }
@@ -1698,7 +1722,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && mm3CoverReady(mm3Cover, sourceAudioUrl)
     : audioTransformMode
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
-    : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision : true)
+    : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && !sourceDraftPending({ sourceMode, sourceAssetId, coverDraftId, coverDraftRevision }) : true)
     && (yue2Mode ? !!confirmedPair : (!!lyrics.trim() || instrumental))
     && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (renderMode === 'base' || (!!activeYue2Ar && !!activeYue2Nar)))));
 

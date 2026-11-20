@@ -76,6 +76,16 @@ export function transposeKey(keyStr: string, semitones: number): string {
   return quality ? `${NOTE_NAMES[newIndex]} ${quality}` : NOTE_NAMES[newIndex];
 }
 
+// ── Cover source and render state ───────────────────────────────────────
+/** An uploaded source whose draft is still being opened. A library send has neither an asset nor a
+ *  draft and is not pending: its draft is registered when the render starts. */
+export const sourceDraftPending = (p: { sourceMode: string; sourceAssetId: string; coverDraftId: string; coverDraftRevision: number }) =>
+  p.sourceMode === 'audio' && !!p.sourceAssetId && (!p.coverDraftId || !p.coverDraftRevision);
+
+/** Whether the render that started `started` (its workflow job id, '' when the start itself failed)
+ *  still owns the busy state: a newer render's job id in `current` means it does not. */
+export const renderOwnsBusy = (started: string, current: string) => started ? current === started : current === '';
+
 // ── YuE2 cover content ──────────────────────────────────────────────────
 /** What a YuE2 cover still needs before it can render, or null when ready.
  *  The style caption is required: with it empty, an instrumental sends YuE2
