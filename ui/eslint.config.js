@@ -58,6 +58,19 @@ export default defineConfig([
       'no-restricted-syntax': ['error', noFetchQuery],
     },
   },
+  // App code shares contracts only; tests may exercise server implementations.
+  {
+    files: ['**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          regex: '(^|/)server/src/(?!contracts/)',
+          message: 'Import shared contracts from server/src/contracts/ instead of server implementation code.',
+        }],
+      }],
+    },
+  },
   // Components read through an options factory. See P8.4 in the TanStack doc.
   {
     files: ['src/components/**/*.{ts,tsx}'],

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
-import type { ProviderInfo } from '../../../../server/src/services/lireek/llm/types';
+import type { ProviderInfo } from '../../../../server/src/contracts/lyricProviders';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { QueryError } from '../shared/QueryError';

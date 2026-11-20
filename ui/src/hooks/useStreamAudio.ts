@@ -4,7 +4,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { extractWav } from '../utils/wavStream';
 import { apiClient } from '../services/httpClient';
 // One copy of the slot analysis, shared with Node's stream sessions so both agree.
-import { detectBpm, detectKey } from '../../../server/src/services/streamSessions/analysis';
+import { detectBpm, detectKey } from '../../../server/src/contracts/streamAnalysis';
 
 interface StreamState {
   isPlaying: boolean;

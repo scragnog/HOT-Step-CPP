@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import type { BackupPreview, SettingsBackup } from '../../../../server/src/services/settingsBackup';
+import type { BackupPreview, SettingsBackup } from '../../../../server/src/contracts/settingsBackup';
 import type { AppSettings } from './SettingsPanel';
 import { http } from '../../services/axiosClient';
 import { queryManager } from '../../queries/invalidation';
