@@ -9,6 +9,7 @@ import { probeServerHealth, revealDownload, exportSongsZip } from './services/sh
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { viewFromUrl, urlForView } from './app/viewRoutes';
+import { KitGallery } from './components/shared/kit/KitGallery';
 import { RestartingOverlay, ServerOfflineOverlay } from './app/ServerOverlays';
 import { UpdateReconnectOverlay, UpdateRestartContext } from './components/settings/UpdateReconnectOverlay';
 import type { UpdateRestartAttempt } from './services/updatesApi';
@@ -922,6 +923,7 @@ const AppContent: React.FC = () => {
   );
 
   const renderContent = () => {
+    if (activeView === 'kit') return <KitGallery />;
     if (activeView === 'settings') {
       return (
         <DiscoPulseWrapper hue={DISCO.activity} className="flex-1 overflow-y-auto">

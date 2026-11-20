@@ -15,6 +15,7 @@ export function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/repaint')) return 'repaint';
   if (path.startsWith('/library')) return 'library';
   if (path.startsWith('/settings')) return 'settings';
+  if (path.startsWith('/kit')) return 'kit'; // dev-only UI kit gallery
   return 'create';
 }
 
@@ -47,6 +48,7 @@ export function urlForView(view: string): string {
   if (view === 'repaint') return '/repaint';
   if (view === 'library') return '/library';
   if (view === 'settings') return '/settings';
+  if (view === 'kit') return '/kit';
   return '/';
 }
 

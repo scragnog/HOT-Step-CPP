@@ -24,7 +24,6 @@ no room below.
 import { StyledSelect } from '../shared/StyledSelect';
 
 <StyledSelect
-  accent="amber"                       // the studio's colour, see below
   value={provider}
   onChange={setProvider}
   options={[
@@ -54,7 +53,6 @@ import { Toggle } from '../shared/Toggle';
 
 // With its label and explanation: one line, nothing else to write.
 <Toggle
-  accent="amber"
   checked={lyricTiming}
   onChange={setLyricTiming}
   label={t('x.lyricTiming', 'Lyric timing supervision')}
@@ -62,7 +60,7 @@ import { Toggle } from '../shared/Toggle';
 />
 
 // Bare switch, when the row already has its own label (a table cell, a list row).
-<Toggle size="sm" accent="sky" checked={on} onChange={setOn} aria-label="Enable" />
+<Toggle size="sm" checked={on} onChange={setOn} aria-label="Enable" />
 ```
 
 `size="md"` (default) is the settings and studio-form size; `size="sm"` is the global bar's dense
@@ -222,16 +220,57 @@ Reload page, the sidebar and player keep working, and switching studio clears it
 independent region in its own boundary only if one failing part should not take its neighbours
 with it.
 
+## The UI kit and the tint
+
+The kit is one tintable design system: tokens in `ui/src/index.css` and `ui/tailwind.config.js`,
+components in `ui/src/components/shared/kit/` plus the three controls above. Change an element
+once and every use changes, so never copy its styling to a call site. New code uses the kit names;
+the old `suno` and `brand` colours still compile for the existing raw classes.
+
+To see every element, size, variant and state in the default tint and in a teal box, open
+`http://localhost:3000/kit` (dev only, no sidebar link).
+
+| Element | Import | Notes |
+|---|---|---|
+| `Button`, `IconButton` | `shared/kit/Button` | `size` sm / md / lg; `variant` primary / secondary / ghost / danger. `IconButton` needs `aria-label`. |
+| `Tabs` | `shared/kit/Tabs` | `items`, `value`, `onChange`; the active indicator slides; arrow keys move. |
+| `Panel`, `Card` | `shared/kit/Panel` | `Panel` takes `title` and `actions` for its header; `Card` with `onClick` becomes a button. |
+| `StatusLed` | `shared/kit/StatusLed` | `state` idle / ok / warn / error / generating, and a required `label`. Warn shows an icon too. |
+| `Slider`, `Toggle`, `StyledSelect` | `shared/...` | Same props as before, kit look. |
+
+```tsx
+import { Button } from '../shared/kit/Button';
+
+<Button variant="primary" size="lg">Generate</Button>
+```
+
+### How the tint works
+
+The accent is three RGB-channel variables on `:root`: `--tint`, `--tint-hover` and `--tint-glow`.
+Tailwind exposes them as `tint`, `tint-hover` and `tint-glow` with alpha support, so `bg-tint`,
+`bg-tint/20` and `ring-tint` all work. Set `data-tint="teal"` on any element and everything inside
+re-tints; no other wiring. To add a tint, add a block next to `[data-tint="teal"]` in `index.css`
+with the three variables. Never hard-code the accent hex in a component.
+
+Surfaces (`surface-well`, `-chassis`, `-panel`, `-raised`), text (`ink`, `ink-muted`, `ink-onTint`),
+status (`status-ok`, `-warn`, `-error`), radii (`rounded-ctl` 6px, `rounded-panel` 10px), shadows
+(`shadow-bevel`, `shadow-press`, `shadow-glow`) and motion (`duration-glow` 140ms,
+`duration-press` 70ms) are tokens too. Status colour never stands alone: give it a label, and warn an icon.
+
+### Adding a size or variant
+
+Everything hangs off one base class. For a `Button`, add `.kit-btn-<name>` in the kit block of
+`index.css` (a size sets height, padding and text size; a variant sets colours and, if the glow
+should differ, `--glow`), then add the name to `ButtonSize` or `ButtonVariant` and to its class map (`SIZE_CLASS`, `VARIANT_CLASS`) in `kit/Button.tsx`. Keep the full class name in the map: Tailwind drops component classes it cannot find whole in the source, so `kit-btn-${size}` would lose its styles.
+Add it to the gallery grid too. Do not fork the base: radius, bevel, border, focus ring, hover
+glow and press live in `.kit-btn` only. Motion respects `prefers-reduced-motion`; keep that when
+adding any.
+
+The kit is dark hardware: in light mode its controls stay dark.
+
 ## Accent colour
 
-Match the controls around you. Pass the same `accent` to `StyledSelect` and `Toggle`.
-
-| Where | Accent |
-|---|---|
-| Training Studio | `amber` |
-| Create, Lyric Studio | `pink` |
-| Global bar panels | the section's own colour (`amber`, `cyan`, `emerald`, `pink`, `purple`, `sky`, `teal`, `violet`); read it off the neighbouring `ToggleSwitch` |
-| Anywhere else | the studio's existing highlight colour; `pink` when it has none |
+The `accent` prop on `StyledSelect` and `Toggle` is deprecated: it is accepted so existing call sites compile, and ignored. Every control takes the kit tint (see above), so do not pass it in new code.
 
 ## Strings
 

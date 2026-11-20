@@ -14,8 +14,7 @@
 //     inside the trigger's parent. Training forms live inside <details> drawers
 //     and scrolling panes, and an absolute panel gets clipped by both. It also
 //     flips above the trigger when there is no room below.
-//   * `accent` picks the highlight colour, because the param bar is pink and
-//     the Training Studio is amber.
+//   * The highlight is the kit tint (index.css), not a per-call accent colour.
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
@@ -29,59 +28,15 @@ export interface SelectOption<T extends string | number> {
   disabled?: boolean;
 }
 
+/** Deprecated: accepted and ignored, the tint colours every select. Kept so call sites compile. */
 type Accent = 'pink' | 'amber' | 'sky' | 'emerald' | 'purple' | 'teal' | 'cyan' | 'violet';
 
-/** Tailwind needs whole class names in the source, so these cannot be built by
- *  interpolating the accent into a template string. */
-const ACCENT: Record<Accent, { focus: string; row: string; text: string; icon: string }> = {
-  pink: {
-    focus: 'focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20',
-    row: 'bg-pink-500/10 dark:bg-pink-500/15',
-    text: 'text-pink-400',
-    icon: 'text-pink-400',
-  },
-  amber: {
-    focus: 'focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20',
-    row: 'bg-amber-500/10 dark:bg-amber-500/15',
-    text: 'text-amber-500',
-    icon: 'text-amber-500',
-  },
-  sky: {
-    focus: 'focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20',
-    row: 'bg-sky-500/10 dark:bg-sky-500/15',
-    text: 'text-sky-500',
-    icon: 'text-sky-500',
-  },
-  emerald: {
-    focus: 'focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20',
-    row: 'bg-emerald-500/10 dark:bg-emerald-500/15',
-    text: 'text-emerald-500',
-    icon: 'text-emerald-500',
-  },
-  purple: {
-    focus: 'focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20',
-    row: 'bg-purple-500/10 dark:bg-purple-500/15',
-    text: 'text-purple-500',
-    icon: 'text-purple-500',
-  },
-  teal: {
-    focus: 'focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20',
-    row: 'bg-teal-500/10 dark:bg-teal-500/15',
-    text: 'text-teal-500',
-    icon: 'text-teal-500',
-  },
-  cyan: {
-    focus: 'focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20',
-    row: 'bg-cyan-500/10 dark:bg-cyan-500/15',
-    text: 'text-cyan-500',
-    icon: 'text-cyan-500',
-  },
-  violet: {
-    focus: 'focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20',
-    row: 'bg-violet-500/10 dark:bg-violet-500/15',
-    text: 'text-violet-500',
-    icon: 'text-violet-500',
-  },
+/** One look for every select: the kit tint (docs/dev/ui-design.md). */
+const TINT = {
+  focus: 'focus-visible:border-tint/50 focus-visible:ring-1 focus-visible:ring-tint/30',
+  row: 'bg-tint/15',
+  text: 'text-tint',
+  icon: 'text-tint',
 };
 
 const SIZE = {
@@ -131,7 +86,6 @@ export function StyledSelect<T extends string | number>({
   options,
   disabled,
   placeholder = '—',
-  accent = 'pink',
   size = 'md',
   className = '',
   searchable,
@@ -153,7 +107,7 @@ export function StyledSelect<T extends string | number>({
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const a = ACCENT[accent];
+  const a = TINT;
   const s = SIZE[size];
 
   const withFilter = searchable ?? options.length >= 8;
@@ -307,15 +261,13 @@ export function StyledSelect<T extends string | number>({
         title={title ?? selected?.label}
         onClick={() => (panelOpen ? closePanel() : openPanel())}
         onKeyDown={onTriggerKeyDown}
-        className={`${triggerLabel ? '' : 'w-full '}flex items-center gap-2 rounded-xl ${s.trigger}
-                    bg-zinc-100 dark:bg-zinc-800
-                    border border-zinc-300 dark:border-white/10
-                    text-zinc-800 dark:text-zinc-200
-                    hover:border-zinc-400 dark:hover:border-white/20
-                    ${a.focus}
-                    outline-none transition-colors cursor-pointer
-                    disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-zinc-300
-                    dark:disabled:hover:border-white/10 ${className}`}
+        className={`${triggerLabel ? '' : 'w-full '}flex items-center gap-2 rounded-ctl ${s.trigger}
+                    bg-surface-well text-ink shadow-press
+                    border border-white/[.07]
+                    hover:border-tint/40 hover:shadow-glow
+                    ${a.focus} kit-focus
+                    transition-[border-color,box-shadow] duration-glow motion-reduce:transition-none cursor-pointer
+                    disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/[.07] disabled:hover:shadow-press ${className}`}
       >
         {triggerLabel ? <span className="truncate text-left">{triggerLabel}</span> : (
           <span className={`truncate flex-1 text-left${selected ? '' : ' text-zinc-400'}`}>
@@ -332,9 +284,9 @@ export function StyledSelect<T extends string | number>({
         <div
           ref={panelRef}
           data-portal-layer
-          className="fixed z-[9999] rounded-xl bg-white dark:bg-zinc-800
-                     border border-zinc-200 dark:border-white/10
-                     shadow-lg shadow-black/20 overflow-hidden"
+          className="fixed z-[9999] rounded-panel bg-surface-raised
+                     border border-white/[.07]
+                     shadow-bevel overflow-hidden"
           style={{
             left: pos.left,
             width: pos.width,
@@ -343,7 +295,7 @@ export function StyledSelect<T extends string | number>({
           }}
         >
           {withFilter && (
-            <div className="p-1.5 border-b border-zinc-200 dark:border-white/10">
+            <div className="p-1.5 border-b border-white/[.07]">
               <div className="relative">
                 <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
                 <input
@@ -353,10 +305,10 @@ export function StyledSelect<T extends string | number>({
                   onChange={(e) => { setQuery(e.target.value); setFocusIdx(0); }}
                   onKeyDown={navKeys}
                   placeholder={searchPlaceholder}
-                  className={`w-full pl-7 pr-2 py-1.5 rounded-lg
-                              bg-zinc-100 dark:bg-zinc-900
-                              border border-zinc-200 dark:border-white/10
-                              text-sm text-zinc-800 dark:text-zinc-200 placeholder-zinc-400
+                  className={`w-full pl-7 pr-2 py-1.5 rounded-ctl
+                              bg-surface-well
+                              border border-white/[.07]
+                              text-sm text-ink placeholder-zinc-500
                               outline-none ${a.focus}`}
                 />
               </div>
@@ -387,7 +339,7 @@ export function StyledSelect<T extends string | number>({
                     title={opt.hint ?? opt.label}
                     className={`w-full flex items-start gap-2 text-left transition-colors ${s.row}
                       ${isFocus && !opt.disabled ? a.row : ''}
-                      ${isSel ? a.text : 'text-zinc-700 dark:text-zinc-200'}
+                      ${isSel ? a.text : 'text-ink'}
                       ${opt.disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                   >
                     <span className="min-w-0 flex-1">

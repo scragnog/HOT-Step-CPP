@@ -39,10 +39,22 @@
   --create-panel-width: 490px;
   --right-sidebar-width: 360px;
 
+  /* UI kit tint: RGB channels so Tailwind can add alpha (bg-tint/20).
+     Re-tint a subtree with data-tint="<name>"; nothing else to wire. */
+  --tint: 245 166 35;
+  --tint-hover: 255 190 85;
+  --tint-glow: 255 197 109;
+
   /* Transitions */
   --transition-fast: 150ms ease;
   --transition-normal: 200ms ease;
   --transition-slow: 300ms ease;
+}
+
+[data-tint="teal"] {
+  --tint: 45 212 191;
+  --tint-hover: 94 234 212;
+  --tint-glow: 153 246 228;
 }
 
 /* ========================================
@@ -272,41 +284,157 @@ input[type="number"]:focus {
 }
 
 /* ========================================
-   Range Slider — Pink Accent
+   Range Slider — UI kit (tint)
+   Slider.tsx sets --pct (fill, 0-100%); a bare range input shows an empty track.
    ======================================== */
 
 input[type="range"] {
   -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  height: 4px;
-  background: #27272a;
-  border-radius: 2px;
+  height: 6px;
+  background: linear-gradient(to right, rgb(var(--tint)) var(--pct, 0%), theme('colors.surface.well') var(--pct, 0%));
+  border: 1px solid rgb(255 255 255 / 0.07);
+  border-radius: 3px;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.5);
   outline: none;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: linear-gradient(theme('colors.surface.raised'), theme('colors.surface.panel'));
+  border: 1px solid rgb(var(--tint) / 0.7);
+  box-shadow: theme('boxShadow.bevel');
+  transition: box-shadow 140ms ease;
+}
+
+input[type="range"]::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ec4899;
   cursor: pointer;
-  border: 2px solid #09090b;
-  box-shadow: 0 0 8px rgba(236, 72, 153, 0.3);
+  background: linear-gradient(theme('colors.surface.raised'), theme('colors.surface.panel'));
+  border: 1px solid rgb(var(--tint) / 0.7);
+  box-shadow: theme('boxShadow.bevel');
 }
 
-input[type="range"]::-webkit-slider-thumb:hover {
-  background: #db2777;
-  box-shadow: 0 0 16px rgba(236, 72, 153, 0.4);
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: theme('boxShadow.bevel'), 0 0 12px rgb(var(--tint-glow) / 0.24);
 }
 
-/* Light-mode range slider */
-:root:not(.dark) input[type="range"] {
-  background: #e4e4e7;
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid rgb(var(--tint));
+  outline-offset: 2px;
 }
 
-:root:not(.dark) input[type="range"]::-webkit-slider-thumb {
-  border-color: #ffffff;
+input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 2px solid rgb(var(--tint));
+  outline-offset: 2px;
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  box-shadow: theme('boxShadow.press');
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
+
+/* ========================================
+   UI kit components (ui/src/components/kit; docs/dev/ui-design.md)
+   Every colour comes from the tint variables or the surface/ink/status
+   tokens, so [data-tint] re-colours the lot.
+   ======================================== */
+
+@layer components {
+  /* Shared keyboard focus ring: one recipe for every kit control. */
+  .kit-focus:focus-visible,
+  .kit-focus[data-force="focus"] {
+    outline: 2px solid rgb(var(--tint));
+    outline-offset: 2px;
+  }
+
+  /* --- Button: one base; size and variant ride on top --- */
+  .kit-btn {
+    --glow: var(--tint-glow);
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-ctl border border-white/[.07] font-medium shadow-bevel;
+    transition: box-shadow 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 70ms ease;
+  }
+  .kit-btn:hover:not(:disabled),
+  .kit-btn[data-force="hover"] {
+    box-shadow: theme('boxShadow.bevel'), 0 0 14px rgb(var(--glow) / 0.24);
+  }
+  .kit-btn:active:not(:disabled),
+  .kit-btn[data-force="press"] {
+    transform: translateY(1px);
+    box-shadow: theme('boxShadow.press');
+  }
+  .kit-btn:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+  .kit-btn-sm { @apply h-7 px-2.5 text-xs; }
+  .kit-btn-md { @apply h-9 px-4 text-sm; }
+  .kit-btn-lg { @apply h-12 px-6 text-base font-semibold tracking-wide; }
+  /* Square: IconButton and any iconOnly Button. */
+  .kit-btn-icon.kit-btn-sm { @apply w-7 px-0; }
+  .kit-btn-icon.kit-btn-md { @apply w-9 px-0; }
+  .kit-btn-icon.kit-btn-lg { @apply w-12 px-0; }
+
+  .kit-btn-primary { @apply border-transparent bg-tint text-ink-onTint hover:bg-tint-hover; }
+  .kit-btn-secondary { @apply bg-surface-raised text-ink hover:border-tint/40; }
+  .kit-btn-ghost { @apply border-transparent bg-transparent text-ink-muted shadow-none hover:bg-white/5 hover:text-ink; }
+  .kit-btn-ghost:hover:not(:disabled) { box-shadow: none; }
+  .kit-btn-danger { --glow: 251 113 133; @apply border-status-error/40 bg-status-error/15 text-status-error hover:bg-status-error/25; }
+
+  /* --- Panel / Card --- */
+  .kit-panel { @apply overflow-hidden rounded-panel border border-white/[.07] bg-surface-panel shadow-bevel; }
+  .kit-panel-header { @apply flex items-center justify-between gap-2 border-b border-white/[.07] bg-surface-raised/60 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-ink-muted; }
+  .kit-card { @apply rounded-panel border border-white/[.07] bg-surface-raised p-3 text-left shadow-bevel; transition: box-shadow 140ms ease, border-color 140ms ease, transform 70ms ease; }
+  .kit-card-interactive { @apply cursor-pointer; }
+  .kit-card-interactive:hover { border-color: rgb(var(--tint) / 0.4); box-shadow: theme('boxShadow.bevel'), 0 0 14px rgb(var(--tint-glow) / 0.24); }
+  .kit-card-interactive:active { transform: translateY(1px); box-shadow: theme('boxShadow.press'); }
+
+  /* --- Tabs: the indicator slides under the active tab --- */
+  .kit-tabs { @apply relative inline-flex gap-1 rounded-ctl border border-white/[.07] bg-surface-well p-1; }
+  .kit-tab { @apply relative z-10 h-8 rounded-ctl px-3 text-sm font-medium text-ink-muted; transition: color 140ms ease; }
+  .kit-tab:hover { @apply text-ink; }
+  .kit-tab[aria-selected="true"] { @apply text-ink-onTint; }
+  .kit-tab-indicator {
+    @apply pointer-events-none absolute top-1 h-8 rounded-ctl bg-tint shadow-bevel;
+    transition: transform 200ms cubic-bezier(0.3, 0.7, 0.2, 1), width 200ms cubic-bezier(0.3, 0.7, 0.2, 1);
+  }
+
+  /* --- StatusLed --- */
+  .kit-led { @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full; background: currentColor; box-shadow: 0 0 6px currentColor; }
+  .kit-led-idle { @apply text-ink-muted/50; box-shadow: none; }
+  .kit-led-ok { @apply text-status-ok; }
+  .kit-led-error { @apply text-status-error; }
+  /* Generating: a lit segment travels along a short track. */
+  .kit-led-track { @apply relative inline-block h-2 w-8 shrink-0 overflow-hidden rounded-full bg-surface-well; box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.6); }
+  .kit-led-track::after {
+    content: '';
+    @apply absolute top-0 h-full w-3 rounded-full bg-tint;
+    box-shadow: 0 0 8px rgb(var(--tint-glow) / 0.6);
+    left: 25%;
+    animation: kit-led-travel 1.2s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes kit-led-travel {
+  from { left: 0; }
+  to { left: calc(100% - 0.75rem); }
+}
+
+/* Reduced motion: no travel, no slide, no press movement; state still reads. */
+@media (prefers-reduced-motion: reduce) {
+  .kit-led-track::after { animation: none; }
+  .kit-btn, .kit-card, .kit-tab, .kit-tab-indicator { transition: none !important; }
+  .kit-btn:active:not(:disabled), .kit-card-interactive:active { transform: none; }
 }
 
 /* ========================================

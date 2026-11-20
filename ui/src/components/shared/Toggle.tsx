@@ -18,14 +18,10 @@
 import React from 'react';
 import { ParamLabel } from './ParamLabel';
 
+/** Deprecated: the kit colours every toggle with the tint (docs/dev/ui-design.md),
+ *  so the value is accepted and ignored. Kept so existing call sites compile. */
 export type ToggleAccent = 'pink' | 'amber' | 'sky' | 'emerald' | 'purple' | 'teal' | 'cyan' | 'violet';
 
-/** Tailwind needs whole class names in the source, so these cannot be built
- *  by interpolating the accent into a template string. */
-const ON: Record<ToggleAccent, string> = {
-  pink: 'bg-pink-500', amber: 'bg-amber-500', sky: 'bg-sky-500', emerald: 'bg-emerald-500',
-  purple: 'bg-purple-500', teal: 'bg-teal-500', cyan: 'bg-cyan-500', violet: 'bg-violet-500',
-};
 
 const SIZE = {
   /** The global bar's rows: dense, many per panel. */
@@ -61,7 +57,7 @@ export interface ToggleProps {
 }
 
 export const Toggle: React.FC<ToggleProps> = ({
-  checked, onChange, accent = 'pink', size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel, defaultValue, onReset,
+  checked, onChange, size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel, defaultValue, onReset,
 }) => {
   const s = SIZE[size];
   const button = (
@@ -74,10 +70,9 @@ export const Toggle: React.FC<ToggleProps> = ({
       title={title}
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); if (!disabled) onChange(!checked); }}
-      className={`relative inline-flex ${s.track} items-center rounded-full transition-colors duration-200 flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-zinc-400 ${
-        checked ? ON[accent] : 'bg-zinc-300 dark:bg-zinc-700'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={`relative inline-flex ${s.track} items-center rounded-full border border-white/[.07] shadow-press transition-colors duration-glow motion-reduce:transition-none flex-shrink-0 kit-focus ${checked ? 'bg-tint' : 'bg-surface-well'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
     >
-      <span className={`inline-block ${s.thumb} rounded-full bg-white shadow-sm transform transition-transform duration-200 ${checked ? s.on : s.off}`} />
+      <span className={`inline-block ${s.thumb} rounded-full bg-ink shadow-bevel transform transition-transform duration-glow motion-reduce:transition-none ${checked ? s.on : s.off}`} />
     </button>
   );
   if (!label) return button;
