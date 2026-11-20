@@ -95,7 +95,7 @@ Per-item errors: none of these are batched, so a failure is the job's own
 shared `/cancel`; retrying `insta-direct`/`insta-approve` re-enqueues a fresh
 audio item only if the earlier attempt never got one far enough to reuse.
 
-## Cover (`cover-open`, `cover-caption`, `cover-transcribe`, `cover-render`)
+## Cover (`cover-open`, `cover-caption`, `cover-transcribe`, `cover-render`, `cover-stems`, `cover-build-save`)
 
 A Cover session opens a `cover-draft` document and runs through it. Every
 step after `cover-open` takes `{ documentId, revision }` and is 409 `Stale
@@ -104,7 +104,17 @@ source asset's hash no longer matches what the draft was opened against.
 
 - `cover-open({ assetId, cached? })` analyzes the source (metadata + BPM/key)
   unless `cached` supplies both, and returns `{ documentId, revision,
-  metadata, analysis }`.
+  metadata, analysis }`. `cover-open({ score: { abc } })` (instead of
+  `assetId`, never both) opens a score-only draft for an imported MusicXML
+  score: no recording, already approved with that score. Only a `yue2`
+  `cover-render` and Build read it; every other step is 400 `Cover draft has
+  no asset id`, and an `ace` render is 400 `A score-only source covers with
+  YuE2 only`.
+- `cover-stems({ separationId, controls: [{ index, volume, muted }] })` mixes
+  a finished stem separation down on the server (the stem mixer's volumes and
+  mutes) and stores the WAV as an audio asset: `{ assetId, audioUrl, filename
+  }`. Open a draft on that asset with `cover-open`. 404 for an unknown
+  separation.
 - `cover-caption({ ...ref, artistId, provider, model, force })` resolves a
   style caption (cached from an existing generation/profile unless `force`)
   and returns `{ documentId, revision, caption }`.
@@ -125,8 +135,18 @@ source asset's hash no longer matches what the draft was opened against.
   must be current and built on the approved score, and must agree with
   `instrumental` (409 otherwise); its exported lyrics replace `lyrics`. Empty
   lyrics without `instrumental` are 400, and so is a backend without covers.
-  Returns `{ request, audioIntentId, audio, elapsedSeconds }`, the Auto-Gen
+  On `ace`, an optional `stems` (the same `{ separationId, controls }`)
+  covers the separation's stems mixed down on the server instead of the
+  draft's own audio; a failed mix fails the job rather than falling back. On
+  `yue2`, `controls.guide` carries the Follow source settings (audio sources
+  only). Returns `{ request, audioIntentId, audio, elapsedSeconds }`, the Auto-Gen
   render shape plus the render time.
+
+- `cover-build-save({ sessionId })` is Build's Save song: it renders the
+  session's kept takes once as an ordinary song, from the params the session
+  already holds (no body from the client). 409 `Keep at least one take` when
+  nothing is kept, 404 for another user's or an unknown session. Result as
+  `cover-render`.
 
 ### YuE2 score and Build routes (`/api/yue2-cover`)
 
@@ -146,7 +166,7 @@ the client saw, and is 409 when it is stale; the session rules are in
 | `POST /sections/review`, `/sections/match`, `/sections/plan-score`, `/sections/suggest`, `/sections/save-dataset` | Prepare's section tools: list a score's sections and check them against lyrics; match or plan them from where the source vocal sings each lyric block; suggest lyric assignments for a Prepare document; save lyrics, score, BPM or key to the matching dataset song. |
 | `POST /source-metadata` | The matching dataset song's BPM, key, instrumental flag, lyrics and score, when the source is one (`{ matched: false }` otherwise). |
 | `POST /drift/:songId` | Measure how far a saved YuE2 cover drifted from its score; the result is cached on the song. |
-| `POST /build`, `GET /build/:id`, `DELETE /build/:id` and the `/build/:id/*` commands | Build by section: create a session from the cover's `params` (and optional `lyrics`), then `generate`, `cancel`, `keep`, `undo`, `crop`, `trim`, `preview`, `lyrics`, `occurrence-lyrics`, `settings` and `plan`; `DELETE /build/:id/takes/:take` drops one take. `POST /build/lyrics-check` checks a lyrics draft before a session exists. |
+| `POST /build`, `GET /build/:id`, `DELETE /build/:id` and the `/build/:id/*` commands | Build by section: create a session from `{ cover }` (the same input `cover-render` takes, on `yue2`, with a draft reference; the server writes the params and checks them as a render would) or, as Create's Build tab does, from `{ params }` (and optional `lyrics`), then `generate`, `cancel`, `keep`, `undo`, `crop`, `trim`, `preview`, `lyrics`, `occurrence-lyrics`, `settings` and `plan`; `DELETE /build/:id/takes/:take` drops one take. `POST /build/lyrics-check` checks a lyrics draft before a session exists. |
 
 ## Repaint and Lego layer (`repaint-render`, `layer-render`)
 

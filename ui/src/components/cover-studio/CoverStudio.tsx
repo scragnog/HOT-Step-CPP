@@ -2,9 +2,6 @@
 // Composes: SourcePanel, ArtistSettingsPanel
 
 import { pollWhile } from '../../queries/contract';
-import { waitForQuery } from '../../queries/wait';
-import { generationStatusOptions } from '../../queries/shell-queue/queue';
-import { songsChanged } from '../../queries/cover-lyrics/reads';
 import type { Yue2CoverResult } from '../../services/yue2CoverApi';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
@@ -17,16 +14,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
-import { generateApi } from '../../services/api';
-import type { GenerationJob } from '../../types';
 import { apiClient, ApiError } from '../../services/httpClient';
 import { useUpload } from '../../queries/writes';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
-import {
-  recombineStems,
-  type SeparationLevel,
-} from '../../services/supersepApi';
+import type { SeparationLevel } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
@@ -85,31 +76,11 @@ import { AbcChart } from './AbcChart';
 import { coverWorkflowApi, waitForCoverJob, type CoverDraftResult } from '../../services/coverWorkflowApi';
 import { coverLyricWorkflowApi as workflowApi } from '../../queries/cover-lyrics/workflows';
 
-// ── Serial cover-generation queue ────────────────────────────────────────────
-// Lets the user stack multiple cover generations (different settings) without
-// waiting — same pattern as InstaGen's queue. Jobs run one at a time; the engine
-// serializes anyway, this keeps the client-side recombine→submit→poll ordered.
-const _coverQueue: Array<() => Promise<void>> = [];
-let _coverRunning = false;
 /** Builds with a Save song queued or rendering: Delete build waits, because the render reads the build's files. */
 const _savingBuilds = new Map<string, number>();
 // Survives Cover Studio remounts (it unmounts when you leave the tab) so a
 // previously-sent library track isn't re-applied every time you revisit (#61).
 let _lastConsumedCoverTs = 0;
-function enqueueCoverJob(fn: () => Promise<void>) {
-  _coverQueue.push(fn);
-  if (!_coverRunning) _drainCoverQueue();
-}
-
-async function _drainCoverQueue() {
-  _coverRunning = true;
-  while (_coverQueue.length > 0) {
-    const job = _coverQueue.shift()!;
-    try { await job(); } catch { /* each job handles its own errors */ }
-  }
-  _coverRunning = false;
-}
-
 // ABC mode suffixes SheetSage2-Refined's key_mode writes (K:Ddor, K:Gmix, ...).
 const KEY_MODES: Record<string, string> = { dor: 'dorian', phr: 'phrygian', lyd: 'lydian', mix: 'mixolydian', loc: 'locrian' };
 
@@ -340,9 +311,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // ── Generation ──
   const [isGenerating, setIsGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(0);
+  // The render workflow reports no percentage; the queue item carries the engine's.
+  const genProgress = 0;
   const [genStage, setGenStage] = useState('');
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [, setActiveJobId] = useState<string | null>(null);
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
 
 
@@ -1119,11 +1091,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const prepareYue2Source = async (): Promise<{ sourceAudioUrl?: string; songId?: string; audioUrl: string; assetId?: string }> => {
     if (!heartmulaMode && advancedMode && sepStems?.length && sepJobId) {
-      const controls = stemControls.map(c => ({ index: c.index, volume: c.muted ? 0 : c.volume, muted: c.muted }));
-      const blob = await recombineStems(sepJobId, controls);
-      const uploaded = await uploadMut.mutateAsync({ path: '/upload/audio', files: [{ field: 'audio', file: blob, name: 'recombined-stems.wav' }] });
-      if (!uploaded.audio_url) throw new Error('Recombined source has no audio URL');
-      return { sourceAudioUrl: uploaded.audio_url, audioUrl: uploaded.audio_url, assetId: uploaded.asset_id };
+      const { job } = await coverWorkflowApi.stems(sepJobId, stemControls.map(c => ({ index: c.index, volume: c.volume, muted: c.muted })));
+      const mixed = (await waitForCoverJob(job.id, () => false)).result as { assetId: string; audioUrl: string };
+      return { sourceAudioUrl: mixed.audioUrl, audioUrl: mixed.audioUrl, assetId: mixed.assetId };
     }
     if (sourceSongId) return { songId: sourceSongId, audioUrl: sourceAudioUrl };
     return { sourceAudioUrl, audioUrl: sourceAudioUrl };
@@ -1236,7 +1206,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const request = ++sheetRequestRef.current;
     setSheetError(''); setSheetPreparing(true);
     try {
-      if (coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
+      // Advanced mode's draft is the stem mix's, made when the score was transcribed (sheetAudioUrl is that mix).
+      if (coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode || sheetAudioUrl)) {
         const result = await coverWorkflowApi.approveScore(coverDraftId, coverDraftRevision, sheetAbc);
         if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
         setCoverDraftRevision(result.document.revision);
@@ -1249,6 +1220,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         ? { audioUrl: sheetAudioUrl, ...(sheetAudioUrl === sourceAudioUrl && sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl: sheetAudioUrl }) }
         : await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+      if (source.assetId) {
+        // A stem mix made now: open its draft and approve on it, so the render reads an approved draft.
+        const { job } = await coverWorkflowApi.open(source.assetId, undefined, selectedSource);
+        const draft = (await waitForCoverJob(job.id, () => sourceKeyRef.current !== key || sheetRequestRef.current !== request)).result as CoverDraftResult;
+        if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+        sourceHydratedRef.current = draft.documentId;
+        setCoverDraftId(draft.documentId); setLeadSheetSource(draft.leadSheetSource);
+        const approved = await coverWorkflowApi.approveScore(draft.documentId, draft.revision, sheetAbc);
+        if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+        setCoverDraftRevision(approved.document.revision);
+        setApprovedSheet({ abc: approved.abc || sheetAbc.trim(), sourceId: approved.sourceId,
+          sourceLabel: approved.sourceLabel, audioUrl: source.audioUrl, key });
+        setSheetAudioUrl(source.audioUrl);
+        return;
+      }
       const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), abc: sheetAbc });
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
       setApprovedSheet({ abc: result.abc || sheetAbc.trim(), sourceId: result.sourceId,
@@ -1398,17 +1384,33 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       : []),
   ];
 
-  const submitCoverWorkflow = () => {
-    if (!token || !coverDraftId || !coverDraftRevision) return;
+  /** The draft a render or Build reads: the source's own, or for an imported MusicXML score a score-only
+   *  draft made now (the score is its whole source, and it comes approved). */
+  const scoreDraftRef = useRef<{ abc: string; documentId: string; revision: number } | null>(null);
+  const scoreOnly = yue2Mode && sourceMode === 'musicxml';
+  const coverDraftFor = async (): Promise<{ documentId: string; revision: number }> => {
+    if (!scoreOnly) return { documentId: coverDraftId, revision: coverDraftRevision };
+    const abc = approvedSheet?.abc ?? '';
+    const held = scoreDraftRef.current;
+    if (held?.abc === abc) return held;
+    const { job } = await coverWorkflowApi.openScore(abc);
+    const opened = (await waitForCoverJob(job.id, () => false)).result as CoverDraftResult;
+    const made = { abc, documentId: opened.documentId, revision: opened.revision };
+    scoreDraftRef.current = made;
+    return made;
+  };
+
+  /** The studio's choices for a render or a Build; the draft reference is added by the caller. */
+  const coverRenderInput = () => {
     // The workflow's yue2* engine params reach the render; the instrumental melody mode rides with them.
     const engineParams = { ...gp.getGlobalParams() as Record<string, unknown>,
       ...(renderInstrumental ? { yue2InstrumentalMode: instrumentalMode } : {}) };
-    const backend = useBackendStore.getState().activeBackendId;
-    const renderSourceKey = sourceKey;
-    setHeartmulaError('');
-    const input = {
-      documentId: coverDraftId, revision: coverDraftRevision,
-      expectedBackend: backend, engineParams,
+    const aceMode = !yue2Mode && !heartmulaMode && !mm3Mode && !audioTransformMode;
+    return {
+      expectedBackend: useBackendStore.getState().activeBackendId, engineParams,
+      // Advanced mode: the server mixes the stems down and covers the mix.
+      ...(aceMode && advancedMode && sepStems?.length && sepJobId
+        ? { stems: { separationId: sepJobId, controls: stemControls.map(c => ({ index: c.index, volume: c.volume, muted: c.muted })) } } : {}),
       ...(audioTransformMode ? { strength: sa3Transform, seed: sa3Seed,
         ...(sa3Adapter ? { adapter: `${sa3Adapter}:1` } : {}) } : {}),
       ...(heartmulaMode ? { heartmulaTags: { ...heartmulaTags }, seed: heartmulaSeed } : {}),
@@ -1435,17 +1437,19 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         pairMode: renderMode === 'base' ? 'base' : 'pair',
         yue2Pick: yue2PickAtEnqueue(null, { lmAdapterAr: activeYue2Ar, lmAdapterNar: activeYue2Nar, lmAdapterArScale: clampCoverAr(coverArStrength) }),
         captionMode: yue2Mode ? 'custom' : captionMode, captionTracks: renderMode === 'base' ? [] : captionTracks,
+        ...(yue2Mode && sourceMode === 'audio' && coverGuide.on && !coverGuideBlock(coverKeyShift, coverTempoMode)
+          ? { guide: (({ on: _on, ...rest }) => rest)(coverGuide) } : {}),
       },
     };
-    const qId = addManualQueueItem({ title: songArtist
-      ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'),
-      artistName: audioTransformMode || heartmulaMode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
-    updateManualQueueItem(qId, { stage: 'Preparing…' });
-    setIsGenerating(true);
-    void (async () => {
+  };
+
+  /** Runs a render workflow job under its queue item: names its stage as it moves, then completes or
+   *  fails the item. Resolves null on success, else the failure message. */
+  const trackCoverRender = async (qId: string, start: () => Promise<{ job: { id: string } }>): Promise<string | null> => {
     let workflowId = '';
     try {
-      const { job } = await coverWorkflowApi.render(input);
+      if (!token) throw new Error('Sign in first');
+      const { job } = await start();
       workflowId = job.id;
       coverRenderJobRef.current = job.id;
       setActiveJobId(job.id); setQueueItemId(qId);
@@ -1456,7 +1460,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const done = await waitForCoverJob(job.id, () => false, current => {
         const running = current.status === 'running';
         const stage = running ? 'Generating…' : 'Queued…';
-        if (stage !== shown) updateManualQueueItem(qId, { stage: shown = stage, status: running ? 'generating' : 'pending' });
+        if (stage !== shown) { setGenStage(stage); updateManualQueueItem(qId, { stage: shown = stage, status: running ? 'generating' : 'pending' }); }
       });
       const result = done.result as { audio?: { audioUrls?: string[]; songIds?: string[];
         masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number };
@@ -1466,15 +1470,32 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         masteredAudioUrl: audio.masteredAudioUrl, noAdapterAudioUrl: audio.noAdapterAudioUrl,
         audioDuration: audio.duration, elapsedSeconds: result.elapsedSeconds });
       showToast(t('cover.coverGenerated'));
+      return null;
     } catch (err: any) {
       failManualQueueItem(qId, err.message || 'Generation failed');
-      if (backend === 'heartmula' && useBackendStore.getState().activeBackendId === backend && sourceKeyRef.current === renderSourceKey) setHeartmulaError(err.message || 'Generation failed');
+      return err.message || 'Generation failed';
     } finally {
-      if (coverRenderJobRef.current === workflowId) {
-        setIsGenerating(false); setActiveJobId(null); setQueueItemId(null);
+      if (workflowId && coverRenderJobRef.current === workflowId) {
+        setIsGenerating(false); setActiveJobId(null); setQueueItemId(null); setGenStage('');
+        coverRenderJobRef.current = '';
       }
-      if (workflowId && coverRenderJobRef.current === workflowId) coverRenderJobRef.current = '';
     }
+  };
+
+  const submitCoverWorkflow = () => {
+    if (!token || (!scoreOnly && (!coverDraftId || !coverDraftRevision))) return;
+    const backend = useBackendStore.getState().activeBackendId;
+    const renderSourceKey = sourceKey;
+    setHeartmulaError('');
+    const input = coverRenderInput();
+    const qId = addManualQueueItem({ title: songArtist
+      ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'),
+      artistName: audioTransformMode || heartmulaMode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
+    updateManualQueueItem(qId, { stage: 'Preparing…' });
+    setIsGenerating(true);
+    void (async () => {
+      const failure = await trackCoverRender(qId, async () => coverWorkflowApi.render({ ...input, ...await coverDraftFor() }));
+      if (failure && backend === 'heartmula' && useBackendStore.getState().activeBackendId === backend && sourceKeyRef.current === renderSourceKey) setHeartmulaError(failure);
     })();
   };
 
@@ -1492,16 +1513,19 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!buildSession && !build.loading) { showToast('Start the build first, then edit its lyrics. Until then it uses the lyrics confirmed on the Prepare page.'); return false; }
     return build.applyLyrics(text);
   };
-  /** The params a build starts from: the session's own, or the Prepare page's before there is one. */
-  const buildParams = (): Record<string, unknown> | null => {
+  /** What a Build starts from: the Prepare page's choices as a cover input (the server writes the params
+   *  and checks them as a render would), or null with a toast when it cannot start yet. The session's own
+   *  params stand in once there is a session (the hook only starts one when it has none). */
+  const buildStart = async (): Promise<Record<string, unknown> | null> => {
     if (buildSession) return buildSession.params;
-    const built = yue2CoverParams();
-    if (typeof built === 'string') { showToast(built); return null; }
-    return built.params;
+    const block = yue2CoverBlock();
+    if (block) { showToast(block); return null; }
+    try { return { cover: { ...coverRenderInput(), ...await coverDraftFor() } }; }
+    catch (err) { showToast((err as Error).message); return null; }
   };
-  const generateBuildTakes = (to: number, count: number, caption: string, lyrics: Record<string, string>, newChords: boolean) => {
-    const params = buildParams();
-    return params ? build.generate(params, to, count, caption, lyrics, newChords).then(Boolean) : Promise.resolve(false);
+  const generateBuildTakes = async (to: number, count: number, caption: string, lyrics: Record<string, string>, newChords: boolean) => {
+    const start = await buildStart();
+    return start ? build.generate(start, to, count, caption, lyrics, newChords).then(Boolean) : false;
   };
   const setPrepareSettings = (s: BuildSettings) => {
     setCoverVoices(s.voices);
@@ -1519,45 +1543,36 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setPrepareSettings(s);
     if (buildSession?.kept.length) build.startOver();
   };
-  const planBuild = (upcoming: string[], finished: boolean) => {
-    const params = buildParams();
-    if (params) void build.plan(params, upcoming, finished);
+  const planBuild = async (upcoming: string[], finished: boolean) => {
+    const start = await buildStart();
+    if (start) void build.plan(start, upcoming, finished);
   };
   // Save song: an ordinary render of the kept codec stream, so it gets the
-  // usual post-processing and library save.
+  // usual post-processing and library save. The server renders it from the
+  // session's own params; the studio only names the session.
   const saveBuild = () => {
     if (!token || !buildSession?.kept.length) return;
     const sessionId = buildSession.id;
-    const params = { ...buildSession.params, yue2Build: { session: buildSession.id },
-      yue2BatchSize: 1, yue2Variations: 1, batchSize: 1, randomSeed: true };
     const title = String(buildSession.params.title || 'Cover');
     const qId = addManualQueueItem({ title, artistName: String(buildSession.params.artistName || ''), caption: String(buildSession.params.caption || '') });
-    updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
+    updateManualQueueItem(qId, { stage: 'Preparing…' });
     setIsGenerating(true);
     _savingBuilds.set(sessionId, (_savingBuilds.get(sessionId) ?? 0) + 1);
-    enqueueCoverJob(async () => {
-      try {
-        const res = await generateApi.submit(params as any);
-        updateManualQueueItem(qId, { jobId: res.jobId });
-        const outcome = await pollJobAsync(res.jobId, qId);
-        // Only a saved song starts the next build, and only if this build is
-        // still the open one; any other outcome keeps it for a retry.
-        if (outcome === 'succeeded') finishSavedBuild(sessionId);
-      } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
-      finally {
-        const left = (_savingBuilds.get(sessionId) ?? 1) - 1;
-        if (left > 0) _savingBuilds.set(sessionId, left); else _savingBuilds.delete(sessionId);
-        if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); }
-      }
-    });
+    void (async () => {
+      // Only a saved song starts the next build, and only if this build is
+      // still the open one; any other outcome keeps it for a retry.
+      if (await trackCoverRender(qId, () => coverWorkflowApi.buildSave(sessionId)) === null) finishSavedBuild(sessionId);
+      const left = (_savingBuilds.get(sessionId) ?? 1) - 1;
+      if (left > 0) _savingBuilds.set(sessionId, left); else _savingBuilds.delete(sessionId);
+    })();
     showToast('Saving the build as a song: it is in the queue');
   };
   // The Build page's view of what is being built: the session's own settings
   // once it exists, the Prepare page's until then.
   const renderBuildPage = () => {
-    const draftParams = buildSession ? null : yue2CoverParams();
-    const params = buildSession?.params ?? (typeof draftParams === 'string' || !draftParams ? null : draftParams.params);
-    const abc = String(params?.yue2Abc ?? sheetAbc);
+    const draftBlock = buildSession ? '' : yue2CoverBlock();
+    const params = buildSession?.params ?? null;
+    const abc = String(params?.yue2Abc ?? (approvedSheet?.abc || sheetAbc));
     const sections = buildSession?.sections ?? scoreSections.map(x => ({ label: x.label, startBar: x.startBar }));
     return <Yue2BuildPage session={buildSession} sections={sections}
       totalBars={barRanges(abc).reduce((n, r) => Math.max(n, r.bar), 0)}
@@ -1567,81 +1582,25 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale, arStrength: coverArStrength }}
       onSettings={s => void applyBuildSettings(s)} keyLabel={coverScoreKeyLabel(abc)}
       sourceBpm={Number(abc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120)}
-      title={[params?.artist, params?.title ?? (songTitle || 'Cover')].filter(Boolean).join(' - ')}
+      title={[params ? params.artist : targetYue2Artist, params?.title
+        ?? (songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'))].filter(Boolean).join(' - ')}
       scoreAbc={abc} recordingUrl={sourceMode === 'audio' && prep.recordingSeekAvailable ? sourceAudioUrl : ''}
-      blocked={buildSession ? '' : typeof draftParams === 'string' ? `${draftParams} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
-      busy={build.busy} error={build.error} caption={buildCaption(params ?? undefined)}
+      blocked={buildSession ? '' : draftBlock ? `${draftBlock} on the Prepare page.` : !canGenerate ? 'Finish the Prepare page first.' : ''}
+      busy={build.busy} error={build.error} caption={params ? buildCaption(params) : draftBlock ? '' : artistCaption}
       onOccurrenceLyrics={edits => void build.occurrenceLyrics(edits)}
       onOccurrenceOctave={edits => build.occurrenceOctave(edits)}
-      onGenerate={generateBuildTakes} onPlan={planBuild} onCancel={() => void build.cancel()} onKeep={(take, crop, count) => void build.keep(take, crop, count)} onDelete={take => void build.remove(take)}
+      onGenerate={generateBuildTakes} onPlan={(u, f) => void planBuild(u, f)} onCancel={() => void build.cancel()} onKeep={(take, crop, count) => void build.keep(take, crop, count)} onDelete={take => void build.remove(take)}
       onUndo={section => void build.undo(section)} onStartOver={build.startOver} onDeleteBuild={() => buildSession && _savingBuilds.has(buildSession.id) ? showToast('A Save song render is queued for this build; delete it once that finishes.') : void build.deleteBuild()} onSave={saveBuild}
       onCrop={(take, frame, mode) => void build.crop(take, frame, mode)} onTrim={(take, seconds) => void build.trim(take, seconds)} onPreview={() => void build.preview()}
       onBack={() => setBuildMode(false)} />;
   };
 
-  /** The /api/generate params for a YuE2 cover of the approved score, as the
-   *  one-shot render and Build by section both submit them, or why not. */
-  const yue2CoverParams = (): { params: Record<string, unknown>; title: string } | string => {
+  /** Why a YuE2 cover of the approved score cannot start yet, or '' when it can. */
+  const yue2CoverBlock = (): string => {
     if (!confirmedPair) return prepareBlock || 'Confirm the score structure and lyrics first';
     if (!approvedSheet || approvedSheet.key !== sourceKey || structureHash(approvedSheet.abc) !== confirmedPair.structureHash)
       return 'Approve the confirmed score first';
-    const missing = yue2CoverContentMissing({ caption: resolvedCaption, lyrics: renderLyrics, instrumental: renderInstrumental });
-    if (missing) return missing;
-  // Take the whole request at click time; the serial queue may start it much later.
-  const engineParams = gp.getGlobalParams() as Record<string, unknown>;
-  const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
-  // Create sends these shared settings with its YuE2 requests too. Keep
-  // ACE model, adapter, sampler and source-audio controls out of this job.
-  const sharedParams = {
-    backend: 'yue2', seed: engineParams.seed, randomSeed: engineParams.randomSeed,
-    batchSize: engineParams.batchSize, duration: -1,
-    postProcessingEnabled: engineParams.postProcessingEnabled,
-    masteringEnabled: engineParams.masteringEnabled, masteringReference: engineParams.masteringReference,
-    lufsEnabled: engineParams.lufsEnabled, lufsTarget: engineParams.lufsTarget,
-    lufsCeilingDb: engineParams.lufsCeilingDb,
-    mm3RefinerEnabled: engineParams.mm3RefinerEnabled, mm3RefinerSteps: engineParams.mm3RefinerSteps,
-    mm3RefinerWindowSeconds: engineParams.mm3RefinerWindowSeconds,
-    mm3RefinerOverlapSeconds: engineParams.mm3RefinerOverlapSeconds, mm3RefinerMix: engineParams.mm3RefinerMix,
-    stableStepOn: engineParams.stableStepOn, stableStepStrength: engineParams.stableStepStrength,
-    stableStepBackend: engineParams.stableStepBackend, stableStepAdapters: engineParams.stableStepAdapters,
-    stableStepSeed: engineParams.stableStepSeed,
-    stableStepSeedFollowsDit: engineParams.stableStepSeedFollowsDit,
-    stableStepSteps: engineParams.stableStepSteps, stableStepSolver: engineParams.stableStepSolver,
-    stableStepScheduler: engineParams.stableStepScheduler,
-    stableStepGuidanceMode: engineParams.stableStepGuidanceMode,
-    stableStepGuidanceScale: engineParams.stableStepGuidanceScale,
-    stableStepPluginParams: engineParams.stableStepPluginParams,
-    whisperLyricsEnabled: engineParams.whisperLyricsEnabled, whisperModel: engineParams.whisperModel,
-    whisperLanguage: engineParams.whisperLanguage, whisperBeamSize: engineParams.whisperBeamSize,
-    whisperIsolateVocals: engineParams.whisperIsolateVocals,
-    qualityEvalEnabled: engineParams.qualityEvalEnabled, qualityEvalTarget: engineParams.qualityEvalTarget,
-    coverArtEnabled: engineParams.coverArtEnabled, coverArtSubject: engineParams.coverArtSubject,
-    coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
-    parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
-    parallelCoverArt: settings.parallelCoverArt,
-  };
-  const pair = yue2PickAtEnqueue(null, {
-    lmAdapterArScale: clampCoverAr(coverArStrength),
-    lmAdapterAr: activeYue2Ar,
-    lmAdapterNar: activeYue2Nar });
-  const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-  const coverChoices = { keepChords, ...coverChoicesFor(approvedSheet.abc, { voices: coverVoices,
-    tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode, keyShift: coverKeyShift, cfgScale: coverCfgScale }) };
-  const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale,
-    yue2LyricSchedule: coverLyricSchedule, customMode: true, taskType: 'text2music',
-    title, artist: targetYue2Artist, artistName: targetYue2Artist || songArtist, sourceArtist: songArtist, caption: artistCaption, style: artistCaption, lyrics: renderInstrumental ? '' : renderLyrics,
-    ...(renderLyricsSource ? { lyricsSource: renderLyricsSource } : {}),
-    ...(sheetScoreSource === 'dataset' ? { scoreSource: 'dataset-sidecar' } : {}),
-    instrumental: renderInstrumental, source: 'cover-studio',
-    ...(sourceMode === 'audio' ? { sourceAudioUrl: approvedSheet.audioUrl } : {}),
-    yue2Cover: sourceMode === 'audio'
-      ? { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices,
-          ...(coverGuide.on && !coverGuideBlock(coverKeyShift, coverTempoMode)
-            ? { guide: (({ on: _on, ...rest }) => rest)(coverGuide) } : {}) }
-      : { sourceKind: 'musicxml', ...coverChoices },
-    yue2Abc: approvedSheet.abc, yue2Prepare: prep.doc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair,
-    ...(renderInstrumental ? { yue2InstrumentalMode: instrumentalMode } : {}) };
-    return { params, title };
+    return yue2CoverContentMissing({ caption: resolvedCaption, lyrics: renderLyrics, instrumental: renderInstrumental }) || '';
   };
 
   const handleGenerate = () => {
@@ -1669,7 +1628,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       return;
     }
     if (!token || (sourceMode === 'audio' && !sourceAudioUrl)) { showToast(t('cover.missingSrcOrLyrics')); return; }
-    if (sourceMode === 'audio' && sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
+    if (sourceMode === 'audio' && (!coverDraftId || !coverDraftRevision)) {
       showToast('Source is still being prepared'); return;
     }
     if (yue2Mode && !confirmedPair) { showToast(prepareBlock || 'Confirm the score structure and lyrics first'); return; }
@@ -1677,225 +1636,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (yue2Mode && renderMode !== 'base' && (!activeYue2Ar || !activeYue2Nar)) {
       showToast('Choose both YuE2 adapter halves'); return;
     }
-    if (sourceMode === 'audio' && sourceAssetId && coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
-      if (yue2Mode && (!approvedSheet || approvedSheet.key !== sourceKey)) {
-        showToast('Approve the confirmed score first'); return;
-      }
-      submitCoverWorkflow();
-      return;
-    }
     if (yue2Mode) {
-      const built = yue2CoverParams();
-      if (typeof built === 'string') { showToast(built); return; }
-      const { params, title } = built;
-      const qId = addManualQueueItem({ title, artistName: targetYue2Artist, caption: artistCaption });
-      updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
-      setIsGenerating(true);
-      enqueueCoverJob(async () => {
-        try {
-          const res = await generateApi.submit(params as any);
-          updateManualQueueItem(qId, { jobId: res.jobId });
-          await pollJobAsync(res.jobId, qId);
-        } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
-        finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
-      });
-      return;
+      const block = yue2CoverBlock();
+      if (block) { showToast(block); return; }
     }
-
-    // Show a queue item immediately ("Queued…" if a cover is already running),
-    // then enqueue the work so the user can stack more without waiting (#62).
-    const coverTitle = songArtist
-      ? `${songTitle || 'Cover'} (${songArtist} Cover)`
-      : (songTitle || 'Cover');
-    const qId = addManualQueueItem({
-      title: coverTitle,
-      artistName: artists.find(a => a.id === selectedArtistId)?.name || '',
-      caption: artistCaption || '',
-    });
-    updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
-    setIsGenerating(true);
-    showToast(t('cover.genStarted'));
-
-    // The closure snapshots the current settings, so each queued cover keeps
-    // the params it was submitted with.
-    enqueueCoverJob(async () => {
-      try {
-      // Step 0: If advanced mode with stems, auto-recombine before generation
-      let effectiveSourceUrl = sourceAudioUrl;
-      if (advancedMode && sepStems && sepStems.length > 0 && sepJobId) {
-        setGenStage(t('cover.recombiningStems'));
-        setGenProgress(2);
-        try {
-          // Build effective controls — log them for diagnostics
-          const effectiveControls = stemControls.map(c => ({
-            index: c.index,
-            volume: c.muted ? 0 : c.volume,
-            muted: c.muted,
-          }));
-          console.log('[CoverStudio] Auto-recombine controls:', JSON.stringify(effectiveControls));
-          console.log('[CoverStudio] Stem names:', sepStems.map(s => `[${s.index}] ${s.name}`).join(', '));
-          const blob = await recombineStems(sepJobId, effectiveControls);
-          // Upload recombined WAV to get a server-side URL; on failure keep the
-          // original. Silent — that fallback is deliberate, not an error worth
-          // a global toast.
-          try {
-            const { audio_url } = await uploadMut.mutateAsync({ path: '/upload/audio', files: [{ field: 'audio', file: blob, name: 'recombined-stems.wav' }], silent: true });
-            if (audio_url) {
-              effectiveSourceUrl = audio_url;
-              console.log('[CoverStudio] Using recombined stems:', audio_url);
-            }
-          } catch { /* upload failed — fall back to the original source */ }
-        } catch (err: any) {
-          console.warn('[CoverStudio] Stem recombine failed, using original:', err.message);
-          showToast(`Stem recombine failed: ${err.message}. Using original audio.`);
-        }
-      }
-      const selectedArtist = artists.find(a => a.id === selectedArtistId);
-      const sourceBpm = bpmOverride != null ? bpmOverride : ((analysis?.bpm || 120) * bpmCorrection);
-      const sourceKey = keyOverride || analysis?.key || 'C major';
-      const targetBpm = Math.round(sourceBpm * tempoScale);
-      const targetKey = pitchShift !== 0 ? transposeKey(sourceKey, pitchShift) : sourceKey;
-
-      // Start from global engine params
-      const engineParams = gp.getGlobalParams();
-
-      // Override with cover-specific params
-      const params: Record<string, any> = {
-        ...engineParams,
-        customMode: true,
-        lyrics: instrumental ? '[Instrumental]' : lyrics,
-        style: artistCaption || engineParams.style || '',
-        title: songArtist
-          ? `${songTitle || 'Cover'} (${songArtist} Cover)`
-          : (songTitle || 'Cover'),
-        taskType: noFsq ? 'cover-nofsq' : 'cover',
-        sourceAudioUrl: effectiveSourceUrl,
-        audioCoverStrength,
-        coverNoiseStrength,
-        ...(coverNoiseMethod ? { coverNoiseMethod } : {}),
-        bpm: targetBpm,
-        keyScale: targetKey,
-        duration: 0,
-        instrumental: instrumental,
-        vocalLanguage,
-        source: 'cover-studio',
-        ...(lyricsSource ? { lyricsSource } : {}),
-        artistName: selectedArtist?.name || songArtist || '',
-        sourceArtist: songArtist || '',
-        ...(sourceLatentUrl ? { sourceLatentUrl } : {}),
-      };
-      if (tempoScale !== 1.0) params.tempoScale = tempoScale;
-      if (pitchShift !== 0) params.pitchShift = pitchShift;
-
-      // Apply album preset adapter (overrides global adapter)
-      if (selectedPreset?.adapter_path) {
-        params.loraPath = selectedPreset.adapter_path;
-        // IMPORTANT: always use the user's manual scale from the adapters dropdown,
-        // NOT the preset's stored scale — user's manual overrides take priority.
-        // params.loraScale and params.adapterGroupScales already come from
-        // engineParams (spread on line 257) and must not be overridden here.
-        // Override trigger word to match the preset's adapter, not the global one
-        if (settings.triggerUseFilename) {
-          const presetFilename = selectedPreset.adapter_path.split(/[\\/]/).pop() || '';
-          const presetTrigger = presetFilename.replace(/\.safetensors$/i, '');
-          if (presetTrigger) {
-            params.triggerWord = presetTrigger;
-            params.triggerPlacement = settings.triggerPlacement || 'prepend';
-          }
-        }
-      }
-      // Reference track + matchering from album preset
-      if (selectedPreset?.reference_track_path) {
-        params.referenceAudioUrl = selectedPreset.reference_track_path;
-        params.masteringEnabled = true;
-        params.masteringReference = selectedPreset.reference_track_path;
-        // Default: use preset reference as timbre (can be overridden below)
-        params.timbreReference = true;
-      }
-      // Timbre conditioning — user override takes priority over preset reference
-      if (timbreOverridePath) {
-        params.timbreReference = timbreOverridePath;
-      } else if (typeof engineParams.timbreReference === 'string' && engineParams.timbreReference) {
-        params.timbreReference = engineParams.timbreReference;
-      }
-
-      const res = await generateApi.submit(params as any);
-      updateManualQueueItem(qId, { jobId: res.jobId });
-      await pollJobAsync(res.jobId, qId);
-      } catch (err: any) {
-        failManualQueueItem(qId, err.message || 'Generation failed');
-      } finally {
-        // Reset the inline progress only once the whole queue has drained.
-        if (_coverQueue.length === 0) {
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setGenProgress(0);
-          setGenStage('');
-        }
-      }
-    });
-  };
-
-  // Poll a single cover job to completion. Resolves on any terminal state so
-  // the serial queue can advance to the next cover. Updates the inline progress
-  // (safe — jobs run one at a time) and the per-job queue item.
-  const pollJobAsync = async (jobId: string, qId: string): Promise<'succeeded' | 'failed' | 'cancelled' | 'timeout'> => {
-    setActiveJobId(jobId); setQueueItemId(qId);
-    setGenProgress(0); setGenStage('Queued...');
-    const timer = createGenerationTimer();
-    let timedOut = false;
-    let outcome: 'succeeded' | 'failed' | 'cancelled' | 'timeout' = 'failed';
-    try {
-      await waitForQuery<GenerationJob>(generationStatusOptions(jobId),
-        s => !timedOut && !['succeeded', 'failed', 'cancelled'].includes(s.status), s => {
-          const tk = timer.tick(s.status);
-          // Server sends 0-100; normalise to 0-100 for display
-          const rawProg = s.progress;
-          const pct = rawProg != null
-            ? Math.min(100, Math.max(0, Math.round(rawProg > 1 ? rawProg : rawProg * 100)))
-            : undefined;
-          if (pct != null) setGenProgress(pct);
-          if (s.stage) setGenStage(s.stage);
-
-          // Update shared queue item
-          updateManualQueueItem(qId, {
-            progress: pct,
-            stage: s.stage || 'Generating...',
-            elapsed: tk.elapsed,
-          });
-
-          if (tk.timedOut) {
-            timedOut = true; outcome = 'timeout';
-            showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-            failManualQueueItem(qId, 'Generation timed out');
-            return;
-          }
-
-          if (s.status === 'succeeded') {
-            outcome = 'succeeded';
-            setGenProgress(100); setGenStage('Complete!');
-            showToast(t('cover.coverGenerated'));
-
-            // Complete queue item with audio data
-            completeManualQueueItem(qId, {
-              audioUrl: s.result?.audioUrls?.[0] || '',
-              songId: s.result?.songIds?.[0],
-              masteredAudioUrl: s.result?.masteredAudioUrl,
-              noAdapterAudioUrl: s.result?.noAdapterAudioUrl,
-              audioDuration: s.result?.duration,
-            });
-          } else if (s.status === 'failed' || s.status === 'cancelled') {
-            outcome = s.status;
-            showToast(`Failed: ${s.error || 'Unknown error'}`);
-            failManualQueueItem(qId, s.error || (s.status === 'cancelled' ? 'Cancelled' : 'Unknown error'));
-          }
-        }, { timeoutMs: (getGenerationTimeoutMinutes() + 30) * 60_000, deliverRepeats: true });
-      await songsChanged();
-    } catch (err) {
-      failManualQueueItem(qId, err instanceof Error ? err.message : 'Generation status failed');
-      return 'failed';
-    }
-    return outcome;
+    submitCoverWorkflow();
   };
 
   // Cancel the currently-running cover. The poll sees the cancelled status,
@@ -1904,7 +1649,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     let cancelled = false;
     if (coverRenderJobRef.current && token) {
       try { await workflowApi.cancel(coverRenderJobRef.current); cancelled = true; } catch {}
-    } else if (activeJobId) { try { await generateApi.cancel(activeJobId); cancelled = true; } catch {} }
+    }
     // Only claim cancellation when the server confirmed it — a failed cancel
     // leaves the job running, and the queue item must stay in flight.
     if (queueItemId && cancelled) failManualQueueItem(queueItemId, 'Cancelled by user');
@@ -1953,7 +1698,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && mm3CoverReady(mm3Cover, sourceAudioUrl)
     : audioTransformMode
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
-    : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
+    : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision : true)
     && (yue2Mode ? !!confirmedPair : (!!lyrics.trim() || instrumental))
     && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (renderMode === 'base' || (!!activeYue2Ar && !!activeYue2Nar)))));
 

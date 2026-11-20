@@ -32,7 +32,7 @@ export async function waitForCoverJob(jobId: string, cancelled: () => boolean,
       progress?.(data.job);
     }, { deliverRepeats: true });
   if (result.job.status !== 'succeeded') throw new Error(result.job.error || `Cover operation ${result.job.status}`);
-  if (result.job.kind === 'cover-render') await songsChanged();
+  if (result.job.kind === 'cover-render' || result.job.kind === 'cover-build-save') await songsChanged();
   return result.job;
 }
 
@@ -41,6 +41,13 @@ export const coverWorkflowApi = {
     metadata: { artist: string; title: string; album: string; duration: number | null };
     analysis: { bpm: number; key: string; scale?: string };
   }, leadSheetSource?: CoverLeadSheetSource) => workflowApi.submit('cover-open', crypto.randomUUID(), { assetId, cached, leadSheetSource }),
+  /** A score-only draft for an imported MusicXML score: no recording, created already approved. */
+  openScore: (abc: string) => workflowApi.submit('cover-open', crypto.randomUUID(), { score: { abc } }),
+  /** Mixes a finished separation's stems down on the server; the result is an audio asset (`assetId`, `audioUrl`). */
+  stems: (separationId: string, controls: { index: number; volume: number; muted: boolean }[]) =>
+    workflowApi.submit('cover-stems', crypto.randomUUID(), { separationId, controls }),
+  /** Save song of a YuE2 Build session: the server renders the kept takes from the session's own params. */
+  buildSave: (sessionId: string) => workflowApi.submit('cover-build-save', crypto.randomUUID(), { sessionId }),
   source: (documentId: string, revision: number, leadSheetSource: CoverLeadSheetSource, assetId?: string) =>
     workflowApi.submit('cover-source', crypto.randomUUID(), { documentId, revision, leadSheetSource, assetId }),
   transcribe: (documentId: string, revision: number, force: boolean) =>

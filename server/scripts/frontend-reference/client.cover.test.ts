@@ -36,6 +36,8 @@ test.before(async () => {
       return { text: 'fixture caption: dusty funk, warm bass' };
     },
     transcribe: async () => { calls.transcribe++; return { abc: FIXTURE_ABC, scoreSource: 'fixture' }; },
+    // The YuE2 cases below queue a YuE2 request while ACE is the active backend.
+    capability: async () => true,
   });
   client = new ReferenceClient(server.origin);
   await client.login();
@@ -134,6 +136,116 @@ test('Cover: auth failure — submitting without a token is 401', async () => {
   const res = await fetch(`${server.origin}/api/workflows/jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind: 'cover-open', idempotencyKey: 'x', input: { assetId: '00000000-0000-4000-8000-000000000000' } }) });
   assert.equal(res.status, 401);
+});
+
+// ── The three client-built bodies that moved to the server ────────────────
+//
+// The fake engine cannot run a YuE2 render, so these read the request the
+// workflow captured on the audio queue (the job's audio intent) instead of
+// waiting for audio. That request is exactly what the bundled UI used to build.
+
+const SCORE_ABC = 'X:1\nM:4/4\nL:1/8\nQ:1/4=120\nK:C\n% verse\nV: Vocal\nC8|D8|\n';
+const yue2Controls = { ...controls, pairMode: 'base', captionMode: 'custom', tempoMode: 'set', coverBpm: 100, keyShift: 2, keepChords: true };
+const queuedRequest = async (jobId: string) => {
+  let job = await client.getWorkflowJob(jobId);
+  for (let i = 0; i < 100 && !(job as unknown as { audioIntentIds: string[] }).audioIntentIds.length
+    && !['failed', 'cancelled', 'succeeded'].includes(job.status); i++) {
+    await new Promise(r => setTimeout(r, 100));
+    job = await client.getWorkflowJob(jobId);
+  }
+  const intent = (job as unknown as { audioIntentIds: string[] }).audioIntentIds[0];
+  assert.ok(intent, `the job queued audio (${job.status}: ${JSON.stringify(job.error)})`);
+  const request = (await client.audioQueueItem(intent)).item.request as Record<string, any>;
+  await client.cancelWorkflowJob(jobId); // the render itself is not under test
+  return request;
+};
+const postJson = (path: string, body: unknown) => fetch(`${server.origin}${path}`, { method: 'POST',
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${client.token}` }, body: JSON.stringify(body) });
+
+test('Cover: a score-only draft (MusicXML) renders a YuE2 cover with no recording, and no other step takes it', async () => {
+  const open = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-open', { score: { abc: `  ${SCORE_ABC}` } })).id);
+  assert.equal(open.status, 'succeeded', JSON.stringify(open.error));
+  const { documentId, revision } = open.result as { documentId: string; revision: number };
+  const { document } = await client.getDocument(documentId);
+  assert.deepEqual([(document.data as any).scoreOnly, (document.data as any).approvedAbc], [true, SCORE_ABC.trim()]);
+
+  await assert.rejects(client.submitWorkflowJob('cover-open', { assetId: '00000000-0000-4000-8000-000000000000', score: { abc: 'x' } }),
+    (err: unknown) => err instanceof ClientError && err.status === 400);
+  const transcribe = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-transcribe', { documentId, revision, force: false })).id);
+  assert.equal(transcribe.status, 'failed');
+  assert.match(JSON.stringify(transcribe.error), /no asset id/);
+  const ace = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-render', renderInput(documentId, revision, 'x'))).id);
+  assert.equal(ace.status, 'failed');
+  assert.match(JSON.stringify(ace.error), /YuE2 only/);
+
+  const request = await queuedRequest((await client.submitWorkflowJob('cover-render', renderInput(documentId, revision, 'dusty funk',
+    { expectedBackend: 'yue2', controls: yue2Controls, targetArtistName: 'Fixture Band' }))).id);
+  assert.equal(request.backend, 'yue2');
+  assert.equal(request.sourceAudioUrl, undefined, 'no recording');
+  assert.equal(request.yue2Abc, SCORE_ABC.trim());
+  assert.deepEqual([request.yue2Cover.sourceKind, request.yue2Cover.tempo, request.yue2Cover.keyShift, request.yue2Cover.keepChords],
+    ['musicxml', 100, 2, true]);
+  assert.deepEqual([request.artist, request.artistName, request.source], ['Fixture Band', 'Fixture Band', 'cover-studio']);
+});
+
+test("Cover: an ACE cover mixes the separation's stems on the server, and only for ACE", async () => {
+  const { documentId, revision, asset } = await openDraft();
+  const { id: separationId } = await client.supersepSeparate(asset.audio_url, 2);
+  const stems = { separationId, controls: [{ index: 0, volume: 1, muted: false }, { index: 1, volume: 0.5, muted: true }] };
+
+  const request = await queuedRequest((await client.submitWorkflowJob('cover-render', renderInput(documentId, revision, 'x', { stems }))).id);
+  assert.match(String(request.sourceAudioUrl), /^\/references\/[0-9a-f-]+\.wav$/);
+  assert.notEqual(request.sourceAudioUrl, asset.audio_url, "the mix replaces the draft's own audio");
+  assert.equal(request.taskType, 'cover');
+
+  const unknown = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-render',
+    renderInput(documentId, revision, 'x', { stems: { ...stems, separationId: 'nope' } }))).id);
+  assert.equal(unknown.status, 'failed');
+  assert.match(JSON.stringify(unknown.error), /Stem separation not found/);
+
+  const yue2 = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-render',
+    renderInput(documentId, revision, 'x', { stems, expectedBackend: 'yue2', controls: yue2Controls }))).id);
+  assert.equal(yue2.status, 'failed');
+  assert.match(JSON.stringify(yue2.error), /ACE covers only/);
+
+  // The YuE2 transcription path mixes through its own step and gets an asset to open a draft on.
+  const mixed = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-stems', stems)).id);
+  assert.equal(mixed.status, 'succeeded', JSON.stringify(mixed.error));
+  const { assetId, audioUrl } = mixed.result as { assetId: string; audioUrl: string };
+  assert.match(audioUrl, /^\/references\//);
+  const reopened = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-open', { assetId })).id);
+  assert.equal(reopened.status, 'succeeded', JSON.stringify(reopened.error));
+});
+
+test('Cover: Build starts from a draft reference and saves through the server', async () => {
+  const open = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-open', { score: { abc: SCORE_ABC } })).id);
+  const { documentId, revision } = open.result as { documentId: string; revision: number };
+  const cover = renderInput(documentId, revision, 'dusty funk', { expectedBackend: 'yue2', controls: yue2Controls });
+
+  // The body the UI used to build is gone: an empty request and a non-YuE2 cover are refused.
+  assert.equal((await postJson('/api/yue2-cover/build', {})).status, 400);
+  const wrong = await postJson('/api/yue2-cover/build', { cover: { ...cover, expectedBackend: 'ace' } });
+  assert.equal(wrong.status, 400);
+  assert.match(((await wrong.json()) as { error: string }).error, /YuE2 backend/);
+  assert.equal((await postJson('/api/yue2-cover/build', { cover: { ...cover, revision: revision + 5 } })).status, 409);
+
+  assert.equal((await client.setActiveBackend('yue2')).activeId, 'yue2');
+  try {
+    const started = await postJson('/api/yue2-cover/build', { cover });
+    assert.equal(started.status, 200, await started.clone().text());
+    const session = await started.json() as { id: string; params: Record<string, any>; kept: unknown[] };
+    assert.equal(session.params.yue2Abc, SCORE_ABC.trim());
+    assert.equal(session.params.yue2Cover.sourceKind, 'musicxml');
+    assert.equal(session.params.sourceAudioUrl, undefined);
+
+    // Save song takes the session id only; with nothing kept it refuses.
+    const empty = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-build-save', { sessionId: session.id })).id);
+    assert.equal(empty.status, 'failed');
+    assert.match(JSON.stringify(empty.error), /Keep at least one take/);
+    const missing = await client.waitForWorkflowJob((await client.submitWorkflowJob('cover-build-save',
+      { sessionId: '00000000-0000-4000-8000-000000000000' })).id);
+    assert.equal(missing.status, 'failed');
+  } finally { await client.setActiveBackend('ace'); }
 });
 
 test('Safety: no real subprocess, LLM, transcriber or off-origin call', () => {

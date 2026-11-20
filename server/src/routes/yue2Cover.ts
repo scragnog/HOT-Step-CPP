@@ -12,7 +12,7 @@ import { yue2PlanStackFrom, yue2ResolvePick } from '../services/backends/yue2/in
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
 import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
 import { remeterTwoFourToFourFour, shiftBarLines } from '../services/backends/yue2/coverScoreTransform.js';
-import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows/coverWorkflow.js';
+import { coverBuildParams, coverScoreDetails, registerCoverWorkflows } from '../services/workflows/coverWorkflow.js';
 import { workflowDocuments } from './workflows.js';
 import { resolveAudioAsset } from '../services/assets/audioAssets.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
@@ -227,10 +227,20 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   };
   // `lyrics` is the build's own text, set on the Build page. It replaces the
   // Prepare lyrics in the session's params and never reaches a dataset.
+  // Cover Studio sends `cover`: the same input `cover-render` takes (a draft
+  // reference plus the studio's controls), and the server writes the params.
+  // Create's Build tab still sends `params` itself.
   router.post('/build', (req: Request, res: Response) => takes(res, () => {
     const userId = authenticate(req)!;
     let params = req.body?.params;
-    if (!params || typeof params !== 'object' || Array.isArray(params)) throw new TakesError('params are required');
+    if (req.body?.cover !== undefined) {
+      try { params = coverBuildParams(req.body.cover, userId); }
+      catch (err) {
+        if (err instanceof WorkflowError) throw new TakesError(err.message, err.status);
+        throw err;
+      }
+    }
+    if (!params || typeof params !== 'object' || Array.isArray(params)) throw new TakesError('cover or params are required');
     if (req.body.lyrics !== undefined) {
       const problem = lyricsProblem(req.body.lyrics);
       if (problem) throw new TakesError(problem);

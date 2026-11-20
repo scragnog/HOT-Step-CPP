@@ -80,13 +80,41 @@ export const coverSourceSchema = coverDraftRefSchema.extend({
  *  caller that already has metadata/analysis for this asset skip Node's
  *  parse + Essentia pass. Creates a `cover-draft` document. */
 export const coverOpenSchema = z.object({
-  assetId: z.string().uuid(),
+  /** The recording to cover. Exactly one of `assetId` and `score`. */
+  assetId: z.string().uuid().optional(),
+  /** A score-only source (an imported MusicXML score, no recording). The draft
+   *  is created already approved, and only the YuE2 `cover-render` and Build
+   *  accept it; every other step answers 400 `Cover draft has no asset id`. */
+  score: z.object({ abc: z.string().trim().min(1).max(500_000) }).optional(),
   leadSheetSource: leadSheetSourceSchema.optional(),
   cached: z.object({
     metadata: z.object({ artist: z.string(), title: z.string(), album: z.string(), duration: z.number().finite().nullable() }),
     analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }),
   }).optional(),
+}).refine(input => (input.assetId === undefined) !== (input.score === undefined),
+  { message: 'Send either assetId or score', path: ['assetId'] });
+
+/** The stems of a finished stem separation, mixed down on the server with
+ *  these per-stem volumes and mutes (what the stem mixer previews). */
+export const coverStemsSchema = z.object({
+  separationId: z.string().min(1),
+  controls: z.array(z.object({
+    index: z.number().int().min(0), volume: z.number().finite().min(0).max(10), muted: z.boolean(),
+  })).min(1).max(64),
 });
+export type CoverStems = z.infer<typeof coverStemsSchema>;
+
+/** POST /api/workflows/jobs { kind: 'cover-stems', input }. Mixes the
+ *  separation's stems down on the server and stores the result as an audio
+ *  asset (the same asset an upload makes), so a draft can be opened on it
+ *  with `cover-open`. Input: `coverStemsSchema`. Result: `{ assetId, audioUrl, filename }`. */
+export interface CoverStemsResult { assetId: string; audioUrl: string; filename: string }
+
+/** POST /api/workflows/jobs { kind: 'cover-build-save', input }. Renders the
+ *  kept takes of a YuE2 Build session once, as an ordinary song (post-processing
+ *  and library save as for any render), from the params the session already
+ *  holds. Result as `cover-render`'s. A session of another user is a 404. */
+export const coverBuildSaveSchema = z.object({ sessionId: z.string().uuid() });
 export interface CoverOpenResult {
   documentId: string; revision: number;
   leadSheetSource?: CoverLeadSheetSource;
@@ -168,6 +196,9 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),
   scoreSource: coverScoreSourceSchema.nullable(),
   prepare: z.unknown().optional(),
+  /** ACE only (400 otherwise): the recording to cover is this separation's stems
+   *  mixed down on the server, replacing the draft's own audio. A failed mix fails the job. */
+  stems: coverStemsSchema.optional(),
   analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }).nullable().optional(),
   settings: z.record(z.string(), z.unknown()),
   controls: z.object({
@@ -186,6 +217,9 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
     lyricSchedule: z.enum(['off', 'bias', 'mask']).default('off'),
     lmAdapterAr: z.string(), lmAdapterNar: z.string(), pairMode: z.enum(['base', 'pair']),
     yue2Pick: z.record(z.string(), z.union([z.string(), z.number()])),
+    /** YuE2 Follow source: the guide settings as the Cover Studio panel holds them
+     *  (without its on/off). Audio sources only; absent leaves the guide off. */
+    guide: z.record(z.string(), z.unknown()).optional(),
     captionMode: z.string(), captionTracks: z.array(z.object({
       name: z.string(), styled: z.string().optional(), caption: z.string().optional(),
       bpm: z.union([z.string(), z.number()]).optional(),
@@ -205,6 +239,8 @@ export interface HeartmulaCoverRolls {
 export interface CoverDraft {
   assetId: string; sha256: string; sourceLabel?: string;
   analysis?: { bpm: number; key: string; scale?: string } | null;
+  /** A score-only draft (`cover-open { score }`): no asset; only the YuE2 render and Build read it. */
+  scoreOnly?: boolean;
   abc?: string; approvedAbc?: string; scoreSource?: string;
   leadSheetSource?: CoverLeadSheetSource;
   leadSheet?: CoverLeadSheetResult;

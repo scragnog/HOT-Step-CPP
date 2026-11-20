@@ -245,9 +245,12 @@ export const yue2CoverApi = {
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }) =>
     request<Yue2SectionMatch>('/sections/match', { method: 'POST', body: JSON.stringify(input) }),
   // All the build commands are silent: Yue2Build renders their failure in its own error line.
-  /** `lyrics` is the build's own text; without it the session follows params.lyrics. */
-  buildStart: (params: Record<string, unknown>, lyrics?: string) =>
-    request<Yue2BuildSession>('/build', { method: 'POST', body: JSON.stringify({ params, ...(lyrics === undefined ? {} : { lyrics }) }) }, { silent: true }),
+  /** `start` is `{ cover }` (Cover Studio: a `cover-render` input, the server writes the params) or the
+   *  params themselves (Create's Build tab). `lyrics` is the build's own text; without it the session follows params.lyrics. */
+  buildStart: (start: Record<string, unknown>, lyrics?: string) =>
+    request<Yue2BuildSession>('/build', { method: 'POST', body: JSON.stringify({
+      ...(Object.keys(start).length === 1 && typeof start.cover === 'object' ? { cover: start.cover } : { params: start }),
+      ...(lyrics === undefined ? {} : { lyrics }) }) }, { silent: true }),
   buildLyricsCheck: (lyrics: string) =>
     request<{ ok: true }>('/build/lyrics-check', { method: 'POST', body: JSON.stringify({ lyrics }) }, { silent: true }),
   buildLyrics: (id: string, revision: number, lyrics: string) =>

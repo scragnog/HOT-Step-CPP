@@ -10,6 +10,8 @@ import { coverScoreDetails, createCoverKinds, effectiveCoverRequest, type CoverR
 import type { AudioIntentItem } from '../../contracts/audioQueue.js';
 import { structureHash } from '../../contracts/yue2Prepare.js';
 import { coverRenderSchema } from '../../contracts/studioWorkflows.js';
+import { listBackends } from '../backends/registry.js';
+import { createBuildSession, generateBuildTakes, getBuildSession, keepBuildTake } from '../yue2Takes.js';
 
 const input: CoverRenderInput = {
   documentId: '11111111-1111-4111-8111-111111111111', revision: 1,
@@ -600,4 +602,82 @@ test('MM3 cover modes map to guide fields, and a plank without a guide asks for 
   const blend = render({ mode: 'blend', blend: 25, strength: 0.9, candidates: 32 });
   assert.equal(blend.mm3BlendPath, 'src.mm3hiddens');
   assert.equal(blend.mm3BlendAmount, 0.25);
+});
+
+test('YuE2: a score-only draft sends no recording and a musicxml cover; an audio draft carries the guide', () => {
+  const abc = 'X:1\nM:4/4\nL:1/8\nQ:1/4=120\nK:C\n% verse\nV: Vocal\nC8|\n';
+  const yue2 = { ...input, expectedBackend: 'yue2' as const, targetArtistName: 'Band',
+    engineParams: { ...input.engineParams, mm3RefinerEnabled: true, mm3RefinerMix: 0.5 },
+    controls: { ...input.controls, guide: { scale: 0.4 } } };
+  const only = effectiveCoverRequest(yue2, { assetId: '', sha256: '', scoreOnly: true, approvedAbc: abc }, '');
+  assert.equal('sourceAudioUrl' in only, false);
+  assert.deepEqual((only.yue2Cover as Record<string, unknown>).sourceKind, 'musicxml');
+  assert.equal('guide' in (only.yue2Cover as object), false, 'a score has no recording to follow');
+  assert.deepEqual([only.artist, only.mm3RefinerEnabled, only.mm3RefinerMix], ['Band', true, 0.5]);
+  const audio = effectiveCoverRequest(yue2, { assetId: 'a', sha256: 's', approvedAbc: abc }, '/references/source.wav');
+  assert.equal(audio.sourceAudioUrl, '/references/source.wav');
+  assert.deepEqual((audio.yue2Cover as Record<string, unknown>).guide, { scale: 0.4 });
+});
+
+test('cover-open takes a score or an asset, never both; a score-only draft is refused by every other step', async () => {
+  const s = setup();
+  assert.throws(() => s.submit('cover-open', 'both', { assetId: '22222222-2222-4222-8222-222222222222', score: { abc: 'X:1\nK:C\nC|' } }));
+  assert.throws(() => s.submit('cover-open', 'neither', {}));
+  const job = s.submit('cover-open', 'score', { score: { abc: '  X:1\nK:C\nC|  ' } }).job;
+  await s.jobs.settled();
+  const opened = s.jobs.get(job.id).result as { documentId: string; revision: number };
+  assert.deepEqual(s.documents.get(opened.documentId, 'owner').data.approvedAbc, 'X:1\nK:C\nC|');
+  const t = s.submit('cover-transcribe', 'tx', { ...opened, force: false }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(t.id).status, 'failed');
+});
+
+test('cover-build-save queues the kept build once, from the session params alone', async t => {
+  const dir = fs.mkdtempSync(path.resolve('.test-cover-build-save-'));
+  const previous = config.data.dir;
+  config.data.dir = dir;
+  t.after(() => { config.data.dir = previous; fs.rmSync(dir, { recursive: true, force: true }); });
+  const wav = Buffer.alloc(44 + 1920);
+  wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(2, 22);
+  wav.writeUInt32LE(48000, 24); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(1920, 40);
+  for (const b of listBackends().filter(x => x.id !== 'yue2' && x.releaseVram)) t.mock.method(b as Required<typeof b>, 'releaseVram', async () => {});
+  const results = new Map<string, unknown[]>();
+  t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url));
+    if (u.pathname === '/yue2/synth') {
+      const req = JSON.parse(String(init?.body)) as { seed?: number; codec_ids?: number[]; songs?: Array<{ seed: number }> };
+      const id = String(results.size + 1);
+      const seeds = req.songs?.map(x => x.seed) ?? [req.seed ?? 1];
+      results.set(id, seeds.map((seed, song) => ({ song, seed: String(seed), noise_seed: String(seed), variation: 0,
+        semantic_ids: [...(req.codec_ids ?? []), ...Array<number>(400).fill(1)], frames: (req.codec_ids?.length ?? 0) + 400 })));
+      return Response.json({ id });
+    }
+    if (u.pathname === '/yue2/align') return Response.json({ words: [] });
+    if (u.searchParams.has('result')) return new Response(new Uint8Array(wav), { headers: { 'content-type': 'audio/wav' } });
+    return Response.json({ status: 'done', tracks: results.get(u.searchParams.get('id')!) });
+  });
+  const abc = ['X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C', '% verse', 'V: Vocal', 'C6|D6|', ''].join('\n');
+  const params = { title: 'Built', caption: 'ambient', lyrics: '[verse]\nfirst line here' };
+  const made = createBuildSession(params, { style: 'ambient', cot: 'off', abc, lyrics: params.lyrics, lm_batch_size: 1, synth_batch_size: 1 }, 'owner');
+  const s = setup();
+  const attempt = () => s.submit('cover-build-save', `save-${s.items.size}-${Math.random()}`, { sessionId: made.id }).job;
+
+  const early = attempt(); await s.jobs.settled();
+  assert.equal(s.jobs.get(early.id).status, 'failed', 'nothing kept yet');
+  assert.match(JSON.stringify(s.jobs.get(early.id).error), /Keep at least one take/);
+  assert.equal(s.items.size, 0);
+
+  generateBuildTakes(made.id, 'owner', 0, 1, 0);
+  for (let i = 0; i < 400 && getBuildSession(made.id, 'owner').pending.length; i++) await new Promise(r => setTimeout(r, 5));
+  const built = getBuildSession(made.id, 'owner');
+  assert.equal(built.error, null);
+  keepBuildTake(made.id, 'owner', built.takes[0].id, built.revision);
+
+  const ok = attempt(); await s.jobs.settled();
+  assert.equal(s.jobs.get(ok.id).status, 'succeeded', JSON.stringify(s.jobs.get(ok.id).error));
+  const request = [...s.items.values()][0].request as Record<string, unknown>;
+  assert.deepEqual(request.yue2Build, { session: made.id });
+  assert.deepEqual([request.yue2BatchSize, request.yue2Variations, request.batchSize, request.randomSeed], [1, 1, 1, true]);
+  assert.equal(request.title, 'Built');
 });

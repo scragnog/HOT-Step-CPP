@@ -4,7 +4,9 @@ import path from 'node:path';
 import { parseFile } from 'music-metadata';
 import { config } from '../../config.js';
 import { getDb } from '../../db/database.js';
-import { resolveAudioAsset } from '../assets/audioAssets.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { recordAudioAsset, resolveAudioAsset } from '../assets/audioAssets.js';
+import { TakesError, getBuildSession } from '../yue2Takes.js';
 import { getActiveBackendId, getBackend } from '../backends/registry.js';
 import { resolveYue2Caption } from '../generation/resolve/captionSource.js';
 import type { Yue2SourceTrack } from '../../contracts/resolution.js';
@@ -20,8 +22,8 @@ import type { WorkflowDocuments } from './revisions.js';
 import {
   coverDraftRefSchema as ref, coverOpenSchema as open, coverTranscribeSchema as transcribe,
   coverCaptionSchema as captionInput, coverRenderSchema as render,
-  coverSourceSchema, type CoverLeadSheetSource, type CoverLeadSheetResult,
-  type CoverRenderInput, type CoverDraft,
+  coverSourceSchema, coverStemsSchema, coverBuildSaveSchema, type CoverLeadSheetSource, type CoverLeadSheetResult,
+  type CoverRenderInput, type CoverDraft, type CoverStems, type CoverStemsResult,
 } from '../../contracts/studioWorkflows.js';
 import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
 import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore, sameAbc } from '../coverLeadSheet.js';
@@ -201,24 +203,28 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       : { mode: 'custom' as const };
   const caption = resolveYue2Caption(i.caption, analysis?.bpm, c.captionTracks as Yue2SourceTrack[], selection).caption;
   const yue2 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('yue2')));
+  // The MM3 refiner post-pass runs on YuE2 output too (yue2/generate.ts), so its settings ride along.
+  const refiner = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('mm3Refiner')));
   const moved = c.keyShift && scoreKey(d.approvedAbc) ? transposeCoverKey(scoreKey(d.approvedAbc), c.keyShift) : '';
-  return { ...shared, ...yue2, backend: 'yue2', duration: -1, expectedBackend: 'yue2',
+  const choices = { voices: c.voices, keepChords: c.keepChords,
+    tempo: c.tempoMode === 'set' ? c.coverBpm : c.tempoMode,
+    key: moved ? moved.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source',
+    ...(moved ? { keyShift: c.keyShift } : {}), cfgScale: c.cfgScale };
+  return { ...shared, ...refiner, ...yue2, backend: 'yue2', duration: -1, expectedBackend: 'yue2',
     coResident: s.coResident, cacheLmCodes: s.cacheLmCodes,
     parallelWhisper: s.parallelWhisper, parallelQualityEval: s.parallelQualityEval,
     parallelCoverArt: s.parallelCoverArt,
     yue2CfgScale: c.cfgScale, yue2LyricSchedule: c.lyricSchedule, customMode: true, taskType: 'text2music',
     title: coverTitle(i), caption, style: caption, lyrics: i.instrumental ? '' : i.lyrics,
+    artist: i.targetArtistName,
     ...(i.lyricsSource ? { lyricsSource: i.lyricsSource } : {}),
     ...scoreMetadata,
     leadSheetRenderingPath: d.leadSheet && !sameAbc(d.leadSheet.abc, d.approvedAbc) ? 'abc-edited' : 'abc',
-    instrumental: i.instrumental, source: 'cover-studio', sourceAudioUrl: url,
+    instrumental: i.instrumental, source: 'cover-studio', ...(d.scoreOnly ? {} : { sourceAudioUrl: url }),
     // The covering band names the saved file and tags it, as on the ACE path.
     artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
-    yue2Cover: { sourceId: url, sourceLabel: d.sourceLabel || url,
-      voices: c.voices, keepChords: c.keepChords,
-      tempo: c.tempoMode === 'set' ? c.coverBpm : c.tempoMode,
-      key: moved ? moved.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source',
-      ...(moved ? { keyShift: c.keyShift } : {}), cfgScale: c.cfgScale },
+    yue2Cover: d.scoreOnly ? { sourceKind: 'musicxml', ...choices }
+      : { sourceId: url, sourceLabel: d.sourceLabel || url, ...choices, ...(c.guide ? { guide: c.guide } : {}) },
     yue2Abc: d.approvedAbc, yue2Cot: c.keepChords ? 'full' : 'melody',
     yue2Pick: { ...c.yue2Pick, lmAdapterAr: c.pairMode === 'pair' ? c.lmAdapterAr : '',
       lmAdapterNar: c.pairMode === 'pair' ? c.lmAdapterNar : '' } };
@@ -313,13 +319,67 @@ async function defaultCaption(artistId: number, provider: string, model: string,
   if (signal.aborted) throw new Error('Cancelled');
   return { text: raw.replace(/^["'`]+|["'`]+$/g, '').trim(), generatedProfileId: profile.id };
 }
-function draft(docs: WorkflowDocuments, id: string, revision: number, user: string): CoverDraft {
+function draft(docs: WorkflowDocuments, id: string, revision: number, user: string, scoreOnly = false): CoverDraft {
   const doc = docs.get(id, user);
   if (doc.kind !== 'cover-draft') throw new WorkflowError(400, 'Document is not a cover draft');
   if (doc.revision !== revision) throw new WorkflowError(409, `Stale cover draft revision ${revision}`);
   const data = doc.data as unknown as CoverDraft;
-  if (!data.assetId) throw new WorkflowError(400, 'Cover draft has no asset id');
+  if (!data.assetId && !(scoreOnly && data.scoreOnly)) throw new WorkflowError(400, 'Cover draft has no asset id');
   return data;
+}
+
+type AssetFn = NonNullable<CoverDeps['asset']>;
+/** Mixes a finished stem separation down in ace-server with the given volumes
+ *  and stores the WAV as an audio asset owned by `userId`, as an upload would. */
+async function mixStemsAsset(stems: CoverStems, userId: string, signal?: AbortSignal): Promise<CoverStemsResult> {
+  const res = await fetch(`${config.aceServer.url}/supersep/recombine`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+    body: JSON.stringify({ id: stems.separationId,
+      stems: stems.controls.map(c => ({ index: c.index, volume: c.muted ? 0 : c.volume, muted: c.muted })) }),
+  });
+  if (res.status === 404) throw new WorkflowError(404, 'Stem separation not found');
+  if (!res.ok) throw new Error(`Stem mix failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  const wav = Buffer.from(await res.arrayBuffer());
+  const file = `${randomUUID()}.wav`;
+  fs.mkdirSync(path.join(config.data.dir, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(config.data.dir, 'references', file), wav);
+  const asset = recordAudioAsset(getDb(), { userId, url: `/references/${file}`, filename: 'recombined-stems.wav',
+    size: wav.length, sha256: createHash('sha256').update(wav).digest('hex') });
+  return { assetId: asset.id, audioUrl: asset.url, filename: asset.filename };
+}
+
+/** The checks both `cover-render` and Build start with: the draft at its pinned
+ *  revision, the prepared lyrics replacing the typed ones, a non-empty vocal,
+ *  and the source asset unchanged. `source` is null for a score-only draft. */
+function prepareCoverInput(i: CoverRenderInput, docs: WorkflowDocuments, asset: AssetFn, userId: string) {
+  let input = i;
+  const data = draft(docs, input.documentId, input.revision, userId, true);
+  if (data.scoreOnly && input.expectedBackend !== 'yue2') throw new WorkflowError(400, 'A score-only source covers with YuE2 only');
+  if (input.stems && input.expectedBackend !== 'ace') throw new WorkflowError(400, 'Stem mixes apply to ACE covers only');
+  if (input.prepare !== undefined && (input.expectedBackend === 'yue2' || input.expectedBackend === 'heartmula')) {
+    const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
+    if ('error' in pair) throw new WorkflowError(409, pair.error);
+    const conflict = instrumentalConflict(pair, input.instrumental);
+    if (conflict) throw new WorkflowError(409, conflict);
+    input = { ...input, lyrics: pair.lyrics };
+  }
+  if (input.expectedBackend !== 'sa3' && !input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
+  const source = data.scoreOnly ? null : asset(data.assetId, userId);
+  if (source && source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
+  return { input, data, source };
+}
+
+/** The /api/generate params a YuE2 Build session starts from, for a Cover
+ *  Studio render input (POST /api/yue2-cover/build { cover }). The same
+ *  request `cover-render` would queue, plus the Prepare document, which
+ *  createBuildSession checks and then drops. */
+export function coverBuildParams(raw: unknown, userId: string): Record<string, unknown> {
+  const parsed = render.safeParse(raw);
+  if (!parsed.success) throw new WorkflowError(400, parsed.error.issues.map(x => `${x.path.join('.')}: ${x.message}`).join('; '));
+  if (parsed.data.expectedBackend !== 'yue2') throw new WorkflowError(400, 'Build by section needs the YuE2 backend');
+  const { input, data, source } = prepareCoverInput(parsed.data, workflowDocuments(), defaultAsset, userId);
+  return { ...effectiveCoverRequest(input, data, source?.url ?? ''),
+    ...(input.prepare !== undefined ? { yue2Prepare: input.prepare } : {}) };
 }
 /** Overrides for the Cover kinds routes/yue2Cover.ts registers at import,
  *  read each time a step runs. Only an isolated harness sets them (the
@@ -338,7 +398,14 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
   const asset = deps.asset || defaultAsset;
   return [{ kind: 'cover-open', input: open, async run(ctx) {
     const input = ctx.input as z.infer<typeof open>;
-    const { assetId } = input;
+    const leadSheetSource = input.leadSheetSource || (dep('leadSheetDefault') || defaultLeadSheetSource)();
+    if (input.score) {
+      const metadata = { artist: '', title: '', album: '', duration: null };
+      const document = docs().create(ctx.userId, 'cover-draft', { assetId: '', sha256: '', scoreOnly: true, sourceLabel: '',
+        metadata, analysis: null, abc: input.score.abc, approvedAbc: input.score.abc, scoreSource: 'musicxml', leadSheetSource });
+      return { documentId: document.id, revision: document.revision, metadata, analysis: null, leadSheetSource };
+    }
+    const assetId = input.assetId!;
     const source = asset(assetId, ctx.userId);
     ctx.emit('stage', { stage: 'Analyzing source' });
     const datasetAnalysis = input.cached ? null : (dep('datasetAnalysis') || readCoverDatasetAnalysis)(source.path);
@@ -352,7 +419,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
       : null);
     const document = docs().create(ctx.userId, 'cover-draft', {
       assetId, sha256: source.sha256, sourceLabel: source.filename, metadata, analysis,
-      abc: '', approvedAbc: '', leadSheetSource: input.leadSheetSource || (dep('leadSheetDefault') || defaultLeadSheetSource)(),
+      abc: '', approvedAbc: '', leadSheetSource,
     });
     return { documentId: document.id, revision: document.revision, metadata, analysis, leadSheetSource: document.data.leadSheetSource };
   } }, { kind: 'cover-source', input: coverSourceSchema, async run(ctx) {
@@ -408,23 +475,18 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     });
     return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: updated.data.scoreSource, leadSheet: updated.data.leadSheet };
   } }, { kind: 'cover-render', input: render, async run(ctx) {
-    let input = ctx.input as CoverRenderInput;
-    const data = draft(docs(), input.documentId, input.revision, ctx.userId);
-    if (input.prepare !== undefined && (input.expectedBackend === 'yue2' || input.expectedBackend === 'heartmula')) {
-      const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
-      if ('error' in pair) throw new WorkflowError(409, pair.error);
-      const conflict = instrumentalConflict(pair, input.instrumental);
-      if (conflict) throw new WorkflowError(409, conflict);
-      input = { ...input, lyrics: pair.lyrics };
-    }
-    if (input.expectedBackend !== 'sa3' && !input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
-    const source = asset(data.assetId, ctx.userId);
-    if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
+    const { input, data, source } = prepareCoverInput(ctx.input as CoverRenderInput, docs(), asset, ctx.userId);
     if (!await (dep('capability') || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');
     ctx.throwIfCancelled();
-    const current = draft(docs(), input.documentId, input.revision, ctx.userId);
-    if (current.assetId !== data.assetId || current.sha256 !== source.sha256) throw new WorkflowError(409, 'Cover source changed');
-    const request = effectiveCoverRequest(input, current, source.url);
+    const current = draft(docs(), input.documentId, input.revision, ctx.userId, true);
+    if (current.assetId !== data.assetId || (source && current.sha256 !== source.sha256)) throw new WorkflowError(409, 'Cover source changed');
+    let url = source?.url ?? '';
+    if (input.stems) {
+      ctx.emit('stage', { stage: 'Mixing stems' });
+      url = (await mixStemsAsset(input.stems, ctx.userId, ctx.signal)).audioUrl;
+      ctx.throwIfCancelled();
+    }
+    const request = effectiveCoverRequest(input, current, url);
     const item = ctx.audio.enqueue('render', request, { source: 'cover-studio', workflowJobId: ctx.jobId });
     const finished = await ctx.audio.wait(item.id);
     ctx.throwIfCancelled();
@@ -433,6 +495,27 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const rolls = heartmulaCover as import('../../contracts/studioWorkflows.js').HeartmulaCoverRolls | undefined;
     return { request: { ...recorded, ...(rolls ? { heartmulaCoverRows: rolls.length, heartmulaCoverBpm: rolls.bpm } : {}) },
       audioIntentId: item.id, audio: finished.result, elapsedSeconds: finished.elapsedSeconds };
+  } }, { kind: 'cover-stems', input: coverStemsSchema, async run(ctx) {
+    ctx.emit('stage', { stage: 'Mixing stems' });
+    const mixed = await mixStemsAsset(ctx.input as CoverStems, ctx.userId, ctx.signal);
+    ctx.throwIfCancelled();
+    return mixed;
+  } }, { kind: 'cover-build-save', input: coverBuildSaveSchema, async run(ctx) {
+    const { sessionId } = ctx.input as z.infer<typeof coverBuildSaveSchema>;
+    let session;
+    try { session = getBuildSession(sessionId, ctx.userId); }
+    catch (err) {
+      if (err instanceof TakesError) throw new WorkflowError(err.status === 404 ? 404 : err.status === 409 ? 409 : 400, err.message);
+      throw err;
+    }
+    if (!session.kept.length) throw new WorkflowError(409, 'Keep at least one take before saving the build');
+    const request = { ...session.params, yue2Build: { session: session.id },
+      yue2BatchSize: 1, yue2Variations: 1, batchSize: 1, randomSeed: true };
+    const item = ctx.audio.enqueue('save', request, { source: 'cover-studio', workflowJobId: ctx.jobId });
+    const finished = await ctx.audio.wait(item.id);
+    ctx.throwIfCancelled();
+    if (finished.status !== 'succeeded') throw new Error(finished.error || `Audio ${finished.status}`);
+    return { request, audioIntentId: item.id, audio: finished.result, elapsedSeconds: finished.elapsedSeconds };
   } }];
 }
 export function registerCoverWorkflows(deps: CoverDeps = {}) {
