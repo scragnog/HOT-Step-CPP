@@ -786,14 +786,27 @@ export async function refreshFailedRenders(): Promise<void> {
 
 /** Submit failed renders again. The server captures each intent afresh, so a
  *  song or preset that changed renders as it is now. */
-function _retryFailedRenders(rows: AudioQueueItem[]): void {
-  const intents = rows.flatMap(row => row.failedRender?.intent ? [row.failedRender.intent] : []);
-  if (!intents.length) return;
-  _dismissRenders(rows.map(row => row.failedRender!.key));
-  void lyricWorkflowApi.submitRenders(intents)
-    .then(job => lyricWorkflowApi.follow(job.id, { onEvent: () => {} }))
-    .catch(err => console.warn('[AudioQueue] Failed render retry did not finish:', err))
-    .finally(() => { void refreshServerProjection(); void refreshFailedRenders(); });
+/** Rows whose resubmission is in flight; a second Retry click skips them. */
+const _retryingRenders = new Set<string>();
+/** POST /lireek/workflow-renders takes 1 to 200 intents. */
+const RENDER_BATCH_MAX = 200;
+
+function _retryFailedRenders(rows: AudioQueueItem[]): number {
+  const todo = rows.filter(row => row.failedRender?.intent && !_retryingRenders.has(row.failedRender.key));
+  for (let at = 0; at < todo.length; at += RENDER_BATCH_MAX) {
+    const chunk = todo.slice(at, at + RENDER_BATCH_MAX);
+    const keys = chunk.map(row => row.failedRender!.key);
+    for (const key of keys) _retryingRenders.add(key);
+    const submitted = lyricWorkflowApi.submitRenders(chunk.map(row => row.failedRender!.intent!));
+    void submitted.catch(() => {}).finally(() => { for (const key of keys) _retryingRenders.delete(key); });
+    void submitted
+      // Dismissed only once the server holds the new job: a refused submit
+      // queued nothing, so its rows stay for another Retry.
+      .then(job => { _dismissRenders(keys); return lyricWorkflowApi.follow(job.id, { onEvent: () => {} }); })
+      .catch(err => console.warn('[AudioQueue] Failed render retry did not finish:', err))
+      .finally(() => { void refreshServerProjection(); void refreshFailedRenders(); });
+  }
+  return todo.length;
 }
 
 
@@ -817,6 +830,7 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _applyChain = Promise.resolve();
   _deliveredSongIds.clear();
   _failedRenders = [];
+  _retryingRenders.clear();
   queryClient.clear();
 }
 
@@ -1071,8 +1085,7 @@ export function retryFailedInAudioQueue(): number {
   const renders = _state.items.filter(item => item.failedRender?.intent);
   void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
     .then(() => refreshServerProjection());
-  _retryFailedRenders(renders);
-  return failed.length + renders.length;
+  return failed.length + _retryFailedRenders(renders);
 }
 
 // ── Manual queue API (for Cover Studio and other non-Lyric-Studio modules) ───

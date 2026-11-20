@@ -96,3 +96,62 @@ test('a render that never reached the queue is a failed row that survives reload
     globalThis.fetch = saved;
   }
 });
+
+test('a refused Retry keeps the rows, a double click submits once, and more than 200 rows go up in batches', async () => {
+  localStorage.setItem(OWNER_KEY, 'server');
+  const many = Array.from({ length: 201 }, (_, i) => i + 100);
+  const jobs = [job('wf-many', { status: 'succeeded',
+    input: { items: many.map(g => ({ type: 'render', intent: intent(g), sourceRevision: 'r', view: view(`Song ${g}`) })) },
+    result: { results: many.map((_, index) => ({ index, status: 'error', error: 'Stale', unqueued: true })) } })];
+  let refuse = true;
+  let release!: () => void;
+  let held: Promise<void> = Promise.resolve();
+  const posts: number[] = [];
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET';
+    const u = new URL(url, 'http://local');
+    if (u.pathname === '/api/audio-queue/items') return ok({ items: [] });
+    if (u.pathname === '/api/workflows/jobs' && u.searchParams.get('kind') === 'lyric-render') return ok({ jobs });
+    if (u.pathname === '/api/lireek/workflow-renders' && method === 'POST') {
+      posts.push(JSON.parse(String(init!.body)).intents.length);
+      await held;
+      if (refuse) return new Response(JSON.stringify({ error: 'Batch must contain 1 to 200 renders' }), { status: 400 });
+      return ok({ job: job(`wf-retry-${posts.length}`, { status: 'pending', input: {}, result: null }), created: true });
+    }
+    return new Response(JSON.stringify({ error: 'no route' }), { status: 404 });
+  }) as typeof fetch;
+  _resetAudioQueueForTests([]);
+  const failedRows = () => _queueItemsForTests().filter(row => row.failedRender);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 50));
+  try {
+    await resumeQueue('t');
+    await refreshFailedRenders();
+    assert.equal(failedRows().length, 201);
+
+    // Refused: nothing was queued, so every row stays, after a reload too.
+    retryFailedInAudioQueue();
+    await settle();
+    assert.deepEqual(posts, [200, 1], 'the route limit is respected');
+    assert.equal(failedRows().length, 201);
+    _resetAudioQueueForTests([]);
+    await resumeQueue('t');
+    await refreshFailedRenders();
+    assert.equal(failedRows().length, 201, 'a refused Retry dismissed nothing');
+
+    // Accepted, with a second click while the first is in flight.
+    refuse = false;
+    posts.length = 0;
+    held = new Promise(resolve => { release = resolve; });
+    assert.equal(retryFailedInAudioQueue(), 201);
+    assert.equal(retryFailedInAudioQueue(), 0, 'rows already being resubmitted are skipped');
+    release();
+    await settle();
+    assert.deepEqual(posts, [200, 1]);
+    await refreshFailedRenders();
+    assert.equal(failedRows().length, 0);
+  } finally {
+    _resetAudioQueueForTests();
+    globalThis.fetch = saved;
+  }
+});
