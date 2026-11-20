@@ -1000,6 +1000,16 @@ test('cover settings: rebuilt into params and request before the first keep, loc
   const settle = (id: string) => until(() => !getBuildSession(id, 'user').pending.length);
   const settings = { voices: 'vocal', tempo: 90, key: 'D', keyShift: 2, cfgScale: 1.2, arStrength: 0 };
 
+  await t.test('free tempo can plan and render a take without sending a tempo', async () => {
+    const free = { ...params, yue2Cover: { ...cover, tempo: 'free' } };
+    const s = createBuildSession(free, toRequest(free), 'user');
+    editBuildPlan(s.id, 'user', 0, ['s1', 's2'], true);
+    generateBuildTakes(s.id, 'user', 0, 1, 1);
+    await settle(s.id);
+    assert.equal(getBuildSession(s.id, 'user').error, null);
+    assert.doesNotMatch(requests.at(-1)!.abc!, /^Q:/m);
+  });
+
   await t.test('each setting reaches the stored params and the next take\'s request', async () => {
     const s = start();
     generateBuildTakes(s.id, 'user', 0, 1, 0);

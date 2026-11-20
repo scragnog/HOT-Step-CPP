@@ -208,7 +208,7 @@ type Spans = Array<[number, number] | null>;
  *  the stored text unchanged, so sessions from before arrangements render as
  *  they did. A lyric schedule is rebuilt from the composed text, or dropped
  *  when that text would pair a block with the wrong occurrence. */
-function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = false): { request: Yue2SynthRequest; lyrics: string; spans: Spans; clock: number[] } {
+function arranged(stored: Pick<Stored, 'request' | 'arrangement' | 'params'>, lookahead = false): { request: Yue2SynthRequest; lyrics: string; spans: Spans; clock: number[] } {
   const abc = stored.request.abc ?? '', lyrics = stored.request.lyrics ?? '';
   const plan = planSections(stored.arrangement);
   // A take of an open plan runs on into the section after it (lookaheadSection).
@@ -226,7 +226,14 @@ function arranged(stored: Pick<Stored, 'request' | 'arrangement'>, lookahead = f
   }
   const marks = scoreSections(request.abc!);
   if (marks.length !== plan.length) throw new TakesError('The arranged score lost a section label; edit the arrangement again.', 409);
-  const bars = scoreBarClock(request.abc!);
+  // Free tempo removes Q: from the synth prompt. Time the arrangement from
+  // the approved source score instead, preserving its beat unit.
+  const source = typeof stored.params.yue2Abc === 'string' ? stored.params.yue2Abc : '';
+  const sourceTempo = source.match(/^Q:[^\r\n]*/m)?.[0];
+  const bpm = Number(stored.params.bpm);
+  const fallback = sourceTempo ?? (Number.isFinite(bpm) && bpm > 0 ? `Q:1/4=${bpm}` : '');
+  const clockScore = !/^Q:/m.test(request.abc!) && fallback ? `${fallback}\n${request.abc!}` : request.abc!;
+  const bars = scoreBarClock(clockScore);
   const clock = marks.map(m => Math.round((bars[m.startBar - 1]?.start ?? 0) * YUE2_FPS))
     .concat(Math.round((bars.at(-1)?.end ?? 0) * YUE2_FPS));
   return { request, lyrics: composed.lyrics, spans: composed.occurrences.map(o => o.lyric), clock };
@@ -534,7 +541,7 @@ export function generateBuildTakes(id: string, userId: string, to: number, count
             update('starting', 0);
           }
           const views = scores.map(abc => (abc === baseScore ? { request, lyrics, spans, clock }
-            : arranged({ request: { ...stored.request, abc }, arrangement: { ...stored.arrangement, sections: sourceSections(abc, sourceLyrics) } }, true)));
+            : arranged({ params: stored.params, request: { ...stored.request, abc }, arrangement: { ...stored.arrangement, sections: sourceSections(abc, sourceLyrics) } }, true)));
           const cap = Math.max(...views.map(v => capOf(v.clock) ?? 0)) || undefined;
           const req: Yue2SynthRequest = { ...request, synth_batch_size: 1,
             ...(prefix.length ? { codec_ids: prefix, continue_codec_ids: true } : {}),
@@ -1025,7 +1032,7 @@ export function editBuildPlan(id: string, userId: string, revision: unknown, upc
   if (arrangement.plan.length > MAX_OCCURRENCES) throw new TakesError(`An arrangement holds at most ${MAX_OCCURRENCES} sections.`);
   const same = (a: typeof arrangement) => JSON.stringify([a.plan, a.finished]);
   if (same(arrangement) === same(stored.arrangement)) return view(stored);
-  arranged({ request: stored.request, arrangement });
+  arranged({ params: stored.params, request: stored.request, arrangement });
   const before = stored.revision;
   stored.arrangement = arrangement;
   stored.revision++;
@@ -1145,7 +1152,7 @@ export function setOccurrenceLyrics(id: string, userId: string, revision: unknow
   }
   if (JSON.stringify(plan) === JSON.stringify(stored.arrangement.plan)) return view(stored);
   const arrangement = { ...stored.arrangement, plan };
-  arranged({ request: stored.request, arrangement });
+  arranged({ params: stored.params, request: stored.request, arrangement });
   stored.arrangement = arrangement;
   stored.revision++;
   save(stored);
@@ -1173,7 +1180,7 @@ export function setOccurrenceOctave(id: string, userId: string, revision: unknow
   }
   if (JSON.stringify(plan) === JSON.stringify(stored.arrangement.plan)) return view(stored);
   const arrangement = { ...stored.arrangement, plan };
-  arranged({ request: stored.request, arrangement });
+  arranged({ params: stored.params, request: stored.request, arrangement });
   stored.arrangement = arrangement;
   stored.revision++;
   save(stored);
@@ -1224,7 +1231,7 @@ export function applyBuildSettings(id: string, userId: string, revision: unknown
     const n = arrangement.nextOccurrence;
     arrangement = { sections: source, plan: source.map((s, i) => ({ id: `o${n + i}`, section: s.id })), nextOccurrence: n + source.length, finished: true };
   }
-  arranged({ request, arrangement });
+  arranged({ params, request, arrangement });
   Object.assign(stored, { params, request, baseAbc: request.abc, sections, arrangement, revision: stored.revision + 1 });
   save(stored);
   return view(stored);
