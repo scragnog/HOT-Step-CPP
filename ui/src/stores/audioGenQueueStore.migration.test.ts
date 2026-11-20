@@ -110,15 +110,42 @@ test("start state: 'browser' (a v1.4.x rollback), items pending — imported, no
   });
 });
 
-test("'browser' after a rollback: items the first import already landed are not sent again", async () => {
+test("'browser' after a rollback: items the first import landed and the server still holds are not sent again", async () => {
   const items = [fixtureItem('old'), fixtureItem('new')];
   await withFakeQueue(items, async ({ storage, idbData, api }) => {
     storage.setItem(OWNER_KEY, 'browser');
     seedBrowserQueue(idbData, items);
-    // The pre-rollback import's receipt: 'old' is on the server already.
+    // The pre-rollback import's receipt: 'old' is on the server already, as
+    // the cancelled row the rollback left, which Retry can reach.
     idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-0', items: [{ legacyId: 'old', itemId: 'srv-old', status: 'cancelled' }] });
+    api.serverItems = [{ id: 'srv-old', status: 'cancelled', meta: { legacyId: 'old' }, request: { title: 'old' }, createdAt: 1 }];
     await ensureQueueOwnerDecided('tok');
     assert.equal(getAudioQueueOwner(), 'server');
+    assert.deepEqual(importedIds(api), ['new']);
+  });
+});
+
+test("'browser' after a rollback: a receipt item whose server row was dismissed since is imported again", async () => {
+  const items = [fixtureItem('old'), fixtureItem('new')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'browser');
+    seedBrowserQueue(idbData, items);
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-0', items: [{ legacyId: 'old', itemId: 'srv-old', status: 'cancelled' }] });
+    api.serverItems = []; // the cancelled row was cleared after the rollback
+    await ensureQueueOwnerDecided('tok');
+    assert.equal(getAudioQueueOwner(), 'server');
+    assert.deepEqual(importedIds(api), ['old', 'new'], 'the still-pending browser item is not lost');
+  });
+});
+
+test("a finished item is never replayed, receipt or not", async () => {
+  const done = { ...fixtureItem('done'), status: 'succeeded' as const, songId: 's1' };
+  const items = [done, fixtureItem('new')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'browser');
+    seedBrowserQueue(idbData, items);
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-0', items: [{ legacyId: 'done', itemId: 'srv-done', status: 'succeeded' }] });
+    await ensureQueueOwnerDecided('tok');
     assert.deepEqual(importedIds(api), ['new']);
   });
 });

@@ -62,6 +62,9 @@ export interface AudioQueueDeps {
   activeEngine: () => string;
   isEngine: (id: string) => boolean;
   now?: () => number;
+  /** Called once each time an item succeeds, whichever attempt it was (a
+   *  Retry included). Errors are logged, never thrown into the queue. */
+  onSucceeded?: (item: AudioIntentItem) => void;
 }
 
 interface Row {
@@ -546,9 +549,13 @@ export class AudioIntentQueue {
       // attempt timestamps, never from submission — a job that sat queued
       // for 600s and ran for 1s must read 1s, not 601s.
       const elapsedSeconds = attemptElapsedSeconds(job, t);
-      this.db.prepare(`UPDATE audio_intents SET status = ?, error = ?, result = ?, elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status = 'submitted'`)
+      const done = this.db.prepare(`UPDATE audio_intents SET status = ?, error = ?, result = ?, elapsed_seconds = ?, updated_at = ? WHERE id = ? AND status = 'submitted'`)
         .run(job.status, job.status === 'failed' ? (job.error ?? 'Generation failed') : null,
           job.result === undefined ? null : JSON.stringify(job.result), elapsedSeconds, t, r.id);
+      if (done.changes === 1 && job.status === 'succeeded' && this.deps.onSucceeded) {
+        try { this.deps.onSucceeded(this.get(r.id)); }
+        catch (err) { console.warn(`[AudioQueue] onSucceeded failed for ${r.id}:`, err); }
+      }
     }
   }
 }

@@ -36,7 +36,7 @@ import {
 import type { QueueItemType } from '../../stores/streamingStore';
 import { lireekApi } from '../../services/lireekApi';
 import type { Artist, LyricsSet, Profile, AlbumPreset, Generation } from '../../services/lireekApi';
-import { captureWrittenSongIntent } from '../../stores/audioGenQueueStore';
+import { captureWrittenSongIntent, refreshFailedRenders } from '../../stores/audioGenQueueStore';
 import { lyricWorkflowApi } from '../../services/lyricWorkflowApi';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { useAuth } from '../../context/AuthContext';
@@ -468,7 +468,8 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         queued = intents.length;
         void lyricWorkflowApi.follow(job.id, { onEvent: event => {
           if (event.type === 'item-error') showToast?.(`Render failed: ${(event.data as { error?: string })?.error || 'Unknown error'}`);
-        } }).catch(err => showToast?.(`Render status unavailable: ${err.message}`));
+        } }).catch(err => showToast?.(`Render status unavailable: ${err.message}`))
+          .finally(() => { void refreshFailedRenders(); });
       } catch (err) {
         failed += intents.length;
         console.error('[QueuePanel] Failed to submit render batch:', err);

@@ -302,8 +302,11 @@ const lyricHistorySchema = z.object({ usedSubjects: z.array(z.string()), usedBpm
 const lyricGenerateItem = lyricItemBase.extend({ type: z.literal('generate'), sourceId: z.number().int().positive(), sourceRevision: z.string(), lyricsSetId: z.number().int().positive().optional(), lyricsSetRevision: z.string().optional(), profileData: z.record(z.string(), z.any()).optional(), artistId: z.number().int().positive().optional(), extraInstructions: z.string().optional(), userSubject: z.string().optional(), noThink: z.boolean().optional(), history: lyricHistorySchema.optional() });
 const lyricRefineItem = lyricItemBase.extend({ type: z.literal('refine'), sourceId: z.number().int().positive(), sourceRevision: z.string(), profileId: z.number().int().positive().optional(), profileRevision: z.string().optional(), source: z.record(z.string(), z.any()), profileData: z.record(z.string(), z.any()).optional(), artist: z.string() });
 export const lyricFetchItem = z.object({ type: z.literal('fetch'), artist: z.string().trim().min(1), album: z.string().optional(), maxSongs: z.number().int().min(1).max(200) });
-export const lyricRenderItem = z.object({ type: z.literal('render'), intent: writtenSongIntentSchema, sourceRevision: z.string() });
-const lyricPreflightItem = z.object({ type: z.literal('preflight-error'), error: z.string() });
+// `view`: what a queue row shows for the song (title, artist, album), built
+// at capture. A render's preflight error keeps its intent, so a client can
+// offer Retry, which submits the intent again.
+export const lyricRenderItem = z.object({ type: z.literal('render'), intent: writtenSongIntentSchema, sourceRevision: z.string(), view: z.record(z.string(), z.unknown()).optional() });
+const lyricPreflightItem = z.object({ type: z.literal('preflight-error'), error: z.string(), intent: writtenSongIntentSchema.optional(), view: z.record(z.string(), z.unknown()).optional() });
 // Generate items share one copy of each profile (keyed by profile id) and
 // each artist's history (keyed by artist id). Jobs captured before that
 // carry profileData and history inline on every item.
@@ -321,5 +324,10 @@ export type LyricBatchInput = z.infer<typeof lyricBatchInputSchema>;
  *  `{ artist_id, lyrics_set_id, songs_fetched }` for fetch, `{ audioIntentId,
  *  generationId, jobId }` for render. A `preflight-error` item (a source
  *  that failed to resolve at submit) always reports `error`. */
-export interface LyricBatchResultItem { index: number; status: 'done' | 'error'; value?: unknown; error?: string }
+export interface LyricBatchResultItem {
+  index: number; status: 'done' | 'error'; value?: unknown; error?: string;
+  /** A render that failed before it reached the audio queue, so no queue row
+   *  shows its error. */
+  unqueued?: boolean;
+}
 export interface LyricBatchResult { results: LyricBatchResultItem[] }

@@ -450,7 +450,9 @@ bearer token.
 
 `request` is the exact body for `/api/generate`, normally a resolve preview's `request`. It is
 captured once and never re-resolved. Its engine is its `expectedBackend`. A request without one
-is pinned to the engine active when it is queued.
+is pinned to the engine active when it is queued. An item whose `meta.lyricLink` is
+`{ generationId, lyricsSetId? }` is listed under that written song (Lyric Studio's
+Recordings) each time an attempt succeeds, a `retry` included.
 
 An item is submitted only while its engine is active. After a backend switch it stays pending
 with a `waiting` message, and the queue does not switch engines itself. At most `maxInFlight`

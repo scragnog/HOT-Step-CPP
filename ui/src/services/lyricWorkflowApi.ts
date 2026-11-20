@@ -26,6 +26,8 @@ export const lyricWorkflowApi = {
     submit('workflow-renders', { intents, idempotencyKey }),
   cancel: (id: string) => workflowApi.cancel(id),
   list: (options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-batch', options, 0),
+  /** Render jobs (POST /lireek/workflow-renders), newest 200. */
+  listRenders: (options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-render', options, 0),
   get: (id: string, options: ReadOptions = {}) => workflowApi.get(id, 0, options),
   follow: followJob,
 };

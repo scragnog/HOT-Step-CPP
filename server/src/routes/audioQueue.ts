@@ -17,6 +17,7 @@ import { getActiveBackendId, getBackend } from '../services/backends/registry.js
 import { cancelGenerationJob, getGenerationJob, submitGeneration } from './generate.js';
 import { AudioIntentQueue, AudioQueueError } from '../services/audioQueue/intentQueue.js';
 import { enqueueAudioIntentSchema, importAudioQueueSchema, type AudioIntentStatus } from '../contracts/audioQueue.js';
+import { linkRenderedRecording } from '../services/lireek/recordingLink.js';
 
 const STATUSES = new Set(['held', 'pending', 'submitting', 'submitted', 'succeeded', 'failed', 'cancelled', 'interrupted']);
 
@@ -88,6 +89,7 @@ export function audioIntentQueue(): AudioIntentQueue {
     cancelJob: id => cancelGenerationJob(id),
     activeEngine: getActiveBackendId,
     isEngine: id => !!getBackend(id),
+    onSucceeded: linkRenderedRecording,
   });
   return instance;
 }

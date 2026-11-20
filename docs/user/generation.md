@@ -599,6 +599,11 @@ re-runs from the Library wait in the same line.
 - The Queue section has Retry for failed items, Clear Done for finished ones, and Reset,
   which cancels everything active and pending on the server. Send To Playlist (off by
   default) adds each finished song to the playlist.
+- A Lyric Studio song that could not be queued at all, for example because the song or
+  its album preset changed before its render started, shows as a failed row with the
+  reason, and stays there after a reload. Retry submits it again with the song and preset
+  as they are now; Clear Done removes it. A Lyric Studio render that fails and then
+  succeeds on Retry is still listed under its song.
 - The queue lives on the server; a fresh install is server-owned from the start. An
   older browser-owned queue with pending work moves to
   the server automatically the next time you load the app, keeping each item's state

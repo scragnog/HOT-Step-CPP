@@ -35,6 +35,8 @@ import {
   readAudioQueue, readGenerationStatus, readSong, readWorkflowJob,
 } from '../queries/shell-queue/queue';
 import { workflowApi } from '../services/workflowApi';
+import { lyricWorkflowApi } from '../services/lyricWorkflowApi';
+import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 import { exportQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
 import { decideQueueOwnerAction } from './audioQueueOwnerDecision';
 import type { AudioIntentItem, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
@@ -117,6 +119,10 @@ export interface AudioQueueItem {
   mm3TakeOf?: string;
   /** This take's seed, lossless (decimal string). */
   mm3TakeSeed?: string;
+  /** A Lyric Studio render that failed before it reached the server queue,
+   *  projected from its lyric-render job (refreshFailedRenders). Retry submits
+   *  `intent` again; X and Clear Done dismiss `key`. */
+  failedRender?: { key: string; intent?: WrittenSongIntent };
 }
 
 export interface AudioGenQueueState {
@@ -436,17 +442,22 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
 /** Finished items are already reflected in the library; nothing needs to
  *  re-run them, so skip importing them into the live server queue. Items an
  *  earlier import already landed (a profile rolled back to the browser in
- *  v1.4.x) are on the server, where Retry reaches them; sending them again
- *  would fail the whole import if a written song now resolves differently. */
+ *  v1.4.x) and whose server row still exists are left there, where Retry
+ *  reaches them; sending them again would fail the whole import if a written
+ *  song now resolves differently. A receipt is history, not proof: a row the
+ *  user has since dismissed is gone, so that item is imported again. */
 async function _resolveImportItems(backup: QueueBackup): Promise<ImportAudioQueue['items']> {
-  const prior = await _idbGet<{ items?: { legacyId: string }[] }>(`${BACKUP_KEY}:receipt`);
-  const landed = new Set(prior?.items?.map(i => i.legacyId));
+  const prior = await _idbGet<{ items?: { legacyId: string; itemId: string }[] }>(`${BACKUP_KEY}:receipt`);
+  const live = prior?.items?.length ? new Set((await readAudioQueue()).items.map(i => i.id)) : new Set<string>();
+  const landed = new Set(prior?.items?.filter(i => live.has(i.itemId)).map(i => i.legacyId));
   const items: ImportAudioQueue['items'] = [];
   for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed' && !landed.has(i.id))) {
     items.push({
       legacyId: item.id,
       request: await resolvedRequestForImport(item),
-      meta: { view: item }, status: item.status, jobId: item.jobId,
+      meta: { view: item, ...(item.generation.provider !== 'create' && item.generation.id && item.lyricsSetId
+        ? { lyricLink: { generationId: item.generation.id, lyricsSetId: item.lyricsSetId } } : {}) },
+      status: item.status, jobId: item.jobId,
       error: item.error,
     });
   }
@@ -639,7 +650,7 @@ async function applyServerItemsNow(items: AudioIntentItem[]): Promise<void> {
       const id = (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id;
       const item = projectServerItem(server, previous.get(id));
       return [item, ...projectTakeSiblings(item, server, previous)];
-    }).concat(local);
+    }).concat(local, _failedRenders);
     _heldIds.clear();
     for (const server of items) if (server.status === 'held') {
       const item = _state.items.find(entry => entry.serverQueueId === server.id);
@@ -695,7 +706,96 @@ function _startServerProjection(token: string): void {
   _lastToken = token;
   _emit();
   void refreshServerProjection();
+  void refreshFailedRenders();
 }
+
+// ── Lyric Studio renders that never reached the queue ───────────────────────
+// A render can fail before the server queues any audio: the song or preset
+// changed before its job ran, or it never resolved at all. No queue row
+// carries that error, so these rows come from the render jobs themselves and
+// survive a reload the same way. Dismissing one is this browser's choice and
+// is kept here; the job is left as it is.
+
+const DISMISSED_RENDERS_KEY = 'lireek-failed-renders-dismissed-v1';
+let _failedRenders: AudioQueueItem[] = [];
+
+function _dismissedRenders(): string[] {
+  try { return JSON.parse(localStorage.getItem(DISMISSED_RENDERS_KEY) || '[]') as string[]; }
+  catch { return []; }
+}
+
+function _dismissRenders(keys: string[]): void {
+  if (!keys.length) return;
+  // ponytail: newest 500 kept; the job list they filter holds 200 jobs at most.
+  localStorage.setItem(DISMISSED_RENDERS_KEY, JSON.stringify([..._dismissedRenders(), ...keys].slice(-500)));
+  const gone = (row: AudioQueueItem) => !!row.failedRender && keys.includes(row.failedRender.key);
+  _failedRenders = _failedRenders.filter(row => !gone(row));
+  _state.items = _state.items.filter(row => !gone(row));
+  _emit();
+}
+
+type RenderJobItem = { type: string; intent?: WrittenSongIntent; view?: Partial<AudioQueueItem> };
+type RenderJobResult = { results?: Array<{ index: number; status: string; error?: string; unqueued?: boolean }> } | null;
+
+/** Failed rows for one render job: each item flagged `unqueued`, or every
+ *  item of a job that failed or was interrupted before it queued anything. */
+export function failedRenderRows(job: WorkflowJob, dismissed: Set<string>): AudioQueueItem[] {
+  const items = (job.input as { items?: RenderJobItem[] }).items ?? [];
+  const failures = job.status === 'succeeded'
+    ? ((job.result as RenderJobResult)?.results ?? []).filter(r => r.status === 'error' && r.unqueued)
+      .map(r => ({ index: r.index, error: r.error ?? 'Render failed' }))
+    : (job.status === 'failed' || job.status === 'interrupted') && job.audioIntentIds.length === 0
+      ? items.flatMap((item, index) => item.intent ? [{ index, error: job.error ?? `Render ${job.status}` }] : [])
+      : [];
+  return failures.flatMap(({ index, error }) => {
+    const key = `${job.id}:${index}`;
+    const item = items[index];
+    if (dismissed.has(key) || !item) return [];
+    const view = item.view ?? {};
+    const generationId = item.intent?.generationId ?? 0;
+    return [{
+      artistId: 0, artistName: '', preset: null, profileId: 0, lyricsSetId: item.intent?.lyricsSetId ?? 0,
+      ...view,
+      id: `failed-render:${key}`,
+      generation: {
+        id: generationId, profile_id: 0, provider: 'lyric-studio', model: '', lyrics: '',
+        created_at: new Date(job.createdAt).toISOString(), ...view.generation,
+        title: view.generation?.title || `Written song ${generationId}`,
+      },
+      globalParams: item.intent?.params ?? {},
+      status: 'failed', error, failedRender: { key, intent: item.intent },
+    } as AudioQueueItem];
+  });
+}
+
+/** Re-read the render jobs and rebuild their failed rows. Called on load and
+ *  whenever a render job the UI follows finishes; not on every poll, since it
+ *  reads whole jobs. */
+export async function refreshFailedRenders(): Promise<void> {
+  if (queueOwner() !== 'server') return;
+  try {
+    const { jobs } = await lyricWorkflowApi.listRenders();
+    const dismissed = new Set(_dismissedRenders());
+    _failedRenders = jobs.flatMap(job => failedRenderRows(job, dismissed));
+    _state.items = _state.items.filter(row => !row.failedRender).concat(_failedRenders);
+    _emit();
+  } catch (err) {
+    console.warn('[AudioQueue] Failed render read failed:', err);
+  }
+}
+
+/** Submit failed renders again. The server captures each intent afresh, so a
+ *  song or preset that changed renders as it is now. */
+function _retryFailedRenders(rows: AudioQueueItem[]): void {
+  const intents = rows.flatMap(row => row.failedRender?.intent ? [row.failedRender.intent] : []);
+  if (!intents.length) return;
+  _dismissRenders(rows.map(row => row.failedRender!.key));
+  void lyricWorkflowApi.submitRenders(intents)
+    .then(job => lyricWorkflowApi.follow(job.id, { onEvent: () => {} }))
+    .catch(err => console.warn('[AudioQueue] Failed render retry did not finish:', err))
+    .finally(() => { void refreshServerProjection(); void refreshFailedRenders(); });
+}
+
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
 
@@ -716,6 +816,7 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _serverProjectionAgain = false;
   _applyChain = Promise.resolve();
   _deliveredSongIds.clear();
+  _failedRenders = [];
   queryClient.clear();
 }
 
@@ -902,6 +1003,8 @@ async function newLyricQueueItem(
 }
 
 export function removeFromAudioQueue(id: string): void {
+  const failed = _state.items.find(item => item.id === id)?.failedRender;
+  if (failed) { _dismissRenders([failed.key]); return; }
   if (queueOwner() === 'server') {
     const serverId = _state.items.find(item => item.id === id)?.serverQueueId;
     if (serverId && _lastToken) {
@@ -945,6 +1048,7 @@ export function forceFailQueueItem(id: string): void {
 }
 
 export function clearFinishedFromAudioQueue(): void {
+  _dismissRenders(_state.items.flatMap(item => item.failedRender ? [item.failedRender.key] : []));
   if (queueOwner() === 'server') {
     // Take rows share their render's server item; it goes once, with its owner
     // row, and the projection drops the takes with it.
@@ -958,14 +1062,17 @@ export function clearFinishedFromAudioQueue(): void {
   _emit();
 }
 
-/** Put every failed server item back in the queue. */
+/** Put every failed server item back in the queue, and submit again every
+ *  Lyric Studio render that failed before reaching it. */
 export function retryFailedInAudioQueue(): number {
-  if (queueOwner() !== 'server') return 0;
+  if (queueOwner() !== 'server' || !_lastToken) return 0;
   // A failed take row (a dropped candidate) belongs to its owner's render.
   const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId && !item.mm3TakeOf);
-  if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
+  const renders = _state.items.filter(item => item.failedRender?.intent);
+  void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
     .then(() => refreshServerProjection());
-  return failed.length;
+  _retryFailedRenders(renders);
+  return failed.length + renders.length;
 }
 
 // ── Manual queue API (for Cover Studio and other non-Lyric-Studio modules) ───

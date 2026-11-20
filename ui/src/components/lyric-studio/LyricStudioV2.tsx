@@ -43,7 +43,8 @@ import { RenderAcrossModal } from './RenderAcrossModal';
 import type { RenderTarget } from './RenderAcrossModal';
 import { useAudioGeneration } from './useAudioGeneration';
 import {
-  captureWrittenSongIntent, ensureQueueOwnerDecided, getAudioQueueOwner, useResumeQueue, useAudioGenQueueSelector,
+  captureWrittenSongIntent, ensureQueueOwnerDecided, getAudioQueueOwner, refreshFailedRenders, useResumeQueue,
+  useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import { lyricWorkflowApi } from '../../services/lyricWorkflowApi';
 import { usePlaybackSelector } from '../../stores/playbackStore';
@@ -511,7 +512,9 @@ export const LyricStudioV2: React.FC = () => {
     const job = await lyricWorkflowApi.submitRenders([intent]);
     void lyricWorkflowApi.follow(job.id, { onEvent: event => {
       if (event.type === 'item-error') showToast(`Render failed: ${(event.data as { error?: string })?.error || 'Unknown error'}`);
-    } }).catch(err => showToast(`Render status unavailable: ${err.message}`));
+    } }).catch(err => showToast(`Render status unavailable: ${err.message}`))
+      // A render that failed before reaching the queue becomes a failed row with Retry.
+      .finally(() => { void refreshFailedRenders(); });
     showToast(renderAs
       ? `Queued: ${gen.title || 'Untitled'} as ${disguiseArtist(renderAs.artistName)}`
       : `Queued: ${gen.title || 'Untitled'}`);

@@ -213,8 +213,13 @@ and submit the job:
   the same input and runner with no limit on jobs at once, so a render never
   waits behind another job and songs submitted one at a time reach the audio
   queue together. Each queued render carries `meta.view` (the song, its
-  artist and album) for the queue row. The bundled UI sends a single render as
-  a batch of one.
+  artist and album) for the queue row, and `meta.lyricLink`
+  (`{ generationId, lyricsSetId }`): the audio queue lists the recording
+  under its song when the item succeeds, on whichever attempt, so a render
+  retried from the queue is listed too. Capture also stores the `view` on
+  each render item, and a render's `preflight-error` item keeps its
+  `intent` and `view`. The bundled UI sends a single render as a batch of
+  one.
 
 Both need the token and answer `{ job, created }`: 201 for a new job, 200
 when the idempotency key repeats it (a key is made up when none is sent), 409
@@ -229,7 +234,10 @@ error reporting the other kinds don't need. `value`'s shape depends on the
 item: `{ id, ... }` for `profile`, `generate` and `refine`, `{ artist_id,
 lyrics_set_id, songs_fetched }` for `fetch`, `{ audioIntentId, generationId,
 jobId }` for `render`. A `preflight-error` item always reports `error` and
-never runs. Items whose source changed since submission (revision mismatch
+never runs. A render that failed before it reached the audio queue (a
+  preflight error, a stale source, a refused enqueue) carries `unqueued: true`
+  in its result entry: no queue row shows that error, so a client shows it
+  from the job, and submitting the item's `intent` again is its Retry. Items whose source changed since submission (revision mismatch
 against the live row) fail with `Source changed since submission` (`Written
 song or preset changed since submission` for a render) rather than running
 against stale data. Items run in lanes, one per artist with each render a

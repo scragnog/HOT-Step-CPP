@@ -15,6 +15,7 @@ import type { LyricsProfile } from './profilerService.js';
 import { registerWorkflowKind } from '../../routes/workflows.js';
 import type { WorkflowContext } from '../workflows/workflowJobs.js';
 import type { AudioIntentItem } from '../../contracts/audioQueue.js';
+import { linkRecording } from './recordingLink.js';
 import {
   lyricBatchInputSchema as lyricBatchInput, lyricItemBase as base,
   lyricFetchItem as fetchItem, lyricRenderItem as render, type LyricBatchInput,
@@ -124,14 +125,16 @@ export async function captureRenderItems(intents: WrittenSongIntent[]): Promise<
   if (intents.length < 1 || intents.length > 200) throw new Error('Batch must contain 1 to 200 renders');
   const items: Item[] = [];
   for (const value of intents) {
+    let intent: WrittenSongIntent | undefined;
     try {
       const parsed = writtenSongIntentSchema.parse(value);
-      const intent = { ...parsed, engine: parsed.engine ?? getActiveBackendId() };
-      const data = await loadWrittenSongData(intent, intent.engine);
-      const resolved = resolveWrittenSongIntent(intent, intent.engine, data);
-      items.push({ type: 'render', intent, sourceRevision: revision(resolved.request) });
+      intent = { ...parsed, engine: parsed.engine ?? getActiveBackendId() };
+      const data = await loadWrittenSongData(intent, intent.engine!);
+      const resolved = resolveWrittenSongIntent(intent, intent.engine!, data);
+      items.push({ type: 'render', intent, sourceRevision: revision(resolved.request), view: renderView(intent) });
     } catch (error) {
-      items.push({ type: 'preflight-error', error: error instanceof Error ? error.message : String(error) });
+      items.push({ type: 'preflight-error', error: error instanceof Error ? error.message : String(error),
+        ...(intent ? { intent, view: renderView(intent) } : {}) });
     }
   }
   return lyricBatchInput.parse({ items });
@@ -182,17 +185,30 @@ function renderView(intent: WrittenSongIntent): Record<string, unknown> {
   };
 }
 
+/** A render that failed before it reached the audio queue (the result's
+ *  `unqueued`): no queue row exists to show the error. */
+class UnqueuedRenderError extends Error {}
+
 async function queueRender(item: z.infer<typeof render>, ctx: WorkflowContext<LyricBatchInput>, index: number): Promise<AudioIntentItem> {
-  const engine = item.intent.engine!;
-  const data = await loadWrittenSongData(item.intent, engine);
-  const resolved = resolveWrittenSongIntent(item.intent, engine, data);
-  if (revision(resolved.request) !== item.sourceRevision) throw new Error('Written song or preset changed since submission');
-  ctx.throwIfCancelled();
-  return ctx.audio.enqueue(`render-${index}`, resolved.request, { source: 'lyric-studio', view: renderView(item.intent) });
+  try {
+    const engine = item.intent.engine!;
+    const data = await loadWrittenSongData(item.intent, engine);
+    const resolved = resolveWrittenSongIntent(item.intent, engine, data);
+    if (revision(resolved.request) !== item.sourceRevision) throw new Error('Written song or preset changed since submission');
+    ctx.throwIfCancelled();
+    // lyricLink: the audio queue lists the recording under its song whichever
+    // attempt succeeds (recordingLink.ts), a Retry from the queue included.
+    return ctx.audio.enqueue(`render-${index}`, resolved.request, {
+      source: 'lyric-studio', view: item.view ?? renderView(item.intent),
+      lyricLink: { generationId: item.intent.generationId, lyricsSetId: item.intent.lyricsSetId },
+    });
+  } catch (error) {
+    throw error instanceof UnqueuedRenderError ? error : new UnqueuedRenderError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index: number, prepared?: AudioIntentItem) {
-  if (item.type === 'preflight-error') throw new Error(item.error);
+  if (item.type === 'preflight-error') throw item.intent ? new UnqueuedRenderError(item.error) : new Error(item.error);
   const prior = completedItem(ctx.jobId, index);
   if (prior) return prior;
   if (item.type === 'render') {
@@ -202,13 +218,7 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
     if (finished.status !== 'succeeded') throw new Error(finished.error || `Audio ${finished.status}`);
     if (!finished.jobId) throw new Error('Audio completed without a generation job id');
     return saveItem(ctx.jobId, index, () => {
-      if (finished.jobId) {
-        const existing = db.getAudioGenerations(item.intent.generationId, item.intent.lyricsSetId)
-          .some((row: any) => row.hotstep_job_id === finished.jobId);
-        if (!existing) db.linkAudioGeneration(item.intent.generationId, finished.jobId, item.intent.lyricsSetId);
-        const url = finished.result?.audioUrl || (finished.result?.audioUrls as string[] | undefined)?.[0];
-        if (typeof url === 'string' && url) db.resolveAudioGeneration(finished.jobId, url);
-      }
+      if (finished.jobId) linkRecording(item.intent, finished.jobId, finished.result);
       return { audioIntentId: finished.id, generationId: item.intent.generationId, jobId: finished.jobId };
     });
   }
@@ -314,7 +324,8 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
       }
     } catch (error) {
       ctx.throwIfCancelled();
-      const result = { index, status: 'error' as const, error: error instanceof Error ? error.message : String(error) };
+      const result = { index, status: 'error' as const, error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof UnqueuedRenderError ? { unqueued: true } : {}) };
       results.push(result);
       ctx.emit('item-error', result);
     }
