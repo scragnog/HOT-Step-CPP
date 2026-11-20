@@ -1,0 +1,98 @@
+// kit/Slider.tsx — the kit slider (tint fill, bevelled thumb); the original ../Slider is untouched. Reusable slider with label, value display, and optional number input
+// Ported to Tailwind styling.
+//
+// Pass `info` to explain the knob. The global param bar's dropdowns used to
+// print that explanation as a paragraph under every slider, which was useful
+// and enormous — five knobs of prose and the panel outgrew the screen. It now
+// hangs off a "?" beside the label instead (see ParamLabel).
+
+import React from 'react';
+import { ParamLabel } from '../ParamLabel';
+
+interface SliderProps {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  /** Fired once a change is finished: drag released, arrow key up, typed
+   *  value blurred or confirmed with Enter, or reset. Optional. */
+  onCommit?: () => void;
+  min: number;
+  max: number;
+  step: number;
+  suffix?: string;
+  showInput?: boolean;
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `value` differs from it. */
+  defaultValue?: number;
+  /** What the knob does, shown in a hover card off a "?" beside the label. */
+  info?: string;
+  /** Optional one-liner above the explanation — default, range, units. */
+  infoMeta?: string;
+  /** Extra control pinned to the right of the header row, beside the value.
+   *  For per-knob modes that aren't points on the scale — Duration's Auto,
+   *  where the backend decides the number instead of the user. */
+  headerRight?: React.ReactNode;
+  /** Called instead of onChange(defaultValue) when the reset icon is
+   *  clicked. For a server-default overlay form, resetting means deleting
+   *  the edit key rather than writing a value — the caller supplies that. */
+  onReset?: () => void;
+  /** Classes for the row holding the range input (e.g. a fixed height to line
+   *  up with a select beside it). */
+  controlClassName?: string;
+  /** Locks the range, the number box and the reset icon, e.g. while the
+   *  previous commit is still saving and a new one would be dropped. */
+  disabled?: boolean;
+}
+
+export const KitSlider: React.FC<SliderProps> = ({
+  label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
+  info, infoMeta, defaultValue, onReset, onCommit, controlClassName, disabled = false,
+}) => {
+  return (
+    <div>
+      <div className="flex items-center justify-between min-h-6 mb-1.5">
+        <ParamLabel
+          label={label}
+          info={info}
+          meta={infoMeta}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={!disabled && defaultValue !== undefined && value !== defaultValue ? () => { (onReset ?? (() => onChange(defaultValue)))(); onCommit?.(); } : undefined}
+        />
+        <div className="flex items-center gap-1.5">
+        {showInput ? (
+          <input
+            type="number"
+            className="w-16 px-2 py-0.5 text-xs text-right text-ink bg-surface-well border border-white/[.07] rounded-ctl outline-none focus-visible:border-tint/50 disabled:opacity-50"
+            value={value}
+            disabled={disabled}
+            onChange={e => onChange(parseFloat(e.target.value) || min)}
+            onBlur={onCommit}
+            onKeyDown={e => { if (e.key === 'Enter') onCommit?.(); }}
+            min={min}
+            max={max}
+            step={step}
+          />
+        ) : (
+          <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">{value}{suffix}</span>
+        )}
+        {headerRight}
+        </div>
+      </div>
+      <div className={controlClassName}>
+        <input
+          type="range"
+          value={value}
+          onChange={e => onChange(parseFloat(e.target.value))}
+          onPointerUp={onCommit}
+          onKeyUp={onCommit}
+          min={min}
+          max={max}
+          step={step}
+          disabled={disabled}
+          style={{ '--pct': `${max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0}%` } as React.CSSProperties}
+          className="kit-range w-full disabled:opacity-50"
+        />
+      </div>
+    </div>
+  );
+};

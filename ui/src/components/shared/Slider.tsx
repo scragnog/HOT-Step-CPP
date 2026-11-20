@@ -62,7 +62,7 @@ export const Slider: React.FC<SliderProps> = ({
         {showInput ? (
           <input
             type="number"
-            className="w-16 px-2 py-0.5 text-xs text-right text-ink bg-surface-well border border-white/[.07] rounded-ctl outline-none focus-visible:border-tint/50 disabled:opacity-50"
+            className="w-16 px-2 py-0.5 text-xs text-right text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded-lg outline-none focus:border-pink-500/50 disabled:opacity-50"
             value={value}
             disabled={disabled}
             onChange={e => onChange(parseFloat(e.target.value) || min)}
@@ -89,7 +89,6 @@ export const Slider: React.FC<SliderProps> = ({
           max={max}
           step={step}
           disabled={disabled}
-          style={{ '--pct': `${max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0}%` } as React.CSSProperties}
           className="w-full disabled:opacity-50"
         />
       </div>

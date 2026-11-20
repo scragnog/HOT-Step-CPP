@@ -56,6 +56,16 @@
   --tint-hover: 94 234 212;
   --tint-glow: 153 246 228;
 }
+[data-tint="violet"] {
+  --tint: 167 139 250;
+  --tint-hover: 196 181 253;
+  --tint-glow: 221 214 254;
+}
+[data-tint="rose"] {
+  --tint: 251 113 133;
+  --tint-hover: 253 164 175;
+  --tint-glow: 254 205 211;
+}
 
 /* ========================================
    Base Styles
@@ -284,11 +294,49 @@ input[type="number"]:focus {
 }
 
 /* ========================================
-   Range Slider — UI kit (tint)
-   Slider.tsx sets --pct (fill, 0-100%); a bare range input shows an empty track.
+   Range Slider — Pink Accent
    ======================================== */
 
 input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: #27272a;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ec4899;
+  cursor: pointer;
+  border: 2px solid #09090b;
+  box-shadow: 0 0 8px rgba(236, 72, 153, 0.3);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #db2777;
+  box-shadow: 0 0 16px rgba(236, 72, 153, 0.4);
+}
+
+/* Light-mode range slider */
+:root:not(.dark) input[type="range"] {
+  background: #e4e4e7;
+}
+
+:root:not(.dark) input[type="range"]::-webkit-slider-thumb {
+  border-color: #ffffff;
+}
+
+/* ========================================
+   Range Slider — UI kit (opt-in: class kit-range, existing sliders untouched) (tint)
+   Slider.tsx sets --pct (fill, 0-100%); a bare range input shows an empty track.
+   ======================================== */
+
+input[type="range"].kit-range {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -300,7 +348,7 @@ input[type="range"] {
   outline: none;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+input[type="range"].kit-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
@@ -312,7 +360,7 @@ input[type="range"]::-webkit-slider-thumb {
   transition: box-shadow 140ms ease;
 }
 
-input[type="range"]::-moz-range-thumb {
+input[type="range"].kit-range::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -322,26 +370,26 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: theme('boxShadow.bevel');
 }
 
-input[type="range"]:hover::-webkit-slider-thumb,
-input[type="range"]:focus-visible::-webkit-slider-thumb {
+input[type="range"].kit-range:hover::-webkit-slider-thumb,
+input[type="range"].kit-range:focus-visible::-webkit-slider-thumb {
   box-shadow: theme('boxShadow.bevel'), 0 0 12px rgb(var(--tint-glow) / 0.24);
 }
 
-input[type="range"]:focus-visible::-webkit-slider-thumb {
+input[type="range"].kit-range:focus-visible::-webkit-slider-thumb {
   outline: 2px solid rgb(var(--tint));
   outline-offset: 2px;
 }
 
-input[type="range"]:focus-visible::-moz-range-thumb {
+input[type="range"].kit-range:focus-visible::-moz-range-thumb {
   outline: 2px solid rgb(var(--tint));
   outline-offset: 2px;
 }
 
-input[type="range"]:active::-webkit-slider-thumb {
+input[type="range"].kit-range:active::-webkit-slider-thumb {
   box-shadow: theme('boxShadow.press');
 }
 
-input[type="range"]:disabled::-webkit-slider-thumb {
+input[type="range"].kit-range:disabled::-webkit-slider-thumb {
   cursor: not-allowed;
 }
 
@@ -436,6 +484,10 @@ input[type="range"]:disabled::-webkit-slider-thumb {
   .kit-btn, .kit-card, .kit-tab, .kit-tab-indicator { transition: none !important; }
   .kit-btn:active:not(:disabled), .kit-card-interactive:active { transform: none; }
 }
+/* Gallery preview of the same rules (class kit-reduce on an ancestor). */
+.kit-reduce .kit-led-track::after { animation: none; }
+.kit-reduce .kit-btn, .kit-reduce .kit-card, .kit-reduce .kit-tab, .kit-reduce .kit-tab-indicator { transition: none !important; }
+.kit-reduce .kit-btn:active:not(:disabled), .kit-reduce .kit-card-interactive:active { transform: none; }
 
 /* ========================================
    Spinner
