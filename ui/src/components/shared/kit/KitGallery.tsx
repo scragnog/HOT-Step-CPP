@@ -13,6 +13,7 @@ import { KitToggle } from './Toggle';
 import { Select } from './Select';
 import { EmptyState, Module, Rail, SectionPanel, SongItem, Well } from './Panels';
 import { MockCreate } from './MockCreate';
+import { MockLayouts } from './MockLayouts';
 import { useTheme } from '../../../hooks/useTheme';
 
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg'];
@@ -57,7 +58,7 @@ export const KitGallery: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
-  const [font, setFont] = useState('1');
+  const [font, setFont] = useState('6');
   const [tab, setTab] = useState('create');
   const [on, setOn] = useState(true);
   const [small, setSmall] = useState(false);
@@ -214,6 +215,10 @@ export const KitGallery: React.FC = () => {
           <SongItem title="Selected" meta="Folk rock" duration="3:03" selected />
           <SongItem title="Playing" meta="Drone" duration="0:28" selected playing />
         </div>
+      </Section>
+
+      <Section title="Layout options: A Console / B Guided (clickable mocks, fake data)">
+        <MockLayouts />
       </Section>
 
       <Section title="Mock Create page (static, every control works)">
