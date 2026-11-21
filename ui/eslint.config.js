@@ -71,6 +71,27 @@ export default defineConfig([
       }],
     },
   },
+  // The studio shell builds on the kit and the shared runtime, not on classic's
+  // components (docs/dev/ui-design.md#shells). This block replaces the one above
+  // for these files, so it repeats the contracts pattern.
+  {
+    files: ['src/shells/studio/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '(^|/)server/src/(?!contracts/)',
+            message: 'Import shared contracts from server/src/contracts/ instead of server implementation code.',
+          },
+          {
+            regex: '(^|/)components/(?!shared/kit/)',
+            message: 'The studio shell may import only components/shared/kit/. Classic components stay in the classic shell.',
+          },
+        ],
+      }],
+    },
+  },
   // Components read through an options factory. See P8.4 in the TanStack doc.
   {
     files: ['src/components/**/*.{ts,tsx}'],

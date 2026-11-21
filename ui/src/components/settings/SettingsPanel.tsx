@@ -13,6 +13,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { engineWorkersOptions, healthOptions, updatesStatusOptions } from '../../queries/shell-queue/settings';
+import { resolveShell, switchShell, type Shell } from '../../app/shell';
 import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
 import { WorkspaceArchivePanel } from './WorkspaceArchivePanel';
@@ -706,6 +707,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           options={SUPPORTED_LANGUAGES.map(l => ({ value: l.code, label: `${l.flag} ${l.name}` }))}
           onChange={(v) => i18n.changeLanguage(v)}
           defaultValue={FALLBACK_LANGUAGE}
+        />
+
+        <SelectRow
+          id="setting-interface"
+          label="Interface"
+          description="Which layout the app starts with. Switching reloads the page. Studio is an unfinished preview."
+          value={resolveShell()}
+          options={[{ value: 'classic', label: 'Classic' }, { value: 'studio', label: 'Studio (preview)' }]}
+          onChange={(v) => switchShell(v as Shell)}
+          defaultValue="classic"
         />
       </div>
 

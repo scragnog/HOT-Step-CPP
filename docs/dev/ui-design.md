@@ -333,6 +333,29 @@ The baseline has been empty (`{}`) since every file was converted in `b6eff9e3`,
 `Toggle`; never run `--update-ui-baseline` to make a new one pass. The baseline only ever goes
 down.
 
+## Shells
+
+The app has two roots, picked at boot in `ui/src/main.tsx` through `app/shell.ts`: **classic**
+(`App.tsx`, the layout described above) and **studio** (`shells/studio/StudioApp.tsx`, a work in
+progress). `?ui=classic|studio` wins and is saved to `hs-shell`; without it the saved value is used;
+without that, classic. Settings, General, Interface writes the same key. A switch is a full page
+reload, never a live swap, and only the chosen shell is downloaded (`import()` under `Suspense`).
+
+Both shells call `useAppRuntime` (`ui/src/app/`) once. It owns everything that is not layout: queue
+resume and projection, live MM3 takes and the play-bar handover, song-cache patches from window
+events, the library refetch after a reconnect, offline and restart detection, and the `ace-settings`
+flags a Create render carries. A new runtime concern goes there, not into a shell.
+
+Rules:
+
+- **Fence.** `src/shells/studio/**` may import only `components/shared/kit/` from `components/`
+  (`no-restricted-imports` in `ui/eslint.config.js`). Everything else comes from the runtime, stores,
+  queries and services.
+- **CSS.** `index.css` is frozen apart from kit classes. Studio CSS lives in a file imported by the
+  studio entry only.
+- **Persisted keys.** Studio-only keys use an `hs-studio-` prefix. The shape of an existing key never
+  changes, because classic reads it too. `hs-shell` holds a JSON string, `"classic"` or `"studio"`.
+
 ## Verifying a change
 
 Type-check (`npx tsc -b` from `ui/`), then ask the user to look at the screen; never use a browser
