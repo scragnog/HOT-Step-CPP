@@ -25,6 +25,7 @@ export default {
           DEFAULT: 'rgb(var(--tint) / <alpha-value>)',
           hover: 'rgb(var(--tint-hover) / <alpha-value>)',
           glow: 'rgb(var(--tint-glow) / <alpha-value>)',
+          deep: 'rgb(var(--tint-deep) / <alpha-value>)',
         },
         surface: { well: '#0d0d0f', chassis: '#111113', panel: '#19191c', raised: '#232326' },
         ink: { DEFAULT: '#eeeae5', muted: '#a6a19b', onTint: '#111113' },

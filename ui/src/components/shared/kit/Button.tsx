@@ -1,5 +1,5 @@
 // Button.tsx — the kit's button. One base recipe (.kit-btn in index.css: radius,
-// bevel, border, hover glow, press); `size` and `variant` ride on top.
+// depth, border, hover glow, press); `size` and `variant` ride on top.
 // To add a size or variant: add its .kit-btn-<name> class in index.css and its
 // name here. See docs/dev/ui-design.md.
 
@@ -11,7 +11,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 /** Whole class names: Tailwind only keeps classes it can see in the source. */
 const SIZE_CLASS: Record<ButtonSize, string> = { sm: 'kit-btn-sm', md: 'kit-btn-md', lg: 'kit-btn-lg' };
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
-  primary: 'kit-btn-primary', secondary: 'kit-btn-secondary', ghost: 'kit-btn-ghost', danger: 'kit-btn-danger',
+  primary: 'kit-btn-primary kit-fill', secondary: 'kit-btn-secondary kit-raised', ghost: 'kit-btn-ghost', danger: 'kit-btn-danger kit-raised',
 };
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -26,7 +26,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     <button
       ref={ref}
       type={type}
-      className={`kit-btn kit-focus ${SIZE_CLASS[size]} ${VARIANT_CLASS[variant]}${iconOnly ? ' kit-btn-icon' : ''} ${className}`}
+      className={`kit-btn kit-lift kit-focus ${SIZE_CLASS[size]} ${VARIANT_CLASS[variant]}${iconOnly ? ' kit-btn-icon' : ''} ${className}`}
       {...rest}
     />
   ),

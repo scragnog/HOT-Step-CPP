@@ -65,7 +65,7 @@ export const KitToggle: React.FC<KitToggleProps> = ({
       title={title}
       disabled={disabled}
       onClick={(e) => { e.stopPropagation(); if (!disabled) onChange(!checked); }}
-      className={`relative inline-flex ${s.track} items-center rounded-full border border-white/[.07] shadow-press transition-colors duration-glow motion-reduce:transition-none flex-shrink-0 kit-focus ${checked ? 'bg-tint' : 'bg-surface-well'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={`relative inline-flex ${s.track} items-center rounded-full transition-colors duration-glow motion-reduce:transition-none flex-shrink-0 kit-focus ${checked ? 'kit-fill' : 'kit-well'} ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
     >
       <span className={`inline-block ${s.thumb} rounded-full bg-ink shadow-bevel transform transition-transform duration-glow motion-reduce:transition-none ${checked ? s.on : s.off}`} />
     </button>

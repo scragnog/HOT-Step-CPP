@@ -42,7 +42,7 @@ export interface CardProps extends React.HTMLAttributes<HTMLElement> {
 
 export const Card: React.FC<CardProps> = ({ onClick, className = '', ...rest }) =>
   onClick ? (
-    <button type="button" onClick={onClick} className={`kit-card kit-card-interactive kit-focus block w-full text-ink ${className}`} {...(rest as React.ButtonHTMLAttributes<HTMLButtonElement>)} />
+    <button type="button" onClick={onClick} className={`kit-card kit-raised kit-lift kit-card-interactive kit-focus block w-full text-ink ${className}`} {...(rest as React.ButtonHTMLAttributes<HTMLButtonElement>)} />
   ) : (
-    <div className={`kit-card text-ink ${className}`} {...(rest as React.HTMLAttributes<HTMLDivElement>)} />
+    <div className={`kit-card kit-raised text-ink ${className}`} {...(rest as React.HTMLAttributes<HTMLDivElement>)} />
   );

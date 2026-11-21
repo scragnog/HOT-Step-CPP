@@ -44,6 +44,24 @@
   --tint: 245 166 35;
   --tint-hover: 255 190 85;
   --tint-glow: 255 197 109;
+  --tint-deep: 201 131 26;
+
+  /* Depth recipe (docs/dev/ui-design.md): gradients, edges, wells. */
+  --grad-raised: linear-gradient(180deg, #2d2d31 0%, #232326 55%, #1c1c1f 100%);
+  --grad-raised-press: linear-gradient(180deg, #19191c 0%, #202023 100%);
+  --grad-panel: linear-gradient(180deg, #1d1d20 0%, #17171a 100%);
+  --grad-well: linear-gradient(180deg, #08080a 0%, #0e0e10 100%);
+  --edge-side: rgb(255 255 255 / 0.07);
+  --edge-neutral: inset 0 1px 0 rgb(255 255 255 / 0.14);
+  --edge-tint: inset 0 1px 0 rgb(255 255 255 / 0.4);
+  --drop: 0 2px 4px rgb(0 0 0 / 0.35);
+  --press-shadow: inset 0 2px 5px rgb(0 0 0 / 0.6);
+  --well-shadow: inset 0 3px 6px rgb(0 0 0 / 0.65), inset 0 1px 0 rgb(0 0 0 / 0.5), 0 1px 0 rgb(255 255 255 / 0.04);
+
+  /* Kit font roles; the test page swaps them live. Final pick: self-host. */
+  --font-body: "Inter", sans-serif;
+  --font-heading: "Inter", sans-serif;
+  --font-mono: "Inter", sans-serif;
 
   /* Transitions */
   --transition-fast: 150ms ease;
@@ -51,20 +69,32 @@
   --transition-slow: 300ms ease;
 }
 
+/* The tint gradients must resolve where the tint is set, so they are declared
+   on :root and on every [data-tint] scope (a var() in a custom property is
+   substituted at the element that declares it). */
+:root,
+[data-tint] {
+  --grad-tint: linear-gradient(180deg, rgb(var(--tint-hover)) 0%, rgb(var(--tint)) 55%, rgb(var(--tint-deep)) 100%);
+  --grad-tint-hover: linear-gradient(180deg, rgb(var(--tint-glow)) 0%, rgb(var(--tint-hover)) 55%, rgb(var(--tint)) 100%);
+  --grad-tint-press: linear-gradient(180deg, rgb(var(--tint-deep)) 0%, rgb(var(--tint)) 100%);
+}
 [data-tint="teal"] {
   --tint: 45 212 191;
   --tint-hover: 94 234 212;
   --tint-glow: 153 246 228;
+  --tint-deep: 20 150 138;
 }
 [data-tint="violet"] {
   --tint: 167 139 250;
   --tint-hover: 196 181 253;
   --tint-glow: 221 214 254;
+  --tint-deep: 124 95 224;
 }
 [data-tint="rose"] {
   --tint: 251 113 133;
   --tint-hover: 253 164 175;
   --tint-glow: 254 205 211;
+  --tint-deep: 225 70 100;
 }
 
 /* ========================================
@@ -341,10 +371,10 @@ input[type="range"].kit-range {
   appearance: none;
   width: 100%;
   height: 6px;
-  background: linear-gradient(to right, rgb(var(--tint)) var(--pct, 0%), theme('colors.surface.well') var(--pct, 0%));
+  background: var(--grad-tint) 0 0 / var(--pct, 0%) 100% no-repeat, var(--grad-well);
   border: 1px solid rgb(255 255 255 / 0.07);
   border-radius: 3px;
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.5);
+  box-shadow: var(--well-shadow);
   outline: none;
 }
 
@@ -394,9 +424,11 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
 }
 
 /* ========================================
-   UI kit components (ui/src/components/kit; docs/dev/ui-design.md)
+   UI kit components (ui/src/components/shared/kit; docs/dev/ui-design.md)
    Every colour comes from the tint variables or the surface/ink/status
-   tokens, so [data-tint] re-colours the lot.
+   tokens, so [data-tint] re-colours the lot. Depth is one recipe, here:
+   gradients (light top, dark bottom), a bright 1px top edge, a real glow
+   on hover, wells darker at the top. Never restyle depth per component.
    ======================================== */
 
 @layer components {
@@ -407,20 +439,61 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
     outline-offset: 2px;
   }
 
+  /* --- Fonts: three roles, set once per page (tokens in :root) --- */
+  .kit-root { font-family: var(--font-body); }
+  .kit-heading { font-family: var(--font-heading); }
+  .kit-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+  /* --- Depth recipe --------------------------------------------------
+     .kit-raised  neutral raised surface (secondary button, select, card)
+     .kit-fill    tint fill (primary, toggle on)
+     .kit-well    recessed area (inputs, lyrics, log)
+     .kit-lift    hover glow and press, on top of raised or fill. */
+  .kit-raised {
+    background: var(--grad-raised);
+    border: 1px solid var(--edge-side);
+    box-shadow: var(--edge-neutral), var(--drop);
+  }
+  .kit-fill {
+    background: var(--grad-tint);
+    border: 1px solid rgb(0 0 0 / 0.28);
+    box-shadow: var(--edge-tint), var(--drop);
+  }
+  .kit-well {
+    background: var(--grad-well);
+    border: 1px solid var(--edge-side);
+    box-shadow: var(--well-shadow);
+  }
+  .kit-lift {
+    transition: box-shadow 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease, transform 70ms ease;
+  }
+  /* Hover: brighter border, a ring, an outer glow. */
+  .kit-lift:hover:not(:disabled),
+  .kit-lift[data-force="hover"] {
+    border-color: rgb(var(--tint-hover) / 0.8);
+    box-shadow: var(--edge-neutral), 0 0 0 1px rgb(var(--tint) / 0.55), 0 0 14px 2px rgb(var(--tint-glow) / 0.35);
+  }
+  .kit-fill.kit-lift:hover:not(:disabled),
+  .kit-fill.kit-lift[data-force="hover"] {
+    background: var(--grad-tint-hover);
+    border-color: rgb(var(--tint-glow) / 0.9);
+    box-shadow: var(--edge-tint), 0 0 0 1px rgb(var(--tint) / 0.55), 0 0 14px 2px rgb(var(--tint-glow) / 0.35);
+  }
+  /* Pressed: gradient darkens, inset shadow, 1px drop. */
+  .kit-lift:active:not(:disabled),
+  .kit-lift[data-force="press"] {
+    transform: translateY(1px);
+    background: var(--grad-raised-press);
+    box-shadow: var(--press-shadow);
+  }
+  .kit-fill.kit-lift:active:not(:disabled),
+  .kit-fill.kit-lift[data-force="press"] {
+    background: var(--grad-tint-press);
+  }
+
   /* --- Button: one base; size and variant ride on top --- */
   .kit-btn {
-    --glow: var(--tint-glow);
-    @apply inline-flex select-none items-center justify-center gap-2 rounded-ctl border border-white/[.07] font-medium shadow-bevel;
-    transition: box-shadow 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 70ms ease;
-  }
-  .kit-btn:hover:not(:disabled),
-  .kit-btn[data-force="hover"] {
-    box-shadow: theme('boxShadow.bevel'), 0 0 14px rgb(var(--glow) / 0.24);
-  }
-  .kit-btn:active:not(:disabled),
-  .kit-btn[data-force="press"] {
-    transform: translateY(1px);
-    box-shadow: theme('boxShadow.press');
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-ctl font-medium;
   }
   .kit-btn:disabled {
     @apply cursor-not-allowed opacity-40;
@@ -433,32 +506,71 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
   .kit-btn-icon.kit-btn-md { @apply w-9 px-0; }
   .kit-btn-icon.kit-btn-lg { @apply w-12 px-0; }
 
-  .kit-btn-primary { @apply border-transparent bg-tint text-ink-onTint hover:bg-tint-hover; }
-  .kit-btn-secondary { @apply bg-surface-raised text-ink hover:border-tint/40; }
-  .kit-btn-ghost { @apply border-transparent bg-transparent text-ink-muted shadow-none hover:bg-white/5 hover:text-ink; }
-  .kit-btn-ghost:hover:not(:disabled) { box-shadow: none; }
-  .kit-btn-danger { --glow: 251 113 133; @apply border-status-error/40 bg-status-error/15 text-status-error hover:bg-status-error/25; }
+  .kit-btn-primary { @apply text-ink-onTint; text-shadow: 0 1px 0 rgb(255 255 255 / 0.25); }
+  .kit-btn-secondary { @apply text-ink; }
+  .kit-btn-ghost { @apply border border-transparent bg-transparent text-ink-muted shadow-none; }
+  .kit-btn-ghost:hover:not(:disabled) { @apply bg-white/5 text-ink; background-image: none; border-color: transparent; box-shadow: none; }
+  .kit-btn-ghost:active:not(:disabled) { background: rgb(0 0 0 / 0.25); box-shadow: none; }
+  .kit-btn-danger {
+    @apply text-status-error;
+    background: linear-gradient(180deg, rgb(251 113 133 / 0.28), rgb(251 113 133 / 0.12));
+    border-color: rgb(251 113 133 / 0.4);
+  }
+  .kit-btn-danger:hover:not(:disabled),
+  .kit-btn-danger[data-force="hover"] {
+    background: linear-gradient(180deg, rgb(251 113 133 / 0.38), rgb(251 113 133 / 0.2));
+    border-color: rgb(253 164 175 / 0.8);
+    box-shadow: var(--edge-neutral), 0 0 0 1px rgb(251 113 133 / 0.5), 0 0 14px 2px rgb(254 205 211 / 0.3);
+  }
+  .kit-btn-danger:active:not(:disabled),
+  .kit-btn-danger[data-force="press"] { background: linear-gradient(180deg, rgb(251 113 133 / 0.1), rgb(251 113 133 / 0.22)); }
 
   /* --- Panel / Card --- */
-  .kit-panel { @apply overflow-hidden rounded-panel border border-white/[.07] bg-surface-panel shadow-bevel; }
-  .kit-panel-header { @apply flex items-center justify-between gap-2 border-b border-white/[.07] bg-surface-raised/60 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-ink-muted; }
-  .kit-card { @apply rounded-panel border border-white/[.07] bg-surface-raised p-3 text-left shadow-bevel; transition: box-shadow 140ms ease, border-color 140ms ease, transform 70ms ease; }
+  .kit-panel { @apply overflow-hidden rounded-panel; background: var(--grad-panel); border: 1px solid var(--edge-side); box-shadow: var(--edge-neutral), var(--drop); }
+  .kit-panel-header { @apply flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-ink-muted; font-family: var(--font-heading); background: var(--grad-raised); border-bottom: 1px solid rgb(0 0 0 / 0.45); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), 0 1px 0 rgb(255 255 255 / 0.04); }
+  .kit-card { @apply rounded-panel p-3 text-left; }
   .kit-card-interactive { @apply cursor-pointer; }
-  .kit-card-interactive:hover { border-color: rgb(var(--tint) / 0.4); box-shadow: theme('boxShadow.bevel'), 0 0 14px rgb(var(--tint-glow) / 0.24); }
-  .kit-card-interactive:active { transform: translateY(1px); box-shadow: theme('boxShadow.press'); }
+
+  /* --- Section panel: chassis-level container --- */
+  .kit-section { @apply flex min-h-0 flex-col overflow-hidden rounded-panel; background: var(--grad-panel); border: 1px solid var(--edge-side); box-shadow: var(--edge-neutral), 0 4px 10px rgb(0 0 0 / 0.4); }
+  .kit-section-head { @apply flex shrink-0 items-center gap-3 px-4 py-3; background: var(--grad-raised); border-bottom: 1px solid rgb(0 0 0 / 0.5); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 1px 0 rgb(255 255 255 / 0.04); }
+  .kit-section-title { @apply text-[17px] font-semibold text-ink; font-family: var(--font-heading); text-shadow: 0 1px 0 rgb(0 0 0 / 0.6); }
+  .kit-section-body { @apply min-h-0 flex-1 p-4; }
+  .kit-section-foot { @apply flex shrink-0 items-center justify-between gap-3 px-4 py-2.5 text-xs text-ink-muted; background: linear-gradient(180deg, rgb(0 0 0 / 0.18), rgb(0 0 0 / 0.32)); border-top: 1px solid rgb(255 255 255 / 0.06); box-shadow: inset 0 1px 0 rgb(0 0 0 / 0.5); }
+
+  /* --- Well: recessed area, darker at the top --- */
+  .kit-well-block { @apply rounded-ctl p-3 text-sm text-ink; }
+
+  /* --- Control module: engraved label, divider rails --- */
+  .kit-module { @apply rounded-panel; background: linear-gradient(180deg, rgb(255 255 255 / 0.025), rgb(0 0 0 / 0.12)); border: 1px solid rgb(0 0 0 / 0.4); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 1px 0 rgb(255 255 255 / 0.04); }
+  .kit-module-label { @apply px-3 pt-2 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted; font-family: var(--font-heading); text-shadow: 0 1px 0 rgb(255 255 255 / 0.07), 0 -1px 0 rgb(0 0 0 / 0.7); }
+  .kit-rail-h { height: 0; border-top: 1px solid rgb(0 0 0 / 0.55); border-bottom: 1px solid rgb(255 255 255 / 0.05); }
+  .kit-rail-v { width: 0; align-self: stretch; border-left: 1px solid rgb(0 0 0 / 0.55); border-right: 1px solid rgb(255 255 255 / 0.05); }
+
+  /* --- List item / song card: rest, hover, selected, playing --- */
+  .kit-item { @apply flex w-full cursor-pointer items-center gap-3 rounded-ctl px-2.5 py-2 text-left text-ink; background: transparent; border: 1px solid transparent; transition: box-shadow 140ms ease, background 140ms ease, border-color 140ms ease; }
+  .kit-item:hover,
+  .kit-item[data-force="hover"] { background: var(--grad-raised); border-color: rgb(var(--tint-hover) / 0.55); box-shadow: var(--edge-neutral), 0 0 0 1px rgb(var(--tint) / 0.35), 0 0 12px 1px rgb(var(--tint-glow) / 0.25); }
+  .kit-item[aria-current="true"] { background: linear-gradient(180deg, rgb(var(--tint) / 0.22), rgb(var(--tint-deep) / 0.12)); border-color: rgb(var(--tint) / 0.6); box-shadow: inset 0 1px 0 rgb(var(--tint-glow) / 0.3); }
+  .kit-item[data-playing="true"] .kit-item-title { color: rgb(var(--tint-hover)); }
+  .kit-item:active { transform: translateY(1px); }
+  .kit-thumb { @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-ctl text-ink-onTint; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 3px rgb(0 0 0 / 0.5); }
 
   /* --- Tabs: the indicator slides under the active tab --- */
-  .kit-tabs { @apply relative inline-flex gap-1 rounded-ctl border border-white/[.07] bg-surface-well p-1; }
+  .kit-tabs { @apply relative inline-flex gap-1 rounded-ctl p-1; background: var(--grad-well); border: 1px solid var(--edge-side); box-shadow: var(--well-shadow); }
   .kit-tab { @apply relative z-10 h-8 rounded-ctl px-3 text-sm font-medium text-ink-muted; transition: color 140ms ease; }
   .kit-tab:hover { @apply text-ink; }
   .kit-tab[aria-selected="true"] { @apply text-ink-onTint; }
   .kit-tab-indicator {
-    @apply pointer-events-none absolute top-1 h-8 rounded-ctl bg-tint shadow-bevel;
+    @apply pointer-events-none absolute top-1 h-8 rounded-ctl;
+    background: var(--grad-tint);
+    border: 1px solid rgb(0 0 0 / 0.28);
+    box-shadow: var(--edge-tint), 0 2px 4px rgb(0 0 0 / 0.35), 0 0 10px rgb(var(--tint-glow) / 0.2);
     transition: transform 200ms cubic-bezier(0.3, 0.7, 0.2, 1), width 200ms cubic-bezier(0.3, 0.7, 0.2, 1);
   }
 
   /* --- StatusLed --- */
-  .kit-led { @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full; background: currentColor; box-shadow: 0 0 6px currentColor; }
+  .kit-led { @apply inline-block h-2.5 w-2.5 shrink-0 rounded-full; background: radial-gradient(circle at 50% 30%, rgb(255 255 255 / 0.55), transparent 55%), currentColor; box-shadow: 0 0 6px currentColor; }
   .kit-led-idle { @apply text-ink-muted/50; box-shadow: none; }
   .kit-led-ok { @apply text-status-ok; }
   .kit-led-error { @apply text-status-error; }
@@ -466,7 +578,8 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
   .kit-led-track { @apply relative inline-block h-2 w-8 shrink-0 overflow-hidden rounded-full bg-surface-well; box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.6); }
   .kit-led-track::after {
     content: '';
-    @apply absolute top-0 h-full w-3 rounded-full bg-tint;
+    @apply absolute top-0 h-full w-3 rounded-full;
+    background: var(--grad-tint);
     box-shadow: 0 0 8px rgb(var(--tint-glow) / 0.6);
     left: 25%;
     animation: kit-led-travel 1.2s ease-in-out infinite alternate;
@@ -481,13 +594,13 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
 /* Reduced motion: no travel, no slide, no press movement; state still reads. */
 @media (prefers-reduced-motion: reduce) {
   .kit-led-track::after { animation: none; }
-  .kit-btn, .kit-card, .kit-tab, .kit-tab-indicator { transition: none !important; }
-  .kit-btn:active:not(:disabled), .kit-card-interactive:active { transform: none; }
+  .kit-lift, .kit-item, .kit-tab, .kit-tab-indicator { transition: none !important; }
+  .kit-lift:active:not(:disabled), .kit-item:active { transform: none; }
 }
 /* Gallery preview of the same rules (class kit-reduce on an ancestor). */
 .kit-reduce .kit-led-track::after { animation: none; }
-.kit-reduce .kit-btn, .kit-reduce .kit-card, .kit-reduce .kit-tab, .kit-reduce .kit-tab-indicator { transition: none !important; }
-.kit-reduce .kit-btn:active:not(:disabled), .kit-reduce .kit-card-interactive:active { transform: none; }
+.kit-reduce .kit-lift, .kit-reduce .kit-item, .kit-reduce .kit-tab, .kit-reduce .kit-tab-indicator { transition: none !important; }
+.kit-reduce .kit-lift:active:not(:disabled), .kit-reduce .kit-item:active { transform: none; }
 
 /* ========================================
    Spinner

@@ -3,7 +3,7 @@
 // http://localhost:3000/kit (no sidebar link). Nothing here touches the app.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Plus, Trash2 } from 'lucide-react';
+import { Inbox, Play, Plus, Trash2 } from 'lucide-react';
 import { Button, IconButton, type ButtonSize, type ButtonVariant } from './Button';
 import { Card, Panel } from './Panel';
 import { StatusLed } from './StatusLed';
@@ -11,6 +11,8 @@ import { Tabs } from './Tabs';
 import { KitSlider } from './Slider';
 import { KitToggle } from './Toggle';
 import { Select } from './Select';
+import { EmptyState, Module, Rail, SectionPanel, SongItem, Well } from './Panels';
+import { MockCreate } from './MockCreate';
 
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg'];
 const VARIANTS: ButtonVariant[] = ['primary', 'secondary', 'ghost', 'danger'];
@@ -28,9 +30,24 @@ const TINTS = [
   { value: 'rose', label: 'Rose' },
 ];
 
+// Font pairings to try: body/UI, headings and panel titles, numeric readouts.
+// The roles are --font-body / --font-heading / --font-mono (index.css); the
+// final pick is a one-line change there. Loaded from Google Fonts on this page
+// only; the shipped pick must be self-hosted (the app runs offline).
+const q = (f: string) => `"${f}", sans-serif`;
+const FONTS = [
+  { value: '1', label: '1 Inter', body: q('Inter'), heading: q('Inter'), mono: q('Inter') },
+  { value: '2', label: '2 Tight + JetBrains', body: q('Inter'), heading: q('Inter Tight'), mono: '"JetBrains Mono", monospace' },
+  { value: '3', label: '3 IBM Plex', body: q('IBM Plex Sans'), heading: q('IBM Plex Sans Condensed'), mono: '"IBM Plex Mono", monospace' },
+  { value: '4', label: '4 Barlow', body: q('Barlow'), heading: q('Barlow Semi Condensed'), mono: '"Share Tech Mono", monospace' },
+  { value: '5', label: '5 Manrope / Space', body: q('Manrope'), heading: q('Space Grotesk'), mono: '"Space Mono", monospace' },
+  { value: '6', label: '6 Geist', body: q('Geist'), heading: q('Geist'), mono: '"Geist Mono", monospace' },
+];
+const FONT_URL = 'https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@400;500;600&family=Share+Tech+Mono&family=Manrope:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap';
+
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="mb-6">
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{title}</h3>
+    <h3 className="kit-heading mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">{title}</h3>
     {children}
   </div>
 );
@@ -38,6 +55,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 export const KitGallery: React.FC = () => {
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
+  const [font, setFont] = useState('1');
   const [tab, setTab] = useState('create');
   const [on, setOn] = useState(true);
   const [small, setSmall] = useState(false);
@@ -49,6 +67,24 @@ export const KitGallery: React.FC = () => {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
+  // Load the candidate fonts and set the three role tokens on <html> (so the
+  // portalled Select list follows too); both are undone when the page closes.
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = FONT_URL;
+    document.head.appendChild(link);
+    return () => { link.remove(); };
+  }, []);
+  useEffect(() => {
+    const f = FONTS.find(x => x.value === font) ?? FONTS[0];
+    const root = document.documentElement.style;
+    root.setProperty('--font-body', f.body);
+    root.setProperty('--font-heading', f.heading);
+    root.setProperty('--font-mono', f.mono);
+    return () => { (['--font-body', '--font-heading', '--font-mono']).forEach(p => root.removeProperty(p)); };
+  }, [font]);
+
   const generate = () => {
     setGenerating(true);
     timer.current = setTimeout(() => setGenerating(false), 4000);
@@ -56,13 +92,16 @@ export const KitGallery: React.FC = () => {
 
   return (
     // Default amber is the :root value, so only a non-default tint sets the attribute.
-    <div data-tint={tint === 'amber' ? undefined : tint} className={`flex-1 overflow-y-auto bg-surface-chassis p-6 text-ink${reduce ? ' kit-reduce' : ''}`}>
+    <div data-tint={tint === 'amber' ? undefined : tint} className={`kit-root flex-1 overflow-y-auto bg-surface-chassis p-6 text-ink${reduce ? ' kit-reduce' : ''}`}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold">UI kit test page</h1>
+          <h1 className="kit-heading text-xl font-semibold">UI kit test page</h1>
           <p className="text-sm text-ink-muted">Dev only. Everything here is live. Forced hover / pressed / focus rows show the states without a pointer.</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 text-xs text-ink-muted">Font
+            <Tabs aria-label="Font pairing" value={font} onChange={setFont} items={FONTS.map(({ value, label }) => ({ value, label }))} />
+          </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Tint
             <Tabs aria-label="Tint" value={tint} onChange={setTint} items={TINTS} />
           </div>
@@ -143,6 +182,37 @@ export const KitGallery: React.FC = () => {
           <StatusLed state="error" label="Failed" />
           <StatusLed state="generating" label="Generating" />
         </div>
+      </Section>
+
+      <Section title="Section panel, well, control module">
+        <div className="grid grid-cols-2 gap-3">
+          <SectionPanel title="Section panel" led={{ state: 'ok', label: 'Ready' }} actions={<IconButton size="sm" variant="ghost" aria-label="Add"><Plus size={14} /></IconButton>} footer={<><span>Footer left</span><span className="kit-mono">42 / 100</span></>}>
+            <Module label="Control module">
+              <div className="flex items-center gap-4">
+                <KitSlider label="Gain" value={val} onChange={setVal} min={0} max={100} step={1} />
+                <Rail vertical />
+                <KitToggle checked={on} onChange={setOn} label="Enabled" />
+              </div>
+            </Module>
+          </SectionPanel>
+          <div className="space-y-3">
+            <Well className="kit-mono h-24 overflow-auto text-xs text-ink-muted">[M] Model weights loaded<br />[M] Synth cfg: 36L H=4096<br />[I] Generation engine ready.</Well>
+            <SectionPanel title="Empty state"><EmptyState icon={<Inbox size={20} />} title="Nothing here yet" action={<Button size="sm" variant="secondary">Add one</Button>}>A panel with nothing in it says so, and offers the next step.</EmptyState></SectionPanel>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="List item / song card: rest, hover, selected, playing">
+        <div className="grid max-w-md gap-1 rounded-panel bg-surface-panel p-2">
+          <SongItem title="Rest" meta="Lo-fi hip hop" duration="2:51" />
+          <SongItem title="Hover (forced)" meta="Ambient" duration="3:56" data-force="hover" />
+          <SongItem title="Selected" meta="Folk rock" duration="3:03" selected />
+          <SongItem title="Playing" meta="Drone" duration="0:28" selected playing />
+        </div>
+      </Section>
+
+      <Section title="Mock Create page (static, every control works)">
+        <MockCreate />
       </Section>
 
       <Section title="Slider, Toggle, Select">

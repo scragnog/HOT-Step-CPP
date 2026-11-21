@@ -240,6 +240,7 @@ To try every element, size, variant and state with a live tint switcher, open
 | `Tabs` | `shared/kit/Tabs` | `items`, `value`, `onChange`; the active indicator slides; arrow keys move. |
 | `Panel`, `Card` | `shared/kit/Panel` | `Panel` takes `title`, `actions`, and `collapsible`; `Card` with `onClick` becomes a button. |
 | `StatusLed` | `shared/kit/StatusLed` | `state` idle / ok / warn / error / generating, and a required `label`. Warn shows an icon too. |
+| `SectionPanel`, `Well`, `Module`, `Rail`, `SongItem`, `EmptyState` | `shared/kit/Panels` | The big containers. `SectionPanel`: header strip (`title`, optional `led`, `actions`), body, optional `footer`. `Well`: recessed area for lyrics, waveform, log. `Module`: controls under an engraved `label`; `Rail` (`vertical`) is the divider. `SongItem`: rest, hover, `selected`, `playing`. `EmptyState`: `icon`, `title`, text, `action`. |
 | `KitSlider`, `KitToggle`, `Select` | `shared/kit/...` | Same props as the originals, minus `accent`. Slider fill needs the `kit-range` class, which `KitSlider` sets. |
 
 ```tsx
@@ -263,6 +264,19 @@ status (`status-ok`, `-warn`, `-error`), radii (`rounded-ctl` 6px, `rounded-pane
 `duration-press` 70ms) are tokens too. They are additions: the `suno` and `brand` colours and
 `--color-primary` are unchanged. Status colour never stands alone: give it a label, and warn an icon.
 
+### Depth recipe
+
+One recipe in the kit block of `index.css`; every element picks it up, so change a number there, never at a call site.
+
+- Tint fills use `--grad-tint` (light top, `--tint-deep` bottom); the hover and press variants are `--grad-tint-hover` and `--grad-tint-press`. Because a `var()` inside a custom property is substituted where it is declared, these gradients are declared on `:root` and on every `[data-tint]` scope. A new tint needs its `--tint-deep` next to the other three channels.
+- `.kit-raised` (neutral raised: secondary button, select trigger, card), `.kit-fill` (tint fill: primary, toggle on) and `.kit-well` (recessed) set the gradient, the side border and the edge. Neutral surfaces get a 14% white top edge, tint fills 40%; wells get a darker top inner shadow.
+- `.kit-lift` adds the hover (brighter border, 1px ring, outer glow) and the press (darker gradient, inset shadow, 1px drop) over the 140ms token. `data-force="hover"` and `"press"` show those states without a pointer.
+- The numbers live in the `--grad-*`, `--edge-*`, `--drop`, `--press-shadow` and `--well-shadow` tokens on `:root`.
+
+### Font roles
+
+Three tokens on `:root`: `--font-body`, `--font-heading` (panel titles, headings, engraved labels) and `--font-mono` (numeric readouts; `.kit-mono` adds tabular figures). Kit surfaces use them through `.kit-root`, `.kit-heading` and `.kit-mono`; the default is Inter for all three. The test page has a font switcher for six pairings and loads those fonts from Google Fonts on that page only. The final pick should be self-hosted, since the app runs locally and may be offline; it then becomes a one-line change to the three tokens.
+
 ### Adding a size or variant
 
 Everything hangs off one base class. For a `Button`, add `.kit-btn-<name>` in the kit block of
@@ -271,7 +285,7 @@ should differ, `--glow`), then add the name to `ButtonSize` or `ButtonVariant` a
 (`SIZE_CLASS`, `VARIANT_CLASS`) in `kit/Button.tsx`. Keep the full class name in the map: Tailwind
 drops component classes it cannot find whole in the source, so `kit-btn-${size}` would lose its
 styles. Add it to the gallery grid too. Do not fork the base: radius, bevel, border, focus ring,
-hover glow and press live in `.kit-btn` only. Motion respects `prefers-reduced-motion`; keep that
+hover glow and press live in the depth recipe (`.kit-lift`), not in `.kit-btn`. Motion respects `prefers-reduced-motion`; keep that
 when adding any (the gallery's reduced-motion preview uses the `kit-reduce` class).
 
 The kit is dark hardware: in light mode its controls stay dark.

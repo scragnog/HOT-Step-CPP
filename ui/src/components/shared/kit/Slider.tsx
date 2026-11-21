@@ -62,7 +62,7 @@ export const KitSlider: React.FC<SliderProps> = ({
         {showInput ? (
           <input
             type="number"
-            className="w-16 px-2 py-0.5 text-xs text-right text-ink bg-surface-well border border-white/[.07] rounded-ctl outline-none focus-visible:border-tint/50 disabled:opacity-50"
+            className="kit-well kit-mono w-16 px-2 py-0.5 text-xs text-right text-ink rounded-ctl outline-none focus-visible:border-tint/50 disabled:opacity-50"
             value={value}
             disabled={disabled}
             onChange={e => onChange(parseFloat(e.target.value) || min)}
@@ -73,7 +73,7 @@ export const KitSlider: React.FC<SliderProps> = ({
             step={step}
           />
         ) : (
-          <span className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">{value}{suffix}</span>
+          <span className="text-xs text-ink-muted kit-mono">{value}{suffix}</span>
         )}
         {headerRight}
         </div>

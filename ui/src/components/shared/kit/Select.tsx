@@ -259,12 +259,9 @@ export function Select<T extends string | number>({
         onClick={() => (panelOpen ? closePanel() : openPanel())}
         onKeyDown={onTriggerKeyDown}
         className={`${triggerLabel ? '' : 'w-full '}flex items-center gap-2 rounded-ctl ${s.trigger}
-                    bg-surface-well text-ink shadow-press
-                    border border-white/[.07]
-                    hover:border-tint/40 hover:shadow-glow
-                    ${a.focus} kit-focus
-                    transition-[border-color,box-shadow] duration-glow motion-reduce:transition-none cursor-pointer
-                    disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-white/[.07] disabled:hover:shadow-press ${className}`}
+                    kit-raised kit-lift text-ink
+                    ${a.focus} kit-focus cursor-pointer
+                    disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       >
         {triggerLabel ? <span className="truncate text-left">{triggerLabel}</span> : (
           <span className={`truncate flex-1 text-left${selected ? '' : ' text-zinc-400'}`}>
@@ -283,9 +280,7 @@ export function Select<T extends string | number>({
           data-portal-layer
           // The portal lives on <body>, outside the tint scope: carry the trigger's tint across.
           data-tint={triggerRef.current?.closest('[data-tint]')?.getAttribute('data-tint') ?? undefined}
-          className="fixed z-[9999] rounded-panel bg-surface-raised
-                     border border-white/[.07]
-                     shadow-bevel overflow-hidden"
+          className="kit-raised kit-root fixed z-[9999] rounded-panel overflow-hidden"
           style={{
             left: pos.left,
             width: pos.width,
