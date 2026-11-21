@@ -26,10 +26,17 @@ export default {
           hover: 'rgb(var(--tint-hover) / <alpha-value>)',
           glow: 'rgb(var(--tint-glow) / <alpha-value>)',
           deep: 'rgb(var(--tint-deep) / <alpha-value>)',
+          ink: 'rgb(var(--tint-ink) / <alpha-value>)', // tint-coloured text and icons (AA on the light panel)
         },
-        surface: { well: '#0d0d0f', chassis: '#111113', panel: '#19191c', raised: '#232326' },
-        ink: { DEFAULT: '#eeeae5', muted: '#a6a19b', onTint: '#111113' },
-        status: { ok: '#4ADE80', warn: '#60A5FA', error: '#FB7185' },
+        // Kit colours are theme variables (index.css): dark values on :root, light under html:not(.dark).
+        surface: {
+          well: 'rgb(var(--k-well) / <alpha-value>)',
+          chassis: 'rgb(var(--k-chassis) / <alpha-value>)',
+          panel: 'rgb(var(--k-panel) / <alpha-value>)',
+          raised: 'rgb(var(--k-raised) / <alpha-value>)',
+        },
+        ink: { DEFAULT: 'rgb(var(--k-ink) / <alpha-value>)', muted: 'rgb(var(--k-muted) / <alpha-value>)', onTint: 'rgb(var(--k-on-tint) / <alpha-value>)' },
+        status: { ok: 'rgb(var(--k-ok) / <alpha-value>)', warn: 'rgb(var(--k-warn) / <alpha-value>)', error: 'rgb(var(--k-error) / <alpha-value>)' },
 
         /* Semantic colors */
         brand: {

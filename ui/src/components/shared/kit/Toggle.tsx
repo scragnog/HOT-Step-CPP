@@ -79,7 +79,7 @@ export const KitToggle: React.FC<KitToggleProps> = ({
         info={info}
         meta={meta}
         underline={!!info}
-        className="text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none"
+        className="text-xs text-ink-muted cursor-pointer select-none"
         rootClassName="min-w-0"
         onReset={defaultValue !== undefined && checked !== defaultValue && !disabled ? (onReset ?? (() => onChange(defaultValue))) : undefined}
       />

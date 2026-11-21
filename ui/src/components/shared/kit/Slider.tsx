@@ -55,7 +55,7 @@ export const KitSlider: React.FC<SliderProps> = ({
           label={label}
           info={info}
           meta={infoMeta}
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          className="text-xs font-medium text-ink-muted uppercase tracking-wider"
           onReset={!disabled && defaultValue !== undefined && value !== defaultValue ? () => { (onReset ?? (() => onChange(defaultValue)))(); onCommit?.(); } : undefined}
         />
         <div className="flex items-center gap-1.5">

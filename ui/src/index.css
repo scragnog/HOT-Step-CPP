@@ -45,6 +45,20 @@
   --tint-hover: 255 190 85;
   --tint-glow: 255 197 109;
   --tint-deep: 201 131 26;
+  /* Tint as text or icon colour: the tint itself in dark, a darker ink in light. */
+  --tint-ink: 245 166 35;
+
+  /* Kit surface, ink and status colours as RGB channels (Tailwind adds alpha). */
+  --k-well: 13 13 15;
+  --k-chassis: 17 17 19;
+  --k-panel: 25 25 28;
+  --k-raised: 35 35 38;
+  --k-ink: 238 234 229;
+  --k-muted: 166 161 155;
+  --k-on-tint: 17 17 19;
+  --k-ok: 74 222 128;
+  --k-warn: 96 165 250;
+  --k-error: 251 113 133;
 
   /* Depth recipe (docs/dev/ui-design.md): gradients, edges, wells. */
   --grad-raised: linear-gradient(180deg, #2d2d31 0%, #232326 55%, #1c1c1f 100%);
@@ -79,23 +93,114 @@
   --grad-tint-press: linear-gradient(180deg, rgb(var(--tint-deep)) 0%, rgb(var(--tint)) 100%);
 }
 [data-tint="teal"] {
+  --tint-ink: 45 212 191;
   --tint: 45 212 191;
   --tint-hover: 94 234 212;
   --tint-glow: 153 246 228;
   --tint-deep: 20 150 138;
 }
 [data-tint="violet"] {
+  --tint-ink: 167 139 250;
   --tint: 167 139 250;
   --tint-hover: 196 181 253;
   --tint-glow: 221 214 254;
   --tint-deep: 124 95 224;
 }
 [data-tint="rose"] {
+  --tint-ink: 251 113 133;
   --tint: 251 113 133;
   --tint-hover: 253 164 175;
   --tint-glow: 254 205 211;
   --tint-deep: 225 70 100;
 }
+
+/* ========================================
+   UI kit, light mode. Kit tokens only: the app's own tokens and rules are
+   untouched. Same recipe as dark, inverted: light matte panels, a white top
+   edge, soft dark shadows, wells darker at the top. The theme is the `dark`
+   class on <html> (useTheme), so the dark values above stay the default.
+   ======================================== */
+html:not(.dark) {
+  --tint-ink: 138 82 0;
+  --k-well: 222 219 214;
+  --k-chassis: 233 231 227;
+  --k-panel: 243 242 239;
+  --k-raised: 251 250 248;
+  --k-ink: 27 27 29;
+  --k-muted: 94 91 87;
+  --k-ok: 22 101 52;
+  --k-warn: 29 78 216;
+  --k-error: 190 18 60;
+  --grad-raised: linear-gradient(180deg, #fbfaf8 0%, #f5f3f0 55%, #ebe9e5 100%);
+  --grad-raised-press: linear-gradient(180deg, #e2dfda 0%, #eae8e4 100%);
+  --grad-panel: linear-gradient(180deg, #f6f5f2 0%, #efede9 100%);
+  --grad-well: linear-gradient(180deg, #d3d0ca 0%, #dedbd6 100%);
+  --edge-side: rgb(0 0 0 / 0.13);
+  --edge-neutral: inset 0 1px 0 rgb(255 255 255 / 0.8);
+  --edge-tint: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --drop: 0 1px 1px rgb(0 0 0 / 0.1), 0 2px 5px rgb(0 0 0 / 0.12);
+  --press-shadow: inset 0 2px 4px rgb(0 0 0 / 0.22);
+  --well-shadow: inset 0 3px 5px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(0 0 0 / 0.12), 0 1px 0 rgb(255 255 255 / 0.75);
+}
+html:not(.dark) [data-tint="teal"] { --tint-ink: 11 107 98; }
+html:not(.dark) [data-tint="violet"] { --tint-ink: 91 63 196; }
+html:not(.dark) [data-tint="rose"] { --tint-ink: 179 23 63; }
+
+/* Light hover: a glow reads weaker on light, so a brighter tint border plus a
+   soft tinted drop shadow instead. Pressed still sinks 1px with an inset shadow. */
+html:not(.dark) .kit-lift:hover:not(:disabled),
+html:not(.dark) .kit-lift[data-force="hover"] {
+  border-color: rgb(var(--tint) / 0.95);
+  box-shadow: var(--edge-neutral), 0 0 0 1px rgb(var(--tint) / 0.5), 0 3px 10px rgb(var(--tint) / 0.4);
+}
+html:not(.dark) .kit-fill.kit-lift:hover:not(:disabled),
+html:not(.dark) .kit-fill.kit-lift[data-force="hover"] {
+  border-color: rgb(var(--tint-deep) / 0.9);
+  box-shadow: var(--edge-tint), 0 0 0 1px rgb(var(--tint) / 0.55), 0 3px 10px rgb(var(--tint) / 0.45);
+}
+html:not(.dark) .kit-lift:active:not(:disabled),
+html:not(.dark) .kit-lift[data-force="press"] { box-shadow: var(--press-shadow); }
+html:not(.dark) .kit-btn-primary { text-shadow: 0 1px 0 rgb(255 255 255 / 0.3); }
+html:not(.dark) .kit-btn-ghost:hover:not(:disabled) { background: rgb(0 0 0 / 0.05); }
+html:not(.dark) .kit-btn-ghost:active:not(:disabled) { background: rgb(0 0 0 / 0.1); }
+html:not(.dark) .kit-btn-danger {
+  background: linear-gradient(180deg, rgb(225 70 100 / 0.2), rgb(225 70 100 / 0.08));
+  border-color: rgb(190 18 60 / 0.4);
+}
+html:not(.dark) .kit-btn-danger:hover:not(:disabled),
+html:not(.dark) .kit-btn-danger[data-force="hover"] {
+  background: linear-gradient(180deg, rgb(225 70 100 / 0.3), rgb(225 70 100 / 0.14));
+  border-color: rgb(190 18 60 / 0.85);
+  box-shadow: var(--edge-neutral), 0 0 0 1px rgb(190 18 60 / 0.4), 0 3px 10px rgb(190 18 60 / 0.3);
+}
+html:not(.dark) .kit-btn-danger:active:not(:disabled),
+html:not(.dark) .kit-btn-danger[data-force="press"] { background: linear-gradient(180deg, rgb(225 70 100 / 0.1), rgb(225 70 100 / 0.22)); }
+html:not(.dark) .kit-panel-header,
+html:not(.dark) .kit-section-head { border-bottom-color: rgb(0 0 0 / 0.14); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 0 rgb(255 255 255 / 0.6); }
+html:not(.dark) .kit-section { box-shadow: var(--edge-neutral), 0 1px 2px rgb(0 0 0 / 0.1), 0 4px 12px rgb(0 0 0 / 0.1); }
+html:not(.dark) .kit-section-title { text-shadow: 0 1px 0 rgb(255 255 255 / 0.8); }
+html:not(.dark) .kit-section-foot { background: linear-gradient(180deg, rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.08)); border-top-color: rgb(0 0 0 / 0.1); box-shadow: inset 0 1px 0 rgb(0 0 0 / 0.1); }
+html:not(.dark) .kit-module { background: linear-gradient(180deg, rgb(255 255 255 / 0.5), rgb(0 0 0 / 0.03)); border-color: rgb(0 0 0 / 0.12); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 0 rgb(255 255 255 / 0.6); }
+html:not(.dark) .kit-module-label { text-shadow: 0 1px 0 rgb(255 255 255 / 0.8); }
+html:not(.dark) .kit-rail-h { border-top-color: rgb(0 0 0 / 0.14); border-bottom-color: rgb(255 255 255 / 0.75); }
+html:not(.dark) .kit-rail-v { border-left-color: rgb(0 0 0 / 0.14); border-right-color: rgb(255 255 255 / 0.75); }
+html:not(.dark) .kit-item:hover,
+html:not(.dark) .kit-item[data-force="hover"] { border-color: rgb(var(--tint) / 0.8); box-shadow: var(--edge-neutral), 0 0 0 1px rgb(var(--tint) / 0.4), 0 3px 8px rgb(var(--tint) / 0.3); }
+html:not(.dark) .kit-item[aria-current="true"] { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.6); }
+html:not(.dark) .kit-item[data-playing="true"] .kit-item-title { color: rgb(var(--tint-ink)); }
+html:not(.dark) .kit-thumb { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 1px 3px rgb(0 0 0 / 0.25); }
+html:not(.dark) .kit-fill,
+html:not(.dark) .kit-tab-indicator { border-color: rgb(0 0 0 / 0.2); }
+html:not(.dark) .kit-tab-indicator { box-shadow: var(--edge-tint), var(--drop), 0 0 8px rgb(var(--tint) / 0.25); }
+html:not(.dark) .kit-led { box-shadow: 0 0 4px currentColor; }
+html:not(.dark) .kit-led-track { box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25); }
+html:not(.dark) .kit-led-track::after { box-shadow: 0 0 6px rgb(var(--tint) / 0.6); }
+html:not(.dark) input[type="range"].kit-range { border-color: rgb(0 0 0 / 0.13); }
+html:not(.dark) input[type="range"].kit-range::-webkit-slider-thumb,
+html:not(.dark) input[type="range"].kit-range::-moz-range-thumb { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 3px rgb(0 0 0 / 0.3); }
+html:not(.dark) input[type="range"].kit-range:hover::-webkit-slider-thumb,
+html:not(.dark) input[type="range"].kit-range:focus-visible::-webkit-slider-thumb { box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 0 0 1px rgb(var(--tint) / 0.5), 0 2px 8px rgb(var(--tint) / 0.45); }
+html:not(.dark) input[type="range"].kit-range:active::-webkit-slider-thumb { box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.25); }
 
 /* ========================================
    Base Styles

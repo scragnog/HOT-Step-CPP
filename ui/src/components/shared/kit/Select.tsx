@@ -33,8 +33,8 @@ export interface SelectOption<T extends string | number> {
 const TINT = {
   focus: 'focus-visible:border-tint/50 focus-visible:ring-1 focus-visible:ring-tint/30',
   row: 'bg-tint/15',
-  text: 'text-tint',
-  icon: 'text-tint',
+  text: 'text-tint-ink',
+  icon: 'text-tint-ink',
 };
 
 const SIZE = {
@@ -264,13 +264,13 @@ export function Select<T extends string | number>({
                     disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
       >
         {triggerLabel ? <span className="truncate text-left">{triggerLabel}</span> : (
-          <span className={`truncate flex-1 text-left${selected ? '' : ' text-zinc-400'}`}>
+          <span className={`truncate flex-1 text-left${selected ? '' : ' text-ink-muted'}`}>
             {selected ? selected.label : placeholder}
           </span>
         )}
         <ChevronDown
           size={s.chevron}
-          className={`shrink-0 text-zinc-400 transition-transform duration-150 ${panelOpen ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-ink-muted transition-transform duration-150 ${panelOpen ? 'rotate-180' : ''}`}
         />
       </button>
 
@@ -289,9 +289,9 @@ export function Select<T extends string | number>({
           }}
         >
           {withFilter && (
-            <div className="p-1.5 border-b border-white/[.07]">
+            <div className="p-1.5 border-b border-ink/10">
               <div className="relative">
-                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-muted pointer-events-none" />
                 <input
                   ref={inputRef}
                   type="text"
@@ -301,8 +301,8 @@ export function Select<T extends string | number>({
                   placeholder={searchPlaceholder}
                   className={`w-full pl-7 pr-2 py-1.5 rounded-ctl
                               bg-surface-well
-                              border border-white/[.07]
-                              text-sm text-ink placeholder-zinc-500
+                              border border-ink/10
+                              text-sm text-ink placeholder-ink-muted/70
                               outline-none ${a.focus}`}
                 />
               </div>
@@ -316,7 +316,7 @@ export function Select<T extends string | number>({
             style={{ maxHeight: pos.maxHeight - (withFilter ? 46 : 0) }}
           >
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-zinc-400">{emptyLabel}</div>
+              <div className="px-3 py-2 text-sm text-ink-muted">{emptyLabel}</div>
             ) : (
               filtered.map((opt, i) => {
                 const isSel = opt.value === value;
@@ -339,7 +339,7 @@ export function Select<T extends string | number>({
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{opt.label}</span>
                       {opt.hint && (
-                        <span className="block truncate text-[10px] text-zinc-500">{opt.hint}</span>
+                        <span className="block truncate text-[10px] text-ink-muted">{opt.hint}</span>
                       )}
                     </span>
                     {isSel && <Check size={14} className={`shrink-0 mt-0.5 ${a.icon}`} />}

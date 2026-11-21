@@ -70,7 +70,7 @@ export const MockCreate: React.FC = () => {
       <nav aria-label="Mock navigation" className="kit-section flex flex-col gap-1 p-2">
         {NAV.map(n => (
           <button key={n.id} type="button" aria-current={nav === n.id || undefined} onClick={() => setNav(n.id)} className="kit-item kit-focus">
-            <n.icon size={16} className={nav === n.id ? 'text-tint' : 'text-ink-muted'} />
+            <n.icon size={16} className={nav === n.id ? 'text-tint-ink' : 'text-ink-muted'} />
             <span className="text-sm">{n.label}</span>
           </button>
         ))}

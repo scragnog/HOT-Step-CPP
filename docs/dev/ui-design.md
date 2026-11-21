@@ -288,7 +288,21 @@ styles. Add it to the gallery grid too. Do not fork the base: radius, bevel, bor
 hover glow and press live in the depth recipe (`.kit-lift`), not in `.kit-btn`. Motion respects `prefers-reduced-motion`; keep that
 when adding any (the gallery's reduced-motion preview uses the `kit-reduce` class).
 
-The kit is dark hardware: in light mode its controls stay dark.
+### Light mode
+
+The kit follows the app's theme, the `dark` class on `<html>` (`useTheme`). Dark values are the `:root`
+defaults; light values for the kit tokens only sit in one `html:not(.dark)` block in `index.css`
+(surfaces `#e9e7e3` / `#f3f2ef` / `#fbfaf8` / `#dedbd6`, ink `#1b1b1d`, muted `#5e5b57`, a white top edge,
+soft dark shadows, wells darker at the top). Existing app tokens and rules do not change in either theme.
+The surface, ink and status colours are RGB-channel variables (`--k-*`) that Tailwind reads, so
+`bg-surface-panel` and `text-ink` follow the theme with no `dark:` variants. Fills keep the tint
+gradient with `ink-onTint` text. For tint-coloured text or icons use `text-tint-ink` (`--tint-ink`),
+never `text-tint`: amber on a light panel is about 2:1. Light `--tint-ink` values, contrast on
+`#f3f2ef` (panel): amber `#8A5200` 5.7, teal `#0B6B62` 5.7, violet `#5B3FC4` 6.4, rose `#B3173F` 6.0;
+on the darkest well `#dedbd6` all four stay above 4.6. In dark, `--tint-ink` equals the tint. The hover
+glow reads weaker on light, so light hover is a brighter tint border plus a tinted soft shadow; pressed
+still sinks 1px. Any new kit rule with a hard-coded dark shadow or white highlight needs a light twin
+in that block. The test page has a Dark / Light switch.
 
 ## Accent colour
 

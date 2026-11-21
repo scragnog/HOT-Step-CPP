@@ -13,6 +13,7 @@ import { KitToggle } from './Toggle';
 import { Select } from './Select';
 import { EmptyState, Module, Rail, SectionPanel, SongItem, Well } from './Panels';
 import { MockCreate } from './MockCreate';
+import { useTheme } from '../../../hooks/useTheme';
 
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg'];
 const VARIANTS: ButtonVariant[] = ['primary', 'secondary', 'ghost', 'danger'];
@@ -53,6 +54,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 );
 
 export const KitGallery: React.FC = () => {
+  const { theme, toggleTheme } = useTheme();
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
   const [font, setFont] = useState('1');
@@ -101,6 +103,9 @@ export const KitGallery: React.FC = () => {
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 text-xs text-ink-muted">Font
             <Tabs aria-label="Font pairing" value={font} onChange={setFont} items={FONTS.map(({ value, label }) => ({ value, label }))} />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-ink-muted">Theme
+            <Tabs aria-label="Theme" value={theme} onChange={v => v !== theme && toggleTheme()} items={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Tint
             <Tabs aria-label="Tint" value={tint} onChange={setTint} items={TINTS} />
