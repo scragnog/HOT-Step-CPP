@@ -9,8 +9,9 @@ export const SHELL_KEY = 'hs-shell';
 const isShell = (v: unknown): v is Shell => v === 'classic' || v === 'studio';
 
 // Written like usePersistedState writes (JSON), so either reader can open it.
-function save(shell: Shell): void {
-  try { localStorage.setItem(SHELL_KEY, JSON.stringify(shell)); } catch { /* storage blocked: the URL still wins this load */ }
+// False when storage is blocked.
+function save(shell: Shell): boolean {
+  try { localStorage.setItem(SHELL_KEY, JSON.stringify(shell)); return true; } catch { return false; }
 }
 
 export function resolveShell(): Shell {
@@ -23,10 +24,11 @@ export function resolveShell(): Shell {
   return 'classic';
 }
 
-/** Save the choice and reload. Drops `?ui=` so it cannot override the new choice. */
+/** Save the choice and reload. Drops `?ui=` once it is saved; if storage is
+ *  blocked, `?ui=` stays in the URL so the reload still boots the chosen shell. */
 export function switchShell(shell: Shell): void {
-  save(shell);
   const url = new URL(window.location.href);
-  url.searchParams.delete('ui');
+  if (save(shell)) url.searchParams.delete('ui');
+  else url.searchParams.set('ui', shell);
   window.location.replace(url);
 }

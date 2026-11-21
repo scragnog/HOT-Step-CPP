@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { GENERATION_DEFAULTS as GLOBAL_PARAM_DEFAULTS } from '../../../server/src/contracts/generationControls';
 import type { GenerationParams, LmRepMode, StableStepBackend } from '../types';
-import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
+import { DEFAULT_SETTINGS, type AppSettings } from '../app/appSettings';
 import { useBackendStore } from './backendStore';
 import { normalizeSeed, type Seed } from '../utils/seed';
 

@@ -21,7 +21,7 @@ import { useAudioQueueProjection } from '../queries/shell-queue/projection';
 import { useResumeQueue, useAudioGenQueueSelector } from '../stores/audioGenQueueStore';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from '../stores/mm3StreamStore';
 import { usePlaybackSelector, play as pbPlay, songToTrack } from '../stores/playbackStore';
-import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
+import { DEFAULT_SETTINGS, type AppSettings } from './appSettings';
 import type { UpdateRestartAttempt } from '../services/updatesApi';
 import type { GenerationParams, Song } from '../types';
 
