@@ -234,6 +234,15 @@ export function readYue2AbcStatus(manifestPath: string): Yue2AbcStatus | null {
   }
 }
 
+/** The one "lead sheets done" verdict, shared by the Prepare card and the
+ *  Optimise tab. Judged from per-source state, not the root `abc_present`
+ *  flag: a later latent re-cut rewrites the manifest root without that flag
+ *  while the per-source abc fields survive. Every source must carry abc or
+ *  abc_error (a soft failure is coverage); a source with neither is untouched. */
+export function yue2SheetsDone(abc: Yue2AbcStatus | null): boolean {
+  return !!abc && abc.sources > 0 && (abc.sourcesWithAbc + abc.sourcesWithError) === abc.sources;
+}
+
 // ── Per-source detail (Lead-sheet preview) ──────────────────────────────────
 //
 // readYue2AbcStatus above answers "how far has the stage got"; these answer

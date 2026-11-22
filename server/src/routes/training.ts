@@ -161,7 +161,7 @@ import {
   YUE2_ALIGN_DEFAULTS, yue2StemsDir,
 } from '../services/training/yue2Align.js';
 import {
-  listYue2SheetSources, missingYue2SheetModels, readYue2AbcStatus, readYue2SheetSource,
+  listYue2SheetSources, missingYue2SheetModels, readYue2AbcStatus, readYue2SheetSource, yue2SheetsDone,
   resolveYue2SheetModel, YUE2_SHEET_DEFAULTS,
 } from '../services/training/yue2Sheet.js';
 import { yue2NoVocalsPath, yue2StemSources, yue2VocalPath } from '../services/training/yue2Stems.js';
@@ -4357,9 +4357,9 @@ router.get('/datasets/:id/yue2-optimise', (req: Request, res: Response) => {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     const prep = yue2AitkPrepareDefaults(ds);
-    let manifest: Record<string, unknown> = {};
-    try { manifest = JSON.parse(fs.readFileSync(prep.options.legacyManifest, 'utf8')); } catch { /* not prepared */ }
-    const stages = { cache: fs.existsSync(prep.options.legacyManifest), codes: manifest.codec_ids_present === true, sheets: manifest.abc_present === true };
+    const codes = readYue2CodecIdsStatus(prep.options.legacyManifest);
+    // Same verdicts as the Prepare cards (tokenize / sheet), so the two pages agree.
+    const stages = { cache: fs.existsSync(prep.options.legacyManifest), codes: !!codes?.present && codes.sourcesWithCodes > 0, sheets: yue2SheetsDone(readYue2AbcStatus(prep.options.legacyManifest)) };
     res.json({ file: optimisationPath(ds.sourceDir), data: readOptimisation(ds.sourceDir), stages, missing: prep.missing });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
@@ -4925,7 +4925,7 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // this stage existed. A source with abc_error IS coverage (a soft
           // failure the reference itself produces on ~4% of real tracks, per
           // doc 23's survey), not a gap to close.
-          done: !!abc && abc.sources > 0 && (abc.sourcesWithAbc + abc.sourcesWithError) === abc.sources,
+          done: yue2SheetsDone(abc),
           status: abc ?? null,
           missing: missingYue2SheetModels(),
           sheetModelFile: sheetModel ? path.basename(sheetModel) : '',

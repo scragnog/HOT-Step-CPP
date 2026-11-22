@@ -9,7 +9,7 @@ import { createJob, type TrainingJob } from './labelingQueue.js';
 import { gpuLaneOwner, runOnGpuLane } from '../generation/gpuLane.js';
 import { type RelayState, runYue2AceTrain } from './yue2TrainRunner.js';
 import {
-  buildYue2SheetArgs, readYue2CoverAbc, setSheetTranscriberSource, writeYue2CoverSheetManifest,
+  buildYue2SheetArgs, readYue2AbcStatus, readYue2CoverAbc, setSheetTranscriberSource, writeYue2CoverSheetManifest, yue2SheetsDone,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
 
@@ -243,4 +243,17 @@ test('development fallback hook reruns a completed cover with force', async () =
     else process.env.HOTSTEP_YUE2_COVER_FORCE_FALLBACK = oldForce;
     fs.rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test('lead sheets count as done from per-source state even when the root abc_present flag is gone', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sheets-done-'));
+  const file = path.join(dir, 'yue2_preprocess.json');
+  try {
+    // A latent re-cut rewrote the root (no abc_present); sources keep their sheets.
+    fs.writeFileSync(file, JSON.stringify({ codec_ids_present: false, sources: [{ name: 'a', abc: 'X:1' }, { name: 'b', abc_error: 'no beats' }] }));
+    assert.equal(yue2SheetsDone(readYue2AbcStatus(file)), true);
+    fs.writeFileSync(file, JSON.stringify({ abc_present: true, sources: [{ name: 'a', abc: 'X:1' }, { name: 'b' }] }));
+    assert.equal(yue2SheetsDone(readYue2AbcStatus(file)), false, 'an untouched source is not done');
+    assert.equal(yue2SheetsDone(null), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
