@@ -679,6 +679,8 @@ struct Yue2ArKvCache {
     // head_lo; the sampler is told the same base.
     int64_t                    head_lo  = 0;
     int64_t                    head_n   = 0;
+    // Set both through yue2_ar_set_head: a head that is never sliced must
+    // leave head_lo at 0, or the sampler's base shifts every drawn id.
     ggml_context *              ctx      = nullptr;
     ggml_backend_buffer_t       buf      = nullptr;
     std::vector<ggml_tensor *> k, v;          // one F16 [D,capacity,Nkv,S] tensor per layer
@@ -686,6 +688,17 @@ struct Yue2ArKvCache {
     // Per set, rewritten by the caller before each decode step; empty = plain causal mask.
     std::vector<std::vector<Yue2MaskSpan>> prompt_bias;
 };
+
+// The lm_head window a stage samples from. ConvRot and imatrix collection
+// never slice the head (yue2_lm_head), so their logits are the full vocabulary
+// from id 0, and the window must say so: the sampler adds head_lo to every
+// drawn index. A semantic window kept on ConvRot read text-token logits as
+// codec ids (GH #367: noise, every draw ran to its cap).
+static void yue2_ar_set_head(Yue2ArKvCache & cache, const Yue2Model & m, int64_t head_lo, int64_t head_n) {
+    const bool full = m.convrot || g_yue2_imatrix.armed;
+    cache.head_lo = full ? 0 : head_lo;
+    cache.head_n  = full ? 0 : head_n;
+}
 
 static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2ArKvCache * out, std::string * err,
                                    int64_t n_sets = 1) {

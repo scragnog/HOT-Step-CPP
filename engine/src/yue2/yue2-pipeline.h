@@ -348,8 +348,7 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     if (!yue2_ar_kv_cache_alloc(m, capacity, &cache, err, P)) {
         return false;
     }
-    cache.head_lo = YUE2_PLAN_HEAD_LO;
-    cache.head_n  = YUE2_PLAN_HEAD_N;
+    yue2_ar_set_head(cache, m, YUE2_PLAN_HEAD_LO, YUE2_PLAN_HEAD_N);
     const int64_t base = cache.head_lo;
 
     // Prefill every set; a prompt identical to an earlier set's is copied
@@ -868,8 +867,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     if (!compact && !yue2_ar_kv_cache_alloc(m, rows, &cache, err, S)) {
         return false;
     }
-    cache.head_lo = YUE2_SEM_HEAD_LO;
-    cache.head_n  = YUE2_SEM_HEAD_N;
+    yue2_ar_set_head(cache, m, YUE2_SEM_HEAD_LO, YUE2_SEM_HEAD_N);
     const int64_t base = cache.head_lo;
     const int64_t end_rel = YUE2_MUSIC_END - base;
 
