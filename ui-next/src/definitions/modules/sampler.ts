@@ -733,7 +733,8 @@ export const sampler = {
       per: [
         { engines: ['ace'], choices: [['Loose', 5], ['Balanced', 9], ['Strict', 13]] },
         { engines: ['minimax-m3'], choices: [['Loose', 1.3], ['Balanced', 1.7], ['Strict', 2.5]] },
-        { engines: ['heartmula'], choices: [['Loose', 1], ['Balanced', 1.25], ['Strict', 2]] },
+        /* HeartMuLa reads tags: the row says the box's word there (S-05) */
+        { engines: ['heartmula'], label: 'Follow the tags', choices: [['Loose', 1], ['Balanced', 1.25], ['Strict', 2]] },
       ],
       tiers: ['quick'],
     },

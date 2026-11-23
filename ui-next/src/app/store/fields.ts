@@ -79,7 +79,13 @@ const shown = (el: Field): Shown => ({ v: el.value, s: el.selectionStart, e: el.
 /** The field's text was changed by typing (`kind` 'type' or 'del') or otherwise (''). */
 export function pushField(el: Field, kind: string): void { add(historyOf(el), shown(el), kind); }
 /** The field's text now, written down if something changed it without telling (a value set directly). */
-export function syncField(el: Field): void { const h = historyOf(el); if (h.st[h.i]!.v !== el.value) { h.kind = ''; add(h, shown(el), ''); } }
+export function syncField(el: Field): void {
+  const h = historyOf(el); if (h.st[h.i]!.v === el.value) return;
+  /* a field bound to nothing (a number box's typing, a filter) that the page drew again starts afresh, as a field drawn
+     anew does: its old typing is not what it shows now */
+  if (!keyOf(el)) { h.st = [shown(el)]; h.i = 0; h.kind = ''; return; }
+  h.kind = ''; add(h, shown(el), '');
+}
 /** Whether the field has a step to go back (or forward) to. */
 export function canStep(el: Field, redo: boolean): boolean {
   const h = historyOf(el), behind = h.st[h.i]!.v !== el.value;
@@ -114,8 +120,10 @@ export function stepField(el: Field, redo: boolean): boolean {
   try {
     setNative(el, x.v);
     try { el.setSelectionRange(Math.min(x.s ?? x.v.length, x.v.length), Math.min(x.e ?? x.v.length, x.v.length)); } catch { /* an input that has no selection */ }
+    /* a field bound to a value: the desk takes the text first; then the field is told, as the browser tells it of its
+       own undo, so a part that keeps a draft (a checked field) holds the same text */
     if (param) retext(param, x.v);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: redo ? 'historyRedo' : 'historyUndo' }));
   } finally { applying = false; }
   return true;
 }
@@ -135,7 +143,10 @@ function retext(param: string, text: string): void {
     const e = s.undo[i]!; if (e.before.get(path) === e.after.get(path)) continue;
     if (e.after.get(path) !== was) break;
     const after = new Map(e.after); after.set(path, now);
-    const gone = [...new Set([...after.keys(), ...e.before.keys()])].every(p => after.get(p) === e.before.get(p));
+    /* it is gone when every path is back where it started; a text back at its default is where an absent one starts */
+    const def = JSON.stringify(valueOf(ix, param, { ...desk, vals: {} }));
+    const same = (p: string, a: string | undefined, b: string | undefined) => a === b || (p === path && (a ?? def) === (b ?? def));
+    const gone = [...new Set([...after.keys(), ...e.before.keys()])].every(p => same(p, after.get(p), e.before.get(p)));
     useDesk.setState({ desk: next, undo: gone ? s.undo.filter(x => x !== e) : s.undo.map(x => (x === e ? { ...e, after } : x)) });
     return;
   }

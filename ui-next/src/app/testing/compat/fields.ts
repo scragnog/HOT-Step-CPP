@@ -8,11 +8,12 @@
 // it. Only the prompt card's and the lyric sheet's fields are read so (a checked field elsewhere keeps a draft of its
 // own on purpose).
 
-import type { Value } from '../../../definitions/types.ts';
-import { applyChange, has, setValue, valueOf } from '../../../derive.ts';
+import { flushSync } from 'react-dom';
+import type { Node, Value } from '../../../definitions/types.ts';
+import { applyChange, bindPart, has, isAuto, setValue, valueOf } from '../../../derive.ts';
 import { ix } from '../../model/index.ts';
 import { useDesk } from '../../store/desk.ts';
-import { asScene, expose, onMirror, onScene } from '../compat.ts';
+import { asScene, expose, fromConcept, onMirror, onScene } from '../compat.ts';
 
 const FIELDS = '#prompt, .prompt-card input[data-bind], .paper textarea[data-bind]';
 const keyOf = (el: HTMLInputElement | HTMLTextAreaElement) => (el.id === 'prompt' ? 'prompt.text' : el.dataset.bind ?? '');
@@ -45,6 +46,14 @@ export function install(): void {
       el.setRangeText(text, start, end, 'end'); el.dispatchEvent(new Event('input', { bubbles: true }));
     },
     renderSuggest() { /* the suggestions follow the box by themselves */ },
+    isAuto(key: string) { return isAuto(ix, key, useDesk.getState().desk); },
+    /* a value set by a scenario's script is a step of its own (the concept's t.do starts a gesture of its own), never
+       part of the typing a field has open; the layer's core setVal commits with no part, which joins an open gesture */
+    setVal(key: string, v: unknown) {
+      const s = useDesk.getState(), x = fromConcept(key, v, s.desk.engine), hit = ix.params.get(key);
+      if (x === undefined || !hit || !has(ix, key, s.desk.engine)) return;
+      flushSync(() => bindPart(ix, hit.d, { part: 'knob', param: key } as Node, () => useDesk.getState().desk, c => useDesk.getState().commit(c, 'script')).params[key]?.set(x));
+    },
     paintPromptTools() { take(written()); },
   });
   for (const t of ['pointerdown', 'keydown', 'focusin']) addEventListener(t, () => take(written()), true);

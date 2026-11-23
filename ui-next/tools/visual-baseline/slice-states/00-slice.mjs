@@ -2,9 +2,8 @@
 // adds a file of its own). The concept's matrix (states.mjs) cut to what the rebuild draws so far. Each state puts on the
 // desk only the modules, pedals and side units the slice builds (docs/03, "Shared parts only"), on the same engines,
 // tiers, widths, schemes and motion settings as the concept's own states, and is run on both pages with the same
-// setup: on the concept page, first the parts of the page the slice does not build yet are withdrawn where they
-// would change the desk's layout (the lyric sheet, which the concept puts at the head of the desk; withdraw() below),
-// and nothing else is changed. SCOPES names the regions of the page compared: the elements the slice draws.
+// setup, the lyric sheet at the head of the desk where the concept puts it (package 4 draws it; until then it was
+// withdrawn from the concept page). SCOPES names the regions of the page compared: the elements the slice draws.
 //
 //   node tools/visual-baseline/vb.mjs capture concept-slice --states slice --scope slice --page <concept>/hotstep-tiers.html
 //   node tools/visual-baseline/vb.mjs capture rebuild-slice --states slice --scope slice --plan-from concept-slice
@@ -20,12 +19,7 @@ const MODS = ['avoid', 'guidance', 'yuebatch'];
 const BOARD = ['tile', 'refiner', 'ss', 'ppvae', 'lift', 'nat', 'gain', 'vst', 'norm', 'wh'];
 const ONLY = { avoid: ['ace'], guidance: ['ace', 'mm3', 'sa3', 'hm'], yuebatch: ['yue'] };
 
-/* The concept puts its lyric sheet at the head of the desk at Studio and Lab, and under the prompt at Quick; the lyrics
-   package has not been rebuilt, so on the concept page it is withdrawn, through the page's own global, before a state
-   is set. The rebuild's page has no such global: there this does nothing. */
-const withdraw = h => h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
 const scene = (bk, tier, mods, pedals) => async h => {
-  await withdraw(h);
   await h.js(([bk, tier, mods, pedals]) => { S.backend = bk; S.tier = tier; S.mods = mods; S.pedals = pedals; render(); }, [bk, tier, mods, pedals]);
   await h.settle(900);
 };
