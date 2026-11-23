@@ -3,19 +3,27 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen } from 'lucide-react';
 import { workspaceArchiveApi, type ArchiveImportPreview } from '../../services/workspaceArchiveApi';
-import { dataFolderOptions, workspaceArchiveImportJobOptions } from '../../queries/shell-queue/settings';
+import { workspaceArchiveImportJobOptions } from '../../queries/shell-queue/settings';
+import { serverKey } from '../../queries/keys';
+import { dataFolderApi } from '../../services/dataFolderApi';
 import { queryManager } from '../../queries/invalidation';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { ParamLabel } from '../shared/ParamLabel';
 
 const gb = (n: number) => `${(n / 1e9).toFixed(2)} GB`;
-// The accepted import's target survives the restart's page reload here, so the outcome can be checked afterwards.
+// The accepted import (id and target) survives the restart's page reload here, so the outcome can be checked afterwards.
 const PENDING_KEY = 'hotstep:workspace-import-pending';
-const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+type Pending = { id: string; target: string };
+// Windows paths ignore case; elsewhere /data/A and /data/a are different folders.
+const samePath = (a: string, b: string) => {
+  const n = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const win = /^[a-z]:|\\/i.test(a) || /^[a-z]:|\\/i.test(b);
+  return win ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b);
+};
 const parentDir = (p: string) => p.replace(/[\\/]+[^\\/]*$/, '');
-const readPending = (): string => { try { return sessionStorage.getItem(PENDING_KEY) ?? ''; } catch { return ''; } };
-const writePending = (target: string) => { try { if (target) sessionStorage.setItem(PENDING_KEY, target); else sessionStorage.removeItem(PENDING_KEY); } catch { /* storage unavailable: no outcome check */ } };
+const readPending = (): Pending | null => { try { const v = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? 'null'); return v && typeof v.id === 'string' && typeof v.target === 'string' ? v : null; } catch { return null; } };
+const writePending = (v: Pending | null) => { try { if (v) sessionStorage.setItem(PENDING_KEY, JSON.stringify(v)); else sessionStorage.removeItem(PENDING_KEY); } catch { /* storage unavailable: no outcome check */ } };
 
 /** Import half of the workspace archive: pick a zip and a new folder, preview, confirm, restart. */
 export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
@@ -28,29 +36,37 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
+  const [reloaded] = useState(() => !!readPending());
   const [pending, setPending] = useState(readPending);
-  const [forceCheck, setForceCheck] = useState(false);
-  // Set at start until the poll first shows the job, so the stale pre-start `null` is not read as a restart.
-  const [unseen, setUnseen] = useState(false);
 
   const jobQuery = useQuery(workspaceArchiveImportJobOptions());
   const job = jobQuery.data?.job ?? null;
   const running = job?.state === 'running';
   const waiting = running && job.progress?.phase === 'waiting';
 
-  // The server restarts about 300 ms after `done`; tell the app shell so it shows its restart overlay.
-  // The poll can miss that window, so the outcome below does not depend on seeing `done`.
+  // The server restarts about 300 ms after `done`; the app shell then shows its restart overlay and
+  // reloads the page when the server answers. The poll can miss that window, so the outcome check
+  // below runs from the saved mark after the reload, not from seeing `done`.
   const done = job?.state === 'done';
   useEffect(() => { if (done) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [done]);
-  // A failed or cancelled job means nothing was switched. A new server has no job (it lives in memory).
-  useEffect(() => { if (pending && (job?.state === 'failed' || job?.state === 'cancelled')) { writePending(''); setPending(''); } }, [pending, job?.state]);
-  useEffect(() => { if (job) setUnseen(false); }, [job]);
-  const restarted = !!pending && !unseen && jobQuery.isSuccess && !job;
-  const locationQuery = useQuery({ ...dataFolderOptions(), enabled: restarted || (!!pending && done && forceCheck), refetchInterval: q => (q.state.data ? false : 2000) });
-  const where = locationQuery.data;
-  const switched = !!where && !!pending && norm(where.dataRoot ?? '') === norm(pending);
-  const reportPath = pending ? `${pending}${/[\\/]$/.test(pending) ? '' : '/'}import-report.json` : '';
-  const dismiss = () => { writePending(''); setPending(''); setForceCheck(false); };
+  const mine = !!pending && job?.id === pending.id;
+  // Only this import's own failure or cancel clears the mark. After a reload, any other job is a stale mark.
+  useEffect(() => {
+    if (!pending || !jobQuery.isSuccess) return;
+    if (mine ? job.state === 'failed' || job.state === 'cancelled' : !!job && reloaded) { writePending(null); setPending(null); }
+  }, [pending, jobQuery.isSuccess, mine, job, reloaded]);
+  // A new server has no job (it lives in memory). After a reload, a `done` job of ours means the old server still runs.
+  const verifying = !!pending && jobQuery.isSuccess && (!job || (reloaded && mine && job.state === 'done'));
+  // Own key and no cache: DataFolderPanel's cached location would still show the old root.
+  const locationQuery = useQuery({
+    queryKey: serverKey('shell-queue/data-folder', { filters: { verifyImport: pending?.id ?? '' } }),
+    queryFn: ({ signal }) => dataFolderApi.location({ signal }),
+    enabled: verifying, gcTime: 0, staleTime: 0, refetchInterval: q => (q.state.data ? false : 2000),
+  });
+  const verdict = verifying && locationQuery.isSuccess ? locationQuery.data : null;
+  const switched = !!verdict && !!pending && samePath(verdict.dataRoot ?? '', pending.target);
+  const reportPath = pending ? `${pending.target}${/[\\/]$/.test(pending.target) ? '' : '/'}import-report.json` : '';
+  const dismiss = () => { writePending(null); setPending(null); };
 
   const refresh = () => void queryManager.invalidate(queryClient, workspaceArchiveImportJobOptions().queryKey);
   const fail = (e: unknown) => {
@@ -71,7 +87,15 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
     mutationFn: () => workspaceArchiveApi.importStart(zip.trim(), target.trim()),
     onMutate: () => { setError(''); setErrors([]); setConfirming(false); },
     onError: fail,
-    onSuccess: ({ job: started }) => { writePending(started.target); setPending(started.target); setForceCheck(false); setUnseen(true); },
+    onSuccess: async ({ job: started }) => {
+      // Seed the job cache with this import, so a stale poll of an earlier job cannot clear or confirm it.
+      const key = workspaceArchiveImportJobOptions().queryKey;
+      await queryClient.cancelQueries({ queryKey: key });
+      queryClient.setQueryData(key, { job: started });
+      const mark = { id: started.id, target: started.target };
+      writePending(mark);
+      setPending(mark);
+    },
     onSettled: refresh,
   });
   const cancelMut = useMutation({
@@ -108,14 +132,13 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
       <button type="button" className="settings-save-btn" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate()}>{t('settings.workspaceArchive.import.cancel')}</button>
       <p>{t('settings.workspaceArchive.import.cancelNote')}</p>
     </div>}
-    {done && job && !forceCheck && <div role="status" className="space-y-1">
+    {done && job && <div role="status" className="space-y-1">
       <p>{t('settings.workspaceArchive.import.restarting', { target: job.target })}</p>
       <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
-      <button type="button" className="settings-save-btn" onClick={() => setForceCheck(true)}>{t('settings.workspaceArchive.import.checkNow')}</button>
     </div>}
-    {pending && !running && (!done || forceCheck) && !where && <p role="status">{t('settings.workspaceArchive.import.checking')}</p>}
-    {pending && !running && where && <div role="status" className="space-y-1">
-      <p>{t(switched ? 'settings.workspaceArchive.import.switched' : 'settings.workspaceArchive.import.notSwitched', { target: pending, root: where.dataRoot ?? '' })}</p>
+    {verifying && !verdict && <p role="status">{t('settings.workspaceArchive.import.checking')}</p>}
+    {verdict && pending && <div role="status" className="space-y-1">
+      <p>{t(switched ? 'settings.workspaceArchive.import.switched' : 'settings.workspaceArchive.import.notSwitched', { target: pending.target, root: verdict.dataRoot ?? '' })}</p>
       <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
       <button type="button" className="settings-save-btn" onClick={dismiss}>{t('settings.workspaceArchive.import.dismiss')}</button>
     </div>}
