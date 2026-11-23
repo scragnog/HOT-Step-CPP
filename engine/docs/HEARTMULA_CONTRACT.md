@@ -201,13 +201,16 @@ memory.
 
 Takes a `/heartmula/synth` body, or with `?cover=1` a `/heartmula/cover` body, and runs
 the same parse, pick, prompt and byte counts as a job against the VRAM free now and the
-residency snapshot. Nothing loads and nothing queues. Each phase may use the free VRAM
-plus the HeartMuLa weights it would drop: stale ones, and the other phase's, which the
-pipeline frees when both do not fit. The phase furthest from fitting decides. Response
+residency snapshot. Nothing loads and nothing queues. The phases are the ones the job
+runs: a cover's style pass (the BF16 Qwen embedding), the LM phase unless `codes` are
+given, and the codec phase unless `codes_only`. Each may use the free VRAM plus the
+HeartMuLa weights it would drop: stale ones, and the other phase's, which the pipeline
+frees when both do not fit (the style pass may drop any). The phase furthest from fitting
+decides. Response
 `{"verdict", "need_bytes", "free_bytes", "reclaimable_bytes", "phase", "detail"}`;
 `verdict` is `fits`, `passes` (only after reclaiming other backends' idle VRAM),
-`refused`, or `unknown` while the GPU worker runs a job. A cover's style pass is not
-counted. Bad bodies and picks get the same errors as synth.
+`refused`, or `unknown` while the GPU worker runs a job. Bad bodies and picks get the
+same errors as synth.
 
 ### `POST /heartmula/synth`
 

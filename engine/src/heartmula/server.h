@@ -809,8 +809,9 @@ static void heartmula_handle_cover(const httplib::Request & req, httplib::Respon
 // or queues. Each phase may use what is free plus the HeartMuLa weights it would drop
 // (stale ones, and the other phase's, which the pipeline frees when both do not fit).
 // Verdict: fits; passes (only after reclaiming other backends' idle VRAM); refused; or
-// unknown while the GPU worker runs a job. A cover's style pass (the Qwen embedding,
-// freed before the LM loads) is not counted.
+// unknown while the GPU worker runs a job. Phases as the job runs them: a cover's
+// style pass (hm_cover_style, which may drop any HeartMuLa weights), the LM unless
+// codes are given, the codec unless codes_only.
 static void heartmula_handle_preflight(const httplib::Request & req, httplib::Response & res) {
     const bool       cover = req.has_param("cover") && req.get_param_value("cover") == "1";
     HeartMuLaRequest r;
@@ -887,8 +888,17 @@ static void heartmula_handle_preflight(const httplib::Request & req, httplib::Re
     const uint64_t kept_codec = codec_kept ? g_hm.codec_bytes : 0;
 
     struct Phase { const char * name; uint64_t need, avail; };
-    Phase phases[2];
+    Phase phases[3];
     int   n = 0;
+    if (cover) {
+        std::error_code ec;
+        const uint64_t  qwen = (uint64_t) std::filesystem::file_size(std::filesystem::path(g_hm.models_dir) / HM_COVER_QWEN, ec);
+        if (ec) {
+            hm_error(res, 503, "model_missing", "HeartMuLa covers need the Qwen3 Embedding BF16 text encoder (" HM_COVER_QWEN ")");
+            return;
+        }
+        phases[n++] = { "style", qwen + reserve, free_b + g_hm.resident_bytes };
+    }
     if (r.codes.empty()) {
         auto tok = hm_tokenizer_locked(p.file[HM_TOKENIZER].path, &err);
         if (!tok) {
@@ -909,8 +919,10 @@ static void heartmula_handle_preflight(const httplib::Request & req, httplib::Re
         const uint64_t kv = heartmula_kv_bytes(positions, B) + (r.cover ? heartmula_cover_cache_bytes(r.cover->steps, B) : 0);
         phases[n++] = { "lm", weights + kv + reserve, free_b + g_hm.resident_bytes - kept_lm };
     }
-    const uint64_t codec = codec_kept ? 0 : p.file[HM_RVQ].gpu_bytes + p.file[HM_FLOW].gpu_bytes + p.file[HM_SCALAR].gpu_bytes;
-    phases[n++] = { "codec", codec + reserve, free_b + g_hm.resident_bytes - kept_codec };
+    if (!r.codes_only) {  // pipeline.h: codes_only ends after the LM phase
+        const uint64_t codec = codec_kept ? 0 : p.file[HM_RVQ].gpu_bytes + p.file[HM_FLOW].gpu_bytes + p.file[HM_SCALAR].gpu_bytes;
+        phases[n++] = { "codec", codec + reserve, free_b + g_hm.resident_bytes - kept_codec };
+    }
 
     // The phase furthest from fitting decides.
     const Phase * worst = &phases[0];

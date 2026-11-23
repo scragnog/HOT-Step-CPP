@@ -74,20 +74,22 @@ int main() {
     admit("miss, degrade", false, false, true, b, MM3Admit::RUN, true, 1);
 
     // ── POST /mm3/preflight verdicts (mm3_preflight_verdict) ──
-    auto verdict = [&](const char * name, bool hit, bool measured, size_t budget, size_t own, MM3Preflight want) {
-        auto slot = [&](bool, int) { return hit; };
+    // `hit`: 0 none, 1 the plan as sent, 2 only the Q8_0 one-take plan of an earlier degraded run.
+    auto verdict = [&](const char * name, int hit, bool measured, size_t budget, size_t own, MM3Preflight want) {
+        auto slot = [&](bool sq8, int st) { return hit == 1 || (hit == 2 && sq8 && st == 1); };
         const MM3AdmitResult r = mm3_vram_admit(slot, measured, budget, w, ROW_7680, 2, 3, false, true, true);
         const MM3Preflight   v = mm3_preflight_verdict(r, measured, false, 3, own);
         printf("%s: preflight %s - %s\n", v == want ? "PASS" : "FAIL", name, mm3_preflight_str(v));
         fails += v == want ? 0 : 1;
     };
     const size_t roomy = mm3_fit_need(w, ROW_7680, 6, false);
-    verdict("fits as sent", false, true, roomy, roomy, MM3Preflight::FITS);
-    verdict("fits only after evicting ACE", false, true, roomy, roomy - 1, MM3Preflight::PASSES);
-    verdict("GH #324 shape cut", false, true, b, b, MM3Preflight::PASSES);
-    verdict("refused", false, true, GiB, GiB, MM3Preflight::REFUSED);
-    verdict("unmeasured", false, false, 0, 0, MM3Preflight::UNKNOWN);
-    verdict("plan cached, budget 1 GiB", true, true, GiB, GiB, MM3Preflight::FITS);
+    verdict("fits as sent", 0, true, roomy, roomy, MM3Preflight::FITS);
+    verdict("fits only after evicting ACE", 0, true, roomy, roomy - 1, MM3Preflight::PASSES);
+    verdict("GH #324 shape cut", 0, true, b, b, MM3Preflight::PASSES);
+    verdict("refused", 0, true, GiB, GiB, MM3Preflight::REFUSED);
+    verdict("unmeasured", 0, false, 0, 0, MM3Preflight::UNKNOWN);
+    verdict("plan cached, budget 1 GiB", 1, true, GiB, GiB, MM3Preflight::FITS);
+    verdict("degraded plan cached", 2, true, b, b, MM3Preflight::PASSES);
 
     printf("%s\n", fails ? "MM3 VRAM FIT: FAIL" : "MM3 VRAM FIT: PASS");
     return fails ? 1 : 0;

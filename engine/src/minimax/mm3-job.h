@@ -2056,6 +2056,13 @@ static void mm3_handle_preflight(const httplib::Request & hreq, httplib::Respons
         res.set_content(json ? json : "{}", "application/json");
         free(json);
     };
+    // Before the first g_mm3 read: select-model reprobes it under this mutex, and
+    // the worker holds it for a whole MM3 job, so never wait on it here.
+    std::unique_lock<std::mutex> lock(g_mm3_mutex, std::try_to_lock);
+    if (g_work_busy || !lock.owns_lock()) {
+        answer("unknown", 0, 0, 0, "the GPU is busy with another job");
+        return;
+    }
     if (!mm3_available(g_mm3)) {
         mm3_json_error(res, 501, "MiniMax-Music3 model files were not found (see GET /mm3/props)");
         return;
@@ -2070,12 +2077,6 @@ static void mm3_handle_preflight(const httplib::Request & hreq, httplib::Respons
     }
     if (!parsed) {
         mm3_json_error(res, 400, err.empty() ? "body must be a JSON object" : err);
-        return;
-    }
-    // The worker holds g_mm3_mutex for a whole MM3 job: never wait on it here.
-    std::unique_lock<std::mutex> lock(g_mm3_mutex, std::try_to_lock);
-    if (g_work_busy || !lock.owns_lock()) {
-        answer("unknown", 0, 0, 0, "the GPU is busy with another job");
         return;
     }
     if (!mm3_request_tokenize(g_mm3, &g_mm3_tokenizer, &req, &err)) {
@@ -2101,9 +2102,7 @@ static void mm3_handle_preflight(const httplib::Request & hreq, httplib::Respons
     const MM3Preflight v = mm3_preflight_verdict(adm, in.measured, in.q8_in, takes, own);
     const MM3VramFit & f = adm.fit;
     std::string detail;
-    if (adm.what == MM3Admit::HIT) {
-        detail = "the plan is in the AR cache, so planning is skipped";
-    } else if (v == MM3Preflight::UNKNOWN) {
+    if (v == MM3Preflight::UNKNOWN) {
         detail = "no VRAM measurement on this device";
     } else if (v == MM3Preflight::REFUSED) {
         detail = "planning does not fit even with the planner cache at Q8_0";
@@ -2114,6 +2113,9 @@ static void mm3_handle_preflight(const httplib::Request & hreq, httplib::Respons
                       " to " + std::to_string(f.takes);
         }
         if (detail.empty()) detail = "idle models of other backends are unloaded first";
+    }
+    if (adm.what == MM3Admit::HIT) {
+        detail += (detail.empty() ? "" : "; ") + std::string("the plan is in the AR cache, so planning is skipped");
     }
     answer(mm3_preflight_str(v), f.need, budget, own, detail);
 }

@@ -963,11 +963,12 @@ export const minimaxBackend: EngineBackend = {
     return outcomeFromJob(job);
   },
   arbitratesResidencyInEngine: true,
-  /** The body runMinimaxGeneration would send, renderer resolved the same way. */
+  /** The body runMinimaxGeneration would send. Auto resolves as it does, but from
+   *  the last-good props: GET /mm3/props waits on a running render's mutex. */
   async preflight(envelope) {
     const { req } = mapMinimaxParams(structuredClone(envelope.submission));
     if (req.dit_backend === 'auto') {
-      req.dit_backend = (await mm3Props()).props?.dit_runtime?.available === true ? 'tensorrt' : 'ggml';
+      req.dit_backend = mm3PropsCached()?.dit_runtime?.available === true ? 'tensorrt' : 'ggml';
     }
     return preflightFromEngine(await mm3Preflight(req));
   },
