@@ -311,7 +311,7 @@ export function composeCaption(ix: Index, key: string, desk: Desk): ToolStep | {
   const bits = [p.split(/[,.\n]/)[0]!.trim()], bpm = here(ix, KEYS.bpm, desk) && !isAuto(ix, KEYS.bpm, desk), k = here(ix, KEYS.key, desk) && valueOf(ix, KEYS.key, desk) !== '';
   if (bpm) bits.push(`${Number(valueOf(ix, KEYS.bpm, desk))} BPM`);
   if (k) bits.push(say(textMsg(ix, KEYS.key, desk)));
-  const g = str(read(ix, KEYS.gender, desk)), lang = has(ix, KEYS.lang, desk.engine) && applies(ix, KEYS.lang, desk) && changed(ix, KEYS.lang, desk) ? optionsOf(ix, KEYS.lang, desk).find(o => o.value === valueOf(ix, KEYS.lang, desk))?.label : undefined;
+  const g = str(read(ix, KEYS.gender, desk)), lang = has(ix, KEYS.lang, desk.engine) && applies(ix, KEYS.lang, desk) && changed(ix, KEYS.lang, desk) ? optionsOf(ix, KEYS.lang, desk).find(o => o.value === valueOf(ix, KEYS.lang, desk))?.label ?? str(valueOf(ix, KEYS.lang, desk)) : undefined;
   const voice = (g === 'duet' ? 'male and female duet' : g ? `${g} lead vocal` : 'lead vocal') + (lang ? `, sung in ${say(lang)}` : '');
   const text = `Global Metadata: ${bits.join(', ')}, warm and intimate\nVocal Details: ${read(ix, KEYS.instr, desk) === true ? 'instrumental; the lead instrument carries the melody' : voice + ', close-mic, light harmonies on the chorus'}\nArrangement: [Intro] solo instrument, [Verse] sparse, [Chorus] full band, [Outro] fades back to the intro motif`;
   const change = named(ix, desk, key, 'compose', { [key]: text });

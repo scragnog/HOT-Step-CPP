@@ -31,7 +31,7 @@ The slice is a working vertical cut of the page:
 - every part the slice has drawn right on every surface a definition can put it (a tile's body, a row, a rack, a well,
   an LCD, a tile's foot, a labelled pairing, a pedal, a side unit), and the registration points the packages add to.
 
-Not built, and left as seams: the prompt card and the lyric sheet, the bespoke parts and the modules made of them, the
+Not built, and left as seams: the bespoke parts and the modules made of them, the
 picker, the engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
 workflows and revisions, drafts, drag and drop, the remaining overlays (popover, notes, score modal, song menu, engine
 log), tooltips and touch gestures, and the choreographed tier transition (a View Transition in the concept; here the
@@ -247,7 +247,7 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | A part's look, a package's stylesheet | `src/app/styles/rebuild/<NN>-<name>.css` | loaded after the concept's, in name order |
 | A keyboard shortcut | a file in `src/app/features/` | `onKey({ id, when, run, order })` (register/keys.ts) |
 | Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
-| A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts) |
+| A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts); `run(arg, from)` is given what the part chose (`v.run(i, arg)`: a tag, a file's name) and the part, whose gesture its change joins |
 | State of its own | `src/app/store/<package>.ts` | its own store; `defineUndoable(name, { read, write })` when Undo covers it |
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
 | Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
@@ -298,6 +298,18 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   on auto, and text that fails its check is refused and said (`derive/parts.ts`).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
+- `derive/fields.ts` (package 4): the prompt card and the lyric sheet. What the sheet draws (`sheetModel`, given to the
+  part as `PartModel.sheet`: its sections with their colours, where each starts and the short labels a narrow segment
+  tries, the line count and its estimate by the song's tempo (`estimateTempo`: the BPM field, else a BPM written in the
+  box, S-07), the tabs, whether the stamp shows (Q-07), Instrumental standing everything back); where it goes
+  (`lyricsPlace`: a sheet, or the note that the engine has no lyrics, S-11); what the card draws (`promptModel`, as
+  `PartModel.prompt`: the box's name and examples by engine (S-05), the suggestions its words call for, the caption a
+  dataset supplies (`trackNow`, Automatic by the tempo field, E-06) and the tags, which tools show); and what each tool
+  writes, as one of the prompt's named steps with what it says after (`writeForMe`, `composeCaption`, `expandStep`,
+  `moveToLyrics`, `tempoStep` and `latentStep`, which bring the module their value lives on, `plainStep`, `copyStep`,
+  `tagStep`, `datasetStep`, `latentClear`, `insertTag`). `derive/models.ts`: a node's named actions say their name
+  (`PartModel.actions[].name`); a text parameter's `maxLength`. `derive/core.ts`: a server list's entry may carry
+  `data` (a caption dataset's tracks and tags).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -351,10 +363,19 @@ the parts gallery, and 6 of the concept's suite, three of them pending there: S-
 draws them, compared with `controls-accepted.json`: `vb.mjs compare concept-controls rebuild-controls --accept
 tools/visual-baseline/controls-accepted.json`) and `tools/test-controls.ts` (in `npm run check`). The gallery draws a
 part with variants once in each (`testing/gallery.ts`).
+
+**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (23 scenarios that run, 8 of
+`scenarios/33-fields.mjs`, which hold on the concept page too, and 15 of the concept's suite, two of them pending there:
+F-13 and S-07; 6 more wait on packages 2, 3 and 8), `switches/4-fields.json` (27 features), `slice-states/
+40-fields.mjs` (38 states of the prompt card's column and the lyric tile, compared with `fields-accepted.json`:
+`vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json`). The
+slice's states, its parts' and package 1's now have the lyric sheet in place on both pages (it was withdrawn from the
+concept page until it was built); `01-desk/add-by-keyboard` passes with it and is a normal entry again.
+
 An acceptance entry may wait on a later package (`"waiting": { "package", "because" }`, tools/behaviour/README.md):
 `run.mjs --slice` reports it apart and fails if it passes, `switches.mjs` leaves it out. The slice's
-`01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
-decide the tile heights their moves need).
+`10-desk-modules/undo-covers-structure` waits on package 3 (Tempo's LCD rows and key wheel decide the tile heights its
+moves need).
 
 ## Deviations from the concept's markup
 
@@ -401,6 +422,25 @@ decide the tile heights their moves need).
     by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
 19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
     the LCD selector it gives a pick (`board/Board.tsx`, one line).
+
+20. **A text field's own Ctrl+Z** (package 4, F-22) is kept by the page for every text field (store/fields.ts,
+    features/field-undo.ts) as the concept's is; where the concept keeps a page step that a field's Ctrl+Z took back
+    to where it started (an entry that then undoes nothing), the step goes. A field bound to nothing (a number box's
+    typing, a filter) starts its history afresh when the page draws it again, as the concept's field drawn anew does.
+21. **The vocal gender beside Instrumental is the generic labelled pairing** (`labelled` holding `segmented`): the
+    segments are the named group, the pairing carries no `gender` class (its segments' padding is the concept's,
+    styles/rebuild/25-prompt.css) and no tip yet (the pairing's housing is package 2's).
+22. **The caption dataset's default is the definition's**, the adapter's own dataset ("The adapter's dataset", value "",
+    as the real application sends it); the concept's default is its first dataset (my-band-ep). The supplied caption
+    reads the first dataset the server lists for "".
+23. **Presets & genres** run the named action `stylePresets`, which the popover's package (8) builds; until then it says
+    so. **Import latent** takes a chosen file; dropping one on it is drag and drop's (package 8).
+24. **No motion yet**: the box's height eases and a suggestion opens by height in the concept (19-text-boxes.js,
+    18-motion.js blockIn); here they change at once (package 9).
+25. **Song info's open state is the card's own**, not kept with the desk (the concept saves S.songInfoOpen); it opens by
+    itself when info arrives from outside, as the concept's does.
+26. **Compose caption writes the key as the page writes it** ("F# major"); the concept spells it with ♯ and flats
+    (Tempo's spellKey, package 3).
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
