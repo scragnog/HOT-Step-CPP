@@ -9,13 +9,6 @@
    "why": "A plugin list is as wide as its button at least (--ddw, set on #dd and inherited by everything in it); the button stands in the Sampler's row, which is laid out around the parts later packages build (its scope, a seam here), so it has another width. The list's own width rule is the concept's."
   },
   {
-   "state": "^controls-dd-",
-   "key": "^#dd",
-   "field": "^animation-name$",
-   "n": 2,
-   "why": "A list opens on the side of its button with room (ovUp above, ovIn below, the concept's placeDD rule); the Sampler tile stands higher here, its scope still a seam, so these lists open below."
-  },
-  {
    "state": "^controls-dd-solvers$",
    "key": "^shot$",
    "field": "^pixels$",

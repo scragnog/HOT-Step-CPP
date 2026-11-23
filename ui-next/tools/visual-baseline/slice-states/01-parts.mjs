@@ -5,7 +5,6 @@
 // build, so only these controls are compared.
 
 const parts = (bk, tier, mods, pedals, sels, vals = {}) => async h => {
-  await h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
   await h.js(([bk, tier, mods, pedals, vals]) => { if (bk !== S.backend) enterEngine(bk); S.tier = tier; S.mods = mods; S.pedals = pedals; Object.assign(S.vals, vals); render(); }, [bk, tier, mods, pedals, vals]);
   await h.settle(900);
   void sels;

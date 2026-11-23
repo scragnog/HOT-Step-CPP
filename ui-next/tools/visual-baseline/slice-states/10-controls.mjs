@@ -9,9 +9,8 @@
 //   node tools/visual-baseline/vb.mjs capture rebuild-controls --states slice --only "^controls-" --plan-from concept-controls
 //   node tools/visual-baseline/vb.mjs compare concept-controls rebuild-controls --accept tools/visual-baseline/controls-accepted.json
 
-/* the concept's lyric sheet (package 4) is withdrawn, as the slice's states withdraw it; nothing else is changed */
+/* the lyric sheet stands at the head of the desk on both pages, as the concept puts it (package 4) */
 const scene = (bk, tier, mods, vals = {}, pedals = []) => async h => {
-  await h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
   await h.js(([bk, tier, mods, vals, pedals]) => { if (bk !== S.backend) enterEngine(bk); S.tier = tier; S.mods = mods; S.pedals = pedals; Object.assign(S.vals, vals); render(); }, [bk, tier, mods, vals, pedals]);
   await h.settle(900);
 };
