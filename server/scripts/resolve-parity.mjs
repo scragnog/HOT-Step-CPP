@@ -46,12 +46,12 @@ globalThis.localStorage = {
 };
 
 const ui = {
-  caption: await import('../../ui/src/utils/captionForBackend.ts'),
-  mm3: await import('../../ui/src/utils/mm3CaptionSource.ts'),
-  yue2: await import('../../ui/src/utils/yue2CaptionSource.ts'),
+  caption: await import('../../ui/src/utils/lyrics/captionForBackend.ts'),
+  mm3: await import('../../ui/src/utils/lyrics/mm3CaptionSource.ts'),
+  yue2: await import('../../ui/src/utils/lyrics/yue2CaptionSource.ts'),
   wild: await import('../../ui/src/utils/wildcardUtils.ts'),
-  dur: await import('../../ui/src/utils/estimateDuration.ts'),
-  key: await import('../../ui/src/utils/keyScale.ts'),
+  dur: await import('../../ui/src/utils/format/estimateDuration.ts'),
+  key: await import('../../ui/src/utils/abc/keyScale.ts'),
 };
 const node = {
   src: await import('../src/services/generation/resolve/captionSource.ts'),

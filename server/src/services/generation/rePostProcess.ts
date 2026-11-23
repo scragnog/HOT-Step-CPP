@@ -310,7 +310,10 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
       // Every requested stage declined to run — a missing model, or a VST that
       // failed to load. Reporting success here would leave the user wondering
       // why nothing changed.
-      throw new Error('The chain ran but no stage produced audio — check the engine log for a missing model or a failed VST');
+      throw new Error(
+        'The chain ran but no stage produced audio — check the engine log for a missing model or a failed VST'
+        + (stages.length ? ` (requested: ${stages.join(', ')})` : ''),
+      );
     }
 
     const quality = result.qualityScores[0];

@@ -17,6 +17,8 @@ import path from 'path';
 import https from 'https';
 import { pipeline } from 'stream/promises';
 import { config } from '../config.js';
+import { planWhisperWindows } from './audioActivity.js';
+import { removeSlice, sliceToWav } from './audioSlice.js';
 
 const execFileAsync = promisify(execFile);
 let resolvedWhisperExe: string | null = null;
@@ -118,7 +120,10 @@ export interface WhisperWord {
   word: string;
   start: number;
   end: number;
-  probability: number;
+  /** Absent when the decoder did not report one. It is carried through as
+   *  absent rather than replaced with a 1, so nothing downstream mistakes it
+   *  for a confident word. */
+  probability?: number;
 }
 
 export interface WhisperSegment {
@@ -130,6 +135,9 @@ export interface WhisperSegment {
 
 export interface WhisperResult {
   segments: WhisperSegment[];
+  /** What produced this transcript: the model file, whether token DTW ran, and
+   *  how many activity-gated windows were joined. */
+  meta?: { model: string; dtw: boolean; windows?: number };
 }
 
 export interface WhisperOptions {
@@ -141,6 +149,16 @@ export interface WhisperOptions {
   beamSize?: number;
   /** Aborts the CLI. The process is killed and no output is kept. */
   signal?: AbortSignal;
+  /**
+   * Ask for whisper.cpp token DTW. Off unless a caller opts in: the lyric
+   * aligner asks for it because token times are what it reconciles, while
+   * generation-time transcription does not, and there the flag can only cost a
+   * second full run when a build does not know the preset name. A caller that
+   * does ask is retried once without it rather than failing the whole run.
+   */
+  dtw?: boolean;
+  /** CLI budget for one call. Each activity-gated window gets the full budget. */
+  timeoutMs?: number;
 }
 
 // ── Model priority for fallback selection ───────────────────────────
@@ -151,6 +169,31 @@ const MODEL_PRIORITY = [
   'ggml-medium.bin',
   'ggml-base.bin',
 ];
+
+/**
+ * whisper.cpp's `--dtw` preset names, keyed by the model family in the file
+ * name. The names are whisper.cpp's own; a build that predates one of them
+ * exits non-zero and the caller retries without the flag.
+ */
+const DTW_PRESETS: Array<[RegExp, string]> = [
+  [/^ggml-large-v3-turbo/i, 'large.v3.turbo'],
+  [/^ggml-large-v3/i, 'large.v3'],
+  [/^ggml-large-v2/i, 'large.v2'],
+  [/^ggml-large-v1/i, 'large.v1'],
+  [/^ggml-medium/i, 'medium'],
+  [/^ggml-small/i, 'small'],
+  [/^ggml-base/i, 'base'],
+  [/^ggml-tiny/i, 'tiny'],
+];
+
+/** The preset for a GGML model file, or null when its family has none. */
+export function dtwPresetFor(modelFile: string): string | null {
+  const name = path.basename(modelFile);
+  const family = DTW_PRESETS.find(([pattern]) => pattern.test(name));
+  if (!family) return null;
+  // `ggml-base.en.bin` is the English-only build of the same architecture.
+  return /\.en\.bin$/i.test(name) ? `${family[1]}.en` : family[1];
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -456,6 +499,9 @@ export async function transcribeWithWhisper(
 
   const beamSize = options.beamSize ?? 5;
   const language = options.language ?? 'auto';
+  const modelName = path.basename(modelPath);
+  const preset = options.dtw === true ? dtwPresetFor(modelName) : null;
+  const timeoutMs = options.timeoutMs ?? config.whisper.timeoutMs;
 
   // Build CLI args
   //   --split-on-word:  split segments at word boundaries, not BPE token boundaries
@@ -475,6 +521,9 @@ export async function transcribeWithWhisper(
     '--split-on-word',        // split at word boundaries, not BPE tokens
     '--max-len', '1',         // 1 word per segment = real per-word timestamps
     '--beam-size', String(beamSize),
+    // Token DTW over the model's alignment heads. `normaliseWhisperJson`
+    // already prefers the `t_dtw` it produces; nothing ever asked for it.
+    ...(preset ? ['--dtw', preset] : []),
     '--no-prints',            // suppress progress to stderr
   ];
 
@@ -492,15 +541,36 @@ export async function transcribeWithWhisper(
   const jsonOutputPath = audioPath + '.json';
 
   console.log(`[Whisper] Transcribing: ${path.basename(audioPath)}`);
-  console.log(`[Whisper] Model: ${path.basename(modelPath)}, language: ${language}, beam: ${beamSize}`);
+  console.log(`[Whisper] Model: ${modelName}, language: ${language}, beam: ${beamSize}` +
+    `${preset ? `, dtw: ${preset}` : ''}`);
   const t0 = Date.now();
 
+  const withoutDtw = (): string[] => {
+    const copy = [...args];
+    const at = copy.indexOf('--dtw');
+    if (at >= 0) copy.splice(at, 2);
+    return copy;
+  };
+  const run = (argv: string[]) => execFileAsync(whisperExe, argv, {
+    timeout: timeoutMs,
+    maxBuffer: 10 * 1024 * 1024,  // 10 MB stdout/stderr buffer
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+
+  let dtwUsed = !!preset;
   try {
-    await execFileAsync(whisperExe, args, {
-      timeout: 120_000,       // 2 minute timeout
-      maxBuffer: 10 * 1024 * 1024,  // 10 MB stdout/stderr buffer
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
+    try {
+      await run(args);
+    } catch (err: any) {
+      // The preset names track whisper.cpp's model list, which a bundled build
+      // can predate. An unknown flag is a bad name here, not a bad render: the
+      // decoder offsets are worse than token times but better than no lyrics.
+      const stderr = err?.stderr?.toString() || '';
+      if (!preset || options.signal?.aborted || !/dtw|unknown argument|invalid argument/i.test(stderr)) throw err;
+      console.warn(`[Whisper] --dtw ${preset} rejected, retrying without it: ${stderr.trim().split('\n').pop()}`);
+      dtwUsed = false;
+      await run(withoutDtw());
+    }
   } catch (err: any) {
     // A cancelled run is not a failure: the caller aborted on purpose.
     if (options.signal?.aborted) {
@@ -532,6 +602,7 @@ export async function transcribeWithWhisper(
     // whisper.cpp JSON format: { transcription: [{ timestamps: {from, to}, text, ... }] }
     // Normalise into our WhisperResult format
     result = normaliseWhisperJson(parsed);
+    result.meta = { model: modelName, dtw: dtwUsed };
   } catch (err: any) {
     console.error(`[Whisper] Failed to parse JSON output: ${err.message}`);
     try { fs.unlinkSync(jsonOutputPath); } catch {}
@@ -701,4 +772,63 @@ export function normaliseWhisperJson(raw: any): WhisperResult {
   }
 
   return { segments };
+}
+
+// ── Whole-track transcription ───────────────────────────────────────
+
+export interface TranscribeTrackOptions extends WhisperOptions {
+  /** Longest activity-gated window. */
+  maxWindowSec?: number;
+}
+
+/**
+ * Transcribe a whole render in activity-gated windows and stitch the results.
+ *
+ * Each window is cut to its own WAV, so the times Whisper reports are relative
+ * to that cut and adding the window's start is exact — no dependence on how a
+ * particular build treats `--offset-t`. A file that cannot be analysed is one
+ * window, which is the old behaviour with a longer budget.
+ */
+export async function transcribeTrack(
+  audioPath: string,
+  sourceLyrics: string,
+  options: TranscribeTrackOptions = {},
+): Promise<WhisperResult | null> {
+  const plan = planWhisperWindows(audioPath, {
+    maxWindowSec: options.maxWindowSec ?? config.whisper.windowSec,
+  });
+  const windows = plan.windows.length ? plan.windows : [{ startSec: 0, endSec: 0 }];
+
+  const segments: WhisperSegment[] = [];
+  let meta: NonNullable<WhisperResult['meta']> | null = null;
+  const slices: string[] = [];
+
+  try {
+    for (const window of windows) {
+      if (options.signal?.aborted) return null;
+      const whole = window.startSec <= 0 && window.endSec <= 0;
+      let file = audioPath;
+      if (!whole) {
+        file = await sliceToWav(audioPath, window.startSec, window.endSec, { signal: options.signal });
+        slices.push(file);
+      }
+      const part = await transcribeWithWhisper(file, sourceLyrics, options);
+      if (!part) continue;
+      if (!meta) meta = { ...(part.meta ?? { model: '', dtw: false }) };
+      const shift = whole ? 0 : window.startSec;
+      for (const segment of part.segments) {
+        segments.push({
+          ...segment,
+          start: segment.start + shift,
+          end: segment.end + shift,
+          words: segment.words?.map(w => ({ ...w, start: w.start + shift, end: w.end + shift })),
+        });
+      }
+    }
+  } finally {
+    for (const slice of slices) removeSlice(slice);
+  }
+
+  if (segments.length === 0) return null;
+  return { segments, ...(meta ? { meta: { ...meta, windows: windows.length } } : {}) };
 }

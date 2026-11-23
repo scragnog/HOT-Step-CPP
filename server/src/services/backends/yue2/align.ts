@@ -11,9 +11,14 @@
 // WHY THIS FILE IS SHORT, and lyricsReconcile.ts is not: Whisper returns what
 // it THINKS it heard, so that path has to align two different word sequences
 // with Needleman-Wunsch before it can time anything. The aligner returns
-// CODEPOINT offsets into our own lyrics string (`yue2_cursor_words_of`), so a
+// CODEPOINT offsets into the string it was given (`yue2_cursor_words_of`), so a
 // word's line — and therefore its [Section] — is a lookup, not a guess. There
 // is nothing to reconcile and nothing to get wrong.
+//
+// The string it is given is not always the lyric's own spelling: lyrics are
+// posted as they are SUNG parcelled into the units of `lyricsPronunciation.ts`
+// ("AGI" is "ay gee eye"), and the optional `plan` on `yue2LyricsJson` is what
+// folds those unit spans back onto the words the sidecar stores.
 //
 // Codepoints, not UTF-16 code units: the engine counts the way Python does, so
 // every offset here is indexed against `Array.from(lyrics)`. A lyric with an
@@ -21,6 +26,7 @@
 // naive `lyrics[i]`, which is exactly the kind of drift nobody notices until
 // the karaoke bar is a line behind halfway through.
 
+import type { AlignerLyrics } from '../../lyricsPronunciation.js';
 import type { LyricsJson, LyricsLine, LyricsWord } from '../../lyricsReconcile.js';
 
 /** One sung word, as POST /yue2/align returns it. `char0`/`char1` are a
@@ -64,10 +70,71 @@ function lyricLines(chars: string[]): LyricLine[] {
 }
 
 /**
+ * Fold the aligner's spans back onto the lyric words that were sent.
+ *
+ * `plan` is the pronunciation map (`lyricsPronunciation.ts`): a word can be
+ * spelled with more than one unit, because the aligner scores letters and a
+ * lyric's hard words are not spelled the way they are sung — "AGI" is posted as
+ * "ay gee eye" and "2024" as "twenty twenty four". The aligner returns one
+ * span per unit, and the sidecar stores one word: its span is the first unit's
+ * start to the last unit's end, its confidence the mean of theirs, and its char
+ * span the ORIGINAL token, so the word text is the lyric's own spelling and not
+ * the pronunciation.
+ *
+ * A unit the aligner dropped simply contributes nothing; if a word loses every
+ * unit it keeps no span, which is the same verdict the run gave before this map
+ * existed. Only a word that has at least one placed unit is written.
+ */
+function foldToWords(plan: AlignerLyrics, words: Yue2AlignWord[]): Yue2AlignWord[] {
+  const sorted = [...words].sort((a, b) => a.char0 - b.char0);
+  const starts = sorted.map(word => word.char0);
+  /** First span that begins at or after `at`. */
+  const lowerBound = (at: number): number => {
+    let lo = 0;
+    let hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] < at) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const out: Yue2AlignWord[] = [];
+  for (const word of plan.words) {
+    const first = plan.units[word.firstUnit];
+    const last = plan.units[word.lastUnit];
+    const from = lowerBound(first.start);
+    let placed = 0;
+    let score = 0;
+    let start = 0;
+    let end = 0;
+    for (let i = from; i < sorted.length && sorted[i].char0 < last.end; i++) {
+      const span = sorted[i];
+      if (placed === 0) start = span.start;
+      end = span.end;
+      score += span.score;
+      placed++;
+    }
+    if (placed === 0) continue;
+    out.push({
+      start,
+      end,
+      score: score / placed,
+      char0: word.start,
+      char1: word.end,
+    });
+  }
+  return out;
+}
+
+/**
  * Build `.lyrics.json` from the aligner's word spans.
  *
  * `lyrics` MUST be byte-for-byte the string that was posted to /yue2/align —
- * the offsets index into it and nothing re-derives them.
+ * the offsets index into it and nothing re-derives them. When `plan` is given,
+ * that string was the pronunciation map's `text` rather than `lyrics` itself, and
+ * the spans are folded back onto the original words first (see `foldToWords`).
  *
  * Words the aligner dropped (a line of punctuation, a word with no alignable
  * character) simply have no span, so a line keeps the words that were timed
@@ -75,10 +142,12 @@ function lyricLines(chars: string[]): LyricLine[] {
  * omitted rather than guessed at: the bar showing nothing is honest, and a
  * fabricated timestamp is not.
  */
-export function yue2LyricsJson(lyrics: string, words: Yue2AlignWord[]): LyricsJson {
+export function yue2LyricsJson(
+  lyrics: string, words: Yue2AlignWord[], plan?: AlignerLyrics,
+): LyricsJson {
   const chars = Array.from(lyrics);
   const lines = lyricLines(chars);
-  const sorted = [...words].sort((a, b) => a.char0 - b.char0);
+  const sorted = [...(plan ? foldToWords(plan, words) : words)].sort((a, b) => a.char0 - b.char0);
 
   const out: LyricsLine[] = [];
   let w = 0;

@@ -108,6 +108,7 @@ tools/mcp-lyricstudio/node_modules/
 tools/mcp-hotstep/node_modules/
 !tools/discord-claude/
 !tools/lm-attr-probe/
+!tools/yue2-ctc-align/
 !tools/mm3-reg-corpus/
 !tools/mm3-trim-silence/
 !tools/vocal-end/

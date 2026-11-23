@@ -404,7 +404,9 @@ test('SA3 preview renders record each cell once, keep going past failures and re
   fs.rmSync(path.join(dir, 'previews'), { recursive: true });
   fs.symlinkSync(outside, path.join(dir, 'previews'), 'junction');
   assert.equal(previews.sa3PreviewAudioPath(dir, done), null);
-  fs.rmdirSync(path.join(dir, 'previews')); // the junction, not its target
+  // unlink, not rmdir: the previews entry is a link, and rmdir on a POSIX
+  // symlink fails with ENOTDIR. unlink removes the link, never its target.
+  fs.unlinkSync(path.join(dir, 'previews'));
   fs.renameSync(outside, path.join(dir, 'previews'));
   assert.ok(previews.sa3PreviewAudioPath(dir, done));
   const ac = new AbortController(); ac.abort();

@@ -102,7 +102,9 @@ test('cleanup refuses junctions out of the run, before any write', async () => {
     assert.equal(fs.existsSync(path.join(runDir, 'ckpt-10')), true);
 
     // A checkpoint folder linked to another run's checkpoint: refused too.
-    fs.rmdirSync(path.join(runDir, 'previews')); // the junction only
+    // unlink, not rmdir: the entry is a symlink, and rmdir on a POSIX
+    // symlink fails with ENOTDIR. unlink removes the link, never its target.
+    fs.unlinkSync(path.join(runDir, 'previews'));
     fs.symlinkSync(path.join(other, 'ckpt-30'), path.join(runDir, 'ckpt-30'), 'junction');
     assert.throws(() => m.runMm3Cleanup(ds, { ...run, checkpoints: [ckpt(10), ckpt(20), ckpt(30)] }, 20, { otherCheckpoints: true }), /outside the run folder/);
     assert.equal(fs.existsSync(path.join(other, 'ckpt-30', 'adapter_model.safetensors')), true);

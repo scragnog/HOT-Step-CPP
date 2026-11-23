@@ -903,7 +903,14 @@ static void yue2_handle_align(const httplib::Request & req, httplib::Response & 
     const int64_t      frames = ok ? (int64_t) em.size() / C : 0;
     std::vector<float> rows5;
     if (ok) {
-        ok = yue2_cursor_align(em.data(), frames, C, audio_s, m.cfg.labels, lyrics, &rows5, &err);
+        // The star lattice, not the trainer's: an ad-lib, a backing "ah" pad or
+        // an outro chant is parked in a garbage state instead of being explained
+        // by stretching a lyric character over it (see yue2-ctc-align.h).
+        // `ace-train yue2-align` still writes cursor_words with
+        // yue2_cursor_align, so the AR trainer's --cursor-weight targets do not
+        // move with this.
+        ok = yue2_cursor_align_star(em.data(), frames, C, audio_s, m.cfg.labels, lyrics,
+                                    YUE2_ALIGN_STAR_MARGIN, &rows5, &err);
     }
     const auto t2 = std::chrono::steady_clock::now();
     yue2_mmsfa_graph_free(&g);
