@@ -3554,7 +3554,6 @@
     "settings.workspaceArchive.import.reportAt": "The import report is saved at {{path}}.",
     "settings.workspaceArchive.import.cancelled": "Import cancelled. The new folder was removed.",
     "settings.workspaceArchive.import.failed": "Import failed: {{error}}",
-    "settings.workspaceArchive.import.checkNow": "Check now",
     "settings.workspaceArchive.import.checking": "Checking which data folder is in use...",
     "settings.workspaceArchive.import.switched": "HOT-Step is now using {{target}}.",
     "settings.workspaceArchive.import.notSwitched": "HOT-Step is still using {{root}}. The switch to {{target}} has not applied yet: restart the app to finish it, or use Data folder > Cancel scheduled change.",
