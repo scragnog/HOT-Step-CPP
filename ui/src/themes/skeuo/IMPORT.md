@@ -1,7 +1,7 @@
 # Re-importing the skeuo skin
 
 Source: `skeuo-skin.zip` from the skin's developer (Helikaon23s), received 2026-11-23, first drop.
-Licence: MIT, consent pending confirmation at import time.
+Licence: MIT, consent confirmed by the developer on 2026-11-23.
 
 `theme.css` is the zip's `ui/src/skins/skeuo.css` with only the edits below, so the next drop is a diff.
 Recipe: diff the new `skeuo.css` against this `theme.css`, apply the new drop, then redo the edits in this list.
