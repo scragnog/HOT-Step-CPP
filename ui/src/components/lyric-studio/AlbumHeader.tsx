@@ -1,3 +1,4 @@
+import { artworkSrc } from '../../utils/artworkSrc';
 import React from 'react';
 import { ChevronLeft, ChevronDown, ChevronRight, Settings2, FileText, Users, Music2, Headphones } from 'lucide-react';
 import type { Artist, LyricsSet, SongLyric } from '../../services/lireekApi';
@@ -56,7 +57,7 @@ export const AlbumHeader: React.FC<AlbumHeaderProps> = ({
           const dArtistName = disguiseArtist(artist.name);
           return dUrl && !imageError ? (
           <img
-            src={dUrl}
+            src={artworkSrc(dUrl)}
             alt={dArtistName}
             className="w-full aspect-video object-cover"
             onError={() => setImageError(true)}

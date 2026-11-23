@@ -6,6 +6,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Music } from 'lucide-react';
+import { artworkSrc } from '../../utils/artworkSrc';
 import { coverSrc, useCoverSet } from '../../utils/defaultCover';
 
 interface CoverImageProps {
@@ -24,7 +25,7 @@ export const CoverImage: React.FC<CoverImageProps> = ({
 }) => {
   const [broken, setBroken] = useState(false);
   const set = useCoverSet();
-  const src = coverSrc(url, seed, set);
+  const src = artworkSrc(coverSrc(url, seed, set));
 
   // A new src deserves a fresh attempt — switching sets should not inherit the
   // previous one's failure.

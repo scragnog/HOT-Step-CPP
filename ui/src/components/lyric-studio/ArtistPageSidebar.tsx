@@ -1,3 +1,4 @@
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Clock, Shuffle, Brain, Disc3 } from 'lucide-react';
@@ -85,7 +86,7 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
               const dUrl = disguiseImageUrl(artist.image_url, artist.name);
               return dUrl && !imageError ? (
               <img
-                src={dUrl}
+                src={artworkSrc(dUrl)}
                 alt={disguiseArtist(artist.name)}
                 className="w-full aspect-[16/9] object-cover"
                 onError={() => setImageError(true)}

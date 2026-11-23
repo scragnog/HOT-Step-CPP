@@ -1,3 +1,4 @@
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import { ChevronLeft, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -175,7 +176,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
                   const dName = disguiseArtist(artist.name);
                   return dUrl && !imageErrors.has(artist.id) ? (
                   <img
-                    src={dUrl}
+                    src={artworkSrc(dUrl)}
                     alt={dName}
                     className="w-full h-full object-cover"
                     onError={() => setImageErrors(prev => new Set(prev).add(artist.id))}

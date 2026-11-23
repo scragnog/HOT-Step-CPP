@@ -6,6 +6,7 @@
 // cover can be replaced with an uploaded image. All of it is embedded into
 // exported audio files on download (handled server-side by gatherSongMetadata).
 
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useState, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -116,7 +117,7 @@ export const MetadataEditorModal: React.FC<MetadataEditorModalProps> = ({ song, 
           <div className="flex items-center gap-4">
             <div className="relative w-24 h-24 rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
               {coverUrl
-                ? <img src={coverUrl} alt="" className="w-full h-full object-cover" />
+                ? <img src={artworkSrc(coverUrl)} alt="" className="w-full h-full object-cover" />
                 : <ImageIcon size={28} className="text-zinc-400" />}
               {uploading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/40">

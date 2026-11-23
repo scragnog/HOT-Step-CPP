@@ -6,6 +6,7 @@
 // dataset's trained adapters plus one of its own tracks (the timbre /
 // mastering reference) can be linked as the album preset.
 
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Mic2, RefreshCw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -136,7 +137,7 @@ export const SendToLyricStudio: React.FC = () => {
                     </span>
                   </div>
                   {result.imageUrl && (
-                    <img src={result.imageUrl} alt="" className="w-24 h-24 rounded-lg object-cover self-center" />
+                    <img src={artworkSrc(result.imageUrl)} alt="" className="w-24 h-24 rounded-lg object-cover self-center" />
                   )}
                 </div>
               )}

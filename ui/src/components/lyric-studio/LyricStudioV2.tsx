@@ -12,6 +12,7 @@
  * Ported from hot-step-9000 with import path + API adaptations for the C++ engine.
  */
 
+import { artworkSrc } from '../../utils/artworkSrc';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import type { AlbumPreset } from '../../services/lireekApi';
@@ -789,7 +790,7 @@ export const LyricStudioV2: React.FC = () => {
                       .ls-dynamic-backdrop { animation: ls-random-zoom 47s ease-in-out infinite, ls-random-rotate 61s ease-in-out infinite, ls-random-pan 53s ease-in-out infinite; }
                     `}</style>
                     <div className="absolute inset-0 z-0 pointer-events-none transition-[background-image] duration-700 ls-dynamic-backdrop"
-                      style={{ backgroundImage: `url(${currentPlaybackTrack!.coverUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', filter: 'brightness(0.15) blur(2px) saturate(1.4)' }} />
+                      style={{ backgroundImage: `url(${artworkSrc(currentPlaybackTrack!.coverUrl)})`, backgroundSize: 'cover', backgroundPosition: 'center', filter: 'brightness(0.15) blur(2px) saturate(1.4)' }} />
                   </>
                 )}
                 <div className="relative z-[1] h-full">

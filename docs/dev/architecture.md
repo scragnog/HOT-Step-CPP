@@ -496,7 +496,7 @@ Production policy:
 
 ```
 default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:;
+font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:;
 media-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none';
 base-uri 'self'; form-action 'self'; report-uri /api/csp-report
 ```
@@ -511,7 +511,7 @@ Why each exception exists:
 |---|---|
 | `style-src 'unsafe-inline'` | React `style` props, Vite's dev CSS and library-injected `<style>` tags |
 | Google Fonts in `style-src` and `font-src` | Inter in `ui/src/index.css` and the `/kit` specimen fonts. Self-hosting them would remove both |
-| `img-src https:` | Lyric Studio artist and album art is stored as outside URLs (Genius, plus any URL a user pastes). A server-side image cache would let this become `'self'` |
+| `img-src` has no outside host | Artist and album art is stored as outside URLs (Genius, plus any URL a user pastes). The UI loads it through `GET /api/artwork?url=` (`routes/artwork.ts`, `services/artwork/artworkCache.ts`, UI helper `utils/artworkSrc.ts`). The route serves only URLs already stored on an artist or album, or on a Genius host. It fetches https only, refuses private, loopback and link-local addresses (checked on the address it connects to, and on each of up to 3 redirects), accepts raster image types up to 8 MB, and caches under `<data>/cache/artwork`, pruned oldest-first past 256 MB |
 | `blob:` in `img-src`, `media-src`, `worker-src` | Local previews, streamed audio and abcjs MIDI playback |
 
 Two things keep the page inside the policy:
@@ -535,11 +535,10 @@ origins.
 
 What the policy does not stop, so shell skins still get a code review:
 
-- An image request to any HTTPS host. Page code can put data in the image URL
-  (`https://example.com/x.png?d=...`). The request goes one way and the reply
-  is never readable, but the data has left. Outside shell skins do not merge
-  until this is accepted or `img-src` is back to `'self'` behind a server
-  artwork route.
+- Page code storing a URL on an artist, then asking the artwork route for it. The
+  server makes that request, so the data leaves from the server (one way, reply
+  unreadable). Outside shell skins get a code review for this; the route itself
+  cannot tell a user-pasted URL from a skin-written one.
 - Navigating away with data in the URL. No CSP directive covers it.
 
 ## UI source layout

@@ -1,3 +1,4 @@
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useState, useEffect, useRef } from 'react';
 import { Disc3, Plus, FileText, MoreVertical, RefreshCw, Link2, Trash2, Search, PenLine, ChevronDown, Sparkles } from 'lucide-react';
 import type { LyricsSet, SongLyric } from '../../services/lireekApi';
@@ -155,7 +156,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
                     const dUrl = disguiseImageUrl(album.image_url, album.album || String(album.id));
                     return dUrl && !imageErrors.has(album.id) ? (
                     <img
-                      src={dUrl}
+                      src={artworkSrc(dUrl)}
                       alt={dAlbumName || 'Album'}
                       className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                       onError={() => setImageErrors(prev => new Set(prev).add(album.id))}

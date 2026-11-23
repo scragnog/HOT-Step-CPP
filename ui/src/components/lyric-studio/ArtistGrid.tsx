@@ -1,3 +1,4 @@
+import { artworkSrc } from '../../utils/artworkSrc';
 import React, { useState, useEffect, useRef } from 'react';
 import { Music, Plus, RefreshCw, Trash2, MoreVertical, Link2, Search, PenLine, ChevronDown } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
@@ -135,7 +136,7 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
                   const dName = disguiseArtist(artist.name);
                   return dUrl && !imageErrors.has(artist.id) ? (
                   <img
-                    src={dUrl}
+                    src={artworkSrc(dUrl)}
                     alt={dName}
                     className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                     onError={() => setImageErrors(prev => new Set(prev).add(artist.id))}
