@@ -1,0 +1,2 @@
+html[data-skin="bad-stop-named"] { --grad-tint: linear-gradient(180deg, black 0%, #38bdf8 100%); }
+html[data-skin="bad-stop-named"]:not(.dark) { --grad-tint: linear-gradient(180deg, black 0%, #38bdf8 100%); }

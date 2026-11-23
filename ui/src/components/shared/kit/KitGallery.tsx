@@ -62,7 +62,10 @@ export const KitGallery: React.FC = () => {
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
   const [font, setFont] = useState(skin ? 'skin' : '6');
-  const pickSkin = (id: string | null) => { setSkin(id); if (id) setFont('skin'); };
+  // The font override to return to when the skin is cleared (initially Geist).
+  const lastFont = useRef('6');
+  const pickFont = (f: string) => { if (f !== 'skin') lastFont.current = f; setFont(f); };
+  const pickSkin = (id: string | null) => { setSkin(id); setFont(id ? 'skin' : lastFont.current); };
   const [tab, setTab] = useState('create');
   const [on, setOn] = useState(true);
   const [small, setSmall] = useState(false);
@@ -109,7 +112,7 @@ export const KitGallery: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 text-xs text-ink-muted">Font
-            <Tabs aria-label="Font pairing" value={font} onChange={setFont} items={[{ value: 'skin', label: 'Skin' }, ...FONTS.map(({ value, label }) => ({ value, label }))]} />
+            <Tabs aria-label="Font pairing" value={font} onChange={pickFont} items={[{ value: 'skin', label: 'Skin' }, ...FONTS.map(({ value, label }) => ({ value, label }))]} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Theme
             <Tabs aria-label="Theme" value={theme} onChange={v => v !== theme && toggleTheme()} items={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />

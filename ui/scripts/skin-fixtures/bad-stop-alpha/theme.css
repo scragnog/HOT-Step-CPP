@@ -1,0 +1,2 @@
+html[data-skin="bad-stop-alpha"] { --grad-tint: linear-gradient(180deg, rgb(0 0 0 / 0) 0%, rgba(0, 0, 0, 0.2) 100%); }
+html[data-skin="bad-stop-alpha"]:not(.dark) { --grad-tint: linear-gradient(180deg, rgb(0 0 0 / 0) 0%, rgba(0, 0, 0, 0.2) 100%); }

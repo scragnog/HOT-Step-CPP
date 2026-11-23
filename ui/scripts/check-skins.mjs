@@ -109,6 +109,33 @@ function checkCss(dir, id, errors) {
   return { dark: sets[base], light: sets[twin] };
 }
 
+// One opaque colour: #rgb, #rrggbb, rgb(R G B) or rgb(R, G, B), alpha absent or 1. Anything else
+// (names, transparent, alpha below 1) gives null, because its rendered contrast cannot be calculated.
+function opaqueColour(s) {
+  s = s.trim();
+  let m = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(s);
+  if (m) { const h = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1]; return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
+  m = /^rgba?\(\s*(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})\s*(?:(?:,|\/)\s*(\d*\.?\d+)\s*)?\)$/i.exec(s);
+  if (m && [m[1], m[2], m[3]].every(n => +n <= 255) && (m[4] === undefined || +m[4] === 1)) return [+m[1], +m[2], +m[3]];
+  return null;
+}
+
+// Every stop of a linear-gradient, in order. A stop that is not an opaque colour is null, so the
+// caller reports it instead of skipping it. Fewer than two stops gives [null].
+function gradientStops(val) {
+  const m = /^\s*linear-gradient\((.*)\)\s*$/is.exec(val);
+  if (!m) return [null];
+  const parts = []; let depth = 0, cur = '';
+  for (const ch of m[1]) {
+    if (ch === '(') depth++; else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
+  }
+  parts.push(cur);
+  if (/^\s*(-?[\d.]+(deg|turn|rad|grad)|to\s+[a-z\s]+)\s*$/i.test(parts[0])) parts.shift();
+  if (parts.length < 2) return [null];
+  return parts.map(p => opaqueColour(p.trim().replace(/(\s+-?[\d.]+(%|px))+$/i, '')));
+}
+
 function checkContrast(sets, def, errors, label) {
   for (const mode of ['dark', 'light']) {
     const v = { ...def[mode], ...(mode === 'dark' ? sets.dark : { ...sets.dark, ...sets.light }) };
@@ -121,10 +148,7 @@ function checkContrast(sets, def, errors, label) {
     const stopsOf = (name, fallback) => {
       if (!(name in v)) return fallback.map(k => triplet(v[k] ?? ''));
       const val = v[name].replace(/var\(\s*(--[\w-]+)\s*\)/g, (m, k) => v[k] ?? m);
-      const out = [];
-      for (const m of val.matchAll(/#([0-9a-f]{6}|[0-9a-f]{3})/gi)) { const h = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1]; out.push([0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16))); }
-      for (const m of val.matchAll(/rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/g)) out.push([+m[1], +m[2], +m[3]]);
-      return out.length ? out : [null];
+      return gradientStops(val);
     };
     const fills = [['--grad-tint', ['--tint-hover', '--tint', '--tint-deep']], ['--grad-tint-hover', ['--tint-glow', '--tint-hover', '--tint']], ['--grad-tint-press', ['--tint-deep', '--tint']]];
     const surf = ['--grad-raised', '--grad-raised-press', '--grad-panel', '--grad-well'];
