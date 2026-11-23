@@ -3,7 +3,7 @@
 // is written".
 
 export { definePart } from './define.ts';
-export type { Gesture, ParamView, PartView, Slot, Surface, MeterScale } from './types.ts';
+export type { Gesture, ParamView, PartView, StateView, Slot, Surface, MeterScale } from './types.ts';
 export { ui, useSay } from '../i18n/index.ts';
 export { Icon } from './icons.tsx';
 export { LcdFace } from './LcdFace.tsx';

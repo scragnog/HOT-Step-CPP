@@ -219,7 +219,7 @@ export const tempo = {
           engines: ['ace', 'minimax-m3', 'yue2'],
           children: [
             { part: 'lcdNumber', param: 'tempo.bpm' },
-            { part: 'beatPulse', reads: ['tempo.bpm'] },
+            { part: 'beatPulse', reads: ['tempo.bpm', 'tempo.sig'] },
             { part: 'tapTempo', param: 'tempo.bpm' },
           ],
         },

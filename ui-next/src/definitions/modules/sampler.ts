@@ -816,7 +816,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Beta (Custom)' },
+      opts: { title: 'Beta (Custom)', look: 'strip' },
       engines: ['ace'],
       when: { param: 'samp.sched', is: 'beta' },
       children: [
@@ -828,7 +828,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Power' },
+      opts: { title: 'Power', look: 'strip' },
       engines: ['ace'],
       when: { param: 'samp.sched', is: 'power' },
       children: [
@@ -839,7 +839,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Composite' },
+      opts: { title: 'Composite', look: 'strip' },
       engines: ['ace'],
       when: { param: 'samp.sched', is: 'composite' },
       children: [
@@ -856,7 +856,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Wasserstein Flow controls' },
+      opts: { title: 'Wasserstein Flow controls', look: 'plugin' },
       engines: ['yue2'],
       when: { param: 'samp.solver', is: 'wasserstein' },
       actions: [{ do: 'reset', label: 'Reset' }],
@@ -874,7 +874,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Latent Channel EQ controls' },
+      opts: { title: 'Latent Channel EQ controls', look: 'plugin' },
       engines: ['yue2'],
       when: { param: 'samp.solver', is: 'latent_eq' },
       actions: [{ do: 'reset', label: 'Reset' }],
@@ -890,7 +890,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Timestep Lie controls' },
+      opts: { title: 'Timestep Lie controls', look: 'plugin' },
       engines: ['yue2'],
       when: { param: 'samp.solver', is: 'tlie' },
       actions: [{ do: 'reset', label: 'Reset' }],
@@ -905,7 +905,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'Plan Overdrive controls' },
+      opts: { title: 'Plan Overdrive controls', look: 'plugin' },
       engines: ['yue2'],
       when: { param: 'samp.sched', is: 'plan_overdrive' },
       actions: [{ do: 'reset', label: 'Reset' }],
@@ -919,7 +919,7 @@ export const sampler = {
     },
     {
       part: 'group',
-      opts: { title: 'HT V3 controls' },
+      opts: { title: 'HT V3 controls', look: 'plugin' },
       engines: ['yue2'],
       when: { param: 'samp.sched', is: 'ht_v3' },
       actions: [{ do: 'reset', label: 'Reset' }],
@@ -942,6 +942,9 @@ export const sampler = {
     {
       part: 'labelled',
       label: 'Retake seed',
+      opts: { look: 'strip' },
+      /* the strip waits with its field for a retake (25-module-sampler.js) */
+      when: { param: 'samp.retake', above: 0 },
       engines: ['ace'],
       children: [
         { part: 'textField', param: 'samp.rseed', opts: { look: 'lcd', size: 14 } },

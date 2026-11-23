@@ -82,6 +82,6 @@ export function PowerChip(v: PartView) {
 definePart('pill', Pill);
 definePart('flag', Flag);
 definePart('lcdButton', LcdButton);
-definePart('recButton', RecButton);
+definePart('recButton', RecButton, { dims: true });
 definePart('lockButton', LockButton);
 definePart('powerChip', PowerChip);

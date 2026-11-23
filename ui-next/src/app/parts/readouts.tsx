@@ -6,13 +6,13 @@
 import { definePart, ui, useSay, type PartView } from '../kit/index.ts';
 
 /** A node's actions as links or buttons. */
-export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' }) {
+export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' | 'term' }) {
   const say = useSay();
   return (
     <>
       {v.actions.map((a, i) => look === 'link'
         ? <button key={i} type="button" className="linkbtn" data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
-        : <button key={i} type="button" className="pbtn" title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>)}
+        : <button key={i} type="button" className={look === 'term' ? 'tbtn' : 'pbtn'} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>)}
     </>
   );
 }
@@ -20,11 +20,19 @@ export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' 
 export function Note(v: PartView) {
   const say = useSay(), tip = v.words.tip ? say(v.words.tip) : undefined, text = say(v.words.text);
   if (v.surface === 'pedal') return <small className="pnote" title={tip}>{v.actions.length ? say(ui('note.then', { text })) : text}<ActionLinks v={v} look="link" /></small>;
+  /* in a terminal, its quiet ink; in an LCD's row, the LCD's dimmed words */
+  if (v.surface === 'term') return <span className="k" title={tip}>{text}</span>;
+  if (v.surface === 'lcdrow') return <span className="lcd-dim" title={tip}>{text}</span>;
   return <span className="lbl" title={tip}>{text}</span>;
 }
 
 export function LcdValue(v: PartView) {
   const say = useSay();
+  /* in an LCD's row: its caps word, then the value lit (Tempo's KEY AUTO) */
+  if (v.surface === 'lcdrow') {
+    const r = v.reads[0];
+    return <span><span className="cdot-lcd" data-ctl={r?.key}>{say(v.label ?? '', { upper: true })}</span> <b data-keylcd="">{say(v.words.text ?? r?.lcd ?? '', { upper: true })}</b></span>;
+  }
   return (
     <>
       <span className="bigval">{say(v.words.text ?? v.reads[0]?.lcd ?? '')}</span>
@@ -39,7 +47,7 @@ export function UnitLcd(v: PartView) {
   return <span className="u-lcd" aria-hidden="true">{(v.lines ?? []).map((l, i) => <span key={i}>{say(l.text, l.upper ? { upper: true } : { lower: true })}</span>)}</span>;
 }
 
-export const Button = (v: PartView) => <ActionLinks v={v} look="button" />;
+export const Button = (v: PartView) => <ActionLinks v={v} look={v.surface === 'term' ? 'term' : 'button'} />;
 
 definePart('note', Note);
 definePart('lcdValue', LcdValue);

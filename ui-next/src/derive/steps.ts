@@ -89,6 +89,8 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
   const put = msg('step.put', { what: pathNames(ix, keys, state, before) });
   if (hint?.named) {
     const n = hint.named, own = ix.params.get(n.key)?.p ?? ix.states.get(n.key)?.s;
+    const file = fileStep(ix, n, before, after);
+    if (file) return file;
     const def = own && (own as { steps?: { [k: string]: Step } }).steps?.[n.step];
     if (!def) throw new Error(`${n.key} has no step "${n.step}"`);
     const slots: { [k: string]: Slot } = { ...n.slots };
@@ -139,6 +141,22 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
   }
   const what = pathNames(ix, keys, state, before);
   return { label: msg('step.change', { what }), put: msg('step.put', { what }) };
+}
+
+/** The steps a file has without saying. */
+export const FILE_STEPS = ['load', 'clear'];
+/** A file's own steps, as the concept names them (13-files.js fileStep): loaded into an empty place, its definition's
+ *  `load` words ("Load kick.wav as the timbre reference"); replacing one, from the one to the other; cleared, "Clear"
+ *  and the state's noun. Null for any other step, or a load the definition names itself when the place was empty. */
+function fileStep(ix: Index, n: NamedStep, before: Desk, after: Desk): StepWords | null {
+  const hit = ix.states.get(n.key);
+  if (!hit || hit.s.kind !== 'file' || !FILE_STEPS.includes(n.step)) return null;
+  const x = String(before.state[n.key] ?? ''), y = String(after.state[n.key] ?? ''), noun = stateWords(ix, n.key).noun;
+  if (!y) return { label: msg('step.file.clear', { noun }), undone: msg('step.file.back', { file: x }), redone: msg('step.file.cleared', { file: x }), put: msg('step.file.putBack', { file: x }) };
+  if (x) return { label: msg('step.file.replace', { noun, from: x, to: y }), put: msg('step.file.putBack', { file: x }) };
+  const def = hit.s.steps?.load;
+  if (def) return null;
+  return { label: msg('step.file.load', { file: y, noun }), undone: msg('step.file.out', { file: y }), redone: msg('step.file.loaded', { file: y }), put: msg('step.file.takeOut', { file: y }) };
 }
 
 /** The word a Quick row shows for the desk: the choice whose values are all in force, or none (choiceOf, tiers.ts). */

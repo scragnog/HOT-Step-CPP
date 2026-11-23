@@ -46,8 +46,14 @@ export const perf = {
       params: ['perf.cfgcut', 'perf.cache'],
       opts: { look: 'heat', xl: 'CFG cutoff', yl: 'step cache', corners: ['fastest', '', '', 'most faithful'] },
     },
-    { part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
-    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },
+    /* the gauge beside the LM cut knob, under the pad (25-module-perf.js .padside) */
+    {
+      part: 'row',
+      children: [
+        { part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
+        { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },
+      ],
+    },
   ],
   thumb: { file: 'perf' },
 } satisfies ModuleDef;

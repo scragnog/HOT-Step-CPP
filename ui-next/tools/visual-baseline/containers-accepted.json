@@ -1,0 +1,117 @@
+{
+ "about": "Package 2's accepted differences between the concept's page and the rebuild's in its states (slice-states/20-containers.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+ "accepted": [
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:type$",
+   "n": 87,
+   "why": "Deviation 11 (slice-accepted.json): every button and input carries its type."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-v$",
+   "n": 25,
+   "why": "Deviation 10: a chip's hook names its value (data-v=\"ratio\"), the concept's its label."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-(mmcache|adg|adpow|scoreprev|t0|fitname)$",
+   "n": 13,
+   "why": "Deviation 10: the concept's paint and delegation hooks (data-mmcache, data-adg, data-adpow, data-scoreprev, the tooltip's held data-t0, data-fitname); the rebuild's parts run their own actions and redraw from their models."
+  },
+  {
+   "state": "",
+   "key": "faders",
+   "field": "^sem:(name|aria-label|title)$",
+   "n": 49,
+   "why": "Package 1's fader names itself by its label (\"Attn\", the concept's \"Attn strength\"), and its tape carries no tip of the full name; the bank (this package) draws the faders as they are."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:(name|aria-label|role)$",
+   "n": 89,
+   "why": "Deviations 6 and 15: a terminal flag and an LCD's lit word name their parameter to a screen reader (\"Rewrite caption (CoT)\" for \"--cot\"), and a terminal's chips are a named group."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-(ctl|power)$",
+   "n": 17,
+   "why": "Package 1's parts carry their own changed hook (deviation 15): a power chip and a look-back strip carry data-ctl, a quoted terminal string carries it on its quote rather than on its flag, a caption above a field (.ts) leaves it to the field."
+  },
+  {
+   "state": "^containers-guard-",
+   "key": "",
+   "field": "^--hi$",
+   "n": 70,
+   "why": "A repetition guard's line is a terminal line like the planner's, so it carries its hang (--hi); the concept wrote it as a plain line. The rebuild's stylesheet takes the hang off the first line of a terminal without a bar (15-containers.css), so nothing is drawn differently: the custom property alone differs."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^line-height$",
+   "n": 74,
+   "why": "The LCD picker's arrows (.cyc) in standards mode (styles/rebuild/10-standards.css, the slice's): line-height 0 keeps them where the concept's quirks-mode page draws them."
+  },
+  {
+   "state": "^containers-(term-(hm|mm3)|deck-replay)",
+   "key": "(term-bar|term>div:0)>span:0$",
+   "field": "color$",
+   "n": 51,
+   "why": "A note in the terminal's bar is in the bar's own ink (#a39cae, the flags' and chips'), so it reads at 3:1 on the terminal; the concept's quiet ink (#8a819a) reads at 2.88:1, below what the parts gallery asks of every part."
+  },
+  {
+   "state": "^containers-lcd-",
+   "key": "[.]lcd$",
+   "field": "^display$",
+   "n": 4,
+   "why": "Tempo's LCD stands in the concept's .tempo wrapper beside the key wheel, which lays it out as a column (25-module-tempo.css); the wrapper and the wheel are package 3's. Its rows are the same."
+  },
+  {
+   "state": "^containers-lcd-",
+   "key": "[.]lcd>div:[0-2]",
+   "field": "^only$",
+   "n": 148,
+   "why": "In Tempo's top row the big number's pieces stand inside package 1's .lcd-numw (display: contents, so they stand in the row as the concept's do) and TAP is package 3's (a seam lent to the row's buttons); the LCD picker of a set time signature draws its own steps (package 1's pick). Each piece's look is compared in 33-containers/tempo-lcd-rows and by eye."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:title$",
+   "n": 4,
+   "why": "The slice's LED switch carries no tip (its parameter's tip, which the concept's rackCtl prints as a title) and the Plan fader's tip stands on its slot here, in its bank's note in the concept; the containers draw them as they are."
+  },
+  {
+   "state": "^containers-sched-strip$",
+   "key": "[.]schctl>div:[12]>span:1$",
+   "field": "^(font-family|font-size|letter-spacing|line-height|text-transform)$",
+   "n": 8,
+   "why": "The concept prints a knob label that is a symbol (α, β) as a word in the body type (21-knob.js .kl.sym); the slice's knob prints every label as the page's caps label."
+  },
+  {
+   "state": "^containers-units",
+   "key": "u-art$",
+   "field": "^(--h|background-image)$",
+   "n": 4,
+   "why": "The cover swatch is in the newest song's colour; the songs list is the generation package's (6), so until then it shows the concept's own colour for no song (300), where the concept's page has its demo songs (215)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^only$",
+   "n": 10,
+   "why": "Empty or decorative pieces the concept draws always and the rebuild only when they hold something: a field's error line while it has no error (.ts foot, the planner seed), and the loaded sleeve's waveform canvas (the timbre module's, package 3)."
+  },
+  {
+   "state": "^containers-term-mm3",
+   "key": "input:1$",
+   "field": "^sem:(placeholder|aria-describedby)$",
+   "n": 2,
+   "why": "The planner seed's field (package 1's text field) says its parameter's placeholder in full (\"follows the generation seed\", the concept's own words for it in its control table) and is described by its error only while it has one."
+  }
+ ]
+}

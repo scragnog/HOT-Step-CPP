@@ -1,28 +1,78 @@
 // The containers. Each holds its children, already drawn by the renderer, in the housing of the concept's markup: row
-// is the .knobs row, rack the .pextra.rackrow strip, well the recessed strip under an instrument (the Sampler's), lcd an
-// LCD panel, foot a tile's foot row. labelled pairs a caps label with one small control, as the surface it stands on
-// pairs them: on a tile, a foot or a well the label comes first (the concept's foot-ctl); on hardware (a pedal, a side
-// unit, an LCD) the control comes first and the caps label under it (lcdsel). A container none of whose children is
-// drawn is not drawn at all (the core's nodeShown).
+// is the .knobs row (a row of rack groups is the concept's .ad-groups), rack the .pextra.rackrow strip, well the
+// recessed strip under an instrument (the Sampler's), lcd an LCD panel, foot a tile's foot row. A container none of
+// whose children is drawn is not drawn at all (the core's nodeShown).
+//
+// labelled pairs a caps label with what it holds, as the surface it stands on pairs them (the core's kids say what it
+// holds): on a tile, a foot or a well the label comes first (the concept's foot-ctl), above a strip of switches (the
+// plans' Endings) or a row of dice (Re-planning); on hardware (a pedal, a side unit, an LCD) the control comes first and
+// the caps label under it (lcdsel); in an LCD's row the label before the control (Tempo's SIG), or a token's
+// foot pairing (its trim Buffer); in a rack group a token's pair (its Range) or a choice at the group's foot (Plan
+// strength's Curve); in a plugin's controls a cell; in a deck a row of the deck's two columns, a recorder's own lines
+// indented under it, and a replay that stands back said on its own line.
 
 import { definePart, useSay, type PartView } from '../kit/index.ts';
+import { itemsOf } from './kids.ts';
 
-export const Row = ({ children }: PartView) => <div className="knobs">{children}</div>;
+export function Row(v: PartView) {
+  const kids = (v.kids ?? []).filter(k => k.shown);
+  /* a row of rack groups is the concept's group row; groups switched by a pill line up as Latent & correction's */
+  if (kids.length && kids.every(k => k.part === 'group')) return <div className={`ad-groups${kids.every(k => k.inner[0] === 'pill') ? ' lat-groups' : ''}`}>{v.children}</div>;
+  return <div className="knobs">{v.children}</div>;
+}
 export const Rack = ({ children }: PartView) => <div className="pextra rackrow">{children}</div>;
 export const Well = ({ children }: PartView) => <div className="knobs samp-strip">{children}</div>;
 export const Lcd = ({ children }: PartView) => <div className="lcd">{children}</div>;
 export const Foot = ({ children }: PartView) => <div className="tile-foot">{children}</div>;
 
 export function Labelled(v: PartView) {
-  const say = useSay(), hardware = v.surface === 'pedal' || v.surface === 'unit' || v.surface === 'lcd';
-  return hardware
-    ? <div className="lcdsel">{v.children}<span className="kl">{say(v.label)}</span></div>
-    : <span className="foot-ctl"><span className="kl">{say(v.label)}</span>{v.children}</span>;
+  const say = useSay(), what = v.kids?.find(k => k.shown)?.part ?? '';
+  /* its tip: its own words, else why it (or what it holds) stands back */
+  /* a pairing with no label of its own takes the label of what it holds (a plugin's controls) */
+  const kid = v.kids?.find(k => k.shown), why = v.dim ?? kid?.dim, label = v.label !== undefined ? say(v.label) : kid?.label !== undefined ? say(kid.label) : '', tip = v.words.tip ? say(v.words.tip) : why ? say(why) : undefined;
+  switch (v.surface) {
+    case 'pedal': case 'unit': case 'lcd':
+      return <div className="lcdsel" title={tip}>{v.children}<span className="kl">{label}</span></div>;
+    case 'lcdrow':
+      /* a setting that stands back here is held out of sight by its row (lcd-trim held), and says nothing itself */
+      return what === 'token' ? <span className="foot-ctl" title={v.words.tip ? say(v.words.tip) : undefined}><span className="kl">{label}</span>{v.children}</span> : <span title={tip}>{label} {v.children}</span>;
+    case 'group':
+      if (what === 'token') return <span className="tk-pair" title={tip}><span className="kl">{label}</span>{v.children}</span>;
+      if (what === 'segmented') return <div className="ad-foot" title={tip}><span className="kl">{label}</span>{v.children}</div>;
+      break;
+    case 'plugin':
+      return <span className="pc-i" title={tip}><span className="kl">{label}</span>{v.children}</span>;
+    case 'deck': return <DeckRow v={v} label={label} />;
+  }
+  if (v.opts.look === 'strip') return <label className="schctl" title={tip}><span className="kl">{label}</span>{v.children}</label>;
+  /* a caption above a text field, with what follows the field at its foot (Latent & correction's timesteps) */
+  if (what === 'textField') { const [field, ...rest] = itemsOf(v.children); return <label className="ts"><span className="kl" title={tip}>{label}</span>{field}<span className="ts-foot">{rest}</span></label>; }
+  /* a caption above what it holds: a strip of switches (the plans' Endings), a row of dice (Re-planning) */
+  if (what === 'rack') return <div className="endings" title={tip}><span className="kl">{label}</span>{v.children}</div>;
+  if (what === 'dice') return <div className="dice-cap" title={tip}><span className="kl">{label}</span>{v.children}</div>;
+  return <span className="foot-ctl" title={tip}><span className="kl">{label}</span>{v.children}</span>;
+}
+
+/** A row of a deck (25-module-plans.js): its label in the first column and what it holds in the second; a picker's or
+ *  a field's row belongs to the recorder above it and is indented; a picker that stands back is marked and says why on
+ *  a line of its own. */
+function DeckRow({ v, label }: { v: PartView; label: string }) {
+  const say = useSay(), kids = (v.kids ?? []).filter(k => k.shown), what = kids[0]?.part ?? '';
+  const sub = what === 'pick' || what === 'textField', off = what === 'pick' && kids[0]?.dim ? kids[0].dim : null;
+  /* a row that holds several controls (whether or not each shows now) lays them out as a row */
+  const cls = (v.kids ?? []).length > 1 ? ' deck-row' : what === 'pick' ? ' deck-lcd' : '';
+  return (
+    <>
+      <span className={`deck-l${sub ? ' deck-sub' : ''}`} title={v.words.tip ? say(v.words.tip) : undefined}>{label}</span>
+      <span className={`deck-c${cls}${off ? ' is-off' : ''}`}>{v.children}</span>
+      {off ? <><span /><span className="deck-c deck-why">{say(off)}</span></> : null}
+    </>
+  );
 }
 
 definePart('row', Row);
-definePart('rack', Rack);
-definePart('well', Well);
-definePart('lcd', Lcd);
-definePart('foot', Foot);
-definePart('labelled', Labelled);
+definePart('rack', Rack, { surface: 'rack' });
+definePart('well', Well, { surface: 'well' });
+definePart('lcd', Lcd, { surface: 'lcd' });
+definePart('foot', Foot, { surface: 'foot' });
+definePart('labelled', Labelled, { dims: true, kidsDim: true });

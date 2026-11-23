@@ -13,7 +13,7 @@ export function TextField(v: PartView) {
   const [draft, setDraft] = useState<string | null>(null);
   const [left, setLeft] = useState(false);
   if (!p) return null;
-  const look = (v.opts.look as string | undefined) ?? (v.surface === 'pedal' || v.surface === 'unit' || v.surface === 'lcd' ? 'lcd' : 'plain');
+  const look = (v.opts.look as string | undefined) ?? (v.surface === 'pedal' || v.surface === 'unit' || v.surface === 'lcd' || v.surface === 'lcdrow' ? 'lcd' : 'plain');
   const text = draft ?? String(p.value ?? ''), bad = draft !== null ? p.check(draft) : null;
   /* a valid draft is set; an invalid one in a field that keeps it stays, unsent; in any other field it is refused (the
      core says so) and what is in force comes back */

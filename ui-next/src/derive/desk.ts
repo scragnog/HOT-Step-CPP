@@ -6,7 +6,7 @@
 import type { Definition, EngineId, Node } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { engineName } from '../definitions/engines.ts';
-import { type Desk, type Index, has, nodeAt, valueOf } from './core.ts';
+import { type Desk, type Index, applies, has, nodeAt, valueOf } from './core.ts';
 import { type Msg, list, msg } from './messages.ts';
 import { defName, type StepWords } from './steps.ts';
 import { idleOf } from './view.ts';
@@ -20,6 +20,10 @@ export function nodeShown(ix: Index, n: Node, desk: Desk): boolean {
   const spec = (PARTS as Record<string, PartSpec>)[at.part];
   const binds = [at.param, ...(at.params ?? [])].filter((k): k is string => !!k);
   if (spec?.edits && binds.length && !binds.some(k => has(ix, k, desk.engine))) return false;
+  /* on a module's tile, a control none of whose parameters applies is not drawn, as the concept leaves out what does not
+     apply (its ok()); a node that should stay and stand back says so with `dim`. A pedal or a side unit keeps every
+     cell's room (a plate, or a field beside its switch: docs/01, "How a pedal and a side unit are laid out") */
+  if (spec?.kind === 'control' && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;
   if (spec?.kind === 'container') return (at.children ?? []).some(c => nodeShown(ix, c, desk));
   return true;
 }

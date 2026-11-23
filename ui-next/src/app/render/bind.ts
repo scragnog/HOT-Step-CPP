@@ -5,7 +5,7 @@
 
 import { useMemo } from 'react';
 import type { Action, Definition, Node } from '../../definitions/types.ts';
-import { actionWords, applyChoice, bindPart, checkText, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
+import { actionWords, applyChoice, bindPart, checkText, fileRefused, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { runNamed } from '../register/actions.ts';
@@ -57,6 +57,8 @@ function actionsOf(def: Definition, node: Node, key: string) {
     check: (k: string, t: string) => checkText(ix, k, desk(), t),
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
     run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
+    apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
+    load: (k: string, name: string, type: string) => { const no = fileRefused(name, type); if (no) tell(no); else bound()?.state[k]?.apply('load', name, undefined, { file: name }); },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
     gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
   };
@@ -77,5 +79,6 @@ function assemble(m: PartModel, a: ReturnType<typeof actionsOf>): PartView {
     press: (k, shift) => a.press(p.key, k, shift), typed: t => a.typed(p.key, t), toFraction: f => a.toFraction(p.key, f), check: t => a.check(p.key, t),
     scrub: (from, px, shift) => a.scrub(p.key, from, px, shift), along: (f, span, px) => a.along(p.key, f, span, px),
   }));
-  return { ...m, params, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
+  const state = (m.state ?? []).map(st => ({ ...st, apply: (step: string, next: unknown, slots?: { [slot: string]: string | number }) => a.apply(st.key, step, next, slots), load: (name: string, type: string) => a.load(st.key, name, type) }));
+  return { ...m, params, state, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
 }

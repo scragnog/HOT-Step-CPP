@@ -3,7 +3,7 @@
 // parts gallery on it. A defect is caught when either fails. Prints caught or missed for each; exit 1 if one is missed.
 // Needs the concept's capture first (vb.mjs capture concept-slice --states slice --scope slice --page <concept>).
 //
-//   node tools/visual-baseline/plants.mjs [--only <regex>]
+//   node tools/visual-baseline/plants.mjs [--only <regex>] [--workers n]
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), repo = path.resolve(here, '..', '..');
-const args = process.argv.slice(2), only = args.includes('--only') ? new RegExp(args[args.indexOf('--only') + 1]) : null;
+const args = process.argv.slice(2), only = args.includes('--only') ? new RegExp(args[args.indexOf('--only') + 1]) : null, workers = args.includes('--workers') ? args[args.indexOf('--workers') + 1] : '10';
 const plants = fs.readdirSync(path.join(here, 'plants')).filter(f => f.endsWith('.json')).flatMap(f => JSON.parse(fs.readFileSync(path.join(here, 'plants', f), 'utf8')).switches.map(s => s.feature)).filter(f => !only || only.test(f));
 /* the states that show each kind of thing: the desk at every tier, values changed, a unit, the tier switch, the parts */
 const STATES = 'slice-desk-ace-lab-light|slice-changed-ace-lab$|slice-changed-ace-studio$|slice-desk-ace-studio-light|slice-desk-ace-quick-light|slice-changed-ace-quick|slice-desk-sa3-lab-light|slice-hidden-lab-note|slice-parts-';
@@ -20,13 +20,13 @@ const vite = path.join(repo, 'node_modules', 'vite', 'bin', 'vite.js'), vb = pat
 /* the clean build's counts of each accepted difference on these states: a plant that changes one is seen */
 const counts = log => [...log.matchAll(/^ {2}(?:ok {2}|FAIL) (\d+) of/gm)].map(m => m[1]).join(',');
 node([vite, 'build', '--mode', 'test', '--logLevel', 'error']);
-node([vb, 'capture', 'plant-clean', '--states', 'slice', '--scope', 'slice', '--plan-from', 'concept-slice', '--only', STATES, '--workers', '10', '--quiet']);
+node([vb, 'capture', 'plant-clean', '--states', 'slice', '--scope', 'slice', '--plan-from', 'concept-slice', '--only', STATES, '--workers', workers, '--quiet']);
 const clean = counts(node([vb, 'compare', 'concept-slice', 'plant-clean', '--scope', 'slice', '--only', STATES, '--accept', path.join(here, 'slice-accepted.json')]).stdout);
 let missed = 0;
 for (const f of [...new Set(plants)]) {
   const b = node([vite, 'build', '--mode', 'test', '--logLevel', 'error'], { HS_SWITCH: f });
   if (b.status !== 0) { console.log(`${f}: BUILD FAILED ${(b.stderr || b.stdout).split('\n').filter(l => /error|switch/i.test(l)).slice(0, 2).join(' / ')}`); missed++; continue; }
-  node([vb, 'capture', 'plant-now', '--states', 'slice', '--scope', 'slice', '--plan-from', 'concept-slice', '--only', STATES, '--page', page, '--workers', '10', '--quiet']);
+  node([vb, 'capture', 'plant-now', '--states', 'slice', '--scope', 'slice', '--plan-from', 'concept-slice', '--only', STATES, '--page', page, '--workers', workers, '--quiet']);
   const c = node([vb, 'compare', 'concept-slice', 'plant-now', '--scope', 'slice', '--only', STATES, '--accept', path.join(here, 'slice-accepted.json'), '--max', '3']);
   const g = node([path.join(here, 'gallery.mjs'), '--page', page]);
   /* the accepted counts are for the whole matrix: on these states a count may be lower, which is not a catch */

@@ -121,6 +121,9 @@ function nodeKeyAt(k: string, n: Node, seen: Map<string, number>): string {
   return `${k}.${id}`;
 }
 
+/** The keys of a node's children under the node's key, in their order (as nodeKeys() gives them). */
+export function childKeys(key: string, children: readonly Node[]): string[] { const seen = counts([...children]); return children.map(c => nodeKeyAt(key, c, seen)); }
+
 /** The translation key of every node of a definition's face, as stringsOf() keys its words: the view looks a node's
  *  words up under it (nodeWord), and passes it to dimOf() and choiceOf(). */
 export function nodeKeys(d: Definition): Map<Node, string> {

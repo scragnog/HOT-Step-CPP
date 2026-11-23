@@ -30,9 +30,9 @@ export const repetition = {
       label: 'Mode',
       default: 'presence',
       options: [
-        { value: 'presence', label: 'Presence' },
-        { value: 'frequency', label: 'Frequency' },
-        { value: 'dry', label: 'DRY' },
+        { value: 'presence', label: 'Presence', tip: 'Penalises a code once it has appeared' },
+        { value: 'frequency', label: 'Frequency', tip: 'Penalises a code more each time it repeats' },
+        { value: 'dry', label: 'DRY', tip: 'Penalises long verbatim repeats' },
       ],
       engines: ['ace'],
       wire: 'param:lmRepMode',
@@ -82,9 +82,9 @@ export const repetition = {
       label: 'Mode',
       default: 'dry',
       options: [
-        { value: 'presence', label: 'Presence' },
-        { value: 'frequency', label: 'Frequency' },
-        { value: 'dry', label: 'DRY' },
+        { value: 'presence', label: 'Presence', tip: 'Penalises a code once it has appeared' },
+        { value: 'frequency', label: 'Frequency', tip: 'Penalises a code more each time it repeats' },
+        { value: 'dry', label: 'DRY', tip: 'Penalises long verbatim repeats' },
       ],
       engines: ['minimax-m3'],
       wire: 'ext:mm3LmRepMode',
@@ -144,17 +144,19 @@ export const repetition = {
     {
       part: 'terminal',
       engines: ['ace'],
-      dim: { when: { any: [{ param: 'lm.on', is: false }, { param: 'lm.rep', is: 1 }] }, says: 'guard off' },
+      /* the guard belongs to the planner: with the planner off it stands back and says so where it says "guard off" (L-11) */
+      dim: { when: { param: 'lm.on', is: false }, says: 'planner off' },
       children: [
         {
           part: 'termLine',
           opts: { command: 'guard' },
+          dim: { when: { param: 'lm.rep', is: 1 }, says: 'guard off' },
           children: [
             { part: 'token', param: 'lm.rep', label: '--penalty' },
             { part: 'termChips', param: 'lm.repmode', label: '--mode' },
             { part: 'token', param: 'lm.win', label: '--window' },
-            { part: 'token', param: 'lm.drybase', label: '--dry-base' },
-            { part: 'token', param: 'lm.drymin', label: '--dry-min' },
+            { part: 'token', param: 'lm.drybase', label: '--dry-base', when: { param: 'lm.repmode', is: 'dry' } },
+            { part: 'token', param: 'lm.drymin', label: '--dry-min', when: { param: 'lm.repmode', is: 'dry' } },
           ],
         },
         {
@@ -168,11 +170,11 @@ export const repetition = {
     {
       part: 'terminal',
       engines: ['minimax-m3'],
-      dim: { when: { param: 'mm.rep', is: 1 }, says: 'guard off' },
       children: [
         {
           part: 'termLine',
           opts: { command: 'guard' },
+          dim: { when: { param: 'mm.rep', is: 1 }, says: 'guard off' },
           children: [
             { part: 'token', param: 'mm.rep', label: '--penalty' },
             { part: 'termChips', param: 'mm.repmode', label: '--mode' },

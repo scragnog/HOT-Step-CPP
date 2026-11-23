@@ -6,7 +6,7 @@
 // its change is cleaned, named and checked against the desk in force, and dropped if what it binds has gone.
 
 import type { ReactNode } from 'react';
-import type { MeterScale, ParamModel, PartModel, Surface } from '../../derive/models.ts';
+import type { MeterScale, ParamModel, PartModel, StateModel, Surface } from '../../derive/models.ts';
 import type { Slot } from '../../derive/messages.ts';
 
 export type { MeterScale, Slot, Surface };
@@ -35,8 +35,18 @@ export interface ParamView extends ParamModel {
  *  when it lets go. `sub` tells two runs of one part apart (the XY pad's drag and its keys). */
 export interface Gesture { begin(sub?: string): void; end(sub?: string): void }
 
-export interface PartView extends Omit<PartModel, 'params'> {
+/** A state its node names (a drop zone's file): what the core says of it, and its named steps (a file's `load` and
+ *  `clear`, the steps its definition lists): one undo step each, named by the definition. A state another definition
+ *  lends (`lent`) is shown and never applied. */
+export interface StateView extends StateModel {
+  apply(step: string, next: string | number | boolean | null | object, slots?: { [slot: string]: string | number }): void;
+  /** A file offered to it (chosen or dropped): the core takes it as the `load` step, or refuses it and says why. */
+  load(name: string, type: string): void;
+}
+
+export interface PartView extends Omit<PartModel, 'params' | 'state'> {
   params: ParamView[];
+  state: StateView[];
   /** A Quick choice row: choose choice i (every value it sets, one step named by the row). */
   choose(i: number): void;
   /** Runs the node's action i (actions[i]). */

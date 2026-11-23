@@ -101,7 +101,12 @@ file of its own; a package adds one and edits no list:
   picker's arrows);
 - `15-controls-1.css` (package 1): the shared controls on the surfaces the concept never drew them on (a token, a flag
   or terminal chips off a terminal, an LCD's lit word, bar chips and big number off an LCD, which bring a small LCD of
-  their own, a chip selector or the record button on paper, a ruler or a look-back strip in a row or on a pedal).
+  their own, a chip selector or the record button on paper, a ruler or a look-back strip in a row or on a pedal);
+- `15-containers.css` (package 2): the containers' few rules of their own (a bar-less terminal's first line, the
+  planner off, a guard with the planner off, a caption above a field, the speed gauge beside its knob) and every part
+  on the surfaces they give (a terminal's line and bar, an LCD's row, a rack group, a strip, a plugin's grid, a deck):
+  an XY pad's plane, an LED switch or a chip selector on a group's paper, a wide part across a group, the plan text and
+  the beat lamps bringing their own housing, a paper-faced part keeping the page's ink inside an LCD.
 
 The components emit the concept's element structure, classes and `data-*` attributes, so its rules apply unchanged;
 never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's grid
@@ -243,7 +248,7 @@ A work package adds files and registers them; it edits none of the shared ones. 
 
 | What a package adds | Where | How it is found |
 | --- | --- | --- |
-| A part | `src/app/parts/<Part>.tsx` | `definePart(name, Component)`; loaded by `load.ts` |
+| A part | `src/app/parts/<Part>.tsx` | `definePart(name, Component, how?)`; loaded by `load.ts`. `how` (package 2): `surface`, the surface a container gives its children (a value, or a function of its options); `dims`, it draws its own standing back (the renderer does not wrap it); `kidsDim`, it draws its children's |
 | A part's look, a package's stylesheet | `src/app/styles/rebuild/<NN>-<name>.css` | loaded after the concept's, in name order |
 | A keyboard shortcut | a file in `src/app/features/` | `onKey({ id, when, run, order })` (register/keys.ts) |
 | Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
@@ -296,6 +301,17 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   moves a ruler or a token (`rulerSnap`, `scrubValue`). `derive/strings.ts keptMsg` (what a field that keeps invalid
   text says is in force) and `optionsOf` keeping a source's `only`; a typed empty box puts a parameter with auto back
   on auto, and text that fails its check is refused and said (`derive/parts.ts`).
+- Package 2: `derive/containers.ts kidsOf` (a container's children: each one's part, whether it is drawn, its label,
+  why it stands back, the parts it holds, whether a higher tier adds it, the keys it edits: `PartModel.kids`) and
+  `fileRefused`, `dropOutside` (what a drop zone takes); `derive/readouts.ts readoutModel` (`PartModel.readout`: the beat
+  lamps, the dice, the flow windows and their count, the speed gauge, the plan strength curve, the plan text in its four
+  looks, the lyric timestamps, the cover's hue) with `sectionNames` and `spellKey`; `PartModel.dimWords` (what a node
+  says when it stands back, held or not) and `PartModel.state` (the state a node names, its owner, its noun, lent or
+  not; `PartView.state` applies its steps and `load`s a file); `derive/steps.ts fileStep` (a file's `load` and `clear`
+  without saying: "Clear the timbre reference", a replacement from one file to the other); `derive/desk.ts nodeShown`: a
+  control none of whose parameters applies is not drawn, as the concept's `ok()` leaves it out (package 1 flagged it);
+  `derive/view.ts boardNodes` gives a pedal's or a unit's own nodes as the definition writes them (the renderer found no
+  words for a node an engine's or a state's line had resolved: the Mastering pedal's Studio face printed nothing).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 
@@ -356,6 +372,14 @@ An acceptance entry may wait on a later package (`"waiting": { "package", "becau
 `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
 decide the tile heights their moves need).
 
+**Package 2 (containers and read-outs)** adds `acceptance/2-containers.json` (17 scenarios: 11 of `scenarios/33-containers.mjs`,
+which hold on the concept page too, and 6 of the concept's suite, one of them pending there: S-28), `switches/2-containers.json`
+(39 features), `slice-states/20-containers.mjs` (35 states of the containers and read-outs on their own, compared with
+`containers-accepted.json`), the parts gallery's seven new surfaces (a terminal's line and its bar, an LCD's row, a rack
+group, a strip, a plugin's controls, a deck: `testing/gallery.ts`, `gallery.mjs`) and `tools/test-containers.ts` (in `npm
+run check`). `testing/compat/containers.ts` gives the scenarios the drop zones' files (`S.timbreFile`, `S.contFile`,
+`S.masterRef`), the adapters loaded (`S.slots`) and `isAuto`.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
@@ -401,6 +425,23 @@ decide the tile heights their moves need).
     by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
 19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
     the LCD selector it gives a pick (`board/Board.tsx`, one line).
+
+20. **A terminal line hangs under its first flag wherever it stands** (the planner's rule, L-24): a repetition guard's
+    line is the same part, so it carries `--hi` too; its stylesheet takes the hang off a bar-less terminal's first line,
+    so it is drawn as the concept's plain line.
+21. **A note in a terminal's bar is in the bar's own ink** (#a39cae, the flags' and chips'), which reads at 3:1; the
+    concept's quiet ink reads at 2.88:1.
+22. **With the planner off, the repetition guard says "planner off" through its terminal's standing back**, its line
+    through its own: two `dim`s in the definition (the terminal's and its line's) where the concept wrote two spans by
+    hand; MiniMax-Music3's guard, whose terminal never stands back, has no "planner off" span.
+23. **The planner's bar says what Plans & endings set** through the note's own words (`{value:mm.reuse}`, a line per
+    replay), not a paint hook; the plan text's MiniMax-Music3 line is the concept's ("plan --model 8B").
+24. **A control none of whose parameters applies is not drawn** (`nodeShown`), as the concept leaves out what `ok()`
+    refuses; a node that should stay and stand back says so with `dim`. Package 1 flagged the gap.
+25. **The cover swatch shows the concept's colour for no song** (300) until the generation package lists songs; the
+    concept's page has its demo songs (215).
+26. **A drop zone names its file field and its clear button by its state's noun** ("Choose the timbre reference"); the
+    concept wrote each by hand ("Choose a reference track").
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

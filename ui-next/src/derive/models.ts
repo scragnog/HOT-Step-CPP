@@ -15,20 +15,26 @@ import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, 
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
 import {
-  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stripWords, textMsg,
+  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stateWords, stripWords, textMsg,
   wordKey,
 } from './strings.ts';
 import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
 import { controlModel, type ControlModel } from './controls.ts';
+import { kidsOf, type KidModel } from './containers.ts';
+import { readoutModel, type ReadoutModel } from './readouts.ts';
+import { stateOf } from './core.ts';
+import type { Json } from '../definitions/types.ts';
 
 /* ---------------------------------------------------------------- a part's model */
 
 /** Where a part stands: the surface its container gives it. A part draws the housing the concept gives it there
  *  (a labelled control is a foot pairing on a tile and an LCD selector on a pedal), and the rebuild's stylesheets give
  *  every part a look on every surface (styles/rebuild/). */
-export type Surface = 'tile' | 'quick' | 'rack' | 'foot' | 'well' | 'lcd' | 'pedal' | 'unit';
+export type Surface = 'tile' | 'quick' | 'rack' | 'foot' | 'well' | 'lcd' | 'pedal' | 'unit'
+  /* the containers' own (package 2): a terminal's lines, a rack group, a plugin's controls, a deck, an LCD's row */
+  | 'term' | 'group' | 'plugin' | 'deck' | 'lcdrow';
 
 /** How the shell places a laid-out cell (a pedal's knob): the core's words for it, not the view's. */
 export interface CellWords {
@@ -104,7 +110,19 @@ export interface PartModel {
   /** Why the node stands back, when it does. */
   dim: Slot | null;
   small: boolean;
+  /** What the node says when it stands back, whether or not it does now (a guard's "guard off", drawn hidden until it
+   *  holds); absent for a node that never stands back. */
+  dimWords?: Slot;
+  /** A container: its children, in the order they are drawn (src/derive/containers.ts). */
+  kids?: KidModel[];
+  /** A read-out: what it shows, worked out from what it reads (src/derive/readouts.ts). */
+  readout?: ReadoutModel;
+  /** The state its node names (a drop zone's file), and whether another definition only lends it to this node. */
+  state?: StateModel[];
 }
+
+/** A state a node names, as a part draws it. */
+export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot }
 
 
 /** A parameter on the desk as a part draws it. */
@@ -169,6 +187,11 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
     const ctl = controlModel(ix, node, desk, words, label);
     if (ctl) m.control = ctl;
   }
+  if (node.dim && key) m.dimWords = m.dim ?? fillMsg(ix, `${key}.dim`, node.dim.says, desk);
+  if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);
+  const ro = readoutModel(ix, node, desk);
+  if (ro) m.readout = ro;
+  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
   return m;

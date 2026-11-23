@@ -13,6 +13,7 @@ import { checkText, paramWords, textMsg } from './strings.ts';
 import { stepChanges, stepWords, type StepWords } from './steps.ts';
 import { fractionValue, keyStep, parseTyped } from './models.ts';
 import { autoEstimate, rulerSnap, scrubValue } from './controls.ts';
+import { FILE_STEPS } from './steps.ts';
 
 /** One undo step: what it changes, and its words. The store applies it and records it. */
 export interface Change {
@@ -67,9 +68,10 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
     const at = now(); if (!bindable(at, k)) return;
     const b = { at, vals: {}, auto: {}, state: {} }; fn(b, at); finish(b);
   };
-  const stepOf = (owner: { key: string; steps?: StateDef['steps'] }, step: string) => {
-    const s = owner.steps?.[step];
-    if (!s) throw new Error(`${owner.key} has no step "${step}": name it in the definition's steps`);
+  const stepOf = (owner: { key: string; kind?: StateDef['kind']; steps?: StateDef['steps'] }, step: string) => {
+    /* a file loads and clears without saying (docs/05, "Undo step names"): steps.ts names those */
+    const s = owner.steps?.[step] ?? (owner.kind === 'file' && FILE_STEPS.includes(step) ? '' : undefined);
+    if (s === undefined) throw new Error(`${owner.key} has no step "${step}": name it in the definition's steps`);
     return s;
   };
   const allowed = (keys: string[], extra: string[], k: string) => {
