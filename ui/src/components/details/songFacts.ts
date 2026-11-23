@@ -16,7 +16,7 @@ import { formatPercent } from '@/utils/format/format';
 import { plural } from '@/utils/format/plural';
 import { isPresent } from '@/utils/guards';
 
-export type Backend = 'ace' | 'minimax-m3' | 'yue2' | 'sa3';
+export type Backend = 'ace' | 'minimax-m3' | 'yue2' | 'sa3' | 'heartmula';
 
 export interface Fact {
   label: string;
@@ -39,6 +39,7 @@ export const BACKEND_LABELS: Record<Backend, string> = {
   'minimax-m3': 'MiniMax-Music3',
   'yue2': 'YuE2',
   'sa3': 'Stable Audio 3',
+  'heartmula': 'HeartMuLa',
 };
 
 export function songBackend(song: Song): Backend {
@@ -47,6 +48,7 @@ export function songBackend(song: Song): Backend {
   if (raw === 'minimax-m3' || raw === 'mm3' || raw === 'minimax') return 'minimax-m3';
   if (raw === 'yue2') return 'yue2';
   if (raw === 'sa3' || raw === 'stable-audio-3') return 'sa3';
+  if (raw === 'heartmula') return 'heartmula';
   return 'ace';
 }
 
@@ -424,6 +426,29 @@ function sa3Facts(gp: any): FactGroup[] {
   return groups;
 }
 
+function heartmulaFacts(gp: any): FactGroup[] {
+  const pick = gp.heartmulaResult?.pick || {};
+  const req = gp.heartmulaRequest || {};
+  const models: Fact[] = [];
+  add(models, 'Model', `HeartMuLa${pick.variant || req.variant ? ` ${pick.variant || req.variant}` : ''}`);
+  for (const [label, key, requestKey] of [
+    ['Global model', 'global', 'global_type'], ['Local model', 'local', 'local_type'],
+    ['Flow model', 'flow', 'flow_type'], ['Scalar decoder', 'scalar_decoder', 'scalar_decoder_type'],
+  ] as const) {
+    const value = pick[key] || req[requestKey];
+    if (value) add(models, label, String(value));
+  }
+  const adapter = pick.adapter || req.adapter;
+  if (adapter) add(models, 'Adapter', adapterName(String(adapter)), { title: String(adapter) });
+  const seeds: Fact[] = [];
+  add(seeds, 'Seed', num(gp.heartmulaResult?.seed ?? gp.seed ?? req.seed), { mono: true });
+  const noise = gp.heartmulaResult?.noise_seed ?? req.noise_seed;
+  if (noise !== undefined && num(noise) !== num(gp.heartmulaResult?.seed ?? gp.seed ?? req.seed)) {
+    add(seeds, 'Noise seed', num(noise), { mono: true });
+  }
+  return [{ title: 'Models', facts: models }, ...(seeds.length ? [{ title: 'Reproduction', facts: seeds }] : [])];
+}
+
 /** Everything the panel shows under "How it was made", for this song's backend. */
 export function buildFactGroups(song: Song): FactGroup[] {
   const gp = params(song);
@@ -435,6 +460,7 @@ export function buildFactGroups(song: Song): FactGroup[] {
     case 'minimax-m3': groups = mm3Facts(gp); break;
     case 'yue2': groups = yue2Facts(gp); break;
     case 'sa3': groups = sa3Facts(gp); break;
+    case 'heartmula': groups = heartmulaFacts(gp); break;
     default: groups = aceFacts(gp);
   }
   return cover.length ? [{ title: 'Cover Studio', facts: cover }, ...groups] : groups;

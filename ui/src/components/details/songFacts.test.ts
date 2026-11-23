@@ -1,8 +1,27 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildFactGroups, buildTrackChips } from './songFacts';
+import { BACKEND_LABELS, buildFactGroups, buildTrackChips, songBackend } from './songFacts';
 import { normalizeSong } from '@/services/api';
 import type { Song } from '@/types';
+
+test('HeartMuLa details use the saved backend and actual model pick', () => {
+  const song = normalizeSong({ backend: 'heartmula', generation_params: JSON.stringify({
+    backend: 'heartmula', ditModel: 'stale-ace', bpm: 100,
+    heartmulaRequest: { variant: '3B', global_type: 'Q8_0', local_type: 'Q4_K_M', flow_type: 'Q8_0', scalar_decoder_type: 'F16' },
+    heartmulaResult: { pick: { variant: '3B', global: 'F16', local: 'Q4_K_M', flow: 'Q8_0', scalar_decoder: 'F16' } },
+  }) });
+  assert.equal(BACKEND_LABELS[songBackend(song)], 'HeartMuLa');
+  const facts = buildFactGroups(song).flatMap(g => g.facts);
+  assert.equal(facts.find(f => f.label === 'Global model')?.value, 'F16');
+  assert.equal(facts.find(f => f.label === 'Local model')?.value, 'Q4_K_M');
+  assert.ok(!facts.some(f => f.value.includes('stale-ace')));
+  assert.deepEqual(buildTrackChips(song), []);
+  assert.equal(songBackend({ backend: 'heartmula' } as Song), 'heartmula');
+  const requestOnly = buildFactGroups({ generationParams: { backend: 'heartmula',
+    heartmulaRequest: { variant: '3B', global_type: 'Q8_0', seed: 0 } } } as unknown as Song).flatMap(g => g.facts);
+  assert.equal(requestOnly.find(f => f.label === 'Global model')?.value, 'Q8_0');
+  assert.equal(requestOnly.find(f => f.label === 'Seed')?.value, '0');
+});
 
 test('saved musical metadata wins and only ACE-Step falls back to request values (#344)', () => {
   for (const backend of ['ace', 'yue2', 'minimax-m3', 'sa3']) {
