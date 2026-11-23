@@ -27,6 +27,7 @@ const TUNING = ['inferenceSteps', 'guidanceScale', 'shift'];
 const Create: React.FC = () => {
   const [caption, setCaption] = useSkinStorage('caption', '');
   const [lyrics, setLyrics] = useState('');
+  const [seconds, setSeconds] = useState(20);
   const { items, active } = useQueue();
   const models = useBackendModels();
   const caps = useCapabilities();
@@ -41,7 +42,8 @@ const Create: React.FC = () => {
         <textarea className="st-input" rows={4} placeholder="Lyrics (empty for an instrumental)" value={lyrics} onChange={e => setLyrics(e.target.value)} />
         <div className="st-row">
           {/* generate() returns at once; progress is in the queue below. Call it from a click. */}
-          <button className="st-btn st-btn-on" disabled={!caption.trim()} onClick={() => generate({ caption, lyrics, instrumental: !lyrics.trim() })}>Generate</button>
+          <button className="st-btn st-btn-on" disabled={!caption.trim()} onClick={() => generate({ caption, lyrics, instrumental: !lyrics.trim(), duration: seconds })}>Generate</button>
+          <input className="st-input" style={{ width: '5rem' }} type="number" min={5} aria-label="Seconds" value={seconds} onChange={e => setSeconds(Number(e.target.value))} />
           <span className="st-muted">{active} in the queue</span>
         </div>
       </section>
@@ -140,7 +142,7 @@ const StarterApp: React.FC = () => {
         {TABS.map(t => <button key={t} className={`st-btn${tab === t ? ' st-btn-on' : ''}`} onClick={() => setTab(t)}>{t}</button>)}
         <button className="st-btn" title="Cycles system, light, dark" onClick={theme.cycle}><Moon size={14} /> {theme.mode}</button>
         {available.length > 0 && (
-          <Select<string> size="sm" value={skin ?? ''} onChange={v => setSkin(v || null)} aria-label="Colour skin"
+          <Select<string> size="sm" className="w-36" value={skin ?? ''} onChange={v => setSkin(v || null)} aria-label="Colour skin"
             options={[{ value: '', label: 'No skin' }, ...available.map(a => ({ value: a.id, label: a.name }))]} />
         )}
         <button className="st-btn" onClick={openClassic}>Classic</button>
