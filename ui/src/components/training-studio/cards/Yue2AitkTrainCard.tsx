@@ -3,7 +3,7 @@ import { yue2SamplerSnapshot } from '@/stores/globalParamsStore';
 import { AlertTriangle, Loader2, Play } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { YUE2_JOINT_BASE_MATCHED_DEFAULTS, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_FIXED_RECIPE_DROPOUTS, YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LORA_STOP, YUE2_JOINT_PRESETS, YUE2_JOINT_TUNED_KEYS } from '../../../../../server/src/contracts/trainingRecipes';
+import { calibrateYue2Length, YUE2_JOINT_BASE_MATCHED_DEFAULTS, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_FIXED_RECIPE_DROPOUTS, YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LORA_STOP, YUE2_JOINT_PRESETS, YUE2_JOINT_TUNED_KEYS } from '../../../../../server/src/contracts/trainingRecipes';
 import { pollWhile } from '@/queries/contract';
 import { trainingQueries } from '@/queries/training-data/queries';
 import { useJobSelection, useReload, useRunEvents, useScopedId } from '@/queries/training-runs/hooks';
@@ -175,9 +175,12 @@ const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = YUE2_JOINT_LEGACY_VALUES a
 // and the optimizer returns to the base-matched presets' pick.
 const BASE_MATCHED_VALUES: Partial<Yue2JointTrainRequest> = YUE2_JOINT_BASE_MATCHED_VALUES as Partial<Yue2JointTrainRequest>;
 const PRESETS = YUE2_JOINT_PRESETS;
+// Older drafts and named presets did not record edits to the checkpoint field.
+const usesDefaultInterval = (form: Partial<Yue2JointTrainRequest>) =>
+  form.saveEveryIsDefault ?? (form.saveEvery === undefined || PRESETS.some(p => p.saveEvery === form.saveEvery));
 const presetValues = (p: typeof PRESETS[number]): Partial<Yue2JointTrainRequest> => ({
   ...(p.key === 'legacy' ? LEGACY_VALUES : { ...BASE_MATCHED_VALUES, stopMode: 'steps' as const }),
-  steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
+  steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, saveEveryIsDefault: true, lokrDim: p.lokrDim });
 const activePreset = (f: Yue2JointTrainRequest) => f.method === 'fixed-recipe' ? undefined : PRESETS.find(p => (f.method === 'tuned') === (p.key === 'legacy')
   && (p.key !== 'legacy' || f.targetKl === LEGACY_VALUES.targetKl) && f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum
   && (f.narCropFrames ?? 0) === p.narCropFrames && f.saveEvery === p.saveEvery && (f.adapterType !== 'lokr' || f.lokrDim === p.lokrDim))?.key;
@@ -387,7 +390,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     writeStored(oneTake, 1);
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
-  return { ...DEFAULT_FORM, ...stored, preview: { ...LADDER_PREVIEW, ...stored.preview }, method: stored.method === 'tuned' || stored.method === 'fixed-recipe' ? stored.method : 'base-matched' };
+  return { ...DEFAULT_FORM, ...stored, saveEveryIsDefault: usesDefaultInterval(stored), preview: { ...LADDER_PREVIEW, ...stored.preview }, method: stored.method === 'tuned' || stored.method === 'fixed-recipe' ? stored.method : 'base-matched' };
 }
 function isJointJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-joint-train';
@@ -646,6 +649,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const gate = form.plannerGate;
   // On a resume the run's own gate and split apply; the preview is for new runs.
   const gateResuming = !!resumeChoice || !!form.resume?.trim();
+  const showCalibration = form.method === 'base-matched' && form.calibrated === true && !gateResuming;
+  const calibrationDuration = useQuery({ ...runQueries.calibrationDuration(trainingWorker, datasetId),
+    enabled: showCalibration && !batchDraft?.length });
+  const minutes = calibrationDuration.data?.minutes;
+  const calibrationEstimate = minutes && Number.isInteger(form.steps) && form.steps > 0
+    && Number.isInteger(form.saveEvery) && form.saveEvery > 0
+    ? calibrateYue2Length(minutes, form.steps, form.saveEvery, !usesDefaultInterval(form)) : null;
   const holdoutQuery = useQuery({ ...runQueries.holdout(trainingWorker, datasetId, gate?.evalSeed ?? 42), enabled: !!gate && !gateResuming });
   // What Decoder steps held before the gate raised it, so switching the gate off puts it back.
   const narBeforeGate = useRef<number | undefined>(undefined);
@@ -934,14 +944,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // Settings that differ from the recipe defaults, per-run paths excluded
   // (#200). Each one can be reset on its own, or all at once.
   const changedSettings = Object.entries(snapshotPresetSettings(form, lyricTiming))
-    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(baselineFor(form)[key]));
+    .filter(([key, value]) => key !== 'saveEveryIsDefault' &&
+      (JSON.stringify(value) !== JSON.stringify(baselineFor(form)[key]) || (key === 'saveEvery' && form.saveEveryIsDefault === false)));
   const resetSetting = (key: string) => {
     if (key === 'lyricTiming') { onLyricTimingChange(false); return; }
-    setForm(previous => ({ ...previous, [key]: baselineFor(previous)[key] }));
+    setForm(previous => ({ ...previous, [key]: baselineFor(previous)[key],
+      ...(key === 'saveEvery' ? { saveEveryIsDefault: true } : {}) }));
   };
   const resetAllSettings = () => {
     setForm(previous => {
-      const next: Record<string, unknown> = { ...DEFAULT_FORM };
+      const next: Record<string, unknown> = { ...DEFAULT_FORM, saveEveryIsDefault: true };
       for (const key of PRESET_EXCLUDED_KEYS) next[key] = previous[key];
       return next as unknown as Yue2JointTrainRequest;
     });
@@ -960,9 +972,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         throw new Error(t('trainingStudio.yue2.method.presetFormChanged',
           'The form changed while the preset was loading. Choose the preset again.'));
       }
-      pendingPresetApplication.current = { form: result.effectiveForm, lyricTiming: result.lyricTiming };
+      const loadedForm = { ...result.effectiveForm,
+        saveEveryIsDefault: preset.settings.saveEvery === undefined ? usesDefaultInterval(form) : usesDefaultInterval(preset.settings) };
+      pendingPresetApplication.current = { form: loadedForm, lyricTiming: result.lyricTiming };
       applying = true;
-      setForm(result.effectiveForm);
+      setForm(loadedForm);
       onLyricTimingChange(result.lyricTiming);
     } catch (err) {
       if (request !== presetLoadRequest.current) return;
@@ -1076,6 +1090,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setForm(previous => ({ ...previous, ...saved, trainingMethod: 'aitk',
       checkpoint: '', output: '', resume: '',
       steps: Math.max(previous.steps, step + 400), saveEvery: saved.saveEvery ?? previous.saveEvery,
+      saveEveryIsDefault: saved.saveEvery === undefined ? previous.saveEveryIsDefault : false,
       dataset: typeof saved.dataset === 'string' ? saved.dataset : '',
       lyricTiming: saved.alignment?.enabled ?? previous.lyricTiming,
       cursorWeight: saved.alignment?.cursorWeight ?? previous.cursorWeight }));
@@ -1178,7 +1193,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <ParamLabel
               label={t('trainingStudio.yue2.method.calibrated', 'Dataset-Calibrated Training')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-              info={t('trainingStudio.yue2.method.calibratedInfo', 'Experimental. Sizes the run to the album instead of using the preset as it is: the preset\'s updates and save interval are scaled by the album\'s minutes of audio against a 45-minute album (between 0.6× and 2×), so the ladder keeps the same number of rungs. A 53-minute album on a 200-update preset trains for 240 updates. The rule came from ear-scored ladders of the earlier recipe, where longer albums took longer to reach full likeness; runs with this on test whether it holds for this one. The training log says what it chose, and the run records it. Off: the preset runs exactly as shown. Applies to new runs, single and batch.')}
+              info={t('trainingStudio.yue2.method.calibratedInfo', 'Experimental. Scales updates and the preset checkpoint interval by the dataset\'s audio minutes divided by 45, between 0.6 and 2 times. A checkpoint interval you enter stays as entered. Applies to new base-matched runs, including batches.')}
             />
           </div>}
           {autoCaption && <div className="flex flex-col gap-2">
@@ -1253,7 +1268,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             // The base is the user's pick, not part of the recipe: re-picking
             // HOT-Approved keeps it (bf16 only when none was chosen).
             method: 'fixed-recipe', base: previous.base || 'bf16', checkpoint: '', adapterType: 'lora', rank: 64, alpha: 64,
-            ...FIXED_RECIPE_SCHEDULE,
+            ...FIXED_RECIPE_SCHEDULE, saveEveryIsDefault: true,
             optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
             beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
             stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
@@ -1276,6 +1291,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <UserPresetRow state={presetState} isActive={userPresetActive} onLoad={preset => void loadPreset(preset)} busy={busy} loading={presetLoading}
           info={t('trainingStudio.yue2.method.presetHint', 'A preset captures the training settings (steps, save cadence, seed, device, optimizer, rank/alpha and stop target), never the dataset, checkpoint or output paths. Click a name to load it; the save icon overwrites it with the current settings, the download icon exports it to share.')} />
+        {showCalibration && <p className="mt-2 text-[11px] text-zinc-500">
+          {batchDraft?.length
+            ? t('trainingStudio.yue2.method.calibratedBatch', 'Updates are calculated for each dataset in the batch.')
+            : calibrationEstimate
+              ? t('trainingStudio.yue2.method.calibratedEstimate', 'Estimated after calibration: {{steps}} updates, checkpoint every {{interval}}.', { steps: calibrationEstimate.steps, interval: calibrationEstimate.saveEvery })
+              : calibrationDuration.isFetching
+                ? t('trainingStudio.yue2.method.calibratedMeasuring', 'Reading dataset audio duration...')
+                : t('trainingStudio.yue2.method.calibratedUnavailable', 'Enter valid settings and check that the dataset has readable audio to see the calibrated update count.')}
+        </p>}
         <ChangedSettingsRow changed={changedSettings} onReset={resetSetting} onResetAll={resetAllSettings}
           disabled={active || preparing || starting || yue2RunAllActive} />
       </div>
@@ -1373,8 +1397,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               : <input className={input} type="number" value={String(form.saveEvery ?? '')} disabled={fieldLocked('saveEvery')}
                   onChange={event => set('saveEvery', Number(event.target.value))} />}
           </label>
-        ) : field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
-          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often. The presets save ten rungs: every 10 on Fast, 20 on Balanced, 30 on Thorough.'),
+        ) : field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form,
+          value => setForm(previous => ({ ...previous, saveEvery: Number(value), saveEveryIsDefault: false })),
+          t('trainingStudio.yue2.method.saveEveryInfo', 'How many updates between checkpoints. Dataset-Calibrated Training scales the preset interval. If you edit this field, the run uses the interval you entered.'),
           t('trainingStudio.yue2.method.saveEveryMeta', 'Balanced 20'))}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
           t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
@@ -1641,7 +1666,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         disabled={active || preparing || starting || yue2RunAllActive}
         onEnabledChange={checked => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: checked } }))}
         enableLabel={t('trainingStudio.yue2.method.previewEnable', 'Render a preview at every saved checkpoint')}
-        enableInfo={t('trainingStudio.yue2.method.previewManual', 'On by default: each checkpoint gets one draft take (12 decoder steps, 300 s) rendered while training continues, so the ladder is ready to score when the run ends. Off: render rungs by hand from the ladder below.')}
+        enableInfo={t('trainingStudio.yue2.method.previewManual', 'Each checkpoint gets a draft preview with 12 decoder steps. Turn previews off to render rungs by hand from the ladder.')}
         enableDefault={LADDER_PREVIEW.enabled}
         lead={
           <Toggle
@@ -1655,6 +1680,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           />
         }
         afterToggle={<>
+          {form.preview?.enabled && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.previewFullSong', 'Artist takes render the full song so you can hear if it fails to end.')}</p>}
           {form.preview?.enabled && form.stopEngine === false && <Toggle
             accent="amber"
             size="sm"
@@ -1670,11 +1696,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </>}
       >
         {form.preview?.enabled && <>
-          {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
+          {(form.preview.baseline || form.preview.control) && field(t('trainingStudio.yue2.method.previewComparisonSeconds', 'Comparison preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
             const seconds = Math.max(8, Math.min(360, Number(value) || 300));
             return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
-          }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 360 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 300'),
-            !busy && form.preview.seconds !== LADDER_PREVIEW.seconds
+          }), t('trainingStudio.yue2.method.previewComparisonSecondsInfo', 'Duration cap in seconds for the optional baseline and control takes. Artist takes render the full song.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 300'),
+            !fieldLocked('seconds', form.preview) && form.preview.seconds !== LADDER_PREVIEW.seconds
               ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds: LADDER_PREVIEW.seconds, previewMaxFrames: LADDER_PREVIEW.seconds * 25 } }))
               : undefined)}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),

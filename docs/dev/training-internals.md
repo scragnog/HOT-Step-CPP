@@ -462,12 +462,14 @@ cursor. The timing weight is configurable and recorded with the run.
 Checkpoint previews select the AR adapter at `preview.arScale`, default 0.6, and the NAR adapter at 1.0. The joint form and batch ladder defaults carry the same AR scale. Manual renders accept `arScale`, falling back to the run's saved preview scale and then 0.6. Baseline previews select no adapters. Previews decode with the VAE picked in YuE2 mode, and every render request names it in `vae_variant`: the engine decodes a `/yue2/synth` request without that field on Standard, whatever select-model or warm made resident.
 
 Checkpoint previews are optional. The route leaves them off when a request omits
-the `preview` block; the joint card sends the parallel ladder block above (one
-300 s take per checkpoint, 12 decoder steps). Without a picked `previewSongId` they
-use the prepared dataset's first sung track, with a fixed default seed of 424242.
-Preview duration is bounded to 8 to 360 seconds (default 90), and
-`previewMaxFrames` (default 2250, at most 9000) caps the semantic frames. Reaching
-that cap is a preview limit, not a natural ending. Preview audio is stored with the run
+the `preview` block. The joint card requests one full-song draft take per
+checkpoint in parallel, with 12 decoder steps and a fixed seed of 424242.
+Without a picked `previewSongId`, the first sung track provides the caption.
+Artist and baseline-only renders supply a lead sheet and use the composer's
+normal limit so a length cap cannot hide runaway takes. Optional baseline and
+control takes render without a supplied sheet and use `previewMaxFrames`
+(default 2250, at most 9000), derived from Comparison preview seconds on the card.
+Preview audio is stored with the run
 and remains playable after reopening it. Native AR and NAR exports from the
 same checkpoint should be selected together; their generation strengths remain
 independent and default to 1/1.
@@ -619,9 +621,16 @@ It is opt-in: the route only acts when a fresh base-matched request sets
 
 With it on, `POST /datasets/:id/yue2-joint-train` calls `ensureDatasetProfile`
 (reuses the saved profile when it covers the same audio files) and
-`calibrateYue2Length(minutes, steps, saveEvery)`: both are scaled by
-`minutes / 45`, clamped to 0.6-2, so the rung count stays the same. This runs
-before `applyBaseMatchedRecipe`, so warmup follows the new step count. The result
+`calibrateYue2Length` scales the update budget by `minutes / 45`, clamped to
+0.6-2. When the request marks `saveEveryIsDefault: true` or omits the interval,
+the same factor scales the checkpoint interval and the budget rounds to a
+checkpoint boundary. An explicitly supplied interval stays as entered.
+Preview pauses that track the checkpoint cadence follow the resulting interval.
+The card estimates the count from the matching dataset profile or audio metadata.
+The server uses the dataset profile for the run. Songs per update is outside this duration rule, so
+the rule can yield different effective epoch counts at different batch sizes.
+
+Calibration runs before `applyBaseMatchedRecipe`, so warmup follows the new step count. The result
 is stored as `calibration` in the run options, is logged at job start, and goes
 into each rung score's settings snapshot (which now also records `method` and
 `gradAccum`). The handler is async for this.

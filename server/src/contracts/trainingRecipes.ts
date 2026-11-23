@@ -390,3 +390,27 @@ export const YUE2_JOINT_BASE_MATCHED_DEFAULTS = {
   gradAccum: 4, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1, warmupFraction: 0.03,
   arCropFrames: 0,
 } as const;
+
+export const CALIBRATION_REFERENCE_MINUTES = 45;
+const CALIBRATION_MIN_FACTOR = 0.6;
+const CALIBRATION_MAX_FACTOR = 2;
+
+export interface Yue2Calibration {
+  rule: 'minutes-v1';
+  minutes: number;
+  factor: number;
+  requestedSteps: number;
+  requestedSaveEvery: number;
+  steps: number;
+  saveEvery: number;
+}
+
+/** Scale a default checkpoint interval with the run budget. Keep manual intervals as entered. */
+export function calibrateYue2Length(minutes: number, steps: number, saveEvery: number, manualInterval = false): Yue2Calibration {
+  const factor = Math.min(CALIBRATION_MAX_FACTOR, Math.max(CALIBRATION_MIN_FACTOR, minutes / CALIBRATION_REFERENCE_MINUTES));
+  const every = manualInterval ? saveEvery : Math.max(1, Math.round(saveEvery * factor));
+  const budget = manualInterval ? Math.round(steps * factor) : Math.round(steps * factor / every) * every;
+  const scaled = Math.max(every, budget);
+  return { rule: 'minutes-v1', minutes: Math.round(minutes * 10) / 10, factor: Math.round(factor * 1000) / 1000,
+    requestedSteps: steps, requestedSaveEvery: saveEvery, steps: scaled, saveEvery: every };
+}

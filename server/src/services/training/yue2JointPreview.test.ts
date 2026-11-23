@@ -92,6 +92,18 @@ test('renderer uses selected style/lyrics, writes audio, and restores selection'
   assert.ok(fs.readdirSync(path.join(f.output, 'previews')).some(n => n.startsWith(`step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}`) && n.endsWith('.wav')));
 });
 
+test('only the optional baseline and control takes use the preview cap', async () => {
+  const f = previewFixture();
+  const { deps, calls } = mockDeps();
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, baseline: true, control: true, previewMaxFrames: 3750 },
+    arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+  const renders = calls.filter(c => c.name === 'synth')
+    .map(c => c.value as { plan_only?: boolean; preview_max_frames?: number })
+    .filter(request => !request.plan_only);
+  assert.deepEqual(renders.map(request => request.preview_max_frames), [undefined, 3750, 3750]);
+});
+
 test('previews decode with the picked VAE (rs-x3), not a forced Standard, and restore it', async () => {
   const f = previewFixture();
   const { deps, calls } = mockDeps();

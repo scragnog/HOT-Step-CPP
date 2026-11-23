@@ -11,6 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { getFFmpegPath } from '../../config.js';
+import { readDuration } from './audioMeta.js';
 import { readSidecar } from './sidecarIO.js';
 import { yue2StemSources } from './yue2Stems.js';
 import { datasetDir } from './paths.js';
@@ -325,34 +326,28 @@ export function saveDatasetProfile(p: DatasetProfile): string {
 // relation is unconfirmed under base-matched; the opt-in runs are the test.
 // Replace with a rule refitted on base-matched album scores once there are
 // enough (dataset-profile-report.ts).
-export const CALIBRATION_REFERENCE_MINUTES = 45;
-const CALIBRATION_MIN_FACTOR = 0.6;
-const CALIBRATION_MAX_FACTOR = 2;
+export { CALIBRATION_REFERENCE_MINUTES, calibrateYue2Length, type Yue2Calibration } from '../../contracts/trainingRecipes.js';
 
-export interface Yue2Calibration {
-  rule: 'minutes-v1';
-  minutes: number;
-  factor: number;
-  requestedSteps: number;
-  requestedSaveEvery: number;
-  steps: number;
-  saveEvery: number;
+function matchingDatasetProfile(slug: string, files: string[]): DatasetProfile | null {
+  const saved = readDatasetProfile(slug);
+  return saved && saved.songs.length === files.length &&
+    saved.songs.every((song, i) => song.file === path.basename(files[i])) ? saved : null;
 }
 
-/** Scale steps and saveEvery together, so the ladder keeps its rung count. */
-export function calibrateYue2Length(minutes: number, steps: number, saveEvery: number): Yue2Calibration {
-  const factor = Math.min(CALIBRATION_MAX_FACTOR, Math.max(CALIBRATION_MIN_FACTOR, minutes / CALIBRATION_REFERENCE_MINUTES));
-  const every = Math.max(1, Math.round(saveEvery * factor));
-  const scaled = Math.max(every, Math.round(steps * factor / every) * every);
-  return { rule: 'minutes-v1', minutes: Math.round(minutes * 10) / 10, factor: Math.round(factor * 1000) / 1000,
-    requestedSteps: steps, requestedSaveEvery: saveEvery, steps: scaled, saveEvery: every };
+/** Estimate the training budget without running the full audio analysis. */
+export async function estimateYue2DatasetMinutes(slug: string, sourceDir: string): Promise<number | null> {
+  const files = yue2StemSources(sourceDir);
+  const savedMinutes = matchingDatasetProfile(slug, files)?.album.totalMin;
+  if (typeof savedMinutes === 'number' && savedMinutes > 0) return savedMinutes;
+  const durations = await pool(files, 4, readDuration);
+  if (!durations.length || durations.some(seconds => seconds <= 0)) return null;
+  return fin(durations.reduce((sum, seconds) => sum + seconds, 0) / 60);
 }
 
 /** The saved profile when it covers the same audio files, else a fresh one (saved). */
 export async function ensureDatasetProfile(slug: string, sourceDir: string): Promise<DatasetProfile> {
-  const names = yue2StemSources(sourceDir).map(f => path.basename(f)).join('|');
-  const saved = readDatasetProfile(slug);
-  if (saved && saved.songs.map(s => s.file).join('|') === names) return saved;
+  const saved = matchingDatasetProfile(slug, yue2StemSources(sourceDir));
+  if (saved) return saved;
   const fresh = await buildDatasetProfile(slug, sourceDir);
   saveDatasetProfile(fresh);
   return fresh;

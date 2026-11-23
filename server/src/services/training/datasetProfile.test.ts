@@ -20,6 +20,13 @@ test('calibrateYue2Length scales steps and saves together, keeping the rung coun
   assert.deepEqual([short.steps, short.saveEvery], [70, 7]);
 });
 
+test('calibrateYue2Length keeps a manual interval while scaling the run budget', () => {
+  const long = calibrateYue2Length(148, 200, 5, true);
+  assert.deepEqual([long.steps, long.saveEvery], [400, 5]);
+  const short = calibrateYue2Length(32, 200, 5, true);
+  assert.deepEqual([short.steps, short.saveEvery], [142, 5]);
+});
+
 test('calibrateYue2Length clamps the factor to 0.6..2', () => {
   assert.equal(calibrateYue2Length(5, 100, 10).factor, 0.6);
   assert.equal(calibrateYue2Length(500, 100, 10).factor, 2);

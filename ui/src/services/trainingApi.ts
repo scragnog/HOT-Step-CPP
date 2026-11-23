@@ -773,8 +773,10 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  (ACE + MM3 + YuE2 sidecars). false = off; absent = on, default provider. */
   autoCaption?: false | { provider: 'gemini' | 'moss'; model?: string };
   /** Dataset-Calibrated Training (base-matched, new runs only): the server
-   *  sizes steps and saveEvery to the album's minutes of audio. Absent = off. */
+   *  sizes steps and the default checkpoint interval to the album's minutes. Absent = off. */
   calibrated?: boolean;
+  /** Scale the built-in preset interval when calibrating a fresh run. */
+  saveEveryIsDefault?: boolean;
   autoPrepare?: boolean;
   preparation?: Partial<Yue2AitkPrepareRequest>;
   checkpoint: string;
@@ -2785,6 +2787,10 @@ export async function captionMissingYue2(
   // silent: Yue2AitkTrainCard's captionMissing error line is the sole notifier
   // (both the start leg and the final checkOnly leg).
   return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts), silent: true }, reqOpts);
+}
+
+export async function getYue2CalibrationDuration(id: string, reqOpts?: TrainingReadOptions): Promise<{ minutes: number | null }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-calibration-duration`, { silent: true }, reqOpts);
 }
 
 /** The planner gate's default hold-out for a dataset, as Start will pick it. */

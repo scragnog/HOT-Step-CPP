@@ -24,6 +24,7 @@ const TR = {
   jointRuns: 'training-runs/joint-runs',
   gateHistory: 'training-runs/gate-history',
   holdout: 'training-runs/holdout',
+  calibrationDuration: 'training-runs/calibration-duration',
   previews: 'training-runs/previews',
   review: 'training-runs/review',
   ladder: 'training-runs/ladder',
@@ -91,6 +92,10 @@ export const runQueries = {
   gateHistory: (id: string, run: string) => queryOptions({
     queryKey: serverKey(TR.gateHistory, { id, filters: { run } }),
     queryFn: ({ signal }) => api.getYue2GateHistory(id, run, { signal }),
+  }),
+  calibrationDuration: (worker: Worker, id: string) => queryOptions({
+    queryKey: serverKey(TR.calibrationDuration, { worker, id }),
+    queryFn: ({ queryKey, signal }) => api.getYue2CalibrationDuration(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   holdout: (worker: Worker, id: string, seed: number) => queryOptions({
     queryKey: serverKey(TR.holdout, { worker, id, filters: { seed } }),

@@ -178,7 +178,8 @@ import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOp
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { evictOtherFamilies } from '../services/generation/residency.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
-import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
+import { YUE2_JOINT_FORM_DEFAULTS } from '../contracts/trainingRecipes.js';
+import { calibrateYue2Length, ensureDatasetProfile, estimateYue2DatasetMinutes, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
 import { readGateHistory } from '../services/training/yue2GateHistory.js';
 import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
 import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
@@ -3841,8 +3842,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     // for it gets steps and saveEvery sized to the album before the recipe
     // fills in warmup from the step count. Without calibrated: true, nothing here runs.
     let calibration = b.resumeRunId ? b.calibration as Yue2Calibration | undefined : undefined;
-    if (b.calibrated === true && method === 'base-matched' && !(typeof b.resumeRunId === 'string' && b.resumeRunId)) {
-      const reqSteps = Number(b.steps), reqEvery = Number(b.saveEvery);
+    if (b.calibrated === true && method === 'base-matched' && !b.resumeRunId && !(typeof b.resume === 'string' && b.resume.trim())) {
+      const reqSteps = Number(b.steps), reqEvery = Number(b.saveEvery ?? YUE2_JOINT_FORM_DEFAULTS.saveEvery);
       if (!Number.isInteger(reqSteps) || reqSteps < 1 || !Number.isInteger(reqEvery) || reqEvery < 1) {
         res.status(400).json({ error: 'Dataset-Calibrated Training needs steps and saveEvery to scale.' });
         return;
@@ -3853,8 +3854,12 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         res.status(400).json({ error: 'Dataset-Calibrated Training could not measure this dataset\'s audio.' });
         return;
       }
-      calibration = calibrateYue2Length(minutes, reqSteps, reqEvery);
+      calibration = calibrateYue2Length(minutes, reqSteps, reqEvery, b.saveEvery != null && b.saveEveryIsDefault !== true);
       b = { ...b, steps: calibration.steps, saveEvery: calibration.saveEvery };
+      if (b.preview && typeof b.preview === 'object') {
+        const preview = b.preview as Record<string, unknown>;
+        if (preview.everySteps === reqEvery) b.preview = { ...preview, everySteps: calibration.saveEvery };
+      }
     }
     if (method === 'base-matched') b = applyBaseMatchedRecipe(b);
     if (method === 'fixed-recipe') b = applyFixedRecipe(b);
@@ -4260,6 +4265,13 @@ function yue2ManifestItemIds(file: string): string[] {
     return Array.isArray(items) ? items.map((x: any) => String(x?.id ?? '')).filter(Boolean) : [];
   } catch { return []; }
 }
+
+/** GET /datasets/:id/yue2-joint-calibration-duration */
+router.get('/datasets/:id/yue2-joint-calibration-duration', async (req: Request, res: Response) => {
+  const ds = repo.getDataset(req.params.id as string);
+  if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+  res.json({ minutes: await estimateYue2DatasetMinutes(ds.slug, ds.sourceDir) });
+});
 
 /** GET /datasets/:id/yue2-joint-holdout?seed=42
  *
