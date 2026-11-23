@@ -27,9 +27,11 @@ Track length under six minutes. The recipe trains every track as one whole seque
 
 How many tracks: the app warns below 10. Between 10 and 20 tracks, size showed no reliable effect on the result. Hold-out evaluation is skipped below 6 songs.
 
+Install a planner LM and `mm3-depth-f16.gguf`. Training Studio defaults to Q8_0 when installed and offers the other installed bases. If BF16 is your only planner LM, you can train on it without installing Q8_0. If you request checkpoint previews without Q8_0, training continues with a warning in the job log and saves the checkpoints for later audition.
+
 ### Cover-laundered codes for dense mixes
 
-If the vocal sits buried in a dense mix, tick "Cover-launder the codes (dense mixes)" on the Codes card. It renders each track back through the model before encoding, which puts the vocal where the codes can carry it. The result goes to a separate cache, and the train form then offers "Train on cover-laundered codes". It runs at about 1.4 times real time per track, once per dataset, and needs the rec7 encoder model installed. On one dense-mix album the laundered adapter won an A/B on every axis. It is unmeasured on sparse or acoustic material, so do not use it by default.
+If the vocal sits buried in a dense mix, tick "Cover-launder the codes (dense mixes)" on the Codes card. It renders each track back through the model before encoding, which puts the vocal where the codes can carry it. The result goes to a separate cache, and the train form then offers "Train on cover-laundered codes". It runs at about 1.4 times real time per track, once per dataset, and needs the rec7 encoder and Q8_0 LM installed. On one dense-mix album the laundered adapter won an A/B on every axis. It is unmeasured on sparse or acoustic material, so do not use it by default.
 
 ## Recommended settings
 

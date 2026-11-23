@@ -126,6 +126,11 @@ shell owns layout and selection; each plug-in owns its parameters and
 serialization, and server validation stays authoritative. This is not a generic
 form engine.
 
+MM3 status and train requests that omit the base use the recipe's Q8_0 LM
+when installed, then fall back to the first installed base in the picker.
+When Q8_0 is missing, the start and resume routes omit automatic previews
+from the queued job and record a warning if previews were requested.
+
 The preview view is shared. `TrainingPreviewPanel.tsx` holds the settings
 block, field, checkpoint card and take rows (presentation only, no server
 state). YuE2's ladder, MM3's ladder and the SA3 card all draw it and keep their

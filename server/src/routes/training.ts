@@ -130,7 +130,7 @@ import { requestHeartmulaCheckpoint, type HeartmulaTrainJobOpts } from '../servi
 import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
-  missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
+  defaultMm3TrainBase, missingMm3TrainModels, resolveMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
   mm3RunName, isMm3TrainPrecision, countMm3Captions, mm3CkptOffloadPlan, fitMm3WorkerCrop,
   type Mm3BasePrecision, type Mm3TrainPrecision,
 } from '../services/training/mm3Train.js';
@@ -2250,20 +2250,22 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       }
     } catch { /* engine down or CPU-only — leave it unknown */ }
 
+    const bases = availableMm3Bases();
+    const defaults = { ...MM3_LM_DEFAULTS, basePrecision: defaultMm3TrainBase(bases) };
     res.json({
       codesDir,
       codes,
       encoder,
       // Reported separately because the two stages need different files: the
-      // codes job wants the encoders, training wants the F16 LM + depth.
+      // codes job wants the encoders, training wants the selected LM + depth.
       codesLaundered,
       missingForCodes: missingMm3TrainModels('codes'),
       missingForLaunder: missingMm3TrainModels('launder'),
-      missingForTrain: missingMm3TrainModels('train', MM3_LM_DEFAULTS.basePrecision, MM3_LM_DEFAULTS),
+      missingForTrain: missingMm3TrainModels('train', defaults.basePrecision, defaults),
       // Only offer bases that are installed — a picker listing a file that is
       // not there just moves the failure to spawn time. Sized at the DEFAULT
       // recipe; the UI re-estimates locally as the user moves rank/frames.
-      bases: availableMm3Bases(),
+      bases,
       // Datasets that could serve as a PRIOR-PRESERVATION corpus: anything with
       // RVQ codes that is not this one. Listed by the server because "has codes"
       // is a filesystem fact the browser cannot see, and offering a dataset
@@ -2305,7 +2307,7 @@ router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
       // setting the route then has to coerce behind the user's back.
       engineBackend: engineGpuBackend(),
       flashSupported: engineSupportsFlashAttnTraining(),
-      defaults: MM3_LM_DEFAULTS,
+      defaults,
       presets: MM3_LM_PRESETS,
       defaultPreset: MM3_LM_DEFAULT_PRESET,
       // For the preview-song picker (Mm3TrainCard's select, default = auto).
@@ -2457,6 +2459,13 @@ function parseMm3PreviewOptions(raw: unknown): Mm3PreviewOptions | undefined {
   };
 }
 
+function mm3PreviewWarning(preview: Mm3PreviewOptions | undefined): string | undefined {
+  // mm3Preview.ts pins Q8_0 for the checkpoint renders.
+  if (preview && !fs.existsSync(resolveMm3TrainModels('q8_0').lm)) {
+    return 'Previews skipped. MM3 checkpoint previews require mm3-lm-q8_0.gguf.';
+  }
+}
+
 /** Resolve the regularisation corpus off the request body.
  *
  *  Returns {} when prior preservation is off, and THROWS when it is on but the
@@ -2593,11 +2602,13 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
     if (!ds) return;
     // Any installed base is trainable since the quant-cpy-kquant patch, so the
     // check is "is this file here", not "is this file f16". Anything unknown
-    // falls back to the default rather than being passed to spawn.
+    // falls back to the recipe base rather than being passed to spawn. A
+    // request without a base uses the same default as the form.
     const installed = availableMm3Bases();
     const askedBase = String((req.body || {}).basePrecision || '');
-    const chosenBase: Mm3BasePrecision =
-      installed.some(b => b.id === askedBase) ? askedBase : MM3_LM_DEFAULTS.basePrecision;
+    const chosenBase: Mm3BasePrecision = askedBase
+      ? (installed.some(b => b.id === askedBase) ? askedBase : MM3_LM_DEFAULTS.basePrecision)
+      : defaultMm3TrainBase(installed);
     const missing = missingMm3TrainModels('train', chosenBase);
     if (missing.length) {
       res.status(400).json({
@@ -2910,6 +2921,7 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
                 + `${ckptOffload ? '' : 'NOT '}moving ~${offloadPlan.offloadedMb} MB of checkpoints to host RAM`);
     }
 
+    const previewWarning = mm3PreviewWarning(previewOpts);
     const job = queue.startMm3TrainLmJob(ds.id, {
       manifest:    ds.datasetJsonPath,
       captionsDir,
@@ -3010,14 +3022,15 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       targetLossMetric: b.targetLossMetric === 'eval' ? 'eval' : 'train',
       targetLossEpochs: num('targetLossEpochs', D.targetLossEpochs, 1, 10000),
       ...reg,
-      preview:     previewOpts,
+      preview:     previewWarning ? undefined : previewOpts,
     });
-    // attnBackend is echoed because it is the one field this route can silently
-    // CHANGE (the flash + rectangular-mask coercion above). Without it the card
-    // shows a flash VRAM estimate for a run that trained exact.
+    if (previewWarning) queue.pushEvent(job, { type: 'log', level: 'warn', message: previewWarning, ts: Date.now() });
+    // Echo the effective attention backend so the card shows the right VRAM
+    // estimate when the route switches from flash to exact.
     res.json({
       jobId: job.id, kind: job.kind, runName, outDir: mm3AdapterRunDir(runName),
       attnBackend: attnBackendResolved,
+      previewWarning,
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
@@ -3264,10 +3277,13 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
     opts.resumeFrom = run.resume.statePath;
     opts.resumeStep = from;
 
+    const previewWarning = mm3PreviewWarning(opts.preview);
+    if (previewWarning) opts.preview = undefined;
     const job = queue.startMm3TrainLmJob(ds.id, opts);
+    if (previewWarning) queue.pushEvent(job, { type: 'log', level: 'warn', message: previewWarning, ts: Date.now() });
     res.json({
       jobId: job.id, kind: job.kind, runName: run.runName, outDir: dir,
-      from, steps: opts.steps, optionsSource: run.optionsSource,
+      from, steps: opts.steps, optionsSource: run.optionsSource, previewWarning,
     });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

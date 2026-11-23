@@ -80,6 +80,12 @@ function newestMatching(dir: string, prefix: string): string {
  *  what is ON DISK instead — see availableMm3Bases(). */
 export type Mm3BasePrecision = string;
 
+/** Use the recipe base when installed, otherwise the first available base. */
+export function defaultMm3TrainBase(installed: readonly Pick<Mm3BaseInfo, 'id'>[]): Mm3BasePrecision {
+  const preferred = MM3_LM_DEFAULTS.basePrecision;
+  return installed.some(base => base.id === preferred) ? preferred : installed[0]?.id ?? preferred;
+}
+
 export function resolveMm3TrainModels(base: Mm3BasePrecision = 'f16'): Mm3TrainModels {
   const dir = mm3ModelDir();
   return {
