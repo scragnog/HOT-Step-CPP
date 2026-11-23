@@ -10,12 +10,14 @@
      "0:0?(\\d+)",
      "$1 s"
     ]
-   ]
+   ],
+   "n": 5
   },
   {
    "derivation": "undo step names",
    "match": "\"timbre\\.str\"",
-   "why": "The page's steps say the reference blend as a percent its knob does not show (1.00 on the knob, 100% in the step). The definitions write it one way everywhere."
+   "why": "The page's steps say the reference blend as a percent its knob does not show (1.00 on the knob, 100% in the step). The definitions write it one way everywhere.",
+   "n": 2
   },
   {
    "derivation": "undo step names",
@@ -26,13 +28,15 @@
      "GGML",
      "Auto"
     ]
-   ]
+   ],
+   "n": 1
   },
   {
    "derivation": "undo step names",
    "match": "\"takes\\.n\":(9|2)",
    "why": "A number of takes the engine cannot run: the server's batch.max is 8 on ACE-Step and 1 on Stable Audio 3 and HeartMuLa; MiniMax-Music3 renders up to 4 variations through mm3Takes (its batch.max is 1), and YuE2's limit is computed by the engine (declared as 1, raised at run time). The definitions' range stops there (DG-02.5); the collector tried the concept control's widest range.",
-   "core": "Takes per run [0-9]+ → [1-8]\""
+   "core": "Takes per run [0-9]+ → [1-8]\"",
+   "n": 7
   },
   {
    "derivation": "undo step names",
@@ -43,13 +47,15 @@
      "as it was",
      "as they were"
     ]
-   ]
+   ],
+   "n": 5
   },
   {
    "derivation": "undo step names",
    "match": "\"yn\\.",
    "why": "The page lists YuE2's plugin controls under no module (they are generated, not in the Sampler's keys), so it names them without the Sampler's name and keeps them for the song. The definitions put them in the Sampler, as the concept's own rule for sampler settings says (13-engine-state.js: a plugin's settings never follow you to another engine).",
-   "core": "^\\{\"label\":\"Sampler [a-z]"
+   "core": "^\\{\"label\":\"Sampler [a-z]",
+   "n": 3
   },
   {
    "derivation": "undo step names",
@@ -60,7 +66,8 @@
      "Latent & correction strength",
      "Denoiser strength"
     ]
-   ]
+   ],
+   "n": 3
   },
   {
    "derivation": "undo step names",
@@ -71,142 +78,170 @@
      "Latent & correction strength",
      "LSS strength"
     ]
-   ]
+   ],
+   "n": 3
   },
   {
    "derivation": "also set",
    "match": "Retake seed|Slot [23]|Final normalizer custom|StableStep fixed seed",
-   "why": "A condition the concept writes in its face is the parameter's own condition here (docs 03): the retake seed applies with a retake variance, a slot's strength while its slot holds an adapter, the normalizer's Custom knob on Custom, the fixed seed while the seed is not followed. A value that does not apply is not changed, so the line does not list it; the page lists it."
+   "why": "A condition the concept writes in its face is the parameter's own condition here (docs 03): the retake seed applies with a retake variance, a slot's strength while its slot holds an adapter, the normalizer's Custom knob on Custom, the fixed seed while the seed is not followed. A value that does not apply is not changed, so the line does not list it; the page lists it.",
+   "n": 35
   },
   {
    "derivation": "also set",
    "match": "yue2 studio tempo",
-   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan (hiddenChanged) lists the longest length as hidden at Studio while the ruler is drawn there."
+   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan (hiddenChanged) lists the longest length as hidden at Studio while the ruler is drawn there.",
+   "n": 6
   },
   {
    "derivation": "also set",
    "match": "yue2 quick build .*→ studio",
-   "why": "Page fault: the link is chosen by finding the key's name in the Studio face's text, where Build by section names the takes and section mode without drawing them; Studio does not show them, so the definitions send the link to Lab."
+   "why": "Page fault: the link is chosen by finding the key's name in the Studio face's text, where Build by section names the takes and section mode without drawing them; Studio does not show them, so the definitions send the link to Lab.",
+   "n": 3
   },
   {
    "derivation": "also set",
    "match": "quick post .*→ lab \\| core .*→ studio",
-   "why": "The page looks for a pedal's settings in the Pedalboard's own Studio face, which holds no pedals, so it always sends the link to Lab. At Studio every pedal shows its main knob and switch, so when those are all that is hidden the definitions send it to Studio."
+   "why": "The page looks for a pedal's settings in the Pedalboard's own Studio face, which holds no pedals, so it always sends the link to Lab. At Studio every pedal shows its main knob and switch, so when those are all that is hidden the definitions send it to Studio.",
+   "n": 5
   },
   {
    "derivation": "also set",
    "match": "(sa3|heartmula) (quick|studio) takes",
-   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range on an engine that takes one."
+   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range on an engine that takes one.",
+   "n": 7
   },
   {
    "derivation": "engine switch",
    "match": "ag\\.|yn\\.",
-   "why": "Owner: the page keeps the adapter group scales (ag.*) and YuE2's plugin controls (yn.*) for the song, because its rule misses them (it matches ad.* and the Sampler's listed keys). Its own comment says adapter and sampler settings are the engine's; the definitions keep them per engine (DG-23)."
+   "why": "Owner: the page keeps the adapter group scales (ag.*) and YuE2's plugin controls (yn.*) for the song, because its rule misses them (it matches ad.* and the Sampler's listed keys). Its own comment says adapter and sampler settings are the engine's; the definitions keep them per engine (DG-23).",
+   "n": 71
   },
   {
    "derivation": "engine switch toast",
    "match": "^count only:",
-   "why": "The toast counts the changed settings the engine left keeps. A value whose condition does not hold is not changed here (conditions the concept writes in faces are parameter conditions, docs 03), so the count can be smaller than the page's."
+   "why": "The toast counts the changed settings the engine left keeps. A value whose condition does not hold is not changed here (conditions the concept writes in faces are parameter conditions, docs 03), so the count can be smaller than the page's.",
+   "n": 23
   },
   {
    "derivation": "engine switch",
    "match": "takes\\.n",
-   "why": "A number of takes the engine cannot run (see the undo entry)."
+   "why": "A number of takes the engine cannot run (see the undo entry).",
+   "n": 3
   },
   {
    "derivation": "revision",
    "match": "s[012]: page|lyrics\\.(text|instr): page|avoid\\.text: page",
-   "why": "The page stores a value for an engine whose control it does not limit (no `only`): adapter strengths on Stable Audio 3, lyrics on Stable Audio 3, the avoid list on HeartMuLa. The definitions keep a value only on the engines that have it, so a revision for those engines does not hold it."
+   "why": "The page stores a value for an engine whose control it does not limit (no `only`): adapter strengths on Stable Audio 3, lyrics on Stable Audio 3, the avoid list on HeartMuLa. The definitions keep a value only on the engines that have it, so a revision for those engines does not hold it.",
+   "n": 16
   },
   {
    "derivation": "cleaning",
    "match": "\"samp\\.steps\":12\\.5|\"pp\\.ss\\.steps\":3\\.3|\"yc\\.topk\":3\\.3",
-   "why": "A number whose step is whole on every engine is a whole number (DG-08): the page keeps 12.5 steps and the server would be sent it; the definitions round it."
+   "why": "A number whose step is whole on every engine is a whole number (DG-08): the page keeps 12.5 steps and the server would be sent it; the definitions round it.",
+   "n": 3
   },
   {
    "derivation": "cleaning",
    "match": "\"samp\\.cs\":0\\.9",
-   "why": "The interval's two ends arrive crossed; the page keeps them crossed and the scope draws an empty interval. The definitions put them in order (docs/05, Cleaning)."
+   "why": "The interval's two ends arrive crossed; the page keeps them crossed and the scope draws an empty interval. The definitions put them in order (docs/05, Cleaning).",
+   "n": 1
   },
   {
    "derivation": "cleaning",
    "match": "\"takes\\.n\":9",
-   "why": "The server takes 8 at most on ACE-Step (DG-02.5)."
+   "why": "The server takes 8 at most on ACE-Step (DG-02.5).",
+   "n": 2
   },
   {
    "derivation": "engine switch toast",
    "match": "takes wait",
-   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range, which the definitions clamp, so what is held and where it waits differs."
+   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range, which the definitions clamp, so what is held and where it waits differs.",
+   "n": 8
   },
   {
    "derivation": "tier contents",
    "match": "quick adapters loaded: only the page \\[\"ad.adv\"\\]",
-   "why": "At Quick the page's note \"N adapters, stacked\" carries the Stack control's key, so the page counts Stack as shown there. The definitions show that note as a read-out: Stack is set at Studio, and a changed Stack is in Quick's Also set line."
+   "why": "At Quick the page's note \"N adapters, stacked\" carries the Stack control's key, so the page counts Stack as shown there. The definitions show that note as a read-out: Stack is set at Studio, and a changed Stack is in Quick's Also set line.",
+   "n": 1
   },
   {
    "derivation": "tier contents",
    "match": "lab adapters loaded: only the page \\[\\], only the definitions \\[(\"ad.planner\",)?\"lyrics.text\"\\]",
-   "why": "The cartridges edit the lyrics through their section masks, and the planner adapter's cartridge at Lab; the page's mask chips and the planner's add button carry no control key. Neither is Adapters' own parameter's line, so Also set is the same."
+   "why": "The cartridges edit the lyrics through their section masks, and the planner adapter's cartridge at Lab; the page's mask chips and the planner's add button carry no control key. Neither is Adapters' own parameter's line, so Also set is the same.",
+   "n": 4
   },
   {
    "derivation": "tier contents",
    "match": "lab flow( loaded)?: only the page \\[\\], only the definitions \\[\"mm.prec\"\\]",
-   "why": "The renderer starts on Auto here (DG-02.1), under which TensorRT may run, so its precision applies; the concept starts on GGML and hides it."
+   "why": "The renderer starts on Auto here (DG-02.1), under which TensorRT may run, so its precision applies; the concept starts on GGML and hides it.",
+   "n": 2
   },
   {
    "derivation": "tier contents",
    "match": "yue2 (studio|lab) tempo( loaded)?: only the page \\[\\], only the definitions \\[\"tempo.max\"\\]",
-   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan does not see the longest-length ruler it draws at Studio and Lab."
+   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan does not see the longest-length ruler it draws at Studio and Lab.",
+   "n": 4
   },
   {
    "derivation": "tier contents",
    "match": "(sa3|heartmula) (studio|lab) tempo( loaded)?: only the page \\[\\], only the definitions \\[\"prompt.text\"\\]",
-   "why": "The tempo and key chips add and take out items of the prompt; the page's chips carry no control key. prompt.text is the Prompt's parameter, so Tempo's Also set line is the same."
+   "why": "The tempo and key chips add and take out items of the prompt; the page's chips carry no control key. prompt.text is the Prompt's parameter, so Tempo's Also set line is the same.",
+   "n": 8
   },
   {
    "derivation": "engine switch toast",
    "match": "^lists differ: ",
-   "why": "The toast counts the changed settings only the engine left has, by the definitions' engine lists; the page counts by its own wider lists (it keeps lyrics, Avoid and some units on engines that do not use them) and skips a control with no label of its own. Its models and adapters must be the page's, and its count may differ from the page's by no more than the number of those settings."
+   "why": "The toast counts the changed settings only the engine left has, by the definitions' engine lists; the page counts by its own wider lists (it keeps lyrics, Avoid and some units on engines that do not use them) and skips a control with no label of its own. Its models and adapters must be the page's, and its count may differ from the page's by no more than the number of those settings.",
+   "n": 11
   },
   {
    "derivation": "tier contents at other values",
    "match": "^ace lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"ad\\.planner\",\"lyrics\\.text\"\\]$",
-   "why": "As in tier contents: the cartridges edit the lyrics through their section masks, and the planner adapter at Lab; the page's chips carry no control key."
+   "why": "As in tier contents: the cartridges edit the lyrics through their section masks, and the planner adapter at Lab; the page's chips carry no control key.",
+   "n": 18
   },
   {
    "derivation": "tier contents at other values",
    "match": "^minimax-m3 lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"lyrics\\.text\"\\]$",
-   "why": "As above: the cartridges' section masks are written into the lyrics."
+   "why": "As above: the cartridges' section masks are written into the lyrics.",
+   "n": 6
   },
   {
    "derivation": "tier contents at other values",
    "match": "^ace quick adapters \\(2 adapters\\) .*: only the page \\[\"ad\\.adv\"\\], only the definitions \\[\\]$",
-   "why": "As in tier contents: at Quick the page's note \"N adapters, stacked\" carries the Stack control's key."
+   "why": "As in tier contents: at Quick the page's note \"N adapters, stacked\" carries the Stack control's key.",
+   "n": 9
   },
   {
    "derivation": "tier contents at other values",
    "match": "^(ace|minimax-m3|yue2) lab art null: only the page \\[\\], only the definitions \\[\"pp\\.art\\.subject\"\\]$",
-   "why": "The Cover art unit's subject is laid out at Lab with its other settings by the unit layout rule (docs 03); the page draws it only in the song info."
+   "why": "The Cover art unit's subject is laid out at Lab with its other settings by the unit layout rule (docs 03); the page draws it only in the song info.",
+   "n": 3
   },
   {
    "derivation": "tier contents at other values",
    "match": "^(ace|minimax-m3|yue2|heartmula) lab ss .*: only the page \\[\"pp\\.ss\\.seed\"\\], only the definitions \\[\\]$",
-   "why": "StableStep's fixed seed stands beside its Follow the seed switch and applies only while the switch is off; the page draws its field with the switch on too, so the page counts it as shown."
+   "why": "StableStep's fixed seed stands beside its Follow the seed switch and applies only while the switch is off; the page draws its field with the switch on too, so the page counts it as shown.",
+   "n": 20
   },
   {
    "derivation": "tier contents at other values",
    "match": "^minimax-m3 lab flow .*: only the page \\[\\], only the definitions \\[\"mm\\.prec\"\\]$",
-   "why": "As in tier contents: the renderer starts on Auto here, under which TensorRT may run, so its precision applies."
+   "why": "As in tier contents: the renderer starts on Auto here, under which TensorRT may run, so its precision applies.",
+   "n": 17
   },
   {
    "derivation": "tier contents at other values",
    "match": "^sa3 (studio|lab) tempo .*: only the page \\[\\], only the definitions \\[\"prompt\\.text\"\\]$",
-   "why": "As in tier contents: the tempo and key chips edit the prompt's text."
+   "why": "As in tier contents: the tempo and key chips edit the prompt's text.",
+   "n": 8
   },
   {
    "derivation": "tier contents at other values",
    "match": "^yue2 (studio|lab) tempo .*: only the page \\[\\], only the definitions \\[\"tempo\\.max\"\\]$",
-   "why": "As in tier contents (page fault): the page's ruler carries no control key."
+   "why": "As in tier contents (page fault): the page's ruler carries no control key.",
+   "n": 14
   },
   {
    "derivation": "also set",
@@ -225,7 +260,8 @@
      "X-over"
     ]
    ],
-   "why": "Inside a sentence a label's first letter is lower-cased unless the word is an acronym or has capitals inside, by one rule wherever it happens (messages.ts lowFirst); the page lower-cases any first letter in its Also set line (DH-23)."
+   "why": "Inside a sentence a label's first letter is lower-cased unless the word is an acronym or has capitals inside, by one rule wherever it happens (messages.ts lowFirst); the page lower-cases any first letter in its Also set line (DH-23).",
+   "n": 10
   }
  ]
 }

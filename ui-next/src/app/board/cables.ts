@@ -65,6 +65,9 @@ export function fixCables(board: HTMLElement | null): void {
     g.innerHTML = `<path class="cb" d="${l.d}" pathLength="1"/><path class="cb-hi" d="${l.d}" pathLength="1"/><path class="cb-sig" d="${l.d}" pathLength="100"/><g class="plugs">${plugs}</g>${l.label ? `<text class="cb-lbl" x="${l.label[1]}" y="${l.label[2]}" text-anchor="${l.label[3]}">${l.label[0]}</text>` : ''}`;
     svg.appendChild(g);
   });
+  /* the links stand in the chain's order in the drawing, whatever order they came in */
+  const order = links.map(l => [...svg.children].find(g => (g as G).dataset.k === l.k && !(g as G)._gone)).filter((g): g is Element => !!g);
+  if (order.some((g, i) => [...svg.children].filter(x => !(x as G)._gone)[i] !== g)) order.forEach(g => svg.appendChild(g));
   have.forEach(g => {
     g._gone = true;
     if (reduced()) { g.remove(); return; }

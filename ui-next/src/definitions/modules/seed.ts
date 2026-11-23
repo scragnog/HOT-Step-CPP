@@ -5,6 +5,7 @@ import type { ModuleDef } from '../types.ts';
 export const seed = {
   kind: 'module',
   id: 'seed',
+  starter: { at: 3 },
   name: 'Seed',
   desc: 'Reproduce a take, and keep the seeds you like.',
   at: 200,

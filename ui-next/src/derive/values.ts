@@ -148,7 +148,7 @@ export function cleanStates(ix: Index, state: unknown, retired: readonly string[
 /** Setting a value from a control, on the desk's engine: a number clamped to that engine's range and put on its step
  *  grid from the minimum (a control's own keys and drags make steps), a pair's end kept a step from the other. `said`
  *  is the one-time sentence when a typed number was out of range ("Steps: 1 to 64. Set to 64."). */
-export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { value: Value; said?: Msg } {
+export function setValue(ix: Index, desk: Desk, key: string, raw: Value, typed = false): { value: Value; said?: Msg } {
   const hit = ix.params.get(key);
   if (!hit || !has(ix, key, desk.engine)) throw new Error(`${key} is not on ${desk.engine}`);
   const f = resolve(hit.p, desk.engine);
@@ -167,7 +167,8 @@ export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { valu
     if (key === a) { const other = desk.vals[b] ?? resolve(ix.params.get(b)!.p, desk.engine).default; if (typeof other === 'number' && v > other - step) v = +(other - step).toFixed(10); }
     if (key === b) { const other = desk.vals[a] ?? resolve(ix.params.get(a)!.p, desk.engine).default; if (typeof other === 'number' && v < other + step) v = +(other + step).toFixed(10); }
   }
-  if (raw < lo || raw > hi) {
+  /* a typed value outside the range says where it was put; a hand or a key past an end just stops there */
+  if (typed && (raw < lo || raw > hi)) {
     const w = (x: number) => (Number.isInteger(step) ? String(x) : x.toFixed(String(step).split('.')[1]?.length ?? 1));
     return { value: v, said: msg('set.said', { name: paramWords(ix, key, desk).label, lo: w(lo), hi: w(hi), v: w(v) }) };
   }

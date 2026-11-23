@@ -1,0 +1,69 @@
+/* The rebuild's own stylesheet for parts on every surface (styles/rebuild/, loaded after the concept's, whose files stay
+   as they are). The concept styled each part where it put it; the generic renderer can put a part anywhere a
+   definition says, so a part that the concept only ever drew on one surface gets its look on the others here, in the
+   concept's tokens and materials. tools/visual-baseline/gallery.mjs draws every part on every surface, in both themes,
+   at every tier, and compares each with the concept where the concept has it. */
+
+/* ---- the meter: its printed face is its own material (the --vu tokens follow the theme); the concept draws it only
+   on the board (27-pedalboard.css .board .vu), here it is the same wherever it stands */
+.vu:not(.board .vu) { display: block; width: 132px; height: 60px; flex: none; position: relative; overflow: hidden; border-radius: 6px; margin-top: 2px;
+  background: radial-gradient(ellipse 90% 130% at 50% 100%, var(--vu1), var(--vu2)); box-shadow: inset 0 1px 3px #0008, inset 0 0 0 1px #0004, 0 1px 0 #ffffff40; }
+.vu:not(.board .vu)::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(165deg, #ffffff38 0 30%, transparent 30.5%); }
+.vu:not(.board .vu) svg { position: absolute; inset: 0; display: block; }
+.vu:not(.board .vu) path { fill: none; stroke: var(--vu-ink); stroke-width: 1; }
+.vu:not(.board .vu) path.r { stroke: var(--vu-red); }
+.vu:not(.board .vu) .vu-red { stroke: var(--vu-red); stroke-width: 3; }
+.vu:not(.board .vu) text { font: 500 8.5px var(--mono); fill: var(--vu-ink); text-anchor: middle; }
+.vu:not(.board .vu) text.r { fill: var(--vu-red); }
+.vu:not(.board .vu) .vu-cap { font: 600 9px var(--mono); letter-spacing: .14em; text-anchor: start; }
+.vu:not(.board .vu) i { position: absolute; left: 50%; bottom: -18px; width: 1.5px; height: 66px; margin-left: -.75px; background: var(--vu-ndl); transform-origin: 50% 100%; transform: rotate(-28deg); border-radius: 1px; transition: transform var(--t-slow) var(--e-out); }
+/* in a row of knobs it stands on the row's line, as a knob does */
+.knobs > .vu, .tile-foot > .vu { align-self: center; }
+
+/* ---- the LED switch: on hardware (a rack, a pedal, a side unit, an LCD) it is the concept's slab; on paper (a tile's
+   body, a row, a well, a foot) it is a raised switch of the page's own surface, its lamp the same */
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl) > .led-btn, .tile-body > .knobs > .led-btn {
+  background: var(--raised); border-color: var(--line); color: var(--muted); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl) > .led-btn.on { color: var(--fg); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl) > .led-btn:hover { border-color: var(--line-strong, var(--line)); color: var(--fg); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl) > .led-btn { --chg: var(--amber); }
+
+/* ---- a labelled control on paper: the concept's foot pairing (15-controls.css .foot-ctl), wherever it stands */
+.tile-body > .foot-ctl, .knobs > .foot-ctl, .samp-strip > .foot-ctl { align-self: center; }
+
+/* ---- an LCD picker on paper keeps its LCD face; a row of them wraps rather than stretching the tile */
+.tile-body > .pk-lcdwrap, .knobs > .pk-lcdwrap, .lcd > .pk-lcdwrap { justify-self: start; align-self: flex-start; width: max-content; max-width: 100%; }
+
+/* ---- a segmented choice and a choice row in a rack or a well: the page's paper inside the strip */
+:is(.rackrow, .samp-strip) > .seg { align-self: center; }
+
+/* ---- a text field outside hardware takes the page's field look (the concept's .ctl input), not the bare input */
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip) > input[type="text"]:not(.lcd-input, .t-input) {
+  font: inherit; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; min-width: 0; }
+
+/* ---- a choice row on hardware (a pedal, a unit, an LCD): its words in the hardware's ink */
+:is(.pedal, .lcd) .qchoice .kl { color: color-mix(in srgb, var(--pd-ink, var(--lcd-fg)) 88%, transparent); }
+:is(.pedal, .lcd) .qchoice button { color: var(--pd-ink, var(--lcd-fg)); }
+
+/* ---- a note on hardware is the hardware's small print (27-pedals.css .pnote) */
+:is(.lcd, .xunit) .lbl { font: 500 11px var(--mono); color: color-mix(in srgb, var(--pd-ink, var(--lcd-fg)) 80%, transparent); }
+
+/* ---- the XY pad: the concept puts it only in a tile's body, where the grid gives it its width; in a row, a rack, a
+   well or a pairing it takes a plane of its own */
+:is(.knobs, .rackrow, .samp-strip, .tile-foot, .foot-ctl, .lcd) > .xy { flex: 1 1 240px; min-width: 220px; align-self: stretch; }
+
+/* ---- a small action button: the concept draws it on a pedal (27-pedals.css .pedal .pbtn); on paper it is the page's
+   small button, on an LCD an LCD key */
+.pbtn:not(.pedal .pbtn) { border: 1px solid var(--line); background: var(--raised); color: var(--fg); border-radius: 7px; padding: 5px 10px; font: 600 12px var(--body); cursor: pointer; }
+.pbtn:not(.pedal .pbtn):hover { border-color: var(--muted); }
+.lcd .pbtn { background: #ffffff10; border: 1px solid #ffffff22; color: var(--lcd-fg); border-radius: 6px; font: 12px var(--lcdfont); }
+
+/* ---- on hardware (a pedal, a side unit) the XY pad is a square plane across the body, and a segmented choice wraps
+   inside the pedal's width rather than running past its edge */
+.pedal:not(.xunit) .xy { width: 100%; min-width: 0; height: 120px; }
+.xunit .u-ctls > .xy { flex: 1 1 220px; min-width: 200px; height: 120px; }
+:is(.pedal, .xunit) .seg { flex-wrap: wrap; max-width: 100%; }
+
+/* ---- in a well a wide control (a labelled pairing, a segmented choice, a choice row, a picker) takes the well's whole
+   row, where the knobs take a column each (the Sampler's strip is a grid of 96px columns) */
+.samp-strip > :is(.foot-ctl, .seg, .qchoice, .pk-lcdwrap) { grid-column: 1 / -1; justify-self: center; max-width: 100%; }

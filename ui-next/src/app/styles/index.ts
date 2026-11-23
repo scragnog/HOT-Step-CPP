@@ -62,3 +62,5 @@ import './concept/35-changed.css';
 import './concept/35-labels.css';
 import './concept/35-motion.css';
 import './concept/35-states.css';
+/* last, so they come after the concept's (a glob's imports are hoisted to the top of the file that holds it) */
+import './rebuild.ts';

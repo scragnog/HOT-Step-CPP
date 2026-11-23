@@ -7,13 +7,18 @@
 import { create } from 'zustand';
 import type { Definition, EngineId, Tier, Value } from '../../definitions/types.ts';
 import {
-  applyChange, arrivalChange, deskStep, emptyBook, engineStep, readDesk, removedWords, savedDeskOf, stepWords, switchEngine,
+  addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, newOn, readDesk, removeFrom, removedWords, savedDeskOf, stepWords, switchEngine,
   type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
 } from '../../derive.ts';
-import { BOARD, BUILT_IN, boardOrder, defOf, ix } from '../model/index.ts';
+import { BUILT_IN, defOf, ix } from '../model/index.ts';
+import { undoables } from '../register/undoable.ts';
 
 /** Where the desk is kept between visits. */
 export const DESK_KEY = 'hotstep.create.desk';
+/** The engines this browser has been on (the concept's hs3-engseen): the first switch to another says what it brings. */
+const SEEN_KEY = 'hotstep.create.engines';
+const seenEngines = (): string[] => { try { const a = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
+const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) try { localStorage.setItem(SEEN_KEY, JSON.stringify([...a, e])); } catch { /* not kept */ } };
 
 /* ---------------------------------------------------------------- undo: what a step changed, path by path */
 
@@ -27,6 +32,8 @@ function flatOf(p: Parts): Flat {
   for (const [k, v] of Object.entries(p.desk.auto)) f.set('a:' + k, JSON.stringify(v));
   for (const [k, v] of Object.entries(p.desk.state)) f.set('s:' + k, JSON.stringify(v));
   f.set('mods', JSON.stringify(p.mods)); f.set('board', JSON.stringify(p.board)); f.set('engine', JSON.stringify(p.desk.engine)); f.set('book', JSON.stringify(p.book));
+  /* the packages' undoable state, as it is now (register/undoable.ts) */
+  for (const [n, s] of undoables()) f.set('x:' + n, JSON.stringify(s.read()));
   return f;
 }
 function unflat(base: Parts, f: Flat): Parts {
@@ -35,6 +42,7 @@ function unflat(base: Parts, f: Flat): Parts {
     if (p.startsWith('v:')) vals[p.slice(2)] = JSON.parse(j) as Value;
     else if (p.startsWith('a:')) auto[p.slice(2)] = JSON.parse(j) as boolean;
     else if (p.startsWith('s:')) state[p.slice(2)] = JSON.parse(j);
+    else if (p.startsWith('x:')) { const s = undoables().get(p.slice(2)); if (s && JSON.stringify(s.read()) !== j) s.write(JSON.parse(j)); }
   }
   const mods = JSON.parse(f.get('mods')!) as string[], board = JSON.parse(f.get('board')!) as string[];
   const desk: Desk = { ...base.desk, vals, auto, state, engine: JSON.parse(f.get('engine')!) as EngineId, on: onOf(mods, board) };
@@ -63,28 +71,34 @@ export interface DeskStore extends Parts {
   /** The gesture in progress, whose changes merge into one step. */
   gesture: string | null;
   toast: Toast | null;
-  /** Spoken in the live region (a move, a refused move). */
-  said: { text: Slot; n: number } | null;
-  /** Where focus should go once the desk has redrawn (a selector), set by a step that removed what had focus. */
-  focus: string | null;
+  /** Spoken in the live region: everything said in one task, together (the concept's say(), F-12). Every toast is said
+   *  too, so what the page shows is also told to a screen reader. */
+  said: { text: Slot[]; n: number } | null;
+  /** Where focus should go once the desk has redrawn: selectors tried in order, the first on the page wins. Set by a
+   *  step that removed what had focus. */
+  focus: string[] | null;
   /** Where each removed module stood (the module after it), so adding it back puts it there. */
   gone: { [id: string]: string | null };
-  /** The modules (by id) the last add or move should ring. */
-  flash: { id: string; n: number } | null;
+  /** What the last add should ring because it was already there: a tile (`flash`) or a pedal or unit (`here`). */
+  flash: { id: string; ring: 'flash' | 'here'; n: number } | null;
 
-  commit(c: Change): void;
+  /** Applies a change a part made and records it as one step. `from` names the part: a gesture is one part's, and a
+   *  change from another part while it runs is a step of its own. */
+  commit(c: Change, from?: string): void;
   beginGesture(tag: string): void;
   endGesture(tag?: string): void;
   setTier(t: Tier): void;
   switchEngine(to: EngineId): void;
   add(id: string, before?: string | null): 'added' | 'there' | 'lab';
-  remove(id: string, focusAfter?: string | null): void;
+  remove(id: string, focusAfter?: string | string[] | null): void;
   move(id: string, before: string | null, back?: string): void;
   runUndo(entry?: Entry): void;
   runRedo(entry?: Entry): void;
   showToast(t: Toast | null): void;
   say(text: Slot): void;
-  setFocus(sel: string | null): void;
+  setFocus(sel: string | string[] | null): void;
+  /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
+  deskStep(words: StepWords, fn: () => void): void;
   /** What the engine told the page: its lists, the selected models, the plugin host's count. */
   told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number }): void;
 }
@@ -93,29 +107,33 @@ const UNDO_MAX = 100;
 let gestures = 0;
 
 function initial(): Parts & { told: Msg | null } {
-  const empty: Desk = { engine: 'ace', tier: 'quick', vals: {}, auto: {}, state: {}, on: onOf([], []) };
+  const empty: Desk = emptyDesk(ix);
   let raw: unknown = null;
   try { const s = localStorage.getItem(DESK_KEY); raw = s ? JSON.parse(s) : null; } catch { raw = null; }
   const r = raw ? readDesk(ix, raw) : null;
   if (!r) return { desk: empty, book: emptyBook(), mods: [], board: [], told: null };
   const ids = [...r.desk.on];
   const mods = ids.filter(id => { const d = defOf(id); return d?.kind === 'module' && !d.builtIn; });
-  const board = boardOrder(ids.filter(id => defOf(id)?.kind !== 'module'));
+  const board = boardOrder(ix, ids.filter(id => defOf(id)?.kind !== 'module'));
   return { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board, told: r.told };
 }
 
 export const useDesk = create<DeskStore>()((set, get) => {
   const start = initial();
+  seeEngine(start.desk.engine);
+  let saying = false;
   /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string) => {
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string) => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
-    if (s.gesture && last && last.gesture === s.gesture) {
+    /* the gesture in progress is this change's when the change comes from the part that began it */
+    const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
+    if (g && last && last.gesture === g) {
       const merged = stepWords(ix, last.first, next.desk) ?? words;
       const undo = [...s.undo.slice(0, -1), { ...last, after, words: merged, at: Date.now() }];
       set({ ...next, undo, redo: [] });
       return;
     }
-    const entry: Entry = { words, first: prev.desk, before, after, gesture: s.gesture, at: Date.now(), ...(back ? { back } : {}) };
+    const entry: Entry = { words, first: prev.desk, before, after, gesture: g, at: Date.now(), ...(back ? { back } : {}) };
     set({ ...next, undo: [...s.undo, entry].slice(-UNDO_MAX), redo: [] });
   };
   const parts = (): Parts => { const s = get(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
@@ -136,10 +154,10 @@ export const useDesk = create<DeskStore>()((set, get) => {
   return {
     ...start, undo: [], redo: [], gesture: null, toast: start.told ? { text: start.told } : null, said: null, focus: null, gone: {}, flash: null,
 
-    commit(c) {
+    commit(c, from) {
       const prev = parts(), desk = applyChange(prev.desk, c);
-      record(prev, { ...prev, desk }, c.words);
-      if (c.said) set({ toast: { text: c.said } });
+      record(prev, { ...prev, desk }, c.words, undefined, from);
+      if (c.said) get().showToast({ text: c.said });
     },
     beginGesture(tag) { const g = get().gesture; if (!g || !g.startsWith(tag + '#')) set({ gesture: `${tag}#${++gestures}` }); },
     endGesture(tag) { const g = get().gesture; if (g && (!tag || g.startsWith(tag + '#'))) set({ gesture: null }); },
@@ -152,47 +170,34 @@ export const useDesk = create<DeskStore>()((set, get) => {
       /* a module the new engine does not have and that cannot wait parked (a source) leaves the desk with it */
       const mods = prev.mods.filter(id => r.desk.on.has(id)), board = prev.board.filter(id => r.desk.on.has(id));
       record(prev, { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board }, engineStep(to));
-      set({ toast: { text: r.toast } });
+      const entry = get().undo[get().undo.length - 1]!, fresh = !seenEngines().includes(to);
+      seeEngine(to);
+      get().showToast({ text: (fresh && newOn(ix, get().desk, to, r.toast)) || r.toast, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
     },
 
     add(id, before) {
       const s = get(), d = defOf(id); if (!d) return 'there';
-      if (d.kind === 'module' && d.labUnder && s.desk.tier !== 'lab') return 'lab';
-      if (s.desk.on.has(d.id)) { set({ flash: { id: d.id, n: (s.flash?.n ?? 0) + 1 } }); return 'there'; }
-      const prev = parts();
-      let mods = [...prev.mods], board = prev.board, desk = prev.desk;
-      const insert = (m: string, b: string | null | undefined) => { mods = mods.filter(x => x !== m); const i = b ? mods.indexOf(b) : -1; if (i >= 0) mods.splice(i, 0, m); else mods.push(m); };
-      if (d.kind === 'module') {
-        const back = s.gone[d.id];
-        insert(d.id, before === undefined && back && mods.includes(back) ? back : before);
-      } else {
-        board = boardOrder([...board, d.id]);
-        if (!mods.includes(BOARD.id)) insert(BOARD.id, before);
-        /* what a pedal or side unit arrives as is the core's (it arrives engaged, unless it would have nothing to run) */
-        desk = applyChange(desk, arrivalChange(ix, d, desk));
-      }
-      record(prev, { desk: { ...desk, on: onOf(mods, board) }, book: prev.book, mods, board }, deskStep('add', d, desk));
-      set({ flash: { id: d.kind === 'module' ? d.id : BOARD.id, n: (s.flash?.n ?? 0) + 1 } });
+      /* where it goes is the core's (addTo), and what a pedal or side unit arrives as (engaged, unless it would have
+         nothing to run: arrivalChange) */
+      const r = addTo(ix, s.desk, s.mods, s.board, d.id, before, s.gone);
+      if (r.did === 'there') set({ flash: { id: d.id, ring: d.kind === 'module' ? 'flash' : 'here', n: (s.flash?.n ?? 0) + 1 } });
+      if (r.did !== 'added') return r.did;
+      const prev = parts(), desk = d.kind === 'module' ? prev.desk : applyChange(prev.desk, arrivalChange(ix, d, prev.desk));
+      record(prev, { desk: { ...desk, on: onOf(r.mods, r.board) }, book: prev.book, mods: r.mods, board: r.board }, deskStep('add', d, prev.desk, ix));
       return 'added';
     },
 
-    remove(id, focusAfter) {
+    remove(id, focusAfter?: string | string[] | null) {
       const prev = parts(), d = defOf(id); if (!d || !prev.desk.on.has(d.id)) return;
-      let mods = prev.mods, board = prev.board, pedals = 0, last = false;
-      const gone = { ...get().gone };
-      if (d.kind === 'module') {
-        const at = mods.indexOf(d.id); gone[d.id] = mods.slice(at + 1).find(x => !(defOf(x) as { source?: true } | undefined)?.source) ?? null;
-        mods = mods.filter(x => x !== d.id);
-        if (d.id === BOARD.id) { pedals = board.length; board = []; }
-      } else {
-        board = board.filter(x => x !== d.id);
-        if (!board.length) { last = true; mods = mods.filter(x => x !== BOARD.id); }
-      }
-      const words = deskStep('remove', d, prev.desk);
+      /* what leaves with it, and where it stood, are the core's (removeFrom) */
+      const { mods, board, stood, pedals, last } = removeFrom(ix, prev.mods, prev.board, d.id);
+      const gone = d.kind === 'module' ? { ...get().gone, [d.id]: stood } : get().gone;
+      const words = deskStep('remove', d, prev.desk, ix);
       const back = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
       record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board) }, mods, board }, words, back);
       const entry = get().undo[get().undo.length - 1]!;
-      set({ gone, focus: focusAfter ?? null, toast: { text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } } });
+      set({ gone, focus: focusAfter ? [focusAfter].flat() : null });
+      get().showToast({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
     },
 
     move(id, before, back) {
@@ -203,7 +208,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       /* a run of presses on one tile's grip, each within two seconds of the last, is one move (30-desk.js) */
       const s = get(), lastE = s.undo[s.undo.length - 1], tag = `move:${id}#`;
       set({ gesture: lastE?.gesture?.startsWith(tag) && Date.now() - lastE.at < 2000 ? lastE.gesture : `${tag}${++gestures}` });
-      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, prev.board) }, mods }, deskStep('move', d, prev.desk), back);
+      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, prev.board) }, mods }, deskStep('move', d, prev.desk, ix), back);
       set({ gesture: null });
     },
 
@@ -212,18 +217,30 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const i = s.undo.indexOf(e); if (i < 0) return;
       set({ undo: s.undo.filter(x => x !== e), gesture: null });
       cross(e, e.after, e.before);
-      set({ redo: [...get().redo, e], toast: { text: { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } }, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } }, focus: e.back ?? null });
+      set({ redo: [...get().redo, e], focus: e.back ? [e.back] : null });
+      get().showToast({ text: { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } }, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
     },
     runRedo(entry) {
       const s = get(), e = entry ?? s.redo[s.redo.length - 1]; if (!e) return;
       const i = s.redo.indexOf(e); if (i < 0) return;
       set({ redo: s.redo.filter(x => x !== e), gesture: null });
       cross(e, e.before, e.after);
-      set({ undo: [...get().undo, e], toast: { text: { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } }, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } } });
+      set({ undo: [...get().undo, e] });
+      get().showToast({ text: { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } }, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
     },
-    showToast(t) { set({ toast: t }); },
-    say(text) { set({ said: { text, n: (get().said?.n ?? 0) + 1 } }); },
-    setFocus(sel) { set({ focus: sel }); },
+    deskStep(words, fn) {
+      const prev = parts(), before = flatOf(prev); fn();
+      const s = get(), after = flatOf(parts());
+      if ([...after].every(([k, v]) => before.get(k) === v)) return;
+      set({ undo: [...s.undo, { words, first: prev.desk, before, after, gesture: null, at: Date.now() }].slice(-UNDO_MAX), redo: [] });
+    },
+    showToast(t) { set({ toast: t }); if (t) get().say(t.text); },
+    say(text) {
+      const was = get().said;
+      set({ said: { text: saying && was ? [...was.text, text] : [text], n: (was?.n ?? 0) + 1 } });
+      if (!saying) { saying = true; queueMicrotask(() => { saying = false; }); }
+    },
+    setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
       set({ desk: { ...d, ...(o.lists ? { lists: o.lists } : {}), ...(o.selection ? { selection: o.selection } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
@@ -232,9 +249,11 @@ export const useDesk = create<DeskStore>()((set, get) => {
 });
 
 /* ---------------------------------------------------------------- the autosave
-   Everything, on every change, as the core writes it (savedDeskOf), read back by readDesk() on the next visit. */
+   Everything, on every change of the desk or the engines' book, as the core writes it (savedDeskOf), read back by
+   readDesk() on the next visit. A toast, a focus request or the history moving writes nothing. */
 let written = '';
-useDesk.subscribe(s => {
+useDesk.subscribe((s, prev) => {
+  if (s.desk === prev.desk && s.book === prev.book) return;
   const rec = savedDeskOf(ix, s.desk, s.book), text = JSON.stringify(rec);
   if (text === written) return;
   written = text;

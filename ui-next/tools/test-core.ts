@@ -22,6 +22,7 @@ import { say, type Slot } from '../src/derive/messages.ts';
 import { applyChoice, choiceOf, hiddenLabModules, loadDraft, loadWorkflow } from '../src/derive/view.ts';
 import { cleanState, setValue } from '../src/derive/values.ts';
 import { FACTORY_REVISIONS } from '../src/definitions/factory.ts';
+import { RETIRED } from '../src/definitions/retired.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 'concept.json'), 'utf8'));
@@ -30,7 +31,7 @@ const REAL = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 're
 /** An accepted disagreement: the derivation, a pattern the case (its state and both outputs) matches, and, to name
  *  exactly what the core says instead, either `rewrite` (replacements that turn the page's output into the core's,
  *  which must then be equal) or `core` (a pattern the core's output must match). */
-const ACCEPT: { derivation: string; match: string; rewrite?: [string, string][]; core?: string; why: string }[] = fs.existsSync(ACCEPT_FILE) ? JSON.parse(fs.readFileSync(ACCEPT_FILE, 'utf8')).differences : [];
+const ACCEPT: { derivation: string; match: string; rewrite?: [string, string][]; core?: string; why: string; n?: number }[] = fs.existsSync(ACCEPT_FILE) ? JSON.parse(fs.readFileSync(ACCEPT_FILE, 'utf8')).differences : [];
 const ix = indexOf(DEFINITIONS);
 const J = (x: unknown) => JSON.stringify(x);
 const ENG: Record<string, EngineId> = { ace: 'ace', mm3: 'minimax-m3', yue: 'yue2', sa3: 'sa3', hm: 'heartmula' };
@@ -87,7 +88,7 @@ const deskOf = (e: EngineId, m: Mapped, extra: Partial<Desk> = {}): Desk => ({ e
 interface Result { cases: number; agree: number; skipped: number; accepted: number; fails: string[] }
 const results: Record<string, Result> = {};
 const res = (name: string) => (results[name] ||= { cases: 0, agree: 0, skipped: 0, accepted: 0, fails: [] });
-const used = new Set<number>();
+const used = new Set<number>(), absorbed = new Map<number, number>();
 function verdict(name: string, same: boolean, what: string, out?: { page: string; core: string }): void {
   const r = res(name); r.cases++;
   if (same) { r.agree++; return; }
@@ -96,10 +97,15 @@ function verdict(name: string, same: boolean, what: string, out?: { page: string
   const exact = (a: (typeof ACCEPT)[number]) => (!a.rewrite || (!!out && a.rewrite.reduce((s, [f, t]) => s.replace(new RegExp(f, 'g'), t), out.page) === out.core))
     && (!a.core || (!!out && new RegExp(a.core).test(out.core)));
   const i = ACCEPT.findIndex(a => a.derivation === name && new RegExp(a.match).test(what) && exact(a));
-  if (i >= 0) { r.accepted++; used.add(i); if (process.argv.includes('--accepted')) console.log(`[${i}] ${what.slice(0, 400)}`); return; }
+  if (i >= 0) { r.accepted++; used.add(i); absorbed.set(i, (absorbed.get(i) ?? 0) + 1); if (process.argv.includes('--accepted')) console.log(`[${i}] ${what.slice(0, 400)}`); return; }
   r.fails.push(what);
 }
 
+/* the parameters the concept page had when it was collected: one added since is new, and not compared with it (a
+   parameter added by 06-how-to.md section 1 leaves the comparison as it was) */
+const CONCEPT_KEYS = new Set([...Object.values<Record<string, unknown>>(FIX.controls).flatMap(c => Object.keys(c)),
+  /* the built-in modules' (the prompt, the lyrics, the models) are the page's own, whatever its control list says */
+  ...DEFINITIONS.filter(d => d.kind === 'module' && d.builtIn).flatMap(d => d.params.map(p => p.key))]);
 /* ---- undo step names */
 for (const s of FIX.steps) {
   const e = ENG[s.engine]!;
@@ -138,7 +144,7 @@ for (const t of FIX.tiers) {
   const desk0 = deskOf(e, m, { tier: t.tier as Tier, on, state: t.slots.length ? { slots: t.slots } : {} });
   const desk = desk0;
   const mine = [...editsAt(ix, d, desk)].sort(), page = (t.keys as string[]).filter(k => ix.params.has(k) && has(ix, k, e)).sort();
-  const extra = mine.filter(k => !page.includes(k)), missing = page.filter(k => !mine.includes(k));
+  const extra = mine.filter(k => !page.includes(k) && CONCEPT_KEYS.has(k)), missing = page.filter(k => !mine.includes(k));
   verdict('tier contents', !extra.length && !missing.length, `${e} ${t.tier} ${t.module}${t.loaded ? ' loaded' : ''}: only the page ${J(missing)}, only the definitions ${J(extra)}`);
 }
 
@@ -163,7 +169,7 @@ for (const t of TIERS.res as { engine: string; kind: string; id: string; tier: T
   }
   mine = [...new Set(mine)].filter(k => has(ix, k, e) && !(d.kind !== 'module' && k === d.on)).sort();
   const page = t.keys.filter(k => ix.params.has(k) && has(ix, k, e)).sort();
-  const onlyPage = page.filter(k => !mine.includes(k)), onlyDefs = mine.filter(k => !page.includes(k));
+  const onlyPage = page.filter(k => !mine.includes(k)), onlyDefs = mine.filter(k => !page.includes(k) && CONCEPT_KEYS.has(k));
   const strip = d.kind === 'module' && !!stripOf(ix, d, desk) !== !!t.strip;
   verdict('tier contents at other values', !onlyPage.length && !onlyDefs.length && !strip, `${e} ${t.tier} ${t.id}${t.slots ? ` (${t.slots} adapters)` : ''} ${J(t.set)}: only the page ${J(onlyPage)}, only the definitions ${J(onlyDefs)}${strip ? `, a strip on the page ${!!t.strip}` : ''}`);
 }
@@ -227,7 +233,8 @@ for (const c of FIX.cleaning) {
   }
   const got = cleanValues(ix, input, auto);
   const want: { [k: string]: unknown } = {}, wantAuto: { [k: string]: unknown } = {};
-  for (const [k, v] of Object.entries(c.vals as Record<string, unknown>)) { if (k.endsWith('.auto')) wantAuto[k.slice(0, -5)] = v; else { const hit = ix.params.get(k); want[k] = hit?.p.type === 'choice' ? ours(k, v, (hit.p.engines ?? hit.d.engines)[0]!) ?? v : v; } }
+  /* a key removed on purpose (retired.ts) is dropped by cleaning, where the page, which still has it, kept it */
+  for (const [k, v] of Object.entries(c.vals as Record<string, unknown>)) { if (RETIRED.keys.includes(k.replace(/\.auto$/, ''))) continue; if (k.endsWith('.auto')) wantAuto[k.slice(0, -5)] = v; else { const hit = ix.params.get(k); want[k] = hit?.p.type === 'choice' ? ours(k, v, (hit.p.engines ?? hit.d.engines)[0]!) ?? v : v; } }
   verdict('cleaning', J(sorted(got.vals)) === J(sorted(want)) && J(sorted(got.auto)) === J(sorted(wantAuto)), `${J(c.input).slice(0, 200)}: page ${J(sorted(want))} ${J(wantAuto)} | core ${J(sorted(got.vals))} ${J(got.auto)}`);
 }
 
@@ -410,6 +417,19 @@ for (const [name, r] of Object.entries(results)) {
   console.log(`  ${name}: ${r.cases} cases, ${r.agree} agree, ${r.accepted} differ as accepted, ${r.fails.length} differ${r.skipped ? `; ${r.skipped} not comparable (a server-listed choice)` : ''}`);
   if (r.fails.length) { bad += r.fails.length; (process.argv.includes('--print') ? r.fails : r.fails.slice(0, 4)).forEach(f => console.log('    ' + f.slice(0, 600))); }
 }
+/* each accepted difference covers exactly the cases it was recorded with (its n): one that now covers more or fewer is
+   a change nobody has looked at (SL-13). `--recount` writes the counts, after the change has been looked at. */
+if (process.argv.includes('--recount')) {
+  const file = JSON.parse(fs.readFileSync(ACCEPT_FILE, 'utf8'));
+  file.differences.forEach((a: { n?: number }, i: number) => { a.n = absorbed.get(i) ?? 0; });
+  fs.writeFileSync(ACCEPT_FILE, JSON.stringify(file, null, 1).split(String.fromCharCode(10)).join(String.fromCharCode(13, 10)) + String.fromCharCode(13, 10));
+  console.log(`concept-differences.json: ${ACCEPT.length} counts written`);
+} else ACCEPT.forEach((a, i) => {
+  /* more cases than recorded is a change nobody has looked at, and fails; fewer (a module removed) is said */
+  const n = absorbed.get(i) ?? 0; if (a.n === undefined || !n || n === a.n) return;
+  if (n > a.n) bad++;
+  console.log(`  accepted: ${a.derivation} /${a.match}/ now covers ${n} cases, recorded with ${a.n}${n > a.n ? ': look at what changed, then npm run core -- --recount' : ' (fewer: npm run core -- --recount records it)'}`);
+});
 const gone = ACCEPT.filter((_, i) => !used.has(i));
 gone.forEach(a => { bad++; console.log(`  gone: ${a.derivation} /${a.match}/ no longer differs; take it out of concept-differences.json`); });
 console.log(`parts' contract: ${contract.length ? contract.join('; ') : 'ok'}`); bad += contract.length;

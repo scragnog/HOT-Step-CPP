@@ -3,11 +3,15 @@
 
 import { DEFINITIONS } from '../../definitions/index.ts';
 import type { Definition, ModuleDef } from '../../definitions/types.ts';
-import { indexOf } from '../../derive.ts';
+import { boardOrder as coreBoardOrder, indexOf } from '../../derive.ts';
+import { gallery } from '../testing/gallery.ts';
 
-export const ix = indexOf(DEFINITIONS);
+/* the test build indexes the parts gallery too (testing/gallery.ts): definitions that put every part on every surface,
+   offered nowhere; every other build has the definitions alone */
+const ALL: readonly Definition[] = import.meta.env.MODE === 'test' ? [...DEFINITIONS, ...gallery()] : DEFINITIONS;
+export const ix = indexOf(ALL);
 
-const BY_ID = new Map<string, Definition>(DEFINITIONS.map(d => [d.id, d]));
+const BY_ID = new Map<string, Definition>(ALL.map(d => [d.id, d]));
 /** A definition by its id (or a former id, `was`). */
 export const defOf = (id: string): Definition | undefined => BY_ID.get(id) ?? BY_ID.get(ix.formerIds.get(id) ?? '');
 
@@ -24,8 +28,5 @@ export const OFFERED: readonly Definition[] = [
   ...DEFINITIONS.filter((d): d is ModuleDef => d.kind === 'module' && !d.builtIn && !d.source && !d.board).sort((a, b) => a.at - b.at),
   ...PEDALS, ...UNITS,
 ];
-/** Board order: pedals in chain order, then side units. */
-export const boardOrder = (ids: Iterable<string>): string[] => {
-  const set = new Set(ids);
-  return [...PEDALS, ...UNITS].filter(d => set.has(d.id)).map(d => d.id);
-};
+/** Board order: pedals in chain order, then side units (the core's rule). */
+export const boardOrder = (ids: Iterable<string>): string[] => coreBoardOrder(ix, ids);

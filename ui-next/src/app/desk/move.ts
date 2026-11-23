@@ -17,8 +17,10 @@ function slotToward(now: Slot, slots: Slot[], dir: 'left' | 'right' | 'up' | 'do
   const mid = (s: Slot) => [s.x + s.w / 2, s.y + s.h / 2] as const, [cx, cy] = mid(now), moved = slots.filter(s => s.k !== now.k && !sameSlot(s, now));
   const level = (s: Slot) => Math.abs(s.y - now.y) <= 24, nearX = (a: Slot, b: Slot) => Math.abs(mid(a)[0] - cx) - Math.abs(mid(b)[0] - cx);
   let c: Slot[] = [];
-  if (dir === 'up') c = moved.filter(s => mid(s)[1] < cy - 4).sort((a, b) => (mid(b)[1] - mid(a)[1]) || nearX(a, b));
-  if (dir === 'down') c = moved.filter(s => mid(s)[1] > cy + 4).sort((a, b) => (mid(a)[1] - mid(b)[1]) || nearX(a, b));
+  /* up and down: a place whose top is above or below this one's, so the tile's top visibly moves that way (a place in
+     the same row where the tile would stand shorter has its middle higher, and is no step up) */
+  if (dir === 'up') c = moved.filter(s => mid(s)[1] < cy - 4 && s.y < now.y - 4).sort((a, b) => (mid(b)[1] - mid(a)[1]) || nearX(a, b));
+  if (dir === 'down') c = moved.filter(s => mid(s)[1] > cy + 4 && s.y > now.y + 4).sort((a, b) => (mid(a)[1] - mid(b)[1]) || nearX(a, b));
   if (dir === 'left') { c = moved.filter(s => level(s) && mid(s)[0] < cx - 4).sort((a, b) => mid(b)[0] - mid(a)[0]); if (!c.length) c = moved.filter(s => s.k < now.k).sort((a, b) => b.k - a.k); }
   if (dir === 'right') { c = moved.filter(s => level(s) && mid(s)[0] > cx + 4).sort((a, b) => mid(a)[0] - mid(b)[0]); if (!c.length) c = moved.filter(s => s.k > now.k).sort((a, b) => a.k - b.k); }
   return c[0] ?? null;

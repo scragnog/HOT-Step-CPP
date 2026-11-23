@@ -1,0 +1,83 @@
+{
+ "about": "Differences between the concept's page and the rebuild's in the slice's matrix that are accepted on purpose, each with its reason and the exact number of times it occurs (vb.mjs compare --accept). A difference these do not cover is listed and fails the comparison; so does a count that changes, so a new difference of an accepted kind is seen too. state, key and field are regular expressions (field: a computed property, or sem:<what> for role, name, text and each attribute). A work package adds its own entries in a file of its own and passes it with --accept.",
+ "accepted": [
+  {
+   "field": "^sem:aria-valuetext$",
+   "key": "",
+   "n": 1305,
+   "why": "Deviation 10: a knob tells a screen reader its value as the page writes it, with its unit (aria-valuetext \"30%\"); the concept's knob gives the bare number."
+  },
+  {
+   "field": "^sem:type$",
+   "key": "",
+   "n": 530,
+   "why": "Deviation 11: every button and input carries its type (type=\"button\", type=\"text\"), the existing frontend's lint rule; there is no form on the page, so nothing behaves differently."
+  },
+  {
+   "field": "^sem:data-sig$",
+   "key": "",
+   "n": 313,
+   "why": "The concept's render cache (data-sig: what an element was last drawn from, so it is not redrawn); the rebuild's renderer has no such attribute."
+  },
+  {
+   "field": "^sem:data-(toast|luaon)$",
+   "key": "",
+   "n": 123,
+   "why": "The concept's delegated click hooks (data-toast on a button whose action is a message, data-luaon on Turn on Lua plugins); the rebuild's buttons run their action themselves."
+  },
+  {
+   "field": "^sem:data-opt$",
+   "key": "^#dd",
+   "n": 8,
+   "why": "A dropdown option's hook names its value (\"spotify\"); the concept's names its label (\"Spotify / YouTube · -14\"), as its values are labels."
+  },
+  {
+   "state": "^slice-dropdown-open-dark$",
+   "key": "^#dd$",
+   "field": "^(top|bottom|inset-block-start|inset-block-end)$",
+   "n": 4,
+   "why": "The page below the desk is shorter until the generation package fills Latest, so a press near the foot of the page scrolls it 60px less, and the dropdown, pinned beside its button, stands 60px lower in the window."
+  },
+  {
+   "state": "^slice-(engine-toast|undo)$",
+   "key": "^#toast$",
+   "field": "^(top|bottom|inset-block-start|inset-block-end)$",
+   "n": 4,
+   "why": "The same shorter page: the go bar is not stuck to the window's foot, so the toast stands 24px from it instead of 16px above the go bar (placeToast is the concept's rule)."
+  },
+  {
+   "state": "^slice-hidden-lab-note$",
+   "key": "^#tiers>button",
+   "field": "^sem:(title|data-tip-held)$",
+   "n": 2,
+   "why": "The concept's tooltip layer holds a button's title (data-tip-held) while its own tip shows after a press; tooltips are package 8's."
+  },
+  {
+   "state": "^slice-(desk-ace-quick-light|desk-yue-studio-dark|changed-yue-studio)$",
+   "key": "^shot$",
+   "field": "^pixels$",
+   "n": 3,
+   "why": "Three desk shots differ by 150 to 400 pixels at the edges of the hexagonal foot switches and of Avoid's note and tape, a level of anti-aliasing: no computed style, attribute or word differs there."
+  },
+  {
+   "state": "^slice-parts-mm3-lab",
+   "key": "\\.tile-foot \\.foot-ctl",
+   "field": "",
+   "n": 56,
+   "why": "Flow's Renderer has three options in the definitions (Auto, GGML, TensorRT; the concept has two), so its segmented differs button by button; and a segmented is a named group here (role=group, aria-label: SL-07's accessible names), where the concept's is a bare row."
+  },
+  {
+   "state": "^slice-parts-quick-row$",
+   "key": "\\.qchoice",
+   "field": "^(only|sem:data-(base|setq))$",
+   "n": 6,
+   "why": "A Quick row's marker for a value between its choices (the concept's <i>) is package 1's, as planned (docs/09); the concept's data-base and data-setq are its delegated click hooks."
+  },
+  {
+   "field": "^line-height$",
+   "key": ">span:\\d+>button:[02]",
+   "n": 2028,
+   "why": "Standards mode (SL-15): the LCD picker's arrow buttons take a line of no height (styles/rebuild/10-standards.css), so their icons sit where the concept's do in quirks mode; nothing else differs (the shots are equal)."
+  }
+ ]
+}

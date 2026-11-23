@@ -10,7 +10,8 @@ import { ui, useSay } from '../i18n/index.ts';
 import { ENGINE_COLOUR, logoOf, CONCEPT_ID } from './engines.ts';
 import { Theme } from './Theme.tsx';
 
-const NAV = ['create', 'Library', 'Studios', 'Training', 'Settings'] as const;
+/* the main navigation: each page's hook in the concept's markup (data-nav) and its words' id */
+const NAV = [['create', 'create'], ['Library', 'library'], ['Studios', 'studios'], ['Training', 'training'], ['Settings', 'settings']] as const;
 const EM_N = 32, CARD_GB = 31.8;
 
 export function TopBar() {
@@ -18,9 +19,11 @@ export function TopBar() {
   const name = ENGINES.find(e => e.id === engine)!.name;
   return (
     <div className="top-in">
+      {/* the brand is the one word the page does not translate */}
+      {/* eslint-disable-next-line no-restricted-syntax */}
       <button className="brand" type="button" data-goto="create" aria-label={say(ui('brand.label'))} title={say(ui('brand.title'))}>HOT<b>-</b>Step</button>
       <nav className="main" aria-label={say(ui('nav'))}>
-        {NAV.map(n => <button key={n} data-nav={n} aria-current={n === 'create' ? 'page' : undefined}>{say(ui(`nav.${n.toLowerCase()}`))}</button>)}
+        {NAV.map(([n, id]) => <button key={n} data-nav={n} aria-current={n === 'create' ? 'page' : undefined}>{say(ui(`nav.${id}`))}</button>)}
       </nav>
       <div className="top-right">
         <div className="engine" id="engine" style={{ '--ec': ENGINE_COLOUR[engine] } as CSSProperties}>

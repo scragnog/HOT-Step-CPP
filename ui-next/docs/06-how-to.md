@@ -151,45 +151,91 @@ shows one plain choice of three presets that set all three; Studio adds the thre
    inset (start from a module with similar controls).
 
 **Four files: 26 lines of definition written as above (about 68 with one field a line), 1 in `parts.ts`, 2 in the
-index, a drawing.** Choosing parts:
+index, a drawing.** To see it: `npm run dev`, add it from the Modules panel, and switch tiers and themes; every part
+it names already looks right on every surface (the parts gallery, section 4, step 5). Choosing parts:
 the table in [01](01-parts-inventory.md) says what each part is for, what it edits and reads, and which modules use it.
 For a desk module (not Lab-only), tier the nodes that Quick or Studio should not show, give Quick a `choiceRow` when a
 plain choice makes sense, and set `size`.
 
 ## 4. Add a new part to the inventory
 
-When no part does what a module needs:
+When no part does what a module needs. Example: a small stepped slider with labelled stops, used by Dynamics for its
+character and by YuE2 Batch for its noise variations.
 
-1. Add an entry to `PARTS` in `parts.ts`: its `kind`, what it `edits` (and `reads`, `state`), its `drive`, a `doc`
-   sentence, its `opts` with each one's type and what it does, its `states`, and its `css`. A bespoke part also says what
-   it is `responsible` for.
-2. Write its component under the same name. It receives `PartProps` ([01](01-parts-inventory.md), "What a bespoke part is
-   given"), and its stylesheet follows the design language: tokens from `00-tokens.css`, the shared states of layer 35,
-   and a file of its own.
-3. Use it in the definition that needed it, in place of what it replaces; a part no definition uses any more is only a
-   note.
+1. Its entry in `PARTS` in `src/definitions/parts.ts` (the inventory; `npm run docs` puts it in the table of
+   [01](01-parts-inventory.md)):
 
-Example: a two-handled range slider for CADS's two thresholds in Plan adherence:
+   ```ts
+   stepSlider: {
+     kind: 'control', edits: ['choice', 'number'], drive: 'choose', css: ['15-step-slider.css'],
+     doc: 'A short slider that snaps to labelled stops: a choice\'s options, or a small number range\'s steps.',
+   },
+   ```
 
-```ts
-rangeSlider: {
-  kind: 'control', edits: ['pair'], drive: 'keys', css: ['15-range.css'],
-  doc: 'One track with two handles for the two ends of a range, the first of its params below the second.',
-},
-```
+2. Its component, a file of its own, `src/app/parts/StepSlider.tsx`. It is loaded and registered by being there
+   (`src/app/load.ts`); nothing else is edited. It imports only the part kit (`../kit/index.ts`), react and its sibling
+   parts; the lint refuses anything else (eslint.config.js rule 1), so it cannot reach the store or decide a value. What
+   it is given (`PartView`, `src/app/kit/types.ts`) is everything it draws, already decided by the core: each parameter
+   with its value, its words, its options with theirs, whether it is changed; and setters that write exactly what its
+   node binds, on the desk as it is when they are called:
 
-and in `modules/adhere.ts`, in place of the two labelled tokens (and, in the same way, of the Plan CFG range's `pair`):
+   ```tsx
+   // stepSlider: a short slider that snaps to labelled stops.
+   import type { KeyboardEvent } from 'react';
+   import { definePart, useSay, type PartView } from '../kit/index.ts';
 
-```ts
-{ part: 'rangeSlider', params: ['yue.cads1', 'yue.cads2'], label: 'Clean below · full above' },
-```
+   export function StepSlider(v: PartView) {
+     const say = useSay(), p = v.params[0];
+     if (!p?.options) return null;
+     const at = Math.max(0, p.options.findIndex(o => o.on));
+     const key = (e: KeyboardEvent<HTMLDivElement>) => {
+       const d = ({ ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 } as Record<string, number>)[e.key];
+       if (!d) return; e.preventDefault();
+       const o = p.options![Math.min(p.options!.length - 1, Math.max(0, at + d))]; if (o) p.set(o.value);
+     };
+     return (
+       <div className={`stepsl${p.changed ? ' changed' : ''}`} data-ctl={p.key}>
+         <span className="kl">{say(v.label)}</span>
+         <div className="stepsl-track" role="radiogroup" aria-label={say(v.label)} tabIndex={0} onKeyDown={key}>
+           {p.options.map(o => <button key={String(o.value)} type="button" role="radio" aria-checked={o.on} tabIndex={-1}
+             className={o.on ? 'on' : ''} onClick={() => p.set(o.value)}><i /><span>{say(o.label)}</span></button>)}
+         </div>
+       </div>
+     );
+   }
+   definePart('stepSlider', StepSlider);
+   ```
 
-**4 lines in `parts.ts`; in the definition, 7 lines become 2**, plus the component and its stylesheet, which are the real work
-and outside this format. The two ends never cross because the parameters say so (`staysBelow` on the lower end): the
-core's `setValue` stops an end a step from the other, and cleaning puts crossed ends in order, whichever part draws
-them. A bespoke part also says in its row the named `steps` it takes and, when its drawing needs particular inputs,
-its `reads` signature; the validator checks every node against both. The inventory table in
-[01](01-parts-inventory.md) is regenerated by `npm run docs`.
+   A number of twelve steps or fewer has its steps as `options` too, each written as the page writes it (YuE2 Batch's
+   1 to 9 variations draw as nine stops with no line more); a longer range has no `options`, and a part that needs
+   stops draws them from `p.range`; `p.press(key, shift)`, `p.typed(text)` and `p.toFraction(f)` keep the value contract
+   for a number. `v.gesture.begin()` and `end()` make a drag or a held key one undo step; `v.batch(fn)` makes several sets
+   one. It never names a step, never formats a value, never computes a default or a range: those are in `v` already.
+
+3. Its look, a stylesheet of its own: `src/app/styles/rebuild/15-step-slider.css` (loaded after the concept's by being
+   there; the number is its layer). Use the tokens of `00-tokens.css`. What every part gets from its markup alone needs
+   no line: its root has `data-ctl` and `.changed`, its label is a direct `.kl` child, and then the page's mono caps label,
+   its changed mark, its focus ring and its disabled state come from `styles/rebuild/35-part-states.css`. Where the part
+   would look wrong on a surface (on hardware: a pedal, a side unit, an LCD; on paper: a tile, a row, a well, a foot),
+   say so in its own stylesheet, by the surface's container (`.pedal .stepsl`, `.lcd .stepsl`).
+
+4. Use it in the definitions that need it: `{ part: 'stepSlider', param: 'dyn.char' }`.
+
+5. Look at it everywhere, and keep it so: `npm run build:test`, then `node tools/visual-baseline/gallery.mjs`. The parts
+   gallery (the test build only) draws every part of the inventory on every surface, both themes, every tier, with its
+   value changed, and checks it is drawn inside its container, its words read at 3:1, its label is the page's, it is
+   marked when changed, and that every part looks as it did when last recorded. A new part is in it with no line
+   written; its screenshots are in `tools/visual-baseline/out/gallery/`. Until it is recorded the run fails with one
+   "new since the last record" per place it stands (50 for a control: 9 surfaces at 3 tiers and 2 themes, less a
+   pedal's at Quick and Studio), and with nothing else: records are kept by place and parameter, so no other part's moves.
+   Once the screenshots look right, `gallery.mjs --record` keeps them (`tools/fixtures/gallery.json`).
+
+**4 files: the `PARTS` entry (4 lines), the component (one file), its stylesheet (one file), and a line in each
+definition that uses it.** A bespoke part also says in its `PARTS` row what it is `responsible` for, the named `steps`
+it takes and, when its drawing needs particular inputs, its `reads` signature; the validator checks every node against
+both. A part that talks to the server does it through a service of its own (`src/app/register/services.ts`), and any
+answer it writes goes through its setters, which act on the desk in force when the answer arrives (a module removed
+meanwhile takes nothing).
 
 ## 5. Change a range or default on one engine
 
@@ -249,7 +295,7 @@ condition, an action, a read, a `beside`, a factory revision), and says saved da
 | Rename a definition's id | The new id, its file name, `was: ['old']` on the definition | Saved workflows and desks read it |
 | Rename a state key | The new key, `was: ['old']` on the state | Saved revisions read it |
 | Move a parameter to another module | Cut and paste; if its owner or what saves it changes, `npm run docs` records the change once you mean it | `tools/fixtures/shipped.json`: the validator says where it was kept and where it is now |
-| Remove a module, pedal or unit | Delete the file and its two index lines; add its id and its keys to `retired.ts` | The validator names what refers to it, and what saved data may hold |
+| Remove a module, pedal or unit | Delete the file and its two index lines; add its id and its keys to `retired.ts`; take it out of what the validator names (a factory workflow that lists it); `npm run docs`. The core's comparison with the concept page leaves its keys out (they are retired), says which accepted differences now cover fewer cases (`npm run core -- --recount` records that), and skips the view's examples that name it. A slice scenario or state that adds it (tools/behaviour, tools/visual-baseline) is given another module | The validator names what refers to it, and what saved data may hold; `npm run check` passes |
 
 ## 9. Add an engine
 

@@ -110,3 +110,13 @@ export function heldNote(ix: Index, key: string, desk: Desk, book: EngineBook): 
   const f = resolve(hit.p, desk.engine), from = resolve(hit.p, h.from);
   return { id: `create.${hit.d.id}.p.${key.replace(/\./g, '-')}.held.note`, en: hit.p.held.note, slots: { shown: formatValue(f, h.shown), value: formatValue(from, h.value), engine: engineName(h.from) } };
 }
+
+/** What the first switch to an engine in this browser adds to its toast (the concept's firstVisit, 13-engine-state.js):
+ *  the modules only it and at most one other engine bring, none of them a source or already on the desk; past three,
+ *  the first and a count. `toast` is the switch's own toast; null when there is nothing new. */
+export function newOn(ix: Index, desk: Desk, to: EngineId, toast: Msg): Msg | null {
+  const own = ix.defs.filter(d => d.kind === 'module' && !d.builtIn && !d.source && !d.board && d.engines.includes(to) && d.engines.length <= 2 && !desk.on.has(d.id));
+  if (!own.length) return null;
+  const names = own.length > 3 ? msg('switch.new.more', { first: defName(own[0]!, desk), n: own.length - 1 }) : list(own.map(d => defName(d, desk)));
+  return msg('switch.new', { toast, names });
+}

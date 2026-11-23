@@ -3,7 +3,7 @@
 // two recordings. See README.md in this folder.
 //
 //   node tools/visual-baseline/vb.mjs capture <name> [--page file.html] [--only regex] [--workers n] [--plan-from name] [--no-shots]
-//   node tools/visual-baseline/vb.mjs compare <a> <b> [--max n]
+//   node tools/visual-baseline/vb.mjs compare <a> <b> [--max n] [--accept file.json]
 //   node tools/visual-baseline/vb.mjs check <base> [--only regex]      (capture "<base>-now" with base's plan, then compare)
 //   node tools/visual-baseline/vb.mjs list
 //
@@ -11,6 +11,11 @@
 // build (dist-test/index.html) unless --page names another (the concept's hotstep-tiers.html); --states slice runs the
 // slice's matrix (slice-states.mjs) instead of the concept's; --scope <name> plans forced states and compares only
 // inside the regions that scope names (slice-states.mjs SCOPES), the parts of the page the rebuild draws so far.
+// Each record also holds what computed styles miss (page-lib.js vb.semantics: every element's role, accessible name,
+// ARIA states, title, own words and attributes), compared like a property; a state may record parts on their own
+// (`parts: [selector]`, keyed from the selector, compared wherever each page puts them) and a screenshot of one
+// element (`shot: '#bento'`). `--accept <file>` names the differences accepted on purpose, each with the number of
+// times it occurs: a difference it covers is not listed, and a count that changes fails the comparison.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -96,14 +101,21 @@ async function runState(browser, st, pageUrl, custom, planIn, shotsDir, propsIn)
   if (st.raw) await page.evaluate(() => window.__vb.finish()); else await quiet();
   if (propsIn) await page.evaluate(l => window.__vb.useProps(l), propsIn); else await page.evaluate(c => window.__vb.setProps(c), custom);
   const full = await page.evaluate(() => window.__vb.recordAll());
+  const sem = await page.evaluate(() => window.__vb.semantics());
+  const parts = {}; for (const sel of st.parts || []) parts[sel] = await page.evaluate(s => window.__vb.recordPart(s), sel);
   const props = await page.evaluate(() => window.__vb.props);
   const nesting = classMap ? await page.evaluate(m => window.__vb.nesting(m), classMap) : null;
   const matches = await page.evaluate(() => window.__vb.matches()), classSets = await page.evaluate(() => window.__vb.classSets());
   lap('record');
   /* the screenshot shows the state that was recorded: the forced pass below runs fake time and moves the page on */
-  if (st.shot && shotsDir) await page.screenshot({ path: path.join(shotsDir, st.id + '.png') });
+  if (st.shot && shotsDir) {
+    /* a shot of one element: what floats over it (the sticky bars, the go bar) is hidden while it is taken */
+    const el = typeof st.shot === 'string' ? await page.$(st.shot) : null;
+    if (el) { const hide = await page.addStyleTag({ content: 'header.top, .deskbar, .gobar { visibility: hidden !important; }' }); await el.screenshot({ path: path.join(shotsDir, st.id + '.png') }); await hide.evaluate(n => n.remove()); }
+    else await page.screenshot({ path: path.join(shotsDir, st.id + '.png') });
+  }
   lap('shot');
-  const rec ={ id: st.id, props, mode: full.mode, els: full.els, errs, fails, forced: {}, plan: null, tm, matches, classSets, nesting };
+  const rec ={ id: st.id, partsOnly: !!st.partsOnly, props, mode: full.mode, els: full.els, sem, parts, errs, fails, forced: {}, plan: null, tm, matches, classSets, nesting };
   if (st.pseudo) {
     const plan = planIn || { fprops: await page.evaluate(() => window.__vb.forcedPropList()), batches: (await page.evaluate(() => window.__vb.plan())).batches.map(b => b.map(({ els, force, region, sib }) => ({ els, force, region, sib })).filter(t => t.els.every(inScope))).filter(b => b.length) };
     rec.plan = plan;
@@ -178,11 +190,20 @@ async function capture(name, o = {}) {
 /* absolute values per key|pseudo. Elements inside <head> are left out: they are never rendered, and a new <meta> renumbers them */
 const absolute = rec => { const m = new Map(); for (const [k, ps, d] of rec.els) { if (k.startsWith('html>head:') || !inScope(k)) continue; const v = rec.mode.slice(); for (const i in d) v[i] = d[i]; m.set(k + '|' + ps, v); } return m; };
 
+/* a digest's fields, by name: role, name, text, then each attribute by its name */
+const SEP = String.fromCharCode(0x241f);
+const semFields = d => { const [role, name, text, ...rest] = (d ?? '').split(SEP); const o = { role, name, text }; for (const r of rest) { const i = r.indexOf('='); o[i < 0 ? r : r.slice(0, i)] = i < 0 ? '' : r.slice(i + 1); } return o; };
 async function compare(a, b, o = {}) {
   const A = path.join(OUT, a), B = path.join(OUT, b), max = +(o.max || 40);
   const ids = fs.readdirSync(A).filter(f => f.endsWith('.json.gz')).map(f => f.slice(0, -8)).filter(id => !o.only || new RegExp(o.only).test(id));
-  let states = 0, elRecs = 0, forcedRecs = 0, diffs = 0; const lines = [], byProp = new Map();
-  const note = (st, s) => { diffs++; if (lines.length < max) lines.push(st + ': ' + s); };
+  let states = 0, elRecs = 0, forcedRecs = 0, semRecs = 0, partRecs = 0, diffs = 0; const lines = [], byProp = new Map();
+  /* accepted differences: { state, key, field, why, n }, each a regular expression but why and n */
+  const accepted = o.accept ? JSON.parse(fs.readFileSync(o.accept, 'utf8')).accepted.map(x => ({ ...x, re: [x.state, x.key, x.field].map(r => new RegExp(r || '')), seen: 0 })) : [];
+  const note = (st, s, key, field) => {
+    const hit = key !== undefined && accepted.find(x => x.re[0].test(st) && x.re[1].test(key) && x.re[2].test(field));
+    if (hit) { hit.seen++; return; }
+    diffs++; if (lines.length < max) lines.push(st + ': ' + s);
+  };
   for (const id of ids) {
     const fb = path.join(B, id + '.json.gz'); if (!fs.existsSync(fb)) { note(id, 'missing in ' + b); continue; }
     const ra = ungz(path.join(A, id + '.json.gz')), rb = ungz(fb); states++;
@@ -190,11 +211,27 @@ async function compare(a, b, o = {}) {
     if (JSON.stringify(ra.fails) !== JSON.stringify(rb.fails)) note(id, `setup differs: ${JSON.stringify(ra.fails)} vs ${JSON.stringify(rb.fails)}`);
     if (JSON.stringify(ra.errs) !== JSON.stringify(rb.errs)) note(id, `page errors differ: ${JSON.stringify(ra.errs)} vs ${JSON.stringify(rb.errs)}`);
     const pa = ra.props, pb = rb.props; const ib = new Map(pb.map((p, i) => [p, i]));
-    const va = absolute(ra), vb = absolute(rb);
-    const cmp = (label, x, y) => { for (let i = 0; i < pa.length; i++) { const j = ib.get(pa[i]); const yv = j === undefined ? '(no such property)' : y[j]; if (x[i] !== yv) { note(id, `${label} ${pa[i]}: ${JSON.stringify(x[i])} -> ${JSON.stringify(yv)}`); byProp.set(pa[i], (byProp.get(pa[i]) || 0) + 1); } } };
-    for (const [k, x] of va) { elRecs++; const y = vb.get(k); if (!y) { note(id, `${k} only in ${a}`); continue; } cmp(k, x, y); }
-    for (const k of vb.keys()) if (!va.has(k)) note(id, `${k} only in ${b}`);
-    for (const fk of Object.keys(ra.forced || {})) {
+    /* a state that records parts on their own compares those alone (the tiles around them are later packages') */
+    const only = ra.partsOnly || rb.partsOnly, va = only ? new Map() : absolute(ra), vb = only ? new Map() : absolute(rb);
+    /* a part on its own is compared on how it looks (colours, type, faces, borders), not on its size or place, which its
+       neighbours decide */
+    const GEOMETRY = /^(width|height|inline-size|block-size|perspective-origin|transform-origin|gap|row-gap|column-gap|top|left|right|bottom|x|y|d)$|^(min-|max-|margin|padding|inset|grid|flex|align-|justify-)/;
+    const cmp = (label, x, y, key = label, partOnly = false) => { for (let i = 0; i < pa.length; i++) { if (partOnly && GEOMETRY.test(pa[i])) continue; const j = ib.get(pa[i]); const yv = j === undefined ? '(no such property)' : y[j]; if (x[i] !== yv) { note(id, `${label} ${pa[i]}: ${JSON.stringify(x[i])} -> ${JSON.stringify(yv)}`, key, pa[i]); byProp.set(pa[i], (byProp.get(pa[i]) || 0) + 1); } } };
+    for (const [k, x] of va) { elRecs++; const el = k.slice(0, k.lastIndexOf('|')), y = vb.get(k); if (!y) { note(id, `${k} only in ${a}`, el, 'only'); continue; } cmp(k, x, y, el); }
+    for (const k of vb.keys()) if (!va.has(k)) note(id, `${k} only in ${b}`, k.slice(0, k.lastIndexOf('|')), 'only');
+    /* what computed styles miss: role, name, own words, attributes */
+    const semCmp = (label, key, da, db) => { const fa = semFields(da), fb2 = semFields(db); for (const f of new Set([...Object.keys(fa), ...Object.keys(fb2)])) if (fa[f] !== fb2[f]) { note(id, `${label} [${f}]: ${JSON.stringify(fa[f] ?? '(none)')} -> ${JSON.stringify(fb2[f] ?? '(none)')}`, key, 'sem:' + f); const g = 'sem:' + (['role', 'name', 'text'].includes(f) ? f : f.startsWith('aria-') ? 'aria' : f.startsWith('data-') ? 'data' : f); byProp.set(g, (byProp.get(g) || 0) + 1); } };
+    if (ra.sem && rb.sem && !only) { const sa = new Map(ra.sem.filter(([k]) => inScope(k))), sb = new Map(rb.sem.filter(([k]) => inScope(k))); for (const [k, d] of sa) { if (!sb.has(k)) continue; semRecs++; semCmp(k, k, d, sb.get(k)); } }
+    /* parts recorded on their own */
+    for (const sel of Object.keys(ra.parts || {})) {
+      const x = ra.parts[sel], y = rb.parts?.[sel];
+      if (!x || !y) { note(id, `part ${sel}: ${x ? 'missing' : 'not drawn'} in ${x ? b : a}`, sel, 'only'); continue; }
+      const ya = new Map(y.recs.map(([k, ps, v]) => [k + '|' + ps, v])), yb = new Map(y.sem);
+      for (const [k, ps, v] of x.recs) { partRecs++; const w = ya.get(k + '|' + ps); if (!w) { note(id, `part ${k}${ps} only in ${a}`, k, 'only'); continue; } cmp(`part ${k}${ps}`, v, w, k, true); }
+      for (const [k, d] of x.sem) if (yb.has(k)) semCmp(`part ${k}`, k, d, yb.get(k)); else note(id, `part ${k} only in ${a}`, k, 'only');
+      const xs = new Set(x.sem.map(([q]) => q)); for (const [k] of y.sem) if (!xs.has(k)) note(id, `part ${k} only in ${b}`, k, 'only');
+    }
+    for (const fk of only ? [] : Object.keys(ra.forced || {})) {
       const fa = ra.forced[fk], fbv = rb.forced?.[fk];
       if (fbv === undefined) { note(id, `forced ${fk} not recorded in ${b}`); continue; }
       if (fa === 'missing' || fbv === 'missing') { if (fa !== fbv) note(id, `forced ${fk}: ${fa === 'missing' ? 'missing' : 'present'} vs ${fbv === 'missing' ? 'missing' : 'present'}`); continue; }
@@ -203,7 +240,7 @@ async function compare(a, b, o = {}) {
         forcedRecs++;
         const base = va.get(key) || ra.mode, x = base.slice(), da = ma.get(key) || {}; for (const i in da) x[i] = da[i];
         const baseB = vb.get(key) || rb.mode, y = baseB.slice(), db = mb.get(key) || {}; for (const i in db) y[i] = db[i];
-        cmp(`[forced ${JSON.parse(fk).map(([e, f]) => e.map((k, i) => k + ':' + f[i].join(':')).join(' & ')).join(' | ').slice(0, 160)}] ${key}`, x, y);
+        cmp(`[forced ${JSON.parse(fk).map(([e, f]) => e.map((k, i) => k + ':' + f[i].join(':')).join(' & ')).join(' | ').slice(0, 160)}] ${key}`, x, y, key.slice(0, key.lastIndexOf('|')));
       }
     }
   }
@@ -220,10 +257,14 @@ async function compare(a, b, o = {}) {
            when a channel moves by more than 8 of 255 */
         let n = 0; for (let i = 0; i < d1.length; i += 4) if (Math.max(Math.abs(d1[i] - d2[i]), Math.abs(d1[i + 1] - d2[i + 1]), Math.abs(d1[i + 2] - d2[i + 2]), Math.abs(d1[i + 3] - d2[i + 3])) > 8) n++; return n; }, [x.toString('base64'), y.toString('base64')]);
       /* and a few dozen such pixels (antialiasing on an edge) are noise: listed, not counted */
-      if (typeof n === 'string' || n > 64) note('shot ' + f, `${n} pixels differ`); else if (n) noise.push(`${f}: ${n} pixels`); }
+      if (typeof n === 'string' || n > 64) note(f.replace(/\.png$/, ''), `shot: ${n} pixels differ`, 'shot', 'pixels'); else if (n) noise.push(`${f}: ${n} pixels`); }
     await br.close(); }
-  console.log(`compared ${states} states, ${elRecs} element records, ${forcedRecs} forced-state records, ${shots} screenshots`);
+  console.log(`compared ${states} states, ${elRecs} element records, ${semRecs} role/name/text/attribute records, ${partRecs} part records, ${forcedRecs} forced-state records, ${shots} screenshots`);
   if (noise.length) console.log('screenshot noise (64 pixels or fewer, ignored): ' + noise.join(', '));
+  if (accepted.length) {
+    console.log('accepted on purpose (' + path.basename(o.accept) + '):');
+    for (const x of accepted) { const ok = x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
+  }
   if (!diffs) { console.log('RESULT: identical'); return 0; }
   console.log(`RESULT: ${diffs} differences` + (diffs > lines.length ? ` (first ${lines.length} shown)` : ''));
   for (const l of lines) console.log('  ' + l);
@@ -233,6 +274,6 @@ async function compare(a, b, o = {}) {
 
 if (cmd === 'list') { for (const s of STATES) console.log(`${s.id}  ${s.w}x${s.h} ${s.scheme}${s.reduced ? ' reduced' : ''}${s.pseudo ? ' +pseudo' : ''}${s.shot ? ' +shot' : ''}`); console.log(STATES.length + ' states'); }
 else if (cmd === 'capture' && args[1]) await capture(args[1], { page: opt('page'), only: opt('only'), workers: opt('workers'), planFrom: opt('plan-from'), noShots: flag('no-shots'), classmap: opt('classmap') });
-else if (cmd === 'compare' && args[2]) process.exitCode = await compare(args[1], args[2], { max: opt('max'), only: opt('only') });
+else if (cmd === 'compare' && args[2]) process.exitCode = await compare(args[1], args[2], { max: opt('max'), only: opt('only'), accept: opt('accept') });
 else if (cmd === 'check' && args[1]) { const now = args[1] + '-now'; fs.rmSync(path.join(OUT, now), { recursive: true, force: true }); await capture(now, { page: opt('page'), only: opt('only'), workers: opt('workers'), planFrom: args[1], noShots: flag('no-shots') }); process.exitCode = await compare(args[1], now, { max: opt('max'), only: opt('only') }); }
 else { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 9).join('\n')); process.exitCode = 2; }

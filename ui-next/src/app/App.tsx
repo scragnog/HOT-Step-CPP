@@ -11,13 +11,13 @@ import { Centre } from './shell/Centre.tsx';
 import { ModulesPanel, WorkflowsPanel } from './shell/Panels.tsx';
 import { usePanels } from './shell/panelState.ts';
 import { LiveRegion, Toast } from './shell/Toast.tsx';
-import { setTierFromView } from './shell/tier.ts';
+import { closeDrawer } from './shell/drawers.ts';
+import { usePanelStore, drawerMode } from './store/panels.ts';
+import { dispatchKey } from './register/keys.ts';
 import type { Engine } from './services/engine.ts';
 
-const isTextField = (el: Element | null) => !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|range|file|color)$/i.test((el as HTMLInputElement).type)) || (el as HTMLElement).isContentEditable);
-
 export function App({ engine }: { engine: Engine }) {
-  const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus);
+  const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus), drawer = usePanelStore(s => s.drawer);
   /* #app is React's root: its own classes say which panels stand open (31-side-panels.js paintPanels) */
   useLayoutEffect(() => {
     const app = document.getElementById('app')!;
@@ -28,35 +28,36 @@ export function App({ engine }: { engine: Engine }) {
     void Promise.all([engine.lists(), engine.vst.chain(), engine.models.list(useDesk.getState().desk.engine)]).then(([lists, chain, models]) =>
       useDesk.getState().told({ lists, selection: models.selection, vstPlugins: chain.plugins.length }));
   }, [engine]);
-  /* focus that a step left nowhere goes where the step said */
+  /* focus that a step left nowhere goes where the step said: the first of its places that is on the page (A-18) */
   useEffect(() => {
     if (!focus) return;
-    requestAnimationFrame(() => { document.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true }); useDesk.getState().setFocus(null); });
+    requestAnimationFrame(() => {
+      const el = focus.map(sel => document.querySelector<HTMLElement>(sel)).find(x => x && x.getClientRects().length);
+      el?.focus({ preventScroll: true }); useDesk.getState().setFocus(null);
+    });
   }, [focus]);
-  /* the page's keys: Ctrl+Z and Ctrl+Shift+Z or Ctrl+Y (a text field keeps them while it has typing to take back),
-     Alt+1, 2, 3 choose a tier */
+  /* the page's keys: each feature registers its own (register/keys.ts, src/app/features) */
   useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      const s = useDesk.getState();
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'z' && !isTextField(document.activeElement)) { e.preventDefault(); if (e.shiftKey) s.runRedo(); else s.runUndo(); return; }
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'y' && !isTextField(document.activeElement)) { e.preventDefault(); s.runRedo(); return; }
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^Digit[123]$/.test(e.code)) { e.preventDefault(); setTierFromView((['quick', 'studio', 'lab'] as const)[+e.code.slice(5) - 1]!); }
-    };
-    addEventListener('keydown', key);
-    return () => removeEventListener('keydown', key);
+    addEventListener('keydown', dispatchKey);
+    return () => removeEventListener('keydown', dispatchKey);
   }, []);
-  const drawers = (side: 'left' | 'right') => {
-    const p = document.getElementById(side === 'left' ? 'leftPanel' : 'rightPanel')!, scrim = document.getElementById('drawerScrim')!;
-    p.classList.toggle('open'); scrim.hidden = !document.querySelector('.side.open');
-    scrim.onclick = () => { document.querySelectorAll('.side.open').forEach(x => x.classList.remove('open')); scrim.hidden = true; };
-  };
+  /* the drawers' scrim, a sibling of #app in the skeleton: shown while a drawer is open, a press on it closes it */
+  useEffect(() => {
+    const scrim = document.getElementById('drawerScrim'); if (!scrim) return;
+    scrim.hidden = !drawer;
+    const close = () => closeDrawer(false);
+    scrim.addEventListener('click', close);
+    return () => scrim.removeEventListener('click', close);
+  }, [drawer]);
+  /* a drawer left open when the window widens past drawers is closed */
+  useEffect(() => { const f = () => { if (!drawerMode()) closeDrawer(false); }; addEventListener('resize', f); return () => removeEventListener('resize', f); }, []);
   const header = document.querySelector('header.top'), skip = document.querySelector('a.skip');
   return (
     <>
       {header ? createPortal(<TopBar />, header) : null}
       {skip ? createPortal(say(ui('skip')), skip) : null}
       <WorkflowsPanel open={panels.L} set={v => panels.set('left', v)} />
-      <Centre drawers={drawers} />
+      <Centre />
       <ModulesPanel open={panels.R} set={v => panels.set('right', v)} />
       <Toast />
       <LiveRegion />

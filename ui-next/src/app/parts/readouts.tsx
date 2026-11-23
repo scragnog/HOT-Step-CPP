@@ -1,48 +1,47 @@
-// The read-outs the slice uses: they show something and edit nothing. note is a quiet line of words; lcdValue a value
-// printed big over a caps word (a pedal's Studio face); unitLcd a side unit's two-line LCD; button a small button
-// that runs its node's action. What each says is the core's (nodeWord, lcdMsg); an action is run by the core
-// (runAction) and its result applied by the shell (actions.ts).
+// The read-outs: they show something and edit nothing. note is a quiet line of words (on a pedal, its small print with
+// its actions after it as links); lcdValue a value printed big over a caps word (a pedal's Studio face); unitLcd a
+// side unit's two-line LCD; button a small button that runs its node's action. What each says, and what its actions
+// do, are the core's.
 
-import { lcdMsg, nodeOptWord, nodeWord } from '../../derive.ts';
-import { ix } from '../model/index.ts';
-import { useDesk } from '../store/desk.ts';
-import { ui, useSay } from '../i18n/index.ts';
-import { ActionLinks } from './actions.tsx';
-import type { ViewProps } from './types.ts';
+import { definePart, ui, useSay, type PartView } from '../kit/index.ts';
 
-export function Note(props: ViewProps) {
-  const { node, nodeKey, def } = props;
-  const say = useSay(), desk = useDesk(s => s.desk);
-  const tip = nodeWord(ix, node, desk, nodeKey, 'tip'), text = say(nodeWord(ix, node, desk, nodeKey, 'text'));
-  /* on a pedal a note is its small print, its actions after it as links (27-pedals.js) */
-  if (def.kind === 'pedal') return <small className="pnote" title={tip ? say(tip) : undefined}>{node.actions?.length ? say(ui('note.then', { text })) : text}<ActionLinks {...props} look="link" /></small>;
-  return <span className="lbl" title={tip ? say(tip) : undefined}>{text}</span>;
-}
-
-export function LcdValue(props: ViewProps) {
-  const { node, nodeKey, reads } = props;
-  const say = useSay(), desk = useDesk(s => s.desk);
-  const first = Object.keys(reads)[0];
-  const value = nodeWord(ix, node, desk, nodeKey, 'text') ?? (first ? lcdMsg(ix, first, desk) : '');
+/** A node's actions as links or buttons. */
+export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' }) {
+  const say = useSay();
   return (
     <>
-      <span className="bigval">{say(value)}</span>
-      <small>{say(nodeWord(ix, node, desk, nodeKey, 'label'))}{node.actions?.length ? <><br /><ActionLinks {...props} look="link" /></> : null}</small>
+      {v.actions.map((a, i) => look === 'link'
+        ? <button key={i} type="button" className="linkbtn" data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
+        : <button key={i} type="button" className="pbtn" title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>)}
     </>
   );
 }
 
-export function UnitLcd({ node, nodeKey, reads, tier }: ViewProps) {
-  const say = useSay(), desk = useDesk(s => s.desk);
-  if ((node.opts as { notAtLab?: boolean } | undefined)?.notAtLab && tier === 'lab') return null;
-  const text = nodeWord(ix, node, desk, nodeKey, 'text');
-  if (text) return <span className="pwin">{say(text)}</span>;
-  const prefix = nodeOptWord(ix, node, desk, nodeKey, 'prefix');
-  /* an LCD prints its first line in capitals and the next in small letters */
-  const lines = Object.keys(reads).map((k, i) => (i === 0 ? (say(prefix) + say(lcdMsg(ix, k, desk))).toLocaleUpperCase() : say(lcdMsg(ix, k, desk)).toLocaleLowerCase()));
-  return <span className="u-lcd" aria-hidden="true">{lines.map((l, i) => <span key={i}>{l}</span>)}</span>;
+export function Note(v: PartView) {
+  const say = useSay(), tip = v.words.tip ? say(v.words.tip) : undefined, text = say(v.words.text);
+  if (v.surface === 'pedal') return <small className="pnote" title={tip}>{v.actions.length ? say(ui('note.then', { text })) : text}<ActionLinks v={v} look="link" /></small>;
+  return <span className="lbl" title={tip}>{text}</span>;
 }
 
-export function Button(props: ViewProps) {
-  return <ActionLinks {...props} look="button" />;
+export function LcdValue(v: PartView) {
+  const say = useSay();
+  return (
+    <>
+      <span className="bigval">{say(v.words.text ?? v.reads[0]?.lcd ?? '')}</span>
+      <small>{say(v.label)}{v.actions.length ? <><br /><ActionLinks v={v} look="link" /></> : null}</small>
+    </>
+  );
 }
+
+export function UnitLcd(v: PartView) {
+  const say = useSay();
+  if (v.words.text) return <span className="pwin">{say(v.words.text)}</span>;
+  return <span className="u-lcd" aria-hidden="true">{(v.lines ?? []).map((l, i) => <span key={i}>{say(l.text, l.upper ? { upper: true } : { lower: true })}</span>)}</span>;
+}
+
+export const Button = (v: PartView) => <ActionLinks v={v} look="button" />;
+
+definePart('note', Note);
+definePart('lcdValue', LcdValue);
+definePart('unitLcd', UnitLcd);
+definePart('button', Button);

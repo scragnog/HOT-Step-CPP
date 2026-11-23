@@ -12,8 +12,9 @@ import { DEFINITIONS } from '../src/definitions/index.ts';
 import type { Definition, EngineId, Node, Tier } from '../src/definitions/types.ts';
 import { ENGINE_IDS } from '../src/definitions/engines.ts';
 import {
-  alsoSet, arrivalChange, applyChange, bareText, boardCount, boardNodes, checkText, deskStep, emptyBook, indexOf, lcdMsg, nodeKeys,
-  nodeShown, nodeWord, optionsOf, parkedOn, readDesk, removedWords, savedDeskOf, stringsOf, tileName, workflowOf, type Desk,
+  addTo, alsoSet, arrivalChange, applyChange, bareText, bindPart, boardCount, boardNodes, checkText, deskModel, deskStep, emptyBook, indexOf, lcdMsg,
+  meterScale, nodeKeys, nodeShown, nodeWord, optionsOf, parkedOn, pedalModel, pedalState, readDesk, removeFrom, removedWords, savedDeskOf, stringsOf,
+  tileName, workflowOf, type Change, type Desk, type Msg,
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
 import { deskSolve, type PackItem } from '../src/app/desk/pack.ts';
@@ -57,6 +58,12 @@ for (const d of DEFINITIONS) {
 }
 
 /* ---------------------------------------------------------------- the selectors the view asks */
+/* The examples below name real modules, pedals and units. When one of them has been removed (06-how-to.md, "Remove a
+   module"), its examples are skipped and said, rather than failing: give them another definition when that matters. */
+const EXAMPLES = ['avoid', 'gain', 'guidance', 'norm', 'post', 'ppvae', 'refiner', 'ss', 'tempo', 'tile', 'vst', 'wh'];
+const gone = EXAMPLES.filter(id => !DEFINITIONS.some(d => d.id === id));
+if (gone.length) console.log(`the view's examples name ${gone.join(', ')}, which the definitions no longer have: those examples are skipped`);
+else {
 const ace = (tier: Tier, on: string[], vals: Desk['vals'] = {}) => desk('ace', tier, on, vals);
 /* a container none of whose children is drawn is not drawn; a control bound to what the engine lacks is not drawn */
 {
@@ -117,6 +124,61 @@ ok('and nothing when it is', checkText(ix, 'pp.ss.seed', ace('lab', ['post', 'ss
   const back = readDesk(ix, JSON.parse(J(saved)))!;
   ok('and reading it back keeps the order', J([...back.desk.on].filter(id => id === 'post' || id === 'avoid')) === '["post","avoid"]');
   ok('a workflow keeps it too', J(workflowOf(ix, d0, 'x').modules) === '["post","avoid"]');
+}
+/* ---------------------------------------------------------------- the parts' contract, at run time (SL-03, SL-11)
+   A setter writes only what its node binds, against the desk in force when it is called: held across another change it
+   names its step from the value it really changes; called once its definition has left the desk it changes nothing; a
+   typed value is read, clamped and said; a key past an end stops there and says nothing. */
+{
+  let live = ace('lab', ['post', 'ss'], { 'pp.ss.on': true });
+  const got: Change[] = [], told: Msg[] = [];
+  const ss = def('ss'), knob = { part: 'knob', param: 'pp.ss.str' } as Node;
+  const held = bindPart(ix, ss, knob, () => live, c => { got.push(c); live = applyChange(live, c); }, m => told.push(m));
+  live = applyChange(live, { vals: { 'pp.ss.str': 50 }, auto: {}, state: {}, words: { label: '', put: '' } as never });
+  held.params['pp.ss.str']!.set(20);
+  ok('a setter held across a change names its step from the value in force (SL-11)', say(got.at(-1)!.words.label) === 'Refine 50% → 20%', say(got.at(-1)!.words.label));
+  ok('a part is given setters for what its node binds and nothing else', J(Object.keys(held.params)) === '["pp.ss.str"]');
+  let threw = false; try { held.params['pp.ss.str']!.set(30, undefined, undefined, { 'avoid.text': 'x' }); } catch { threw = true; }
+  ok('a setter refuses to write another value beside its own without a named step', threw);
+  held.params['pp.ss.str']!.typed('500');
+  ok('a typed value past the end is put there and said (21-knob.js)', live.vals['pp.ss.str'] === 60 && /Refine: 10 to 60\. Set to 60\./.test(say(got.at(-1)!.said!)), say(got.at(-1)!.said ?? ''));
+  const n = got.length; held.params['pp.ss.str']!.typed('500');
+  ok('typed again at the end it changes nothing and is still said', got.length === n && /Set to 60/.test(say(told.at(-1)!)));
+  held.params['pp.ss.str']!.typed('abc');
+  ok('what is no number is said, and changes nothing', got.length === n && say(told.at(-1)!) === 'Type a number for Refine');
+  held.params['pp.ss.str']!.press('End', false); held.params['pp.ss.str']!.press('ArrowUp', true);
+  ok('a key past an end stops there and says nothing (SL-12)', got.length === n && live.vals['pp.ss.str'] === 60);
+  held.params['pp.ss.str']!.press('Home', false);
+  ok('a key the contract knows moves the value', live.vals['pp.ss.str'] === 10);
+  held.params['pp.ss.str']!.typed('1:30'); const at130 = live.vals['pp.ss.str']; held.params['pp.ss.str']!.typed('−5');
+  ok('a typed number is read as the page writes it (m:ss is 90, put at 60; a true minus is -5, put at 10)', at130 === 60 && live.vals['pp.ss.str'] === 10, [at130, live.vals['pp.ss.str']]);
+  live = { ...live, on: new Set([...live.on].filter(x => x !== 'ss')) };
+  const before = got.length; held.params['pp.ss.str']!.set(40);
+  ok('a setter whose definition has left the desk changes nothing (an answer that came too late)', got.length === before);
+}
+/* the desk's make-up rules are the core's (addTo, removeFrom) */
+{
+  const d0 = ace('studio', ['avoid']);
+  const a = addTo(ix, d0, ['avoid'], [], 'ss', undefined, {});
+  ok('the first pedal brings the Pedalboard', a.did === 'added' && J(a.mods) === '["avoid","post"]' && J(a.board) === '["ss"]', a);
+  ok('a Lab module outside Lab is offered Lab', addTo(ix, d0, ['avoid'], [], 'guidance', undefined, {}).did === 'lab');
+  ok('what is there is there', addTo(ix, d0, ['avoid'], [], 'avoid', undefined, {}).did === 'there');
+  const r = removeFrom(ix, ['avoid', 'post'], ['ss'], 'ss');
+  ok('the last pedal takes the Pedalboard with it', r.last && J(r.mods) === '["avoid"]' && !r.board.length, r);
+  const rb = removeFrom(ix, ['post', 'avoid'], ['ss', 'tile'], 'post');
+  ok('the Pedalboard takes its pedals, and remembers where it stood', rb.pedals === 2 && !rb.board.length && rb.stood === 'avoid', rb);
+  const back = addTo(ix, d0, ['tempo', 'avoid'], [], 'post', undefined, { post: 'avoid' });
+  ok('a module added back goes where it stood', back.did === 'added' && J(back.mods) === '["tempo","post","avoid"]', back);
+}
+/* what pedals and units are, and the empty desk's offers, are the core's */
+{
+  const d = ace('lab', ['post', 'ss', 'gain', 'wh'], { 'pp.on': false, 'pp.ss.on': true, 'pp.wh.on': true });
+  ok('a pedal on while the chain is bypassed is held', pedalState(ix, def('ss') as never, d) === 'held');
+  ok('a pedal with no switch always runs, and stops with the chain', pedalState(ix, def('gain') as never, d) === 'always' && pedalModel(ix, def('gain') as never, d).cls.split(' ').includes('off'));
+  ok('the empty Quick desk names what the first offer is on its engine', say(deskModel(ix, desk('sa3', 'quick', []), []).empty!.says!) === 'Add a length, a seed or pedals from Modules' && say(deskModel(ix, ace('quick', []), []).empty!.says!) === 'Add tempo, a seed or pedals from Modules');
+  ok('a VU meter prints the scale of the concept', J(meterScale({}, undefined).marks.filter(m => m.words).map(m => m.words)) === '["-20","-10","-5","0","+3"]');
+  ok('an own scale writes a true minus', meterScale({ min: -24, max: -6 }, -14).marks[0]!.words === '−24');
+}
 }
 void ENGINE_IDS;
 

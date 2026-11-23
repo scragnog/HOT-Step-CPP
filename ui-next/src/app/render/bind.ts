@@ -1,16 +1,78 @@
-// A node bound on the desk: the core's bindPart (setters for exactly what the node binds, each change named by the
-// core), its changes committed to the store as one step each. Its children are the renderer's to draw.
+// A node bound on the desk: its model, worked out by the core and redrawn only when it changes (useModel), and the
+// actions that change exactly what it binds. Every action reads the desk as it is when it is called (bindPart with the
+// store's getter), so a part that acts later is cleaned and named against the desk in force; what no longer binds is
+// dropped. A part's changes carry its node's name, so a gesture of one part never swallows another's.
 
-import type { Definition, Node } from '../../definitions/types.ts';
-import type { PartProps } from '../../definitions/parts.ts';
-import { bindPart, type Change, type Desk } from '../../derive.ts';
+import { useMemo } from 'react';
+import type { Action, Definition, Node } from '../../definitions/types.ts';
+import { actionWords, applyChoice, bindPart, checkText, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
+import { runNamed } from '../register/actions.ts';
+import { setTierFromView } from '../shell/tier.ts';
+import type { ParamView, PartView } from '../kit/types.ts';
+import { useModel } from './useModel.ts';
 
-const commit = (c: Change) => useDesk.getState().commit(c);
+const desk = () => useDesk.getState().desk;
 
-export function bind(def: Definition, node: Node, desk: Desk): Omit<PartProps, 'children'> {
-  const props: Partial<PartProps> = bindPart(ix, def, node, desk, commit);
-  delete props.children;
-  return props as Omit<PartProps, 'children'>;
+/** What running an action did, applied: a change is committed, a tier is gone to and rung, a module is added, a
+ *  named action is run by the feature that builds it. */
+export function dispatch(d: Definition, a: Action, node?: Node, from?: string): void {
+  const did = runAction(ix, d, a, desk(), node);
+  if ('change' in did) useDesk.getState().commit(did.change, from);
+  else if ('go' in did) setTierFromView(did.go, { ring: did.ring });
+  else if ('add' in did) useDesk.getState().add(did.add);
+  else runNamed(did.call);
+}
+
+/** Runs action i of the strip a module's tile shows now (its definition's strip that holds). */
+export function runStrip(d: Definition, i: number): void {
+  const a = stripOf(ix, d, desk())?.actions?.[i];
+  if (a) dispatch(d, a);
+}
+/** Sets a pedal's or a side unit's switch (its foot switch, its power) as any control sets it: one step, named. */
+export function setSwitch(d: Definition, key: string, on: boolean): void {
+  try { bindPart(ix, d, { part: 'ledButton', param: key } as Node, desk, c => useDesk.getState().commit(c)).params[key]?.set(on); } catch { /* not on the board any more */ }
+}
+
+/** A node's actions: stable for the node, each acting on the desk in force. */
+function actionsOf(def: Definition, node: Node, key: string) {
+  const from = `${def.id}:${key || (node.param ?? '')}`;
+  const commit = (c: Change) => useDesk.getState().commit(c, from);
+  const tell = (m: Msg) => useDesk.getState().showToast({ text: m });
+  let open: ReturnType<typeof bindPart> | null = null;
+  /* bound now: the node as the desk shows it now; null when it is not shown any more */
+  const bound = () => { if (open) return open; try { return bindPart(ix, def, node, desk, commit, tell); } catch { return null; } };
+  const param = (k: string) => bound()?.params[k];
+  return {
+    from,
+    set: (k: string, v: string | number | boolean) => param(k)?.set(v),
+    reset: (k: string) => param(k)?.reset(),
+    setAuto: (k: string, on: boolean) => param(k)?.setAuto(on),
+    press: (k: string, key: string, shift: boolean) => param(k)?.press(key, shift) ?? false,
+    typed: (k: string, t: string) => param(k)?.typed(t),
+    toFraction: (k: string, f: number) => param(k)?.toFraction(f),
+    check: (k: string, t: string) => checkText(ix, k, desk(), t),
+    choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
+    run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
+    batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
+    gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
+  };
+}
+
+/** The part's props for a node at a place, or null when the core does not draw it. */
+export function usePartView(def: Definition, node: Node, key: string, surface: Surface, cell?: CellWords): PartView | null {
+  const ck = cell ? JSON.stringify(cell) : '';
+  const model = useModel(s => partModel(ix, def, node, s.desk, key, surface, cell), `${def.id}|${key}|${node.param ?? ''}|${surface}|${ck}`);
+  const acts = useMemo(() => actionsOf(def, node, key), [def, node, key]);
+  return useMemo(() => (model ? assemble(model, acts) : null), [model, acts]);
+}
+
+function assemble(m: PartModel, a: ReturnType<typeof actionsOf>): PartView {
+  const params: ParamView[] = m.params.map(p => ({
+    ...p,
+    set: v => a.set(p.key, v), reset: () => a.reset(p.key), setAuto: on => a.setAuto(p.key, on),
+    press: (k, shift) => a.press(p.key, k, shift), typed: t => a.typed(p.key, t), toFraction: f => a.toFraction(p.key, f), check: t => a.check(p.key, t),
+  }));
+  return { ...m, params, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
 }

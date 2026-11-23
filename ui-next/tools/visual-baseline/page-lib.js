@@ -246,4 +246,42 @@
     }
     return vb.collect([...set], vb.fprops);
   };
+  /* ---- what computed styles do not show (ui-next): each element's role, accessible name, ARIA states, tooltip, own
+     words and attributes, as one digest per element, compared like a property. The role is the explicit one or the
+     element's implicit one; the name follows the accessible-name order for what the pages use (aria-labelledby,
+     aria-label, the text of a button, link, option or heading, an input's label, then the title). Own words are the
+     element's own text nodes, spaces collapsed (whitespace between elements is no difference). Attributes are every
+     aria-*, data-*, title, tabindex, hidden, disabled, type, placeholder, role, for, href, alt, value and checked; the
+     inline style and the class are the computed styles' business. */
+  const IMPLICIT = { button: 'button', a: 'link', input: 'textbox', textarea: 'textbox', select: 'combobox', nav: 'navigation', main: 'main', header: 'banner', aside: 'complementary', h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', ul: 'list', li: 'listitem', output: 'status', section: 'region', article: 'article', img: 'img', svg: 'graphics-document' };
+  const NAMED_BY_TEXT = /^(button|link|option|heading|radio|tab|menuitem|switch|checkbox)$/;
+  const squash = s => s.replace(/\s+/g, ' ').trim();
+  const roleOf = el => el.getAttribute('role') || (el.localName === 'input' && /^(checkbox|radio|range)$/.test(el.type) ? ({ checkbox: 'checkbox', radio: 'radio', range: 'slider' })[el.type] : IMPLICIT[el.localName] || '');
+  const nameOf = el => {
+    const by = el.getAttribute('aria-labelledby'); if (by) return squash(by.split(/\s+/).map(id => document.getElementById(id)?.textContent || '').join(' '));
+    const al = el.getAttribute('aria-label'); if (al !== null) return squash(al);
+    if (NAMED_BY_TEXT.test(roleOf(el))) { const t = squash(el.textContent || ''); if (t) return t; }
+    if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return squash(l.textContent); }
+    return squash(el.getAttribute('title') || '');
+  };
+  const ATTR = /^(aria-.*|data-.*|title|tabindex|hidden|disabled|type|placeholder|role|for|href|alt|value|checked|open)$/;
+  vb.semOf = el => {
+    const own = squash([...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(''));
+    const attrs = [...el.attributes].filter(a => ATTR.test(a.name)).map(a => a.name + '=' + a.value).sort();
+    const live = (el.localName === 'input' || el.localName === 'textarea') ? ['value:' + el.value] : [];
+    return [roleOf(el), nameOf(el), own, ...attrs, ...live].join('␟');
+  };
+  vb.semantics = () => { vb.keys(); const out = []; for (const el of document.querySelectorAll('body *')) { const k = vb.map.get(el); if (k) out.push([k, vb.semOf(el)]); } return out; };
+
+  /* ---- a part recorded on its own (ui-next): the first element matching a selector and everything under it, keyed from
+     the selector, so the same control compares wherever each page puts it */
+  vb.recordPart = sel => {
+    const root = document.querySelector(sel); if (!root) return null;
+    vb.finish(); vb.relayout();
+    const map = new Map(), walk = (el, key) => { map.set(el, key); let i = 0; for (const c of el.children) { walk(c, key + '>' + c.localName + ':' + i); i++; } };
+    walk(root, sel);
+    const els = [...map.keys()], saved = vb.map; vb.map = map;
+    const recs = vb.collect(els); vb.map = saved;
+    return { recs, sem: els.map(el => [map.get(el), vb.semOf(el)]) };
+  };
 })();

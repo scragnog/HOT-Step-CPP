@@ -5,6 +5,7 @@
 import { createRoot } from 'react-dom/client';
 import './styles/index.ts';
 import './i18n/index.ts';
+import './load.ts';
 import { App } from './App.tsx';
 import { mockEngine } from './services/mockEngine.ts';
 

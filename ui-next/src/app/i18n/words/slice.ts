@@ -3,7 +3,7 @@
 // definition's words under the keys stringsOf() gives them). These are ids like any other message, so a locale's
 // table translates them the same way; `{name}` slots are filled by say().
 
-export const UI_EN: { [id: string]: string } = {
+export const WORDS: { [id: string]: string } = {
   'ui.brand.label': 'HOT-Step: go to Create',
   'ui.brand.title': 'Create',
   'ui.nav': 'Main',
@@ -48,8 +48,16 @@ export const UI_EN: { [id: string]: string } = {
   'ui.saved': 'Saved',
   'ui.saved.title': 'Your desk, songs and settings are kept in this browser as you work',
   'ui.undo': 'Undo',
+  'ui.undo.label': 'Undo {label}',
+  'ui.undo.title': 'Undo {label} (Ctrl+Z). {put}.',
+  'ui.redo.label': 'Redo {label}',
+  'ui.redo.title': 'Redo {label} (Ctrl+Shift+Z)',
   'ui.redo': 'Redo',
   'ui.undone': 'Undone: {what}',
+  'ui.undo.nothing': 'Nothing to undo',
+  'ui.undo.nothing.redo': 'Nothing to redo',
+  'ui.undo.closeFirst': 'Close this first to undo on the desk',
+  'ui.undo.closeFirst.redo': 'Close this first to redo on the desk',
   'ui.redone': 'Redone: {what}',
   'ui.ask': 'What should it sound like?',
   'ui.drafts': 'Drafts',
@@ -128,9 +136,10 @@ export const UI_EN: { [id: string]: string } = {
   'ui.xy.title': 'Drag anywhere, Shift for fine moves. Arrow keys nudge (Shift for bigger steps), Home and End move {x} to its ends, Page Up and Page Down step {y}; double-click resets.',
   'ui.xy.text': '{x} {xv}, {y} {yv}',
   'ui.pick.label': '{label}: {value}',
-  'ui.pick.prev': 'Previous {label}',
-  'ui.pick.next': 'Next {label}',
-  'ui.toast.close': 'Dismiss',
+  'ui.pick.prev': 'Previous {label|lower}',
+  'ui.pick.next': 'Next {label|lower}',
+  'ui.toast.close': 'Dismiss this message',
+  'ui.toast.close.title': 'Dismiss',
   'ui.engines.title': 'Engine',
   'ui.empty.title': 'Nothing on the desk yet',
   'ui.empty.picker': 'Open the picker',

@@ -51,8 +51,12 @@ export interface Option {
   /** On a chip selector or a segmented row where the label does not fit. */
   short?: Text;
   tip?: Text;
-  /** What an LCD picker prints for it ("-14 LUFS", "V2.1"). Default: the label in capitals. */
+  /** What an LCD prints for it ("-14 LUFS", "V2.1"): the LCD picker, a pedal's read-out, a side unit's screen.
+   *  Default: the label in capitals. */
   lcd?: Text;
+  /** What an LCD picker and its list print for it, where that differs from what a read-out prints (`lcd`): the Tiled
+   *  decoder's picker says "Tiled V2.1" where its read-out says "V2.1". Default: `lcd`. */
+  pick?: Text;
   /** The LCD's small second line for it ("refine only"). */
   detail?: Text;
   /** Values this option was saved under before, read as this one when saved data is loaded (docs/05, "Saved
@@ -348,7 +352,9 @@ export interface Thumb {
   per?: { engines: EngineId[]; file: string }[];
 }
 
-export type Category = 'Compose' | 'Engine' | 'Chain' | 'Words';
+/** The groups modules are offered in, in this order (the Modules panel, the picker). A new one is added here. */
+export const CATEGORIES = ['Compose', 'Engine', 'Chain', 'Words'] as const;
+export type Category = (typeof CATEGORIES)[number];
 
 interface DefBase {
   id: string;
@@ -369,7 +375,7 @@ interface DefBase {
 }
 
 /** What a module may change per engine. */
-export type ModuleOverride = { engines: EngineId[] } & Partial<Pick<ModuleDef, 'name' | 'quickName' | 'desc' | 'tierSummary'>> & { size?: Partial<Size> };
+export type ModuleOverride = { engines: EngineId[] } & Partial<Pick<ModuleDef, 'name' | 'quickName' | 'desc' | 'tierSummary' | 'starter'>> & { size?: Partial<Size> };
 
 export interface ModuleDef extends DefBase {
   kind: 'module';
@@ -389,6 +395,9 @@ export interface ModuleDef extends DefBase {
   per?: ModuleOverride[];
   /** Its name at Quick when Quick shows less of it ("Tempo"). */
   quickName?: Text;
+  /** Offered on the empty desk: its place among the offers (`at`), and, for the first, the words the empty Quick desk
+   *  names it with ("Add tempo, a seed or pedals from Modules"). */
+  starter?: { at: number; noun?: Text };
   /** What the tile shows, one list for every tier: a node with `tiers` appears only at those tiers. A Lab-only
    *  module (labUnder) shows at Lab alone, so its nodes need no tiers. */
   face: Node[];

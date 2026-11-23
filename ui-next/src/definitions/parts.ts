@@ -152,7 +152,10 @@ export const PARTS = {
   powerButton: {
     kind: 'control', edits: ['boolean'], drive: 'click', css: ['25-module-planner.css'],
     doc: 'A terminal power switch with its word (● planner) and the scope switch (● Lua plugins): the switch a whole instrument hangs on.',
-    opts: { look: { type: ['term', 'scope'], doc: 'term: the terminal bar; scope: on a scope read-out.' } },
+    opts: {
+      look: { type: ['term', 'scope'], doc: 'term: the terminal bar; scope: on a scope read-out.' },
+      name: { type: 'text', doc: 'Its accessible name, where its printed word alone does not say what it switches ("Post-processing chain" for "Chain").' },
+    },
   },
   lockButton: {
     kind: 'control', edits: ['boolean'], drive: 'click', css: ['15-controls.css', '25-module-seed.css'],
@@ -481,6 +484,14 @@ export interface BoundParam {
   set(value: Value, step?: string, slots?: { [slot: string]: string | number }, also?: { [param: string]: Value }): void;
   setAuto(on: boolean): void;
   reset(): void;
+  /** The value contract's keys (arrows, Shift, Page Up and Down, Home, End) on a number: true when the key was one of
+   *  them and the value moved by it (src/derive/models.ts keyStep, the contract's one statement). */
+  press(key: string, shift: boolean): boolean;
+  /** A number typed in: read as the page writes numbers (parseTyped); outside its range it is put at the end and the
+   *  page says so, and what is no number is said and changes nothing. */
+  typed(text: string): void;
+  /** A hand's place along a number's range, 0 to 1. */
+  toFraction(f: number): void;
 }
 
 /** A state the node binds. `apply` takes the name of one of its StateDef's steps; the step's words come from the

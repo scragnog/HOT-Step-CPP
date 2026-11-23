@@ -1,145 +1,112 @@
 // The Pedalboard's body (the concept's post face, paintBoard and pedalHTML, 27-pedalboard.js): the head with the board
 // module's face (its chain switch) and the count, then the board: the cables, the pedals in chain order, and the side
-// units. Every pedal and unit is drawn from its definition: laid out from its parameters by the core (boardNodes), its
-// own face nodes by the generic renderer. No pedal or unit has a component of its own.
+// units. Every pedal and unit is drawn from what the core says of it (pedalModel: its state, its words, its body laid
+// out from its parameters, at the tier); each laid-out control is a node like any other, drawn by its part on the
+// pedal's surface. No pedal or unit has a component of its own; each redraws only when its own model changes.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Definition, ModuleDef, Node, PedalDef, UnitDef } from '../../definitions/types.ts';
-import { boardCount, boardNodes, defName, idleOf, nodeKeys, paramWords, usedHere, valueOf, type Cell as LaidCell } from '../../derive.ts';
+import { boardModel, nodeKeys, pedalModel, type CellModel } from '../../derive.ts';
 import { defOf, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
-import { Icon } from '../parts/icons.tsx';
-import { PART_VIEWS } from '../parts/registry.ts';
+import { Icon } from '../kit/icons.tsx';
 import { Face, NodeView } from '../render/Face.tsx';
-import { bind } from '../render/bind.ts';
+import { useModel } from '../render/useModel.ts';
+import { setSwitch } from '../render/bind.ts';
 import { fixCables, snapPedals, watchBoard } from './cables.ts';
 
-const HOW = { id: 'part.knob.howTo', en: 'Drag up or down (hold Shift for fine steps), scroll, or use the arrow keys. Double-click to reset.' };
-
-/** One laid-out cell: a knob, a choice, a text field or a switch, bound to its parameter as any node is. */
-function LaidOut({ def, cell, keys }: { def: Definition; cell: LaidCell; keys: Map<Node, string> }) {
-  const desk = useDesk(s => s.desk), say = useSay();
-  if (cell.part === 'node') return cell.node ? <NodeView def={def} node={cell.node} keys={keys} desk={desk} /> : null;
-  if (cell.part === 'plate' || !cell.param) return null;
-  const node = { part: cell.part, param: cell.param } as Node, View = PART_VIEWS[cell.part];
-  if (!View) return null;
-  const props = bind(def, node, desk), w = paramWords(ix, cell.param, desk), f = w.face;
-  if (cell.part === 'knob') {
-    const full = w.label, label = f.short ? w.short! : w.label;
-    return <View {...props} def={def} nodeKey="" cell={{ small: true, bare: !!f.unit && f.unit !== '%', label, aria: full, title: ui('pedal.tip', { a: full, b: HOW }) }} />;
-  }
-  if (cell.part === 'ledButton') return <View {...props} def={def} nodeKey="" cell={{ small: true }} />;
-  /* a choice or text: an LCD selector with its caps label after it */
-  const text = ix.params.get(cell.param)!.p.type === 'text';
+/** One laid-out cell: a knob, a choice, a text field or a switch, bound to its parameter as any node is, or one of
+ *  the pedal's own nodes. A choice or a text stands in an LCD selector with its caps label after it (or, on a unit,
+ *  before it). */
+function LaidOut({ def, cell, keys, unit }: { def: Definition; cell: CellModel; keys: Map<Node, string>; unit?: boolean }) {
+  const say = useSay(), surface = def.kind === 'unit' ? 'unit' : 'pedal';
+  const node = useMemo(() => cell.node ?? ({ part: cell.part, param: cell.param } as Node), [cell.node, cell.part, cell.param]);
+  if (cell.part === 'plate' || (!cell.param && !cell.node)) return null;
+  const view = <NodeView def={def} node={node} nodeKey={cell.node ? keys.get(cell.node) ?? '' : ''} keys={keys} surface={surface} cell={cell.words} />;
+  if (cell.part === 'node' || cell.part === 'knob' || cell.part === 'ledButton') return view;
+  if (unit) return <div className="lcdsel"><span className="kl">{say(cell.label)}</span>{view}</div>;
   return (
     <div className={`lcdsel${cell.beside ? ' psw-rev' : ''}`} style={cell.beside && !cell.shown ? { visibility: 'hidden' } : undefined}>
-      <View {...props} def={def} nodeKey="" cell={{}} />
-      <span className={`kl${text ? ' cdot-lcd' : ''}`} data-ctl={text ? cell.param : undefined}>{say(w.label)}</span>
+      {view}
+      <span className={`kl${cell.text ? ' cdot-lcd' : ''}`} data-ctl={cell.text ? cell.param : undefined}>{say(cell.label)}</span>
     </div>
   );
 }
 
-function Pedal({ def, chainOn }: { def: PedalDef; chainOn: boolean }) {
-  const say = useSay(), desk = useDesk(s => s.desk), keys = useMemo(() => nodeKeys(def), [def]);
-  const { cells } = boardNodes(ix, def, desk);
-  const lab = desk.tier === 'lab', on = def.on ? valueOf(ix, def.on, desk) === true : true;
-  const idle = idleOf(ix, def, desk), name = def.short && !lab ? { id: `create.${def.id}.short`, en: def.short } : defName(def, desk), full = defName(def, desk);
-  const tip = [def.short && !lab ? say(full) : '', idle ? say(idle.says) : ''].filter(Boolean).join('. ');
-  const knobs = cells.filter(c => c.part === 'knob' && !c.beside && c.shown), plates = cells.filter(c => c.part === 'plate');
-  const sels = cells.filter(c => (c.part === 'pick' || c.part === 'textField' || c.part === 'chips') && !c.beside);
-  const nodes = cells.filter(c => c.part === 'node'), switches = cells.filter(c => (c.part === 'ledButton' && c.param !== def.on) || !!c.beside);
-  const units = lab && knobs.length >= 3 ? 2 : 1;
-  const n = knobs.length + plates.length, cols = n <= 5 ? n : Math.ceil(n / 2), why = plates[0]?.plate;
-  let mid: React.ReactNode = null;
-  if (desk.tier === 'studio') {
-    const main = cells.find(c => c.part === 'knob');
-    mid = <div className="pmid">{main?.shown ? <LaidOut def={def} cell={main} keys={keys} /> : nodes.map((c, i) => <LaidOut key={i} def={def} cell={c} keys={keys} />)}</div>;
-  }
-  if (lab) mid = (
-    <>
-      {knobs.length ? <div className="pknobs" style={{ '--cols': cols } as CSSProperties}>
-        {knobs.map(c => <LaidOut key={c.param} def={def} cell={c} keys={keys} />)}
-        {plates.map((c, i) => <div key={c.param} className="kn kn-empty" aria-hidden="true" {...(!i && why ? { 'data-blank': say(why), style: { '--span': Math.min(plates.length, cols) } as CSSProperties } : {})} />)}
-      </div> : null}
-      {sels.length ? <div className="psels">{sels.map(c => <LaidOut key={c.param} def={def} cell={c} keys={keys} />)}</div> : null}
-      {nodes.map((c, i) => <LaidOut key={i} def={def} cell={c} keys={keys} />)}
-      {switches.length ? <div className="psw">{switches.map(c => <LaidOut key={c.param + (c.beside ?? '')} def={def} cell={c} keys={keys} />)}</div> : null}
-    </>
-  );
-  const foot = def.on ? bind(def, { part: 'ledButton', param: def.on } as Node, desk).params[def.on] : undefined;
+const Pedal = memo(function Pedal({ def }: { def: PedalDef }) {
+  const say = useSay(), keys = useMemo(() => nodeKeys(def), [def]), m = useModel(s => pedalModel(ix, def, s.desk), def.id);
+  const cell = (c: CellModel, i: number) => <LaidOut key={(c.param ?? '') + (c.beside ?? '') + i} def={def} cell={c} keys={keys} />;
+  const lab = m.tier === 'lab', why = m.plates[0]?.plate;
   return (
-    <div className={`pedal u${units} ${on && chainOn ? '' : 'off'} ${def.on && on && !chainOn ? 'held' : ''} ${idle ? 'idle' : ''} ${def.on && !on ? 'byp' : ''} ${def.on ? '' : 'neutral'}`} data-pid={def.id} style={{ '--h': def.hue } as CSSProperties} title={tip || undefined}>
-      <b>{say(name)}</b>{mid}
-      <span className="led" title={idle ? say(idle.says) : undefined} />
-      {foot ? <button className="foot" data-foot={def.on!} aria-pressed={on} aria-label={say(ui(on ? 'pedal.off' : 'pedal.on', { name: full }))} onClick={() => foot.set(!on)} />
+    <div className={m.cls} data-pid={def.id} style={{ '--h': m.hue } as CSSProperties} title={m.tip ? say(m.tip) : undefined}>
+      <b>{say(m.name)}</b>
+      {m.tier === 'studio' ? <div className="pmid">{m.mid.map(cell)}</div> : null}
+      {lab ? <>
+        {m.knobs.length ? <div className="pknobs" style={{ '--cols': m.cols } as CSSProperties}>
+          {m.knobs.map(cell)}
+          {m.plates.map((c, i) => <div key={c.param} className="kn kn-empty" aria-hidden="true" {...(!i && why ? { 'data-blank': say(why), style: { '--span': Math.min(m.plates.length, m.cols) } as CSSProperties } : {})} />)}
+        </div> : null}
+        {m.sels.length ? <div className="psels">{m.sels.map(cell)}</div> : null}
+        {m.nodes.map(cell)}
+        {m.switches.length ? <div className="psw">{m.switches.map(cell)}</div> : null}
+      </> : null}
+      <span className="led" title={m.idle ? say(m.idle) : undefined} />
+      {m.foot ? <button className="foot" data-foot={m.foot.key} aria-pressed={m.foot.on} aria-label={say(m.foot.label)} onClick={() => setFoot(def, m.foot?.key, !m.foot!.on)} />
         : <span className="always">{say(ui('pedal.always'))}</span>}
-      <button className="px tab" data-pedalx={def.id} aria-label={say(ui('pedal.take', { name: full }))} title={say(ui('pedal.take.title'))} onClick={() => useDesk.getState().remove(def.id, pedalFocusAfter(def.id))}><Icon name="x" size={12} /></button>
+      <button className="px tab" data-pedalx={def.id} aria-label={say(ui('pedal.take', { name: m.full }))} title={say(ui('pedal.take.title'))} onClick={() => useDesk.getState().remove(def.id, pedalFocusAfter(def.id))}><Icon name="x" size={12} /></button>
     </div>
   );
-}
+});
 
-function Unit({ def, chainOn }: { def: UnitDef; chainOn: boolean }) {
-  const say = useSay(), desk = useDesk(s => s.desk), keys = useMemo(() => nodeKeys(def), [def]);
-  const { cells } = boardNodes(ix, def, desk), on = valueOf(ix, def.on, desk) === true, name = defName(def, desk);
-  const lab = desk.tier === 'lab';
-  const objs = cells.filter(c => c.part === 'node'), knobs = lab ? cells.filter(c => c.part === 'knob' && c.shown) : [], rest = lab ? cells.filter(c => c.part !== 'node' && c.part !== 'knob' && c.part !== 'plate' && c.param !== def.on).sort((a, b) => def.params.findIndex(p => p.key === a.param) - def.params.findIndex(p => p.key === b.param)) : [];
-  const power = bind(def, { part: 'ledButton', param: def.on } as Node, desk).params[def.on];
+const Unit = memo(function Unit({ def }: { def: UnitDef }) {
+  const say = useSay(), keys = useMemo(() => nodeKeys(def), [def]), m = useModel(s => pedalModel(ix, def, s.desk), def.id);
   return (
-    <div className={`pedal xunit ${def.wide ? 'u-wide' : ''} ${on && (!def.gated || chainOn) ? '' : 'off'}`} data-xid={def.id} title={def.gated ? say(ui('unit.gated')) : undefined}>
-      <b>{say(name)}{def.gated && !chainOn ? <small className="u-wait">{say(ui('unit.wait'))}</small> : null}</b>
+    <div className={m.cls} data-xid={def.id} title={m.gated ? say(ui('unit.gated')) : undefined}>
+      <b>{say(m.name)}{m.waits ? <small className="u-wait">{say(ui('unit.wait'))}</small> : null}</b>
       <div className="u-ctls">
-        {objs.map((c, i) => <LaidOut key={i} def={def} cell={c} keys={keys} />)}
-        {knobs.map(c => <LaidOut key={c.param} def={def} cell={c} keys={keys} />)}
-        {rest.map(c => <UnitCtl key={c.param} def={def} cell={c} keys={keys} />)}
+        {m.nodes.map((c, i) => <LaidOut key={i} def={def} cell={c} keys={keys} unit />)}
+        {m.knobs.map(c => <LaidOut key={c.param} def={def} cell={c} keys={keys} unit />)}
+        {m.switches.map(c => <LaidOut key={c.param} def={def} cell={c} keys={keys} unit />)}
       </div>
       <div className="u-lip">
-        <button className="u-pow" data-foot={def.on} aria-pressed={on} aria-label={say(ui(on ? 'pedal.off' : 'pedal.on', { name }))} title={say(ui(on ? 'unit.off' : 'unit.on'))} onClick={() => power?.set(!on)}>
+        <button className="u-pow" data-foot={m.foot?.key} aria-pressed={!!m.foot?.on} aria-label={say(m.foot?.label)} title={m.foot?.title ? say(m.foot.title) : undefined} onClick={() => setFoot(def, m.foot?.key, !m.foot?.on)}>
           <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 2v6" /><path d="M4.6 4.4a5 5 0 1 0 6.8 0" /></svg>
         </button>
-        <button className="u-x" data-pedalx={def.id} aria-label={say(ui('pedal.take', { name }))} title={say(ui('pedal.take.title'))} onClick={() => useDesk.getState().remove(def.id, pedalFocusAfter(def.id))}><Icon name="x" size={12} /></button>
+        <button className="u-x" data-pedalx={def.id} aria-label={say(ui('pedal.take', { name: m.name }))} title={say(ui('pedal.take.title'))} onClick={() => useDesk.getState().remove(def.id, pedalFocusAfter(def.id))}><Icon name="x" size={12} /></button>
       </div>
     </div>
   );
-}
+});
 
-/** A unit's control at Lab, laid out as the concept's rackCtl lays it out: a choice of up to four as chips, a longer
- *  choice as an LCD selector with its label first, a switch as an LED button, text as an LCD input. */
-function UnitCtl({ def, cell, keys }: { def: Definition; cell: LaidCell; keys: Map<Node, string> }) {
-  const desk = useDesk(s => s.desk), say = useSay();
-  if (!cell.param) return null;
-  if (cell.part === 'ledButton') return <LaidOut def={def} cell={cell} keys={keys} />;
-  const node = { part: cell.part, param: cell.param } as Node, View = PART_VIEWS[cell.part as keyof typeof PART_VIEWS];
-  if (!View) return null;
-  const props = bind(def, node, desk), w = paramWords(ix, cell.param, desk);
-  return <div className="lcdsel"><span className="kl">{say(w.label)}</span><View {...props} def={def} nodeKey="" cell={{}} /></div>;
-}
+/** A foot switch or a unit's power: its key set as any control sets it, one step named by the core. */
+const setFoot = (def: PedalDef | UnitDef, key: string | undefined, on: boolean) => { if (key) setSwitch(def, key, on); };
 
-/** After a pedal or unit leaves, focus goes to the next one on the board, else the one before, else the board's grip. */
-function pedalFocusAfter(id: string): string {
-  const s = useDesk.getState(), ring = s.board.filter(x => { const d = defOf(x); return d && usedHere(d, s.desk.engine); }), i = ring.indexOf(id);
-  const sel = (x: string) => (defOf(x)?.kind === 'unit' ? `[data-xid="${x}"] .u-pow` : `[data-pid="${x}"] .foot, [data-pid="${x}"] .px`);
-  return [ring[i + 1], ring[i - 1]].filter((x): x is string => !!x).map(sel).concat('[data-m="post"] .grip').join(', ');
+/** After a pedal or unit leaves, focus goes to the next one on the board, else the one before, else the board's grip:
+ *  places tried in that order (A-18). */
+function pedalFocusAfter(id: string): string[] {
+  const s = useDesk.getState(), ring = boardModel(ix, s.desk, s.board), all = [...ring.pedals, ...ring.units], i = all.indexOf(id);
+  const sel = (x: string) => (defOf(x)?.kind === 'unit' ? [`[data-xid="${x}"] .u-pow`] : [`[data-pid="${x}"] .foot`, `[data-pid="${x}"] .px`]);
+  return [all[i + 1], all[i - 1]].filter((x): x is string => !!x).flatMap(sel).concat('[data-m="post"] .grip');
 }
 
 export function Board({ def }: { def: ModuleDef }) {
-  const say = useSay(), s = useDesk(), { desk, board } = s;
-  const chain = def.params.find(p => p.type === 'boolean')?.key ?? null, chainOn = chain ? valueOf(ix, chain, desk) === true : true;
-  const pedals = board.map(id => defOf(id)).filter((d): d is PedalDef => d?.kind === 'pedal' && usedHere(d, desk.engine));
-  const units = board.map(id => defOf(id)).filter((d): d is UnitDef => d?.kind === 'unit' && usedHere(d, desk.engine));
+  const say = useSay(), b = useModel(s => boardModel(ix, s.desk, s.board), 'board'), tier = useModel(s => s.desk.tier, 'tier');
   const boardEl = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { snapPedals(boardEl.current, desk.tier === 'lab'); requestAnimationFrame(() => fixCables(boardEl.current)); });
-  useEffect(() => watchBoard(boardEl.current, () => desk.tier === 'lab'), [desk.tier]);
+  /* the board's geometry is measured again when what stands on it changes, and when it resizes (watchBoard) */
+  const shape = [tier, b.pedals.join(), b.units.join(), b.chainOn].join('|');
+  useLayoutEffect(() => { snapPedals(boardEl.current, tier === 'lab'); requestAnimationFrame(() => fixCables(boardEl.current)); }, [shape, tier]);
+  useEffect(() => watchBoard(boardEl.current, () => tier === 'lab'), [tier]);
   return (
     <>
-      <div className="board-head"><Face def={def} /><span data-ppcount="">{say(boardCount(ix, desk, chain))}</span></div>
-      <div ref={boardEl} className={`board${chainOn ? '' : ' bypassed'}${pedals.length ? '' : ' empty'}`}>
+      <div className="board-head"><Face def={def} surface="tile" /><span data-ppcount="">{say(b.count)}</span></div>
+      <div ref={boardEl} className={`board${b.chainOn ? '' : ' bypassed'}${b.pedals.length ? '' : ' empty'}`}>
         <svg className="cables" aria-hidden="true" />
         <div className="pedals" data-pedals="">
-          {pedals.length ? pedals.map(d => <Pedal key={d.id} def={d} chainOn={chainOn} />) : <span className="board-empty">{say(ui('board.empty'))}</span>}
+          {b.pedals.length ? b.pedals.map(id => <Pedal key={id} def={defOf(id) as PedalDef} />) : <span className="board-empty">{say(ui('board.empty'))}</span>}
         </div>
         <div className="units" data-units="">
-          {units.length ? <><span className="units-label">{say(ui('board.units'))}</span>{units.map(d => <Unit key={d.id} def={d} chainOn={chainOn} />)}</> : null}
+          {b.units.length ? <><span className="units-label">{say(ui('board.units'))}</span>{b.units.map(id => <Unit key={id} def={defOf(id) as UnitDef} />)}</> : null}
         </div>
       </div>
     </>

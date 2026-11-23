@@ -27,7 +27,9 @@ The slice is a working vertical cut of the page:
   such pedal (Tiled decoder, MM3 latent refiner, StableStep, PP-VAE, Spectral lifter, Vocal naturalizer, Pre-VST gain,
   VST3 chain, Final normalizer) and the side unit Whisper lyrics, with the cables, balanced rows and snapped heights;
 - the three tiers, structurally (what each tier shows); undo and redo for every change; the autosave and its restore;
-  light and dark; the five desktop widths.
+  light and dark; the five desktop widths, with the panels as drawers at 1180px and below;
+- every part the slice has drawn right on every surface a definition can put it (a tile's body, a row, a rack, a well,
+  an LCD, a tile's foot, a labelled pairing, a pedal, a side unit), and the registration points the packages add to.
 
 Not built, and left as seams: the prompt card and the lyric sheet, the bespoke parts and the modules made of them, the
 picker, the engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
@@ -39,239 +41,343 @@ tier changes at once). "The plan for the rest" below divides them into packages.
 
 ```
 ui-next/
-  index.html               the concept's document skeleton (no doctype: see "Deviations"), the overlays' containers
+  index.html               the concept's document skeleton, with a doctype (standards mode, as the real application's
+                           page), the overlays' containers and the one #dd
   vite.config.ts           three builds: dev (dist/), --mode file (dist-file/index.html, one self-contained file),
-                           --mode test (dist-test/index.html, the same file with the compatibility layer)
-  eslint.config.js         the existing frontend's lint rules, for src/app
-  tsconfig.json            the core and the tools (Node); tsconfig.app.json: the React layer (DOM, JSX), same strictness
+                           --mode test (dist-test/index.html, the same file with the test layer and the parts gallery);
+                           HS_SWITCH=<name> builds the test page with one feature switched off or one defect planted
+                           (dist-switch/)
+  eslint.config.js         the existing frontend's lint rules and the React layer's two (below, "The rules the lint keeps")
   src/
-    definitions/, derive/  the core (unchanged in kind; additions below)
+    definitions/, derive/  the core; derive/models.ts is what the view draws (below, "How a part is written")
     app/
-      main.tsx             entry: styles, translation, the engine, the test layer in the test build only
+      main.tsx             entry: styles, translation, load.ts, the engine, the test layer in the test build only
+      load.ts              loads every file of features/ and parts/: what they register is the page's
       App.tsx              rooted in #app; portals into the top bar, the skip link, the toast and the live region
-      model/               the core indexed once (ix), definitions by id, board order
+      kit/                 the part kit: everything a part may use (definePart, PartView, useSay, Icon, LcdFace, the
+                           value contract's gestures)
+      parts/               one file per part (or a few small ones together); each registers itself with definePart
+      render/              Face.tsx (the generic renderer), Tile.tsx, bind.ts (a node's model and its actions),
+                           useModel.ts (a view's subscription, redrawn only when its model changes)
+      register/            the registration points: keys.ts, slots.ts and Slot.tsx, actions.ts, undoable.ts, services.ts
+      features/            what the page does that is not a part: each file registers keys, slot fills, named actions,
+                           undoable state (undo-keys, tier-keys, drawers, motion-offscreen)
+      model/               the core indexed once (ix; the test build adds the parts gallery), definitions by id
       store/desk.ts        the desk store: desk, engines' book, modules and board order, undo/redo, autosave
-      store/panels.ts      which side panels stand open (view state)
+      store/panels.ts      which side panels stand open, which drawer is open
       services/            engine.ts (the boundary), mockEngine.ts (the concept's simulation)
-      i18n/                i18next with the generated English table; ui.ts: the page's own words
-      styles/              concept/ (the concept's 62 stylesheets, unchanged) and index.ts (their load order)
-      parts/               one component per part of the inventory, registry.ts (name to component), value.ts (the
-                           number contract and gestures), xyMotion.ts, LcdFace.tsx, Dropdown.tsx, doAction.ts
-      render/              Face.tsx (the generic renderer), Tile.tsx (the tile shell), bind.ts
-      board/               Board.tsx (the Pedalboard's body, pedals and side units laid out), cables.ts
-      desk/                Desk.tsx, pack.ts (the pure layout), layout.ts (measuring and placing), move.ts, focus.ts
-      shell/               TopBar, Theme, Panels (+ panelState.ts), Centre, Toast, tier.ts, engines.ts (marks, colours)
-      thumbs/              the thumbnail frames around the definitions' drawings
-      testing/compat.ts    the test-only compatibility layer (never in dist/ or dist-file/)
+      i18n/                i18next on an instance of its own; words/*.ts: the page's own words, one file per package
+      styles/              concept/ (the concept's stylesheets, unchanged), index.ts (their order), rebuild/*.css (the
+                           rebuild's own, loaded after: parts on every surface, the shared part states, standards mode)
+      board/, desk/, shell/, thumbs/   the shells: the Pedalboard, the desk and its layout, the bars and panels
+      testing/             compat.ts (the concept's globals for the two tools) and compat/*.ts (one per package);
+                           gallery.ts (every part on every surface)
   tools/
-    behaviour/             the concept's behaviour suite, brought here (+ slice.json, --slice)
-    visual-baseline/       the concept's visual baseline, brought here (+ slice-states.mjs, --states, --scope)
-    concept/collect-pack.mjs  records the concept's desk layouts into tools/fixtures/pack.json
-    test-view.ts           the layout against those layouts, and the core's selectors the view uses
+    behaviour/             the concept's behaviour suite; acceptance/*.json (one per package), scenarios/30-slice.mjs
+                           (the slice's own claims, which pass on the concept too), switches.mjs + switches/*.json
+    visual-baseline/       the concept's visual baseline; slice-states/*.mjs (one per package), slice-accepted.json,
+                           gallery.mjs (every part on every surface), plants.mjs + plants/*.json (planted defects)
+    test-view.ts           the layout, the core's selectors and models, the parts' contract at run time
+    test-parts-contract.mjs  the parts' contract in the lint: the review's planted part refused
 ```
 
-`npm run check` runs both type checks, the validator, the request comparison, the core's tests and tools/test-view.ts.
-`npm run dev` serves the page; `npm run build:file` writes the file the owner publishes; `npm run build:test` the file
-the two tools drive; `npm run lint` lints the React layer.
+`npm run check` runs both type checks, the validator, the request comparison, the core's tests, tools/test-view.ts and
+tools/test-parts-contract.mjs. `npm run dev` serves the page; `npm run build:file` writes the file the owner publishes;
+`npm run build:test` the file the tools drive; `npm run lint` lints the React layer.
 
 ## Styles
 
 The concept's stylesheets are used as they are: `src/app/styles/concept/` is a byte-for-byte copy of the concept's
-`src/css`, imported in its file-name order by `styles/index.ts`, and the build neither minifies nor rewrites them
-(`cssMinify: false`; the built stylesheet equals the concatenation, comments and spacing aside). The components emit the
-concept's element structure, classes and `data-*` attributes, so these rules apply unchanged and the concept's visual
-baseline compares the two pages directly. To change the look, change a stylesheet here (and only here, from now on);
-never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's
-grid placement).
+`src/css`, imported in its file-name order by `styles/index.ts`, and never edited here. The rebuild's own stylesheets are
+`styles/rebuild/*.css`, loaded after the concept's in name order (the number is the layer, as in the concept), each a
+file of its own; a package adds one and edits no list:
+
+- `15-parts.css`: parts on the surfaces the concept never drew them on (the meter off the board, the LED switch on paper,
+  an XY pad in a row, a small button on paper and on an LCD, a wide control in a well, a segmented choice on a pedal);
+- `35-part-states.css`: what every part inherits from its markup alone (root `data-ctl` and `.changed`, a direct `.kl`
+  label): the page's mono caps label, its changed mark, focus ring and disabled state, in the hardware's ink on a pedal
+  or an LCD. Every rule has no weight (`:where`), so wherever the concept styles a part its own rule wins;
+- `10-standards.css`: the two boxes standards mode changes in the slice's part of the page (the engine caret, the LCD
+  picker's arrows).
+
+The components emit the concept's element structure, classes and `data-*` attributes, so its rules apply unchanged;
+never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's grid
+placement). A part's look on every surface is checked by the parts gallery (below, "The test layer").
 
 ## The page skeleton
 
-`index.html` is the concept's skeleton: the skip link, `header.top`, `#app`, the other pages' stand-in and every
-overlay's container, in the concept's order, so that the visual baseline's element keys (an element is keyed by the
-nearest unique id above it, or by its position among its siblings) agree. React is rooted in `#app`; it draws the top
-bar into `header.top`, the toast into `#toast` and the live region into `#say` through portals, and the engine panel and
-the dropdown into their containers.
+`index.html` is the concept's skeleton with a doctype: the skip link, `header.top`, `#app`, the other pages' stand-in
+and every overlay's container, in the concept's order, and the concept's one `#dd` (the dropdown every pick shares), so
+that the visual baseline's element keys agree. React is rooted in `#app`; it draws the top bar into `header.top`, the
+toast into `#toast`, the live region into `#say` and a pick's list into `#dd` through portals.
 
 ## The store
 
 `store/desk.ts` holds the core's `Desk` (engine, tier, values, auto switches, state, what is on it), the engines'
-`EngineBook`, the modules in the user's order and the board in chain order (the desk's `on` is built from them, in that
-order, which is the order the records keep), and the undo and redo history. It decides nothing about a value:
+`EngineBook`, the modules in the user's order and the board in chain order, and the undo and redo history. It decides
+nothing about a value:
 
 - **A value** changes only through a `Change` a part's setter built (`bindPart`): cleaned, set on the engine's grid and
-  named by the core. `commit(change)` applies it and records one step with the core's words.
+  named by the core. `commit(change, from)` applies it and records one step; `from` names the part, so a gesture belongs
+  to the part that began it and a change from another part meanwhile (an answer from the server) is a step of its own.
 - **A gesture** (a drag, a held key, typing in one field, a run of wheel steps, a run of moves on one grip) is one step:
-  a part calls `gesture.begin(tag)` and `gesture.end(tag)` (parts/value.ts); changes inside merge, and the merged step is
-  named again by the core from the first desk to the last (`stepWords`).
-- **The make-up** (add, remove, move) and an engine switch are steps named by the core (`deskStep`, `engineStep`);
-  what a pedal arrives as is the core's (`arrivalChange`); `switchEngine` does the engine switch.
+  a part calls `v.gesture.begin()` and `end()`; changes inside merge, named again by the core from the first desk to the
+  last (`stepWords`).
+- **The make-up**: where something added goes and what leaves with something removed are the core's (`addTo`,
+  `removeFrom`), the steps' words too (`deskStep`, `engineStep`, with what Undo puts back: "the modules", "the pedals",
+  "the engine"); what a pedal arrives as is the core's (`arrivalChange`); `switchEngine` does the engine switch.
 - **Undo** puts back only the paths a step changed and nothing has changed since (a value, an auto switch, a state, the
-  modules, the board, the engine, the book), as the concept's desk entries do; redo is the same the other way.
-- **The autosave** writes `savedDeskOf()` on every change (`hotstep.create.desk`); the next visit reads it with
-  `readDesk()`, which cleans every value on the way in. The panels' choice is kept beside it (`hotstep.create.panels`),
-  the theme as `hotstep.theme`.
+  modules, the board, the engine, the book, and every package's undoable state), as the concept's desk entries do; redo
+  is the same the other way. Its toast and the live region say what was undone or redone; with nothing to undo the keys
+  say so.
+- **A package's own state** lives in a store of its own (`store/<package>.ts`). If Undo should cover it (a workflow
+  opened, the drafts), the package registers it (`register/undoable.ts defineUndoable`) and changes it inside
+  `deskStep(words, fn)`: one step, put back path by path like the rest. **State the server owns** (a take that arrives, a
+  job's progress, a model list) is not registered: Undo never takes back what the server has done, and an arrival is no
+  step; a value an arrival writes into the desk goes through a part's setter, which acts on the desk in force.
+- **The autosave** writes `savedDeskOf()` whenever the desk or the book changes (a toast or a focus request writes
+  nothing), as `hotstep.create.desk`; the next visit reads it with `readDesk()`, which cleans every value on the way in.
 
 ## The service boundary
 
 `services/engine.ts` is the one interface between the page and the server, grouped as the existing frontend's API layer
 groups it (`ui/src/services/api.ts`: songs, generate, models, plus the option lists and the VST3 chain). `generate`
 takes the Create intent the core builds (`createIntent()`), never anything the view assembles. `mockEngine.ts` is the
-concept's simulation (its songs, its model catalogue, a queue that renders on a clock with the concept's stage words),
-and is what the single-file build runs. The real implementation is a thin adapter over `generateApi`, `songApi`,
-`modelApi` and `vstApi`, chosen in `main.tsx`; the page needs no other change.
+concept's simulation. A package that needs more of the server (the build session, the planner's runs) defines a service
+of its own in its own file and registers it (`register/services.ts defineService`), its mock beside it; the real
+adapters are package 10's.
 
-## How a part component is written
+## How a part is written
 
-A part's component receives `ViewProps`: the core's `PartProps` for its node on the desk (`bindPart`: its node
-resolved for the engine and tier, `params` with a setter for exactly what the node binds, `state`, `reads`, `batch`),
-plus its definition, its node's translation key and its children already drawn. It emits the concept's markup for the
-part, draws from what it is given, and changes the desk only through the setters. A worked example, the LED switch:
+A part is given its node's model and the actions that change exactly what its node binds, and nothing else
+(`kit/types.ts PartView`). The model is the core's (`derive/models.ts partModel`): every parameter the node binds with
+its value, its words as the page writes them, its range and its place on it, its options with their words and which
+is chosen, whether it is changed, auto or applies; the node's label (a shell's, else the node's, else the parameter's),
+its accessible name, its tooltip, its own words (a note's text, an XY pad's axis words), what it reads, its actions'
+words, a choice row's choices and what each sets, a meter's scale, an LCD's lines with their case; the tier, the engine
+and the surface it stands on. Its actions are `p.set`, `p.reset`, `p.setAuto`, `p.press` (the value contract's keys),
+`p.typed` (a typed number), `p.toFraction` (a hand's place), `p.check` (a field's check while typing), `v.choose`,
+`v.run`, `v.batch` and `v.gesture`. Every action acts on the desk as it is when it is called, so a part that waits (a
+file that loads, a list that arrives, a run that takes seconds) names its step from the value it really changes, is
+cleaned against the engine in force, and changes nothing if what it binds has gone. A part cannot name a step, write
+another key, format a value or decide a default; it has no route to the store (the lint, below).
+
+The LED switch, whole:
 
 ```tsx
-export function LedButton(props: ViewProps) {
-  const say = useSay(), desk = useDesk(s => s.desk);
-  const p = Object.values(props.params)[0];          // the one parameter its node binds
+import { definePart, useSay, type PartView } from '../kit/index.ts';
+
+export function LedButton(v: PartView) {
+  const say = useSay(), p = v.params[0];
   if (!p) return null;
-  const on = p.value === true;                        // the value in force, as the core gives it
-  const label = props.cell?.label                     // a shell's label (a pedal), else the node's words, else the
-    ?? (props.nodeKey ? nodeWord(ix, props.node, desk, props.nodeKey, 'label') : undefined)
-    ?? paramWords(ix, p.key, desk).label;             // parameter's: every word is a message with its key
+  const on = p.value === true;
   return (
-    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`}
-      data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} onClick={() => p.set(!on)}>
-      <i />{say(label)}
+    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} onClick={() => p.set(!on)}>
+      <i />{say(v.label)}
     </button>
   );
 }
+definePart('ledButton', LedButton);
 ```
 
-It never computes the changed marker (`p.changed`), the words (`nodeWord`, `paramWords`) or the step (`p.set` returns
-nothing; the store records the step the core named). A number control keeps the value contract by calling
-`onValueKey(e, p)` (arrows, Shift, Page, Home, End) and the gesture helpers; it may compute where a hand or a key moves
-the value (that is how it is operated) and the setter cleans it. To add a part: its entry in `PARTS`
-(src/definitions/parts.ts), its component in `src/app/parts/`, its line in `parts/registry.ts`.
+A part's file registers itself (`definePart`) and is loaded by being in `src/app/parts/` (`load.ts`); [06](06-how-to.md)
+section 4 has the steps to add one. A part draws the housing the concept gives it on its surface: `labelled` is the
+foot pairing on paper (its label first) and an LCD selector on hardware (the control first), a text field is an LCD input
+on hardware and a field on paper.
 
 ## How the generic renderer works
 
-`render/Face.tsx` walks a definition's `face`: for each node it asks the core whether it is drawn (`nodeShown`: shown
-at this tier, on this engine and under its condition, bound to something the engine has, and for a container at least
-one child drawn), binds it (`bind`), looks its part up in the registry and renders it with its children, and wraps it
-when the core says it stands back (`dimOf`). Node keys come from the core (`nodeKeys`), so a node's words are
-translated under the same key `stringsOf()` gives them. It has no branch for any module.
+`render/Face.tsx` walks a definition's face: for each node it asks for its model (`render/bind.ts usePartView`: the
+core's `partModel`, null when the core does not draw the node), looks its part up (`kit/define.ts`), and draws it with its
+children on the surface the part gives them (a rack, a well, an LCD and a tile's foot are surfaces of their own); a node
+that stands back is wrapped as the concept wraps it. It has no branch for any module or part.
 
-The shells are drawn from the definition too. `render/Tile.tsx` is the tile (its width class from `size`, its group,
-its name at the tier from `tileName`, the strip it becomes from `stripOf`/`stripWords`, the "Also set" line from
-`alsoSet`). `board/Board.tsx` is the Pedalboard's body: each pedal and side unit is laid out from its parameters by the
-core (`boardNodes`), each cell bound like a node; the board's count is `boardCount`, a pedal's idle reason `idleOf`.
+The shells are drawn from the core's models too: `render/Tile.tsx` from `tileModel` (its width at the tier and engine,
+its group and name, the engine's note, the strip it becomes, the "Also set" line); `board/Board.tsx` from `boardModel`
+(the chain, the count, the pedals and units the engine uses) and, for each pedal and unit, `pedalModel` (its state, on,
+bypassed, held, idle or always, its classes, its name at the tier, its tip, its foot switch, its body laid out at the
+tier); `desk/Desk.tsx` from `deskModel` (the tiles shown, the empty desk's offers and words, what waits parked, the note
+naming the hidden Lab modules); the Modules panel from `cardModel` (each card's name, tip, tags and how it matches the
+filter, in the page's language).
 
-## A bespoke part, or a mostly bespoke module
+## Rendering
 
-A bespoke part is a part like any other: an entry in `PARTS` with `responsible` saying exactly what it does, a component
-under its name, its line in the registry. Its definition binds the parameters and state it edits and lists what it
-reads. It is given `ViewProps` and nothing else. It may draw anything, keep view state (a caret, a hover, an
-animation), talk to the engine through `services/` for what its row says (the build board's session, the model list),
-and ask for one of its definition's named steps (`p.set(v, 'step', slots)`, `state.apply('step', next)`). It may not
-keep its own copy of a value, decide a default, a range, a label or an undo name, write a value its node does not bind,
-or reach into the store. A module that is mostly one bespoke part (Seed, Takes, Adapters, Build) is still a definition
-rendered by the generic renderer: its face is that part's node beside the data nodes around it. Until a package builds
-a part, its node renders as a marked seam (`data-seam`), so its module still appears with everything else data.
+Each view subscribes to its own model (`render/useModel.ts`): on every change of the store it asks the core for its
+model, compares it with the last as JSON, and redraws only when it differs. A knob that turns redraws that knob, the
+words that show its value and the Undo button; the tiles, the board and the desk do not redraw. The desk is laid out
+again only when its make-up changes (tier, engine, the modules in order, the window's width), a tile's shape changes
+(its width class, a strip, the engine's note, the "Also set" line) or a tile's body changes size (a ResizeObserver);
+the board's pedals are measured again when what stands on it changes or it resizes.
+
+Measured with the review's method (`perf.js`: every ACE-Step module, all pedals and units at Lab, StableStep's Refine
+dragged through 60 pointer moves; CDP metrics, two runs each):
+
+| | Script | Style | Layout | Layouts | DOM mutations outside the pedal |
+| --- | --- | --- | --- | --- | --- |
+| Concept | 89 to 117 ms | 56 to 60 ms | 23 to 28 ms | 68 to 69 | about 1,780 |
+| Before (the slice as reviewed) | 273 to 295 ms | 755 to 846 ms | 81 to 89 ms | 290 to 291 | 4,343 |
+| Now | 97 to 144 ms | 41 to 70 ms | 12 to 21 ms | 33 to 35 | 91 |
+
+## The rules the lint keeps
+
+`npm run lint` keeps the two rules the design rests on (eslint.config.js):
+
+1. **A part has no route to the store.** A file in `src/app/parts/` imports react, react-dom, the part kit, its sibling
+   parts and `src/app/services`, and nothing else, and names no page global (`window`). The review's planted part (one
+   added line that wrote two other modules' values under a made-up undo name) is refused on its imports; written through
+   `window` it is refused too (tools/test-parts-contract.mjs, in `npm run check`).
+2. **The view decides nothing about a value.** Outside the files whose job is values (the store, the binding, the test
+   layer, the model index, translation, the services), the React layer may not name an engine, read a definition field
+   that decides a value or what shows (`engines`, `labUnder`, `builtIn`, `source`, `gated`, `when`, `range`,
+   `default`, `on`, `per`), import the core's value functions (`valueOf`, `has`, `applies`, `changed`, `resolve`...),
+   format, parse or re-case a number or a word, or write English in its markup. It cannot catch a decision written with
+   none of these (two values the core gave, compared), English in a template literal or a constant, a definition field
+   read through another variable name, or the same rule stated twice inside the core: those remain the review's.
+
+## Adding without colliding
+
+A work package adds files and registers them; it edits none of the shared ones. The registration points:
+
+| What a package adds | Where | How it is found |
+| --- | --- | --- |
+| A part | `src/app/parts/<Part>.tsx` | `definePart(name, Component)`; loaded by `load.ts` |
+| A part's look, a package's stylesheet | `src/app/styles/rebuild/<NN>-<name>.css` | loaded after the concept's, in name order |
+| A keyboard shortcut | a file in `src/app/features/` | `onKey({ id, when, run, order })` (register/keys.ts) |
+| Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
+| A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts) |
+| State of its own | `src/app/store/<package>.ts` | its own store; `defineUndoable(name, { read, write })` when Undo covers it |
+| A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
+| Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
+| Concept globals its scenarios call | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
+| Its acceptance | `tools/behaviour/acceptance/<package>.json` | `run.mjs --slice` runs every file |
+| Its features switched off | `tools/behaviour/switches/<package>.json` | `switches.mjs` checks each makes a scenario fail |
+| Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs` | `slice-states.mjs` gathers them |
+| Its accepted visual differences | entries of its own, passed with `--accept` | counted exactly |
+
+The core and the definitions are shared on purpose and do not collide in practice: the inventory already lists every
+part the packages build (`PARTS`, 73 parts, 73 used), every definition exists, and a package changes a definition only
+to give a node its part's options.
 
 ## Translation
 
 Every word is a message (an id and its slots, `derive/messages.ts`); `useSay()` fills it from the locale's table held by
-i18next, the existing frontend's mechanism. English is generated: the core's sentences (`coreStrings`), each
-definition's words under the keys `stringsOf()` gives them, and the page's own chrome (`i18n/ui.ts`, keyed `ui.*`). A
-locale adds a table of the same ids. Components hold no English; the brand is the one literal.
+i18next, on an instance of the page's own (`createInstance`, so the application's default instance and its language
+detector are never shared). English is generated: the core's sentences (`coreStrings`, and `EN` in messages.ts, which
+holds the core's words for tiles, pedals, cards and the empty desk), each definition's words under the keys `stringsOf()`
+gives them, and the page's own chrome (`i18n/words/*.ts`, keyed `ui.*`). A locale adds a table of the same ids.
+Components hold no English (the lint); the brand is the one literal. `say(slot, { upper: true })` prints a word in
+capitals in the page's language (an LCD).
 
 ## Additions to the core made for the view
 
 Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branch for a module:
 
-- `derive/desk.ts`: `nodeShown`, `usedHere`, `tileAtTier`, `tileName` (a module's name at Quick is its quickName),
-  `deskStep`, `engineStep`, `removedWords`, `parkedOn`, `boardCount`, `arrivalChange`.
-- `derive/strings.ts`: `nodeKeys`, `nodeWord`, `nodeOptWord`, `actionKey`, `stripKey`, `stripWords`, `actionWords`,
-  `bareText` (a pedal knob's number without its unit), `lcdMsg`, `optionsOf`, `checkText`.
-- Messages for the make-up steps, the removal toasts, the parked tray and the board's count.
+- `derive/models.ts`: what each view draws (`partModel`, `paramModel`, `tileModel`, `pedalModel`, `boardModel`,
+  `deskModel`, `cardModel`), `pedalState`, `chainOf`, `meterScale`, `keyStep` (the value contract's one statement),
+  `fractionValue`, `parseTyped` (the inverse of how the page writes a number), the make-up rules `addTo`, `removeFrom`,
+  `boardOrder`, `emptyDesk`, `startersOn`.
+- `derive/parts.ts bindPart`: setters on the desk in force (a getter), dropping a change to what no longer binds;
+  `press`, `typed`, `toFraction`; a typed value's clamp said even when it changes nothing (`tell`).
+- `derive/desk.ts`: `nodeShown`, `usedHere`, `tileAtTier`, `tileName`, `deskStep` (with what Undo puts back),
+  `engineStep`, `removedWords`, `parkedOn`, `boardCount`, `arrivalChange`; `derive/engine.ts newOn` (the first switch to
+  an engine says what it brings); `derive/strings.ts pickMsg`, `splitUnit`, and the rest the view asks.
+- The definitions: an option's `pick` words (what an LCD picker prints where it differs from a read-out: closed
+  deviations 3 and 4), a module's `starter` (the empty desk's offers and the words it names the first with),
+  `CATEGORIES` (the Modules panel's groups, in one place), an engine's `tag`, the power button's `name`.
+- `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
+  words, so adding a module no one has put on the desk renames nothing (SL-13).
 
-Defects found while building the view, fixed in the core or the definitions:
-
-- `boardNodes` laid out a text that stands `beside` a switch twice (StableStep's fixed seed);
-- `idleOf` keyed a pedal's idle words under a key `stringsOf()` never makes (no translation could reach them), and
-  `rowOf` keyed a Quick choice given by an engine line without its line;
-- `workflowOf` and `savedDeskOf` wrote the modules in definition order, losing the user's order;
-- "Also set" named a side unit's setting without the unit ("Beam 8" for the concept's "Whisper lyrics beam 8");
-- the Tiled decoder lacked the concept's Lab note on Stable Audio 3 while Lua plugins are off (pedals/tile.ts).
-
-## The test layer, and running both tools against the rebuild
+## The test layer, and running the tools against the rebuild
 
 `src/app/testing/compat.ts` gives the two tools what they reach into the concept page for, on top of the store, in the
-test build only: `S` (engine, tier, modules, board, values, panels; set it, then `render()` applies it as a scene, not a
-step), `render`, `setVal` (a value set as a control would set it), `get`, `toast`, the catalogue (`MODS`, `PEDALS`,
-`EXTRAS`, `PED`, `BK`), `UNDO` and `REDO`, `vsStray` (always empty: every change is a step), and each step's words for
-the suite's naming check. It translates the concept's engine ids (`mm3`) and choice values (`Crossover`, by label).
+test build only: `S` (set it, then `render()` applies it as a scene, not a step), `render`, `setVal`, `get`, `toast`, the
+catalogue, `UNDO` and `REDO`, and `vsStray`, which detects a change to the desk that no undo or redo recorded (outside a
+scene). A package's additions are a file of its own in `testing/compat/` (the slice's: `addItem`, `switchEngine`,
+`enterEngine`, `setTier`, `shown`, `removeMod`, `paintUndo`, `S.eng`).
 
 ```
 npm run build:test
 set PLAYWRIGHT_MODULE=<node_modules/playwright>
-node tools/behaviour/run.mjs --slice                 # the scenarios in the slice (tools/behaviour/slice.json)
-node tools/behaviour/run.mjs --slice --pending       # the pending ones in the slice
+node tools/behaviour/run.mjs --slice                 # the acceptance: every file in tools/behaviour/acceptance/
+node tools/behaviour/switches.mjs                    # each slice feature switched off makes a scenario fail
 node tools/visual-baseline/vb.mjs capture concept-slice --states slice --scope slice --page <concept>/hotstep-tiers.html
 node tools/visual-baseline/vb.mjs capture rebuild-slice --states slice --scope slice --plan-from concept-slice
-node tools/visual-baseline/vb.mjs compare concept-slice rebuild-slice --scope slice
+node tools/visual-baseline/vb.mjs compare concept-slice rebuild-slice --scope slice --accept tools/visual-baseline/slice-accepted.json
+node tools/visual-baseline/gallery.mjs               # every part on every surface, both themes, every tier
+node tools/visual-baseline/plants.mjs                # each planted defect is caught
 ```
 
-Both tools default to `dist-test/index.html`. The visual baseline's slice matrix (`slice-states.mjs`, 155 states) is
-the concept's own matrix cut to what the slice draws: every engine at every tier with every slice module, pedal and side
-unit, light and dark, the five desktop widths, reduced motion, parked, the empty desk, the hidden-modules note, changed
-values, the chain bypassed, a removal with Undo showing; on the concept page the lyric sheet is withdrawn first (it
-heads the desk and the lyrics package has not been built). `--scope slice` compares the desk, the note above it, the
-tier switch, Undo and Redo, and the top bar's brand, navigation, engine button and theme switch.
-
-**Results.** Visual baseline: 155 states compared, **99 identical** element for element (with forced hover, focus and
-active states), **56 differing**, every one of them only in the two elements listed as deviations 3 and 4 below (and
-the boxes that hold them). Behaviour: the 6 normal scenarios in the slice pass (50 checks), and both pending scenarios in
-the slice now pass (F-20, F-25). Over the whole suite, which mostly exercises what later packages build, 27 of 250
-normal scenarios pass today, and 3 of 36 pending.
+- **Behaviour.** `acceptance/slice.json` lists 38 scenarios, every one whose subject is something the slice builds: 31
+  of the concept's suite and 7 of the slice's own (`scenarios/30-slice.mjs`: knob keys, undo and redo by key, button and
+  toast with what they say, the autosave and its restore, the theme, an engine switch, the tier keys, adding and
+  removing; each passes on the concept page too). 10 that look like the slice's are excluded, each with its reason (4
+  vacuous without a picker, 1 without a prompt card, 2 that contradict F-25, 3 that need later packages). All 38 pass.
+  `switches.mjs` builds the page with each of 11 slice features switched off in turn (undo, redo, autosave, restore,
+  knob keys, keyboard moves, add, remove, tier switch, engine switch, theme) and runs the acceptance: each makes 1 to 6
+  scenarios fail.
+- **Looks, against the concept.** 161 states (the concept's matrix cut to the slice, the dropdown open, the engine
+  toast, and three that record parts the slice's modules do not draw where the concept does: Flow's rack and foot, the
+  Mastering VU meter, a Quick choice row), in standards mode, compared on every element's computed style (with forced
+  hover, focus and active), its role, accessible name, own words and attributes, 11 screenshots of the desk, and the
+  parts on their own; the scope is the desk, the bars' slice, the Modules panel, the toast and the dropdown. Result:
+  **identical**, with the differences accepted on purpose (`slice-accepted.json`, each with its reason and its exact
+  count, so a new one of an accepted kind fails).
+- **Every part on every surface.** `gallery.mjs` draws the parts gallery (`testing/gallery.ts`: every control and
+  read-out of the inventory, generated from it, in a tile's body, a row, a rack, a well, an LCD, a tile's foot, a
+  labelled pairing, on a pedal and on a side unit, plus a bare new part's markup on each), both themes, every tier,
+  values changed: drawn inside its container, words at 3:1, the page's label, a changed mark, a choice that says which
+  is chosen, the concept's type and colours where the concept has the same part on the same kind of surface (20
+  references), and every look as it was recorded (`tools/fixtures/gallery.json`).
+- **Planted defects.** `plants.mjs` plants 15 defects one at a time (the review's 0 to 11, and three of a part's look off
+  its concept surface) and runs the comparison and the gallery: 15 caught. The review's 12 (knob keys dead) is
+  behaviour, caught by the switches.
 
 ## Deviations from the concept's markup
 
-1. **No doctype.** The concept's page has none and renders in quirks mode; so does the rebuild's, so the stylesheets
-   lay out identically. The real application's page has a doctype; see the questions below.
-2. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast and the live region
-   are portals into the concept's elements; the overlays' containers are empty until their packages fill them.
-3. **The Tiled decoder's LCD picker prints the option's `lcd` words, "V2.1"; the concept prints "TILED V2.1".** The
-   definition has one `lcd` for both the picker and the Studio read-out, which in the concept differ.
-4. **Whisper's Language picker prints "ANY LANGUAGE" (the option's `lcd`, which the unit's LCD needs); the concept
-   prints its label, "AUTO-DETECT".** Same cause: one option field serves two LCDs that print different words. Both
-   want a definition-level fix (an option's picker words beside its `lcd`), a question for the maintainer.
-5. **Adding a Lab module outside Lab offers Lab in a toast with an action**, not in the popover (#pop is the overlays
-   package's).
-6. **The engine panel holds the five engine cards only** (their marks and names); the taglines, specs and models are
-   the engine panel package's.
-7. **An XY pad changed from elsewhere (an undo, a scene, another tier) is drawn where it is**, as the concept draws a
-   pad it has just rebuilt; it springs only while it is being worked.
-8. **The page keeps its records under its own keys** (`hotstep.create.desk`, `hotstep.theme`), not the concept's
-   `hs3-*`; the core reads the concept's saved shape (`migrate`, version 0) for when importing is built.
-9. **Words the definitions hold differ in a few places from the concept's** (Avoid's placeholder "jazz, piano, slow..."
-   for "…"): text, not structure; the computed styles agree.
+1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
+   the dropdown are portals into the concept's elements; the overlays' containers are empty until their packages fill
+   them. Package 10 undoes this when the page moves into the real application's root.
+2. **Adding a Lab module outside Lab offers Lab in a toast with an action**, not in the popover (#pop is package 8's).
+3. **The engine panel holds the five engine cards only**; the taglines, specs and models are package 5's.
+4. **An XY pad changed from elsewhere is drawn where it is**, as the concept draws a pad it has just rebuilt; it springs
+   only while it is being worked.
+5. **The page keeps its records under its own keys** (`hotstep.create.desk`, `hotstep.create.engines`,
+   `hotstep.theme`); the core reads the concept's saved shape (`migrate`, version 0) for when importing is built.
+6. **A knob says its value with its unit to a screen reader** (`aria-valuetext`), and a segmented choice is a named
+   group; every button and input says its type. The concept's give the bare number and no names.
+7. **Adding from the Modules panel keeps focus on the card** (F-25, found by the review loop); the concept moves it to
+   the new tile (two of its scenarios, excluded from the acceptance with that reason).
+8. **An XY pad's key run is a step of its own**, and a double-click reset is a "Reset" step; the concept merges keys
+   pressed soon after a drag into the drag's step and lets a reset back to the start of a run cancel it. Each gesture
+   one step is what every other control does here.
+9. **One toast at a time**; the concept stacks up to three (F-12) and lets Tab into a toast that carries Undo (F-11).
+   The toast's package (6) builds both.
+10. **The concept's delegation hooks are absent** (`data-sig`, `data-toast`, `data-luaon`, `data-setq`, `data-base`):
+    the rebuild's buttons run their own actions. A dropdown option's `data-opt` is its value, not its label.
+11. **A Quick row's marker for a value between its choices** is package 1's (the row says the value in words now).
+12. **A tile moved up or down by the keyboard moves its top** that way; the concept compares the middles of the places
+    it could take, which a shorter place in the same row can pass as "up". The same on every layout the concept's
+    suite checks.
 
-A design gap found by the how-to below: the `meter` part's look exists only on the Pedalboard (`.board .vu` in
-27-pedalboard.css), so a meter in a module's tile (the how-to's Dynamics example) is drawn unstyled. The inventory says
-`meter` is usable anywhere; its stylesheet should say so too.
+The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
+the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
+3, 4 (an LCD picker's words) and 9 (Avoid's ellipsis) are closed.
 
-## Adding a module and a pedal from the how-to, on a copy
+## Adding from the how-to, on a copy
 
-On a scratch copy of `ui-next`, following [06](06-how-to.md) sections 2 and 3 and nothing else: `pedals/widener.ts` as
-written (36 lines), `modules/dynamics.ts` as written with its options and wire notes filled in (24 lines), 4 lines in
-`index.ts`, 1 unit in `parts.ts`, `node tools/thumb.ts widener` (9 lines), the Dynamics drawing copied from a similar
-module (22 lines), `npm run docs`: 9 files, 125 lines, no component. `npm run check` passed. In the single-file build both
-appear in the Modules panel with their drawings and on the desk at Quick (the Loudness row), Studio and Lab (the meter,
-the two knobs, the segmented choice; the pedal's knob and switch), with no seam; "Loud" is one step named "Loudness:
-Standard → Loud", a knob is one step ("Dynamics ceiling −0.3 dBTP → −0.4 dBTP", "Stereo widener width 100% → 105%"),
-the changed marker shows, Quick's "Also set" names the widener, Undo and Redo work, and a reload restores both. It took
-three parts the slice had not needed (segmented, choiceRow, meter), now built, and found two defects, now fixed: the
-Modules panel had no group for a new category ("Chain"), and redrawing a card's drawing on every render swallowed a
-click that began on it.
+On a scratch copy of `ui-next`, following [06](06-how-to.md) as it is (the trials are in the revision's notes), each
+with `npm run check` and `npm run lint` passing and looked at in both themes at every tier:
+
+| Job | Files written by hand | Lines | Besides |
+|---|---|---|---|
+| Add a parameter (APG eta on two engines) | 1 (`guidance.ts`) | 11 | `npm run docs` (2 generated docs) |
+| Add a pedal (a stereo widener) | 2 (its definition, the index) | 55 + 2 | its drawing (13 lines), written by `node tools/thumb.ts widener`; docs |
+| Add a module of existing parts, a face per tier (Dynamics) | 4 (definition, a unit in `parts.ts`, index, drawing) | 37 + 1 + 2 + 17 | docs |
+| Add a part (a stepped slider) used by two definitions | 5 (`PARTS`, component, stylesheet, the two definitions) | 4 + 24 + 17 + 1 + 1 | `gallery.mjs --record` once it looks right; docs |
+| Remove a module (Avoid) | 4 (its file deleted, index, `retired.ts`, the factory workflow naming it) | 31 deleted; 2 + 2 + 2 | docs. The slice's own browser checks add Avoid (`30-slice.mjs`, `00-slice.mjs`): removing a slice module means giving them another, as 06 says |
+
+A new part is checked on every surface by the gallery with no line written there; until its looks are recorded the
+gallery fails on it alone.
 
 ## How the rebuild will sit inside the real application beside Tailwind
 
@@ -288,62 +394,30 @@ each reset reaches the other's pages. The choices, for the maintainer:
 3. **Keep the Create page its own entry** (its own HTML document under the same server) until the other screens move
    to the same design language, then merge.
 
-And one question that comes first: the real application's page is in standards mode (it has a doctype) and the concept
-in quirks mode. The concept's stylesheets were tuned in quirks mode; before the rebuild moves into the real page, the
-concept and the rebuild should both be put in standards mode and the visual baseline captured again, so that the move
-itself is proved. Recommendation: option 1, after that switch.
+The page is already in standards mode, as the real application's is, and proved so against the concept. Translation
+runs on an instance of its own, so it cannot take over the application's i18next. Recommendation: option 1.
 
 ## The plan for the rest
 
-Each package owns the files named, depends on what is listed, and is accepted when its behaviour scenarios pass (with
-`--only`) and its visual-baseline states match the concept with the scope widened to its region (states.mjs families;
-add a slice-states entry when the concept's state needs a withdrawal). Order: 1 and 2 first (every later module needs
-them), then 3 to 8 in parallel, then 9 and 10.
+Each package adds files and registers them (above, "Adding without colliding"); it owns the slice files named for it,
+and no other package edits them. Each is accepted when its acceptance file passes, its switches each make a scenario
+fail, its visual states match the concept with its accepted differences counted, the gallery passes with its parts in
+it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to 8 in parallel, then 9 and 10.
 
-1. **Shared controls.** `parts/`: fader, ruler, numberBox, lcdNumber, chips, termChips, lcdChips, pill, flag,
-   lcdButton, recButton, lockButton, powerChip, token, lookback, the textField and textArea looks, choiceRow's marker
-   for a value between choices, the pick variants plugin, chip, model and stamp with the dropdown's variants. Depends on:
-   the slice. Acceptance: `04-controls/*`, `10-desk-modules/keyboard-contracts`, `13-quick-studio/choice-rows-are-radio-groups`,
-   `14-lab-desk/knob-value-can-be-typed`, `18-tips-touch/short-plugin-menu-is-named-cards`; states `ov-dd-*`.
-2. **Containers and read-outs.** `parts/`: well, lcd, lcdRow, terminal, termBar, termLine, group, foot, deck, pair,
-   bank, link, dice, beatPulse, flowWindows, speedGauge, adhereCurve, planText, lrcPreview, coverSwatch, unitStatus,
-   unitBadge, dropZone, and the meter's look outside the board. With 1, every "data plus parts of its own" module whose
-   own part is a read-out renders (Repetition guard, Flow, Plans, Re-planning, Plan adherence, the side units). Acceptance:
-   `20-lab-round5/side-units-say-their-actions`, `22-engines-round5/side-units-fit-a-narrow-board-*`, `08-persistence-cables/cables`;
-   states `desk-*`, `w*-*` with those modules.
-3. **Bespoke instruments**, one package each, in parallel: Tempo (keyWheel, tapTempo, capChips), Sampler
-   (samplerScope), Seed (splitFlap, savedSeeds), Takes (takesReels), Adapters (cartridges), Timbre (timbreBlend,
-   recentRefs), Latent (latentCurve), Lead sheet (abcFoot and the score modal), Build by section (buildBoard, its
-   session calls in `services/`), Continue and Repaint (recordingSpan, repaintRegion). Each owns its part files and its
-   `services/` calls. Depends on 1 and 2. Acceptance: its `05-modules/*` scenario, its `22-` and `23-` scenarios, and the
-   states that show it (`pop-seeds`, `pop-adapters*`, `pop-build-*`, `repaint-source*`, `sched-*`, `latent-on`, `tap-armed`).
-4. **The prompt card and the lyric sheet.** `parts/` promptBox and lyricSheet; `shell/Centre.tsx`'s quickcol and
-   `desk/Desk.tsx`'s `LyricsSeam` are theirs; remove the withdrawal from `slice-states.mjs`. The layout already handles a
-   lyric sheet at the head of the desk (`lead`, `fill`). Acceptance: `06-prompt-generate/prompt-*`, `05-modules/lyrics`,
-   `01-desk/tiers`, `09-undo-storage/undo-keeps-a-later-edit-of-the-same-thing`; states `pop-lyrics*`, `pop-wildcards`,
-   `pop-mm3-caption`, `pop-yue-tags`, and every `desk-*` state without the withdrawal.
-5. **The engine panel and models.** `shell/TopBar.tsx`'s panel and meter, modelPicker, the engine log; `services`
-   models. Acceptance: `15-other-engines/model-list-as-wide-as-its-row`, `21-chrome-round5/model-steps-named-by-role`;
-   states `ov-engine*`, `ov-log*`, `pop-vram-full*`.
-6. **Generation, the go bar, Latest, the player and the song menu.** `shell/Centre.tsx`'s gobar and latest, new
-   `generate/` and `player/` folders; the real `services/` adapter (see 10). Acceptance: `06-prompt-generate/generate`,
-   `songs-player`, `00-smoke/smoke`, `21-chrome-round5/quick-player-names-its-song-*`; states `pop-running*`,
-   `pop-finished`, `pop-error*`, `pop-player*`, `ov-song-menu*`.
-7. **Workflows, revisions, drafts and storage.** `shell/Panels.tsx`'s Workflows body, a `workflows/` folder, the
-   unreadable-record handling over `records.ts`. Acceptance: `03-workflows/*`, `07-overlays-keys/drafts`,
-   `09-undo-storage/*`, `08-persistence-cables/old-shape-ignored`, `21-chrome-round5/unreadable-desk-kept-aside`; states
-   `pop-modified*`, `pop-rev-detail*`, `pop-rename*`, `ov-save*`, `ov-drafts*`.
-8. **The picker, the overlays and drag and drop.** The picker, the popover (and the Lab offer, deviation 5), notes,
-   tooltips and touch gestures, the focus ring, drag and drop onto the desk and the board. Acceptance: `07-overlays-keys/*`,
-   `02-dnd-panels/drag-*`, `18-tips-touch/*`, `01-desk/lab-modules`; states `ov-picker*`, `ov-notes*`, `ov-ideas*`, `drag-*`.
-9. **Motion.** The tier change as a View Transition (`shell/tier.ts`), the desk's FLIP slides and entrances, the
-   pedals' landing and the cables drawing out (`board/cables.ts`). Acceptance: `13-quick-studio/tier-change-keeps-the-place-*`,
-   `19-desk-round5/rapid-tier-changes-raise-no-error`, `23-sa3-hm-round5/reduced-motion-arrivals-are-ringed`.
-10. **The real application.** The real `Engine` over `ui/src/services`, the Tailwind coexistence chosen above, the
-    route in the real app, and the doctype question. Acceptance: the whole suite and the whole matrix, then the concept's
-    own states with no withdrawal.
+| Package | Adds (files of its own) | Registers | Slice files it owns and edits |
+| --- | --- | --- | --- |
+| 1. Shared controls | `parts/` fader, ruler, numberBox, lcdNumber, chips, termChips, lcdChips, pill, flag, lcdButton, recButton, lockButton, powerChip, token, lookback; `styles/rebuild/15-controls-1.css`; `acceptance/1-controls.json`, `switches/1-controls.json`, `slice-states/10-controls.mjs`, `compat/controls.ts` | `definePart` | `parts/Pick.tsx` and `parts/Dropdown.tsx` (the plugin, chip, model and stamp variants), `parts/ChoiceRow.tsx` (its marker), `parts/TextField.tsx`, `parts/TextArea.tsx` (their looks) |
+| 2. Containers and read-outs | `parts/` lcdRow, terminal, termBar, termLine, group, deck, pair, bank, link, dice, beatPulse, flowWindows, speedGauge, adhereCurve, planText, lrcPreview, coverSwatch, unitStatus, unitBadge, dropZone; `styles/rebuild/15-containers.css`; its acceptance, switches, states | `definePart` | `parts/containers.tsx` (if a container's housing changes) |
+| 3. Bespoke instruments, one each | `parts/<Part>.tsx`, `styles/rebuild/25-<module>.css`, `services/<module>.ts` (Build's session, the planner's runs), `store/<module>.ts` for server-owned state, `compat/<module>.ts`, its acceptance, switches, states | `definePart`, `defineService`, `defineUndoable` where Undo covers it | none |
+| 4. Prompt card and lyric sheet | `parts/PromptBox.tsx`, `parts/LyricSheet.tsx`, `features/prompt.tsx`, `features/field-undo.ts`, `store/fields.ts`, `styles/rebuild/25-prompt.css`, its words, acceptance, switches, states | `fill('centre.prompt' / 'centre.quickLyrics' / 'desk.lead')`, `onKey({ id: 'field-undo', order: 10 })` (Ctrl+Z in a field first) | `tools/visual-baseline/slice-states/00-slice.mjs`: the lyric sheet's withdrawal goes |
+| 5. Engine panel and models | `parts/ModelPicker.tsx`, `features/engine-panel.tsx`, `services/models.ts`, its words, acceptance, states | `fill('engine.panel')`, `defineService` | `shell/TopBar.tsx` (the VRAM meter's figures) |
+| 6. Generation, go bar, Latest, player, song menu | `features/generate.tsx`, `generate/`, `player/`, `store/generate.ts` (the queue: server-owned, not undoable), `services/generate.ts` | `fill('centre.gobar' / 'centre.latest' / 'overlays')`, `onKey({ id: 'generate' })` (Ctrl+Enter) | `shell/Toast.tsx` (the stack of three, Tab into it) |
+| 7. Workflows, revisions, drafts, storage | `features/workflows.tsx`, `workflows/`, `store/workflows.ts` | `fill('panel.workflows')`, `defineUndoable('workflow')`, `deskStep` for opening one | `src/derive/records.ts` (unreadable records kept aside) |
+| 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
+| 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
+| 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
 
-What the slice will need changed as the packages land: `Desk.tsx`'s `LyricsSeam` and the quickcol (package 4); the
-Lab offer's toast becomes the popover (8); `TopBar.tsx`'s engine panel grows its models (5); `main.tsx` chooses the real
-engine (10); `slice-states.mjs` and `slice.json` grow with each package, and the deviations 3 and 4 close with a
-definition change.
+No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
+needs a new option on a part appends it (the type check refuses a clash, and the rows are independent); the generated
+pages of `docs/` (`npm run docs` rewrites them; a merge regenerates them); and the slice's acceptance and states files,
+which only package 4 touches (one line) and which every other package leaves alone by adding its own.

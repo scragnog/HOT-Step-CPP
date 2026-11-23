@@ -26,7 +26,7 @@ export const post = {
     },
   ],
   face: [
-    { part: 'powerButton', param: 'pp.on', label: 'Chain' },
+    { part: 'powerButton', param: 'pp.on', label: 'Chain', opts: { name: 'Post-processing chain' } },
   ],
   thumb: { file: 'post' },
 } satisfies ModuleDef;

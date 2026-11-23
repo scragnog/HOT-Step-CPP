@@ -50,7 +50,7 @@ export const wh = {
       type: 'choice',
       label: 'Language',
       default: 'auto',
-      options: { from: 'languages', include: [{ value: 'auto', label: 'Auto-detect', lcd: 'any language' }] },
+      options: { from: 'languages', include: [{ value: 'auto', label: 'Auto-detect', lcd: 'any language', pick: 'Auto-detect' }] },
       wire: 'param:whisperLanguage',
     },
   ],

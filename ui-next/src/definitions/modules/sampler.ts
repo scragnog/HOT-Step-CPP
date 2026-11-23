@@ -5,6 +5,7 @@ import type { ModuleDef } from '../types.ts';
 export const sampler = {
   kind: 'module',
   id: 'sampler',
+  starter: { at: 2 },
   name: 'Sampler',
   desc: 'Steps and guidance on a scope, plus solver, schedule and guidance plugins.',
   at: 80,

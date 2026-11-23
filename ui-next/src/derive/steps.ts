@@ -41,8 +41,9 @@ export function stepName(ix: Index, key: string, desk: Desk): Msg {
   const label = w.label.en!, own = nameOn(d, desk.engine), ownMsg = defName(d, desk);
   /* a pedal's or unit's switch labelled On is the pedal or unit */
   if (d.kind !== 'module' && d.on === key && label === 'On') return ownMsg;
-  /* every parameter's words on this engine, as the concept counts them: those another engine has too */
-  const same = [...ix.params.values()].filter(x => (x.p.key === key ? label : resolve(x.p, desk.engine).label).toLowerCase() === label.toLowerCase()).length;
+  /* the parameters that print the same words on this engine, among the definitions on the desk (a module, pedal or unit
+     no one has added renames nothing: SL-13), as the concept counts them: those another engine has too */
+  const same = [...ix.params.values()].filter(x => (x.d === d || (x.d.kind === 'module' && x.d.builtIn) || desk.on.has(x.d.id)) && (x.p.key === key ? label : resolve(x.p, desk.engine).label).toLowerCase() === label.toLowerCase()).length;
   return same > 1 && !label.toLowerCase().startsWith(own.toLowerCase()) ? msg('name.owned', { owner: ownMsg, label: w.label }) : w.label;
   void p;
 }

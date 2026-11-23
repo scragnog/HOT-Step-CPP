@@ -11,6 +11,7 @@ import { cleanState, setValue } from './values.ts';
 import { type Msg, msg } from './messages.ts';
 import { textMsg } from './strings.ts';
 import { stepChanges, stepWords, type StepWords } from './steps.ts';
+import { fractionValue, keyStep, parseTyped } from './models.ts';
 
 /** One undo step: what it changes, and its words. The store applies it and records it. */
 export interface Change {
@@ -32,22 +33,38 @@ export function applyChange(desk: Desk, c: Change): Desk {
 
 /** The props a node's part is given on the desk: setters for the parameters its node edits and the state it names,
  *  read-only values for what it reads (parameters with their auto switch and whether they apply and are on the desk,
- *  state, desk facts), and its children. `commit` receives every change, already named. */
-export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, commit: (c: Change) => void): PartProps {
+ *  state, desk facts), and its children. `commit` receives every change, already named.
+ *
+ *  `desk` is the desk the values are read from; pass a function returning the desk in force and every setter cleans,
+ *  names and checks its change against the desk as it is when the setter is called, not as it was when the part was
+ *  drawn: a setter held across other changes (a file that loads, a list that arrives, a run that takes seconds) names
+ *  its step from the value it really changes, and a change to what is no longer bound (another engine, the module off
+ *  the desk) is dropped. */
+export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (() => Desk), commit: (c: Change) => void, tell?: (m: Msg) => void): PartProps {
+  const now = typeof deskIn === 'function' ? deskIn : () => deskIn, desk = now();
   const node = nodeAt(ix, node0, desk);
   if (!node) throw new Error(`${node0.part} is not shown here`);
   const bound = editsOf(node).filter(k => has(ix, k, desk.engine));
   const live = new Set(liveDefs(ix, desk).map(x => x.id));
   /* a batch gathers every set of one gesture into one step */
-  let batch: { vals: Change['vals']; auto: Change['auto']; state: Change['state']; named?: { key: string; step: string; slots?: { [k: string]: string | number } }; said?: Msg } | null = null;
+  let batch: { at: Desk; vals: Change['vals']; auto: Change['auto']; state: Change['state']; named?: { key: string; step: string; slots?: { [k: string]: string | number } }; said?: Msg } | null = null;
   const finish = (b: NonNullable<typeof batch>) => {
-    const after = applyChange(desk, { ...b, words: { label: msg(''), put: msg('') } });
-    const words = stepWords(ix, desk, after, b.named ? { named: b.named } : undefined);
+    const after = applyChange(b.at, { ...b, words: { label: msg(''), put: msg('') } });
+    const words = stepWords(ix, b.at, after, b.named ? { named: b.named } : undefined);
     if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}) });
+    /* a typed value already at the end it was put at changes nothing, and is still said (21-knob.js) */
+    else if (b.said) tell?.(b.said);
   };
-  const change = (fn: (b: NonNullable<typeof batch>) => void) => {
-    if (batch) { fn(batch); return; }
-    const b = { vals: {}, auto: {}, state: {} }; fn(b); finish(b);
+  /* what the node binds is still there: its definition on the desk and the key on the engine in force */
+  const bindable = (at: Desk, k: string) => {
+    if (typeof deskIn !== 'function') return true;
+    const owner = ix.params.get(k)?.d ?? ix.states.get(k)?.d;
+    return !!owner && ((owner.kind === 'module' && !!owner.builtIn) || at.on.has(owner.id)) && (!ix.params.has(k) || has(ix, k, at.engine));
+  };
+  const change = (k: string, fn: (b: NonNullable<typeof batch>, at: Desk) => void) => {
+    if (batch) { if (bindable(batch.at, k)) fn(batch, batch.at); return; }
+    const at = now(); if (!bindable(at, k)) return;
+    const b = { at, vals: {}, auto: {}, state: {} }; fn(b, at); finish(b);
   };
   const stepOf = (owner: { key: string; steps?: StateDef['steps'] }, step: string) => {
     const s = owner.steps?.[step];
@@ -57,24 +74,36 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
   const allowed = (keys: string[], extra: string[], k: string) => {
     if (!keys.includes(k) && !extra.includes(k)) throw new Error(`${node.part} may not change ${k}: its node does not bind it, nor does the step it is taking`);
   };
+  /* one parameter set: cleaned on the engine in force; a typed value outside the range is said; a named step may set
+     what it lists */
+  const setOne = (k: string, value: Value, typed: boolean, step?: string, slots?: { [s: string]: string | number }, also?: { [x: string]: Value }) => {
+    const { p } = ix.params.get(k)!;
+    if (!step && also) throw new Error(`${node.part} changes other values beside ${k}: name the step that does`);
+    change(k, (b, at) => {
+      const r = setValue(ix, at, k, value, typed);
+      b.vals[k] = r.value; if (resolve(p, at.engine).auto) b.auto[k] = false; if (r.said) b.said = r.said;
+      if (step) {
+        const s = stepOf(p, step);
+        b.named = { key: k, step, ...(slots ? { slots } : {}) };
+        for (const [x, v] of Object.entries(also || {})) { allowed(bound, stepChanges(s), x); b.vals[x] = setValue(ix, at, x, v).value; }
+      }
+    });
+  };
   const params: Record<string, BoundParam> = {};
   for (const k of bound) {
     const { p } = ix.params.get(k)!;
     params[k] = {
       key: k, face: wordsOf(ix, p, desk), value: valueOf(ix, k, desk)!, text: textMsg(ix, k, desk), changed: changed(ix, k, desk), auto: isAuto(ix, k, desk), applies: applies(ix, k, desk),
-      set(value, step, slots, also) {
-        const r = setValue(ix, desk, k, value);
-        change(b => {
-          b.vals[k] = r.value; if (resolve(p, desk.engine).auto) b.auto[k] = false; if (r.said) b.said = r.said;
-          if (step) {
-            const s = stepOf(p, step);
-            b.named = { key: k, step, ...(slots ? { slots } : {}) };
-            for (const [x, v] of Object.entries(also || {})) { allowed(bound, stepChanges(s), x); b.vals[x] = setValue(ix, desk, x, v).value; }
-          } else if (also) throw new Error(`${node.part} changes other values beside ${k}: name the step that does`);
-        });
+      set(value, step, slots, also) { setOne(k, value, false, step, slots, also); },
+      press(key, shift) { const at = now(); if (!bindable(at, k)) return false; const to = keyStep(ix, k, at, key, shift); if (to === null) return false; setOne(k, to, false); return true; },
+      typed(text) {
+        const at = now(); if (!bindable(at, k)) return;
+        const r = parseTyped(ix, k, at, text);
+        if ('error' in r) tell?.(r.error); else setOne(k, r.value, true);
       },
-      setAuto(on) { change(b => { b.auto[k] = on; }); },
-      reset() { change(b => { b.vals[k] = null; delete b.auto[k]; if (resolve(p, desk.engine).auto) b.auto[k] = true; }); },
+      toFraction(f) { const at = now(); if (!bindable(at, k)) return; const v = fractionValue(ix, k, at, f); if (v !== null) setOne(k, v, false); },
+      setAuto(on) { change(k, b => { b.auto[k] = on; }); },
+      reset() { change(k, (b, at) => { b.vals[k] = null; delete b.auto[k]; if (resolve(p, at.engine).auto) b.auto[k] = true; }); },
     };
   }
   const state: Record<string, BoundState> = {};
@@ -89,9 +118,9 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
         /* state is cleaned where it enters, as a value is: what its kind cannot hold is refused */
         const clean = cleanState(hit.s, next);
         if (clean === undefined) throw new Error(`${JSON.stringify(next).slice(0, 80)} is not a ${hit.s.kind} for ${key}`);
-        change(b => {
+        change(key, (b, at) => {
           b.state[key] = clean; b.named = { key, step, ...(slots ? { slots } : {}) };
-          for (const [x, v] of Object.entries(also || {})) { allowed(bound, stepChanges(s), x); b.vals[x] = setValue(ix, desk, x, v).value; }
+          for (const [x, v] of Object.entries(also || {})) { allowed(bound, stepChanges(s), x); b.vals[x] = setValue(ix, at, x, v).value; }
         });
       },
     };
@@ -106,7 +135,7 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
   }
   return {
     node, engine: desk.engine, tier: desk.tier, params, state, reads,
-    batch(fn) { if (batch) { fn(); return; } batch = { vals: {}, auto: {}, state: {} }; try { fn(); } finally { const b = batch; batch = null; finish(b); } },
+    batch(fn) { if (batch) { fn(); return; } batch = { at: now(), vals: {}, auto: {}, state: {} }; try { fn(); } finally { const b = batch; batch = null; finish(b); } },
     run() { /* actions are run by the shell, which names their steps the same way */ },
     children: [],
   };

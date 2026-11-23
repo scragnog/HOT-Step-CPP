@@ -43,11 +43,18 @@ export function tileName(d: Definition, desk: Desk): Msg {
 
 /** The step that changes the desk's make-up: adding, removing or moving a module, pedal or side unit, or switching
  *  the engine. Each is one undo step, named as the concept names it. */
-export function deskStep(kind: 'add' | 'remove' | 'move', d: Definition, desk: Desk): StepWords {
+export function deskStep(kind: 'add' | 'remove' | 'move', d: Definition, desk: Desk, ix?: Index): StepWords {
   const name = tileName(d, desk);
-  return { label: msg(`step.${kind}`, { name }), put: msg('step.put', { what: name }) };
+  /* what Undo puts back, as the concept's desk entries say it (14-undo.js namesOf): the modules, the pedals, or both. A
+     pedal or unit changes the modules too when it brings the board or, the last one off, takes it away; the board
+     taken off takes its pedals */
+  const onBoard = ix ? [...desk.on].filter(id => ix.defs.some(x => x.id === id && x.kind !== 'module')).length : 0;
+  const board = ix ? ix.defs.some(x => x.kind === 'module' && !!x.board && desk.on.has(x.id)) : true;
+  const both = d.kind === 'module' ? !!d.board && kind === 'remove' && onBoard > 0 : kind === 'add' ? !board : onBoard <= 1;
+  const what = both ? list([msg('path.mods'), msg('path.pedals')]) : msg(d.kind === 'module' ? 'path.mods' : 'path.pedals');
+  return { label: msg(`step.${kind}`, { name }), put: msg('step.put.desk', { what }) };
 }
-export const engineStep = (to: EngineId): StepWords => ({ label: msg('step.engine', { engine: engineName(to) }), put: msg('step.engine.put') });
+export const engineStep = (to: EngineId): StepWords => ({ label: msg('step.engine', { engine: engineName(to) }), put: msg('step.put.desk', { what: msg('path.engine') }) });
 
 /** What taking something off the desk says: a module (with the pedals the Pedalboard took with it), or a pedal or a
  *  side unit off the board (and whether it was the last, which takes the Pedalboard off too). */
@@ -100,5 +107,5 @@ export function arrivalChange(ix: Index, d: Definition, desk: Desk): Change {
     const engaged: Desk = { ...desk, vals: { ...desk.vals, [d.on]: true }, on: new Set([...desk.on, d.id]) };
     vals[d.on] = !(d.kind === 'pedal' && idleOf(ix, d, engaged));
   }
-  return { vals, auto: {}, state: {}, words: deskStep('add', d, desk) };
+  return { vals, auto: {}, state: {}, words: deskStep('add', d, desk, ix) };
 }

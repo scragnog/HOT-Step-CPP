@@ -8,6 +8,8 @@ import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Desk, HiddenNote } from '../desk/Desk.tsx';
 import { setTierFromView } from './tier.ts';
+import { toggleDrawer } from './drawers.ts';
+import { usePanelStore } from '../store/panels.ts';
 
 const TIERS: Tier[] = ['quick', 'studio', 'lab'];
 
@@ -38,25 +40,25 @@ function UndoRedo() {
   const say = useSay(), last = useDesk(s => s.undo[s.undo.length - 1]), next = useDesk(s => s.redo[s.redo.length - 1]);
   return (
     <>
-      <button className="small-btn undo-btn" id="undoBtn" type="button" hidden={!last} title={last ? `${say(ui('undo'))} ${say(last.words.label)} (Ctrl+Z)` : undefined} aria-label={last ? `${say(ui('undo'))} ${say(last.words.label)}` : undefined} onClick={() => useDesk.getState().runUndo()}>
+      <button className="small-btn undo-btn" id="undoBtn" type="button" hidden={!last} title={last ? say(ui('undo.title', { label: last.words.label, put: last.words.put })) : undefined} aria-label={last ? say(ui('undo.label', { label: last.words.label })) : undefined} onClick={() => useDesk.getState().runUndo()}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>{say(ui('undo'))} <span>{last ? say(last.words.label) : ''}</span>
       </button>
-      <button className="small-btn redo-btn" id="redoBtn" type="button" hidden={!next} aria-keyshortcuts="Control+Shift+Z Control+Y" title={next ? `${say(ui('redo'))} ${say(next.words.label)} (Ctrl+Shift+Z)` : undefined} aria-label={next ? `${say(ui('redo'))} ${say(next.words.label)}` : undefined} onClick={() => useDesk.getState().runRedo()}>
+      <button className="small-btn redo-btn" id="redoBtn" type="button" hidden={!next} aria-keyshortcuts="Control+Shift+Z Control+Y" title={next ? say(ui('redo.title', { label: next.words.label })) : undefined} aria-label={next ? say(ui('redo.label', { label: next.words.label })) : undefined} onClick={() => useDesk.getState().runRedo()}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5" /><path d="M20 9H9a5 5 0 0 0 0 10h3" /></svg><span className="redo-t">{say(ui('redo'))}</span>
       </button>
     </>
   );
 }
 
-export function Centre({ drawers }: { drawers: (side: 'left' | 'right') => void }) {
-  const say = useSay(), tier = useDesk(s => s.desk.tier);
+export function Centre() {
+  const say = useSay(), tier = useDesk(s => s.desk.tier), drawer = usePanelStore(s => s.drawer);
   return (
     <main className={`centre t-${tier}`} id="centre">
       <div className="deskbar">
         <h1 className="sr-only" id="deskH1" hidden={tier === 'quick'}>{say(ui('desk.h1'))}</h1>
         <div className="panel-toggles">
-          <button className="small-btn" data-open="left" aria-controls="leftPanel" aria-expanded="false" onClick={() => drawers('left')}>{say(ui('panel.workflows'))}</button>
-          <button className="small-btn" data-open="right" aria-controls="rightPanel" aria-expanded="false" onClick={() => drawers('right')}>{say(ui('panel.modules'))}</button>
+          <button className="small-btn" data-open="left" aria-controls="leftPanel" aria-expanded={drawer === 'left'} onClick={() => toggleDrawer('left')}>{say(ui('panel.workflows'))}</button>
+          <button className="small-btn" data-open="right" aria-controls="rightPanel" aria-expanded={drawer === 'right'} onClick={() => toggleDrawer('right')}>{say(ui('panel.modules'))}</button>
         </div>
         <Tiers />
         <div className="deskbar-end">

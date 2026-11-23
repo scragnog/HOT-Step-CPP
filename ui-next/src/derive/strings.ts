@@ -3,7 +3,7 @@
 // reordering lines, options or nodes keeps every translation; and no two strings share a key (the test checks it).
 
 import type { Action, Definition, Node, NodeOverride, ParamDef, Strip, Value } from '../definitions/types.ts';
-import { CHECKS, PARTS, type PartSpec } from '../definitions/parts.ts';
+import { CHECKS, PARTS, UNITS, type PartSpec } from '../definitions/parts.ts';
 import { EN } from './messages.ts';
 
 export interface Str { key: string; text: string }
@@ -36,11 +36,11 @@ export function stringsOf(d: Definition): Str[] {
   const add = (key: string, text: string | undefined) => { if (text !== undefined && text !== '') out.push({ key, text }); };
   add(`${base}.name`, d.name); add(`${base}.desc`, d.desc);
   if (d.kind === 'module') {
-    add(`${base}.quickName`, d.quickName);
+    add(`${base}.quickName`, d.quickName); add(`${base}.starter`, d.starter?.noun);
     d.tierSummary?.forEach((t, i) => add(`${base}.tier.${['quick', 'studio', 'lab'][i]}`, t));
     for (const l of d.per || []) {
       const at = `@${l.engines.join('+')}`;
-      add(`${base}.name${at}`, l.name); add(`${base}.quickName${at}`, l.quickName); add(`${base}.desc${at}`, l.desc);
+      add(`${base}.name${at}`, l.name); add(`${base}.quickName${at}`, l.quickName); add(`${base}.desc${at}`, l.desc); add(`${base}.starter${at}`, l.starter?.noun);
       l.tierSummary?.forEach((t, i) => add(`${base}.tier.${['quick', 'studio', 'lab'][i]}${at}`, t));
     }
     (d.strip || []).forEach(s => strip(`${base}.strip`, s));
@@ -62,8 +62,8 @@ export function stringsOf(d: Definition): Str[] {
       add(`${k}.placeholder${at}`, f.placeholder); add(`${k}.check${at}`, f.check?.message); add(`${k}.keepInvalid${at}`, f.check?.keepInvalid);
       if (f.auto) add(`${k}.auto${at}`, f.auto.says);
       if (f.format) { add(`${k}.template${at}`, f.format.template); (f.format.words || []).forEach(w => add(`${k}.w.${keyPart(w.value)}${at}`, w.text)); }
-      if (Array.isArray(f.options)) for (const o of f.options) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.short${at}`, o.short); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.detail${at}`, o.detail); }
-      else for (const o of f.options?.include || []) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); }
+      if (Array.isArray(f.options)) for (const o of f.options) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.short${at}`, o.short); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); add(`${ok}.detail${at}`, o.detail); }
+      else for (const o of f.options?.include || []) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); }
     };
     face(p, '');
     if (p.held) { add(`${k}.held.note`, p.held.note); add(`${k}.held.toast`, p.held.toast); add(`${k}.held.value`, p.held.value); }
@@ -259,15 +259,22 @@ export function lcdMsg(ix: Index, key: string, desk: Desk): Slot {
   }
   return textMsg(ix, key, desk);
 }
+/** What an LCD picker prints for its choice: the option's `pick` words, else what an LCD prints (lcdMsg). */
+export function pickMsg(ix: Index, key: string, desk: Desk): Slot {
+  const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), v = valueOf(ix, key, desk);
+  const o = p.type === 'choice' ? (Array.isArray(f.options) ? f.options : f.options?.include ?? []).find(x => x.value === v) : undefined;
+  return o?.pick ? { id: `create.${d.id}.p.${dashed(p.key)}.o.${keyPart(o.value)}.pick${lineAt(ix, key, desk, 'options')}`, en: o.pick } : lcdMsg(ix, key, desk);
+}
 /** A choice's options on the desk's engine, each with its words as messages: the fixed list, or what the parameter
  *  includes and then the server's list for its source (desk.lists), without a value twice. */
-export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; lcd?: Msg; detail?: Msg }[] {
+export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; lcd?: Msg; pick?: Msg; detail?: Msg }[] {
   const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), base = `create.${d.id}.p.${dashed(p.key)}.o`, at = lineAt(ix, key, desk, 'options');
   const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
   const listed = !Array.isArray(f.options) && f.options ? (desk.lists?.[f.options.from] ?? []).filter(x => !fixed.some(o => o.value === x.value)) : [];
   return [
     ...fixed.map(o => ({ value: o.value, label: { id: `${base}.${keyPart(o.value)}.label${at}`, en: o.label } as Msg,
       ...(o.lcd ? { lcd: { id: `${base}.${keyPart(o.value)}.lcd${at}`, en: o.lcd } as Msg } : {}),
+      ...(o.pick ? { pick: { id: `${base}.${keyPart(o.value)}.pick${at}`, en: o.pick } as Msg } : {}),
       ...('detail' in o && o.detail ? { detail: { id: `${base}.${keyPart(o.value)}.detail${at}`, en: o.detail } as Msg } : {}) })),
     ...listed.map(o => ({ value: o.value, label: o.label as Slot })),
   ];
@@ -294,4 +301,12 @@ export function actionWords(ix: Index, n: Node, desk: Desk, key: string): { acti
     if (l.actions) { list = l.actions; k = `${key}@${hash(J([l.engines, l.tiers, l.when]))}`; }
   }
   return list.map(a => ({ action: a, label: fillMsg(ix, actionKey(k, a, 'label'), a.label, desk), ...('tip' in a && a.tip ? { tip: fillMsg(ix, actionKey(k, a, 'tip'), a.tip, desk) } : {}) }));
+}
+
+/** An LCD's words as printed: a number and its unit apart, the unit in small type after a thin space ("-14 LUFS"),
+ *  else the words whole. The unit is one of the units the definitions use (parts.ts UNITS), which no locale
+ *  translates; the number may be written with any digits and either decimal mark. */
+export function splitUnit(text: string): { main: string; unit: string | null } {
+  const unit = Object.keys(UNITS).find(u => u.length > 1 && text.toLocaleUpperCase().endsWith(' ' + u.toLocaleUpperCase()) && /^[−-]?[\p{Nd}.,]+$/u.test(text.slice(0, -u.length - 1)));
+  return unit ? { main: text.slice(0, -unit.length - 1), unit } : { main: text, unit: null };
 }

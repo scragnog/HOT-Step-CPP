@@ -7,8 +7,8 @@
 //   node tools/behaviour/run.mjs --dump ...                traces keep each top-level element's full markup (to diff)
 //   node tools/behaviour/run.mjs --pending [...]           run only the pending scenarios (behaviours the page is known
 //                                                          to get wrong): each "still failing" or "now passes"
-//   node tools/behaviour/run.mjs --slice [...]             only the scenarios inside the rebuild's slice (slice.json:
-//                                                          the scenarios that touch only what the rebuild draws so far)
+//   node tools/behaviour/run.mjs --slice [...]             the rebuild's acceptance: every scenario listed in
+//                                                          acceptance/*.json (one file per work package)
 //
 // In ui-next the page is the rebuild's test build (dist-test/index.html) unless --page names another.
 import fs from 'node:fs';
@@ -31,12 +31,15 @@ const files = fs.readdirSync(path.join(here, 'scenarios')).filter(f => f.endsWit
 const all = [];
 for (const f of files) { const mod = await import(pathToFileURL(path.join(here, 'scenarios', f)).href); for (const sc of mod.default) all.push({ ...sc, id: f.replace(/\.mjs$/, '') + '/' + sc.id }); }
 const only = opt('only') ? new RegExp(opt('only')) : null;
-/* --slice: the scenarios slice.json lists, normal and pending, each with the reason it is in the slice */
-const SLICE = flag('slice') ? JSON.parse(fs.readFileSync(path.join(here, 'slice.json'), 'utf8')).scenarios.map(x => x.id) : null;
+/* --slice: the scenarios the acceptance files list (acceptance/*.json, one per work package), each with the reason it
+   is there; a scenario the concept marks pending that the rebuild gets right is run as a normal one */
+const ACC = path.join(here, 'acceptance');
+const SLICE = flag('slice') ? fs.readdirSync(ACC).filter(f => f.endsWith('.json')).sort().flatMap(f => JSON.parse(fs.readFileSync(path.join(ACC, f), 'utf8')).scenarios.map(x => x.id)) : null;
+if (SLICE) { const known = new Set(all.map(s => s.id)), bad = SLICE.filter(id => !known.has(id)); if (bad.length) throw new Error('acceptance lists scenarios that do not exist: ' + bad.join(', ')); }
 /* a pending scenario ({ pending: { finding, right } }) states a behaviour the page is known to get wrong: a normal run
    leaves it out, --pending runs only those */
 const pendingRun = flag('pending'), pendingAll = all.filter(s => s.pending);
-const list = all.filter(s => (!only || only.test(s.id)) && (!SLICE || SLICE.includes(s.id)) && !!s.pending === pendingRun);
+const list = all.filter(s => (!only || only.test(s.id)) && (SLICE ? SLICE.includes(s.id) && !pendingRun : !!s.pending === pendingRun));
 if (flag('list')) { list.forEach(s => console.log(s.id + (s.pending ? `  [pending ${s.pending.finding}]` : ''))); console.log(list.length + (pendingRun ? ' pending scenarios' : ' scenarios')); process.exit(0); }
 
 const record = opt('record'), compareWith = opt('compare'), trace = !!(record || compareWith);

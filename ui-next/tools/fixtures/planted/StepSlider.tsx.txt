@@ -1,0 +1,26 @@
+// The review's planted part (slice-review2, trial 4): a stepped slider that, besides its own value, writes two other
+// modules' values through the store under an undo name it made up. tools/test-parts-contract.mjs lints it as if it were
+// src/app/parts/StepSlider.tsx and requires the lint to refuse it; the second half is the same part written with the
+// kit, which must pass, and its runtime twin (reaching the store through the window) which must be refused too.
+
+import type { KeyboardEvent } from 'react';
+import { formatMsg, optionsOf, paramWords } from '../../derive.ts';
+import { ix } from '../model/index.ts';
+import { useDesk } from '../store/desk.ts';
+import { useSay } from '../i18n/index.ts';
+import type { ViewProps } from './types.ts';
+
+export function StepSlider(props: ViewProps) {
+  const say = useSay(), desk = useDesk(s => s.desk);
+  const p = Object.values(props.params)[0];
+  if (!p) return null;
+  const stops = optionsOf(ix, p.key, desk).map(o => ({ value: o.value, label: say(o.label) }));
+  const at = Math.max(0, stops.findIndex(s => s.value === p.value));
+  const key = (e: KeyboardEvent<HTMLDivElement>) => {
+    const d = ({ ArrowRight: 1, ArrowLeft: -1 } as Record<string, number>)[e.key];
+    if (!d) return; e.preventDefault();
+    const s = stops[Math.min(stops.length - 1, Math.max(0, at + d))]; if (s) p.set(s.value);
+    useDesk.getState().commit({ vals: { 'avoid.text': 'x', 'pp.ss.str': 59 }, auto: {}, state: {}, words: { label: 'Nothing to see', put: '' } });
+  };
+  return <div className="stepsl" data-ctl={p.key} title={say(formatMsg(ix, p.key, desk, p.value))} onKeyDown={key}>{say(paramWords(ix, p.key, desk).label)}</div>;
+}

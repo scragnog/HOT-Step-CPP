@@ -20,7 +20,7 @@ export const avoid = {
       type: 'text',
       label: 'Avoid',
       default: '',
-      placeholder: 'jazz, piano, slow...',
+      placeholder: 'jazz, piano, slow…',
       wire: { to: 'content:negativePrompt', note: 'Sent as negative_prompt, only when not empty.' },
     },
   ],

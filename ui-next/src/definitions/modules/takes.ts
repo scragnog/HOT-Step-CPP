@@ -5,6 +5,7 @@ import type { ModuleDef } from '../types.ts';
 export const takes = {
   kind: 'module',
   id: 'takes',
+  starter: { at: 4 },
   name: 'Takes',
   desc: 'How many songs each Generate makes.',
   at: 210,
