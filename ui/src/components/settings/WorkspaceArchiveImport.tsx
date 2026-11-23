@@ -48,7 +48,8 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   // reloads the page when the server answers. The poll can miss that window, so the outcome check
   // below runs from the saved mark after the reload, not from seeing `done`.
   const done = job?.state === 'done';
-  useEffect(() => { if (done) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [done]);
+  // A restored `done` was announced before the reload; announcing it again would reload the page forever.
+  useEffect(() => { if (done && !reloaded) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [done, reloaded]);
   const mine = !!pending && job?.id === pending.id;
   // Only this import's own failure or cancel clears the mark. After a reload, any other job is a stale mark.
   useEffect(() => {
@@ -132,7 +133,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
       <button type="button" className="settings-save-btn" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate()}>{t('settings.workspaceArchive.import.cancel')}</button>
       <p>{t('settings.workspaceArchive.import.cancelNote')}</p>
     </div>}
-    {done && job && <div role="status" className="space-y-1">
+    {done && job && !reloaded && <div role="status" className="space-y-1">
       <p>{t('settings.workspaceArchive.import.restarting', { target: job.target })}</p>
       <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
     </div>}
