@@ -1,0 +1,13 @@
+<!-- Thumbnail tempo.minimax-m3: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="lcd" x="15" y="15" width="90" height="63" rx="8"/>
+<text class="lcd-n" x="24" y="52">120</text>
+<rect class="lcd-t" x="25" y="60" width="6" height="2.5" rx="1.25"/>
+<rect class="lcd-d" x="33" y="60" width="6" height="2.5" rx="1.25"/>
+<rect class="lcd-d" x="41" y="60" width="6" height="2.5" rx="1.25"/>
+<rect class="lcd-d" x="49" y="60" width="6" height="2.5" rx="1.25"/>
+<rect class="lcd-d" x="24" y="68" width="18" height="4" rx="2"/>
+<rect class="lcd-d" x="46" y="68" width="30" height="4" rx="2"/>
+<circle class="wheel" cx="136" cy="46" r="22"/>
+<path class="wheel-s" d="M136 33L136 24M142.5 34.7L147 26.9M147.3 39.5L155.1 35M149 46L158 46M147.3 52.5L155.1 57M142.5 57.3L147 65.1M136 59L136 68M129.5 57.3L125 65.1M124.7 52.5L116.9 57M123 46L114 46M124.7 39.5L116.9 35M129.5 34.7L125 26.9"/>
+<circle class="wheel-i" cx="136" cy="46" r="13"/>
+<circle class="hot" cx="136" cy="46" r="8.5"/>

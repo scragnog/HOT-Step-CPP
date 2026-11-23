@@ -1,0 +1,8 @@
+<!-- Thumbnail pd-master: inner drawing in the thumbnail kit's classes, on the pedal canvas. Captured from the concept at vanilla-reference. -->
+<rect class="vu" x="10" y="22" width="60" height="28" rx="3"/>
+<path class="vu-a" d="M19 43Q40 27 61 43"/>
+<path class="vu-r" d="M53 37Q57.5 39.5 61 43"/>
+<path class="vu-n" d="M40 51L30 32"/>
+<rect class="slot" x="10" y="55" width="60" height="10" rx="3"/>
+<rect class="pkey" x="14" y="69" width="7" height="7" rx="1.5"/>
+<rect class="eng" x="25" y="71.25" width="34" height="3" rx="1.5"/>

@@ -1,0 +1,8 @@
+<!-- Thumbnail pd-ppvae: inner drawing in the thumbnail kit's classes, on the pedal canvas. Captured from the concept at vanilla-reference. -->
+<g class="k pk">
+<path class="k-t" d="M31.5 48.5A12 12 0 1 1 48.5 48.5"/>
+<circle class="k-c" cx="40" cy="40" r="9.4"/>
+<circle class="k-r" cx="40" cy="40" r="8.6"/>
+<path class="k-p" d="M40 40L33.8 46.2"/>
+</g>
+<rect class="eng" x="31" y="57" width="18" height="2.5" rx="1.25"/>

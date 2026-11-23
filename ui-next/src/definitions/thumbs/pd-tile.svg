@@ -1,0 +1,4 @@
+<!-- Thumbnail pd-tile: inner drawing in the thumbnail kit's classes, on the pedal canvas. Captured from the concept at vanilla-reference. -->
+<rect class="lcd" x="10" y="30" width="60" height="12" rx="3"/>
+<rect class="lcd-t" x="23.2" y="34.5" width="33.6" height="3" rx="1.5"/>
+<rect class="eng" x="30" y="48" width="20" height="2.5" rx="1.25"/>

@@ -1,0 +1,44 @@
+<!-- Thumbnail latent: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="46" rx="8"/>
+<path class="base" d="M22 50H154"/>
+<path class="curve-g" d="M22 50C58 50 70 23 88 23S118 50 154 50"/>
+<circle class="dot-g" cx="88" cy="23" r="3"/>
+<rect class="rack off" x="15" y="67" width="44" height="30" rx="6"/>
+<g class="k off">
+<path class="k-t" d="M23.4 86.6A6.5 6.5 0 1 1 32.6 86.6"/>
+<path class="k-a" d="M23.4 86.6A6.5 6.5 0 0 1 21.6 81"/>
+<circle class="k-c" cx="28" cy="82" r="3.9"/>
+<path class="k-p" d="M28 82L24.7 81.5"/>
+</g>
+<g class="k off">
+<path class="k-t" d="M41.4 86.6A6.5 6.5 0 1 1 50.6 86.6"/>
+<path class="k-a" d="M41.4 86.6A6.5 6.5 0 0 1 39.6 81"/>
+<circle class="k-c" cx="46" cy="82" r="3.9"/>
+<path class="k-p" d="M46 82L42.7 81.5"/>
+</g>
+<rect class="rack" x="66" y="67" width="44" height="30" rx="6"/>
+<g class="k ">
+<path class="k-t" d="M74.4 86.6A6.5 6.5 0 1 1 83.6 86.6"/>
+<path class="k-a" d="M74.4 86.6A6.5 6.5 0 0 1 79 75.5"/>
+<circle class="k-c" cx="79" cy="82" r="3.9"/>
+<path class="k-p" d="M79 82L79 78.7"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M92.4 86.6A6.5 6.5 0 1 1 101.6 86.6"/>
+<path class="k-a" d="M92.4 86.6A6.5 6.5 0 1 1 102.3 78.2"/>
+<circle class="k-c" cx="97" cy="82" r="3.9"/>
+<path class="k-p" d="M97 82L99.7 80.1"/>
+</g>
+<rect class="rack" x="117" y="67" width="44" height="30" rx="6"/>
+<g class="k ">
+<path class="k-t" d="M125.4 86.6A6.5 6.5 0 1 1 134.6 86.6"/>
+<path class="k-a" d="M125.4 86.6A6.5 6.5 0 0 1 134.2 77.1"/>
+<circle class="k-c" cx="130" cy="82" r="3.9"/>
+<path class="k-p" d="M130 82L132.1 79.5"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M143.4 86.6A6.5 6.5 0 1 1 152.6 86.6"/>
+<path class="k-a" d="M143.4 86.6A6.5 6.5 0 0 1 141.5 82.5"/>
+<circle class="k-c" cx="148" cy="82" r="3.9"/>
+<path class="k-p" d="M148 82L144.7 82.3"/>
+</g>

@@ -1,0 +1,19 @@
+{
+  "name": "ui-next",
+  "license": "MIT",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=22.18.0 <25.0.0"
+  },
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "validate": "node tools/validate-definitions.ts",
+    "check": "tsc -p tsconfig.json && node tools/validate-definitions.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3"
+  }
+}

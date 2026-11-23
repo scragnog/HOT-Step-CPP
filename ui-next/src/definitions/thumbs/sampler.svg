@@ -1,0 +1,37 @@
+<!-- Thumbnail sampler: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="54" rx="8"/>
+<path class="grid" d="M33.3 15V69M51.5 15V69M69.8 15V69M88 15V69M106.3 15V69M124.5 15V69M142.8 15V69M15 33H161M15 51H161"/>
+<path class="amb" d="M25 22V64M153 22V64"/>
+<path class="curve" d="M25 24L37 25L49 26L61 28L73 30L85 33L97 36L109 39L121 44L133 49L145 56L153 62"/>
+<circle class="dot" cx="25" cy="24" r="1.6"/>
+<circle class="dot" cx="37" cy="25" r="1.6"/>
+<circle class="dot" cx="49" cy="26" r="1.6"/>
+<circle class="dot" cx="61" cy="28" r="1.6"/>
+<circle class="dot" cx="73" cy="30" r="1.6"/>
+<circle class="dot" cx="85" cy="33" r="1.6"/>
+<circle class="dot" cx="97" cy="36" r="1.6"/>
+<circle class="dot" cx="109" cy="39" r="1.6"/>
+<circle class="dot" cx="121" cy="44" r="1.6"/>
+<circle class="dot" cx="133" cy="49" r="1.6"/>
+<circle class="dot" cx="145" cy="56" r="1.6"/>
+<circle class="dot" cx="153" cy="62" r="1.6"/>
+<rect class="well" x="15" y="73" width="146" height="24" rx="6"/>
+<rect class="nbox" x="22" y="77" width="20" height="16" rx="3"/>
+<rect class="ink" x="27" y="83.5" width="10" height="3" rx="1.5"/>
+<g class="k ">
+<path class="k-t" d="M70.7 90.3A7.5 7.5 0 1 1 81.3 90.3"/>
+<path class="k-a" d="M70.7 90.3A7.5 7.5 0 0 1 69.9 80.6"/>
+<circle class="k-c" cx="76" cy="85" r="4.9"/>
+<path class="k-p" d="M76 85L72.5 82.5"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M102.7 90.3A7.5 7.5 0 1 1 113.3 90.3"/>
+<path class="k-a" d="M102.7 90.3A7.5 7.5 0 0 1 106.2 77.7"/>
+<circle class="k-c" cx="108" cy="85" r="4.9"/>
+<path class="k-p" d="M108 85L107 80.8"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M134.7 90.3A7.5 7.5 0 1 1 145.3 90.3"/>
+<circle class="k-c" cx="140" cy="85" r="4.9"/>
+<path class="k-p" d="M140 85L137 88"/>
+</g>

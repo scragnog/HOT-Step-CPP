@@ -1,0 +1,23 @@
+<!-- Thumbnail yuebatch: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="chip" x="15" y="19" width="98" height="12" rx="6"/>
+<circle class="led-on" cx="23" cy="25" r="2.4"/>
+<rect class="eng" x="30" y="23.5" width="76" height="3" rx="1.5"/>
+<g class="k ">
+<path class="k-t" d="M27.8 79.2A13 13 0 1 1 46.2 79.2"/>
+<path class="k-a" d="M27.8 79.2A13 13 0 0 1 27 78.3"/>
+<circle class="k-c" cx="37" cy="70" r="10.4"/>
+<circle class="k-r" cx="37" cy="70" r="9.6"/>
+<path class="k-p" d="M37 70L29.4 76.2"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M78.8 79.2A13 13 0 1 1 97.2 79.2"/>
+<circle class="k-c" cx="88" cy="70" r="10.4"/>
+<circle class="k-r" cx="88" cy="70" r="9.6"/>
+<path class="k-p" d="M88 70L81.1 76.9"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M129.8 79.2A13 13 0 1 1 148.2 79.2"/>
+<circle class="k-c" cx="139" cy="70" r="10.4"/>
+<circle class="k-r" cx="139" cy="70" r="9.6"/>
+<path class="k-p" d="M139 70L132.1 76.9"/>
+</g>

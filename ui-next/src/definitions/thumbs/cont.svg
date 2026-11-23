@@ -1,0 +1,43 @@
+<!-- Thumbnail cont: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="well" x="15" y="15" width="146" height="42" rx="8"/>
+<circle class="vinyl" cx="37" cy="36" r="15"/>
+<circle class="groove" cx="37" cy="36" r="11.5"/>
+<circle class="groove" cx="37" cy="36" r="8.5"/>
+<circle class="vinyl-l" cx="37" cy="36" r="5"/>
+<rect class="ink" x="62" y="29" width="52" height="3.5" rx="1.75"/>
+<rect class="ink2" x="62" y="39" width="70" height="3" rx="1.5"/>
+<rect class="sel-amb" x="104" y="63" width="57" height="34" rx="4"/>
+<rect class="wave" x="17" y="77" width="2.1" height="6" rx="1"/>
+<rect class="wave" x="21.3" y="72.7" width="2.1" height="14.7" rx="1"/>
+<rect class="wave" x="25.6" y="74.1" width="2.1" height="11.9" rx="1"/>
+<rect class="wave" x="29.9" y="72.9" width="2.1" height="14.3" rx="1"/>
+<rect class="wave" x="34.2" y="70.4" width="2.1" height="19.2" rx="1"/>
+<rect class="wave" x="38.5" y="69.8" width="2.1" height="20.5" rx="1"/>
+<rect class="wave" x="42.8" y="75.4" width="2.1" height="9.1" rx="1"/>
+<rect class="wave" x="47.1" y="76.6" width="2.1" height="6.8" rx="1"/>
+<rect class="wave" x="51.4" y="76.6" width="2.1" height="6.8" rx="1"/>
+<rect class="wave" x="55.6" y="68.2" width="2.1" height="23.7" rx="1"/>
+<rect class="wave" x="59.9" y="75.3" width="2.1" height="9.3" rx="1"/>
+<rect class="wave" x="64.2" y="70.9" width="2.1" height="18.3" rx="1"/>
+<rect class="wave" x="68.5" y="71.6" width="2.1" height="16.8" rx="1"/>
+<rect class="wave" x="72.8" y="75.9" width="2.1" height="8.3" rx="1"/>
+<rect class="wave" x="77.1" y="75.2" width="2.1" height="9.5" rx="1"/>
+<rect class="wave" x="81.4" y="70.5" width="2.1" height="19" rx="1"/>
+<rect class="wave" x="85.7" y="76.9" width="2.1" height="6.3" rx="1"/>
+<rect class="wave" x="90" y="76.7" width="2.1" height="6.5" rx="1"/>
+<rect class="wave" x="94.3" y="75.3" width="2.1" height="9.3" rx="1"/>
+<rect class="wave" x="98.6" y="74.8" width="2.1" height="10.4" rx="1"/>
+<rect class="wave" x="102.9" y="74.2" width="2.1" height="11.6" rx="1"/>
+<rect class="wave-amb" x="107.2" y="76.3" width="2.1" height="7.3" rx="1"/>
+<rect class="wave-amb" x="111.5" y="68.6" width="2.1" height="22.9" rx="1"/>
+<rect class="wave-amb" x="115.8" y="68.3" width="2.1" height="23.4" rx="1"/>
+<rect class="wave-amb" x="120.1" y="71.1" width="2.1" height="17.8" rx="1"/>
+<rect class="wave-amb" x="124.4" y="70.6" width="2.1" height="18.8" rx="1"/>
+<rect class="wave-amb" x="128.6" y="74" width="2.1" height="12.1" rx="1"/>
+<rect class="wave-amb" x="132.9" y="66.4" width="2.1" height="27.2" rx="1"/>
+<rect class="wave-amb" x="137.2" y="74.3" width="2.1" height="11.5" rx="1"/>
+<rect class="wave-amb" x="141.5" y="75.9" width="2.1" height="8.3" rx="1"/>
+<rect class="wave-amb" x="145.8" y="69" width="2.1" height="22.1" rx="1"/>
+<rect class="wave-amb" x="150.1" y="73.8" width="2.1" height="12.3" rx="1"/>
+<rect class="wave-amb" x="154.4" y="68.3" width="2.1" height="23.3" rx="1"/>
+<rect class="wave-amb" x="158.7" y="75.4" width="2.1" height="9.1" rx="1"/>

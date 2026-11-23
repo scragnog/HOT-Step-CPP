@@ -1,0 +1,29 @@
+<!-- Thumbnail replan: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="box" x="15" y="15" width="21" height="21" rx="5"/>
+<text class="box-n" x="25.5" y="30.5" text-anchor="middle">1</text>
+<rect class="box" x="41" y="15" width="21" height="21" rx="5"/>
+<text class="box-n" x="51.5" y="30.5" text-anchor="middle">2</text>
+<rect class="box" x="67" y="15" width="21" height="21" rx="5"/>
+<text class="box-n" x="77.5" y="30.5" text-anchor="middle">3</text>
+<rect class="chip" x="15" y="47" width="70" height="12" rx="6"/>
+<circle class="led-on" cx="23" cy="53" r="2.4"/>
+<rect class="eng" x="30" y="51.5" width="48" height="3" rx="1.5"/>
+<rect class="chip" x="15" y="65" width="70" height="12" rx="6"/>
+<circle class="led-on" cx="23" cy="71" r="2.4"/>
+<rect class="eng" x="30" y="69.5" width="48" height="3" rx="1.5"/>
+<g class="k ">
+<path class="k-t" d="M101.8 71.2A13 13 0 1 1 120.2 71.2"/>
+<path class="k-a" d="M101.8 71.2A13 13 0 0 1 111 49"/>
+<circle class="k-c" cx="111" cy="62" r="10.4"/>
+<circle class="k-r" cx="111" cy="62" r="9.6"/>
+<path class="k-p" d="M111 62L111 52.2"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M136.8 71.2A13 13 0 1 1 155.2 71.2"/>
+<path class="k-a" d="M136.8 71.2A13 13 0 0 1 135.5 54.4"/>
+<circle class="k-c" cx="146" cy="62" r="10.4"/>
+<circle class="k-r" cx="146" cy="62" r="9.6"/>
+<path class="k-p" d="M146 62L138.1 56.2"/>
+</g>
+<rect class="eng" x="102" y="82" width="18" height="2.5" rx="1.25"/>
+<rect class="eng" x="137" y="82" width="18" height="2.5" rx="1.25"/>

@@ -1,0 +1,22 @@
+<!-- Thumbnail plans: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="56" rx="8"/>
+<rect class="term-k" x="22" y="27.5" width="22" height="3" rx="1.5"/>
+<rect class="rec" x="52" y="23" width="26" height="12" rx="6"/>
+<circle class="rec-d" cx="59" cy="29" r="2"/>
+<rect class="rec-t" x="63" y="27.75" width="10" height="2.5" rx="1.25"/>
+<path class="play" d="M84 24l8 5-8 5z"/>
+<rect class="lcd" x="98" y="22" width="56" height="14" rx="3"/>
+<rect class="lcd-t" x="114" y="27.5" width="24" height="3" rx="1.5"/>
+<rect class="term-k" x="22" y="51.5" width="22" height="3" rx="1.5"/>
+<rect class="rec" x="52" y="47" width="26" height="12" rx="6"/>
+<circle class="rec-d" cx="59" cy="53" r="2"/>
+<rect class="rec-t" x="63" y="51.75" width="10" height="2.5" rx="1.25"/>
+<path class="play" d="M84 48l8 5-8 5z"/>
+<rect class="lcd" x="98" y="46" width="56" height="14" rx="3"/>
+<rect class="lcd-t" x="114" y="51.5" width="24" height="3" rx="1.5"/>
+<rect class="chip" x="15" y="81" width="70" height="12" rx="6"/>
+<circle class="led-on" cx="23" cy="87" r="2.4"/>
+<rect class="eng" x="30" y="85.5" width="48" height="3" rx="1.5"/>
+<rect class="chip" x="91" y="81" width="70" height="12" rx="6"/>
+<circle class="led-on" cx="99" cy="87" r="2.4"/>
+<rect class="eng" x="106" y="85.5" width="48" height="3" rx="1.5"/>

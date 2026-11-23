@@ -1,0 +1,103 @@
+// Module "Models". Concept: src/js/34-engine-panel.js and src/css/30-engine-panel.css.
+
+import type { ModuleDef } from '../types.ts';
+
+export const models = {
+  kind: 'module',
+  id: 'models',
+  name: 'Models',
+  desc: 'The model files the engine loads, in the engine panel.',
+  at: 2,
+  category: 'Engine',
+  builtIn: true,
+  engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
+  owner: 'engine',
+  stored: 'settings',
+  size: { w: 2 },
+  params: [
+    {
+      key: 'model.var',
+      type: 'choice',
+      label: 'Variant',
+      undoName: 'Model variant',
+      default: '',
+      options: { from: 'models', bucket: 'variant', include: [{ value: '', label: 'Engine default' }] },
+      engines: ['heartmula'],
+      wire: 'model:heartmula.variant',
+    },
+    {
+      key: 'model.dit',
+      type: 'choice',
+      label: 'DiT model',
+      default: '',
+      options: { from: 'models', bucket: 'dit', include: [{ value: '', label: 'Engine default' }] },
+      wire: 'param:ditModel',
+      per: {
+        'minimax-m3': { label: 'Flow DiT', wire: 'model:minimax-m3.dit', undoName: 'Sound model' },
+        yue2: {
+          label: 'Language model (AR + NAR)',
+          options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }] },
+          wire: 'model:yue2.lm',
+          undoName: 'Sound model',
+        },
+        sa3: { label: 'Flow DiT', wire: 'model:sa3.dit', undoName: 'Sound model' },
+        heartmula: {
+          label: 'Global LM',
+          options: { from: 'models', bucket: 'global', include: [{ value: '', label: 'Engine default' }] },
+          wire: 'model:heartmula.global',
+          undoName: 'Language model',
+        },
+        ace: { undoName: 'Sound model' },
+      },
+    },
+    {
+      key: 'model.lm',
+      type: 'choice',
+      label: 'LM model',
+      default: '',
+      options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }] },
+      engines: ['ace', 'minimax-m3', 'heartmula'],
+      wire: 'param:lmModel',
+      per: {
+        'minimax-m3': { label: 'Planner LM', wire: 'model:minimax-m3.lm', undoName: 'Planner model' },
+        heartmula: {
+          label: 'Local decoder',
+          options: { from: 'models', bucket: 'local', include: [{ value: '', label: 'Engine default' }] },
+          wire: 'model:heartmula.local',
+          undoName: 'Decoder model',
+        },
+        ace: { undoName: 'Planner model' },
+      },
+    },
+    {
+      key: 'model.x',
+      type: 'choice',
+      label: 'Depth decoder',
+      default: '',
+      options: { from: 'models', bucket: 'depth', include: [{ value: '', label: 'Engine default' }] },
+      engines: ['minimax-m3', 'heartmula'],
+      wire: 'model:minimax-m3.depth',
+      per: {
+        heartmula: {
+          label: 'Codec flow',
+          options: { from: 'models', bucket: 'flow', include: [{ value: '', label: 'Engine default' }] },
+          wire: 'model:heartmula.flow',
+          undoName: 'Codec model',
+        },
+        'minimax-m3': { undoName: 'Detail model' },
+      },
+    },
+    {
+      key: 'model.vae',
+      type: 'choice',
+      label: 'VAE decoder',
+      undoName: 'Decoder model',
+      default: '',
+      options: { from: 'models', bucket: 'vae', include: [{ value: '', label: 'Engine default' }] },
+      engines: ['ace', 'yue2'],
+      wire: 'param:vaeModel',
+      per: { yue2: { label: 'VAE', wire: 'model:yue2.vae' } },
+    },
+  ],
+  face: [{ part: 'modelPicker', params: ['model.var', 'model.dit', 'model.lm', 'model.x', 'model.vae'] }],
+} satisfies ModuleDef;

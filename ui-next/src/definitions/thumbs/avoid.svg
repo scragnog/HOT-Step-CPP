@@ -1,0 +1,10 @@
+<!-- Thumbnail avoid: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<g transform="rotate(-2.5 88 58)">
+<path class="note" d="M24 24H152V82L140 94H24Z"/>
+<path class="note-fold" d="M152 82L140 94V82Z"/>
+<path class="note-ink" d="M38 52c1.3 -10 4 -10 5.4 0c1.3 -4.5 3.8 -4.5 5.1 0M55.5 52c1.3 -4.8 3.8 -4.8 5.1 0c1.3 -5.4 3.8 -5.4 5 0c1.1 -6 3.3 -6 4.4 0c1.3 -5.8 3.8 -5.8 5 0c1.3 -10 3.8 -10 5 0M87.1 52c1.3 -6.3 3.9 -6.3 5.2 0c1.2 -10 3.6 -10 4.8 0c1.2 -5.7 3.7 -5.7 5 0c1.3 -6.3 4 -6.3 5.4 0"/>
+<path class="note-ink strike" d="M35 49L110.4 48"/>
+<path class="note-ink" d="M38 72c1.3 -4.8 3.9 -4.8 5.3 0c1.1 -4.4 3.3 -4.4 4.4 0M54.7 72c1.4 -4.7 4.1 -4.7 5.4 0c1.3 -5.8 4 -5.8 5.3 0c1.1 -10 3.3 -10 4.4 0c1.2 -5.3 3.5 -5.3 4.6 0c1.3 -10 4 -10 5.4 0c1.1 -10 3.4 -10 4.5 0"/>
+<path class="note-ink strike" d="M35 69L87.4 68"/>
+</g>
+<rect class="tape" x="74" y="17" width="30" height="11" rx="1.5"/>

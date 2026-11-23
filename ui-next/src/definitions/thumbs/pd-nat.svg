@@ -1,0 +1,49 @@
+<!-- Thumbnail pd-nat: inner drawing in the thumbnail kit's classes, on the pedal canvas. Captured from the concept at vanilla-reference. -->
+<g class="k pk">
+<path class="k-t" d="M38.3 35.7A8 8 0 1 1 49.7 35.7"/>
+<path class="k-a" d="M38.3 35.7A8 8 0 0 1 44 22"/>
+<circle class="k-c" cx="44" cy="30" r="5.4"/>
+<path class="k-p" d="M44 30L44 25.2"/>
+</g>
+<rect class="eng" x="37" y="42" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M70.3 35.7A8 8 0 1 1 81.7 35.7"/>
+<path class="k-a" d="M70.3 35.7A8 8 0 0 1 74.1 22.2"/>
+<circle class="k-c" cx="76" cy="30" r="5.4"/>
+<path class="k-p" d="M76 30L74.9 25.3"/>
+</g>
+<rect class="eng" x="69" y="42" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M102.3 35.7A8 8 0 1 1 113.7 35.7"/>
+<path class="k-a" d="M102.3 35.7A8 8 0 0 1 108 22"/>
+<circle class="k-c" cx="108" cy="30" r="5.4"/>
+<path class="k-p" d="M108 30L108 25.2"/>
+</g>
+<rect class="eng" x="101" y="42" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M134.3 35.7A8 8 0 1 1 145.7 35.7"/>
+<path class="k-a" d="M134.3 35.7A8 8 0 0 1 140 22"/>
+<circle class="k-c" cx="140" cy="30" r="5.4"/>
+<path class="k-p" d="M140 30L140 25.2"/>
+</g>
+<rect class="eng" x="133" y="42" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M38.3 63.7A8 8 0 1 1 49.7 63.7"/>
+<path class="k-a" d="M38.3 63.7A8 8 0 0 1 44 50"/>
+<circle class="k-c" cx="44" cy="58" r="5.4"/>
+<path class="k-p" d="M44 58L44 53.2"/>
+</g>
+<rect class="eng" x="37" y="70" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M70.3 63.7A8 8 0 1 1 81.7 63.7"/>
+<circle class="k-c" cx="76" cy="58" r="5.4"/>
+<path class="k-p" d="M76 58L72.6 61.4"/>
+</g>
+<rect class="eng" x="69" y="70" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M102.3 63.7A8 8 0 1 1 113.7 63.7"/>
+<path class="k-a" d="M102.3 63.7A8 8 0 0 1 108 50"/>
+<circle class="k-c" cx="108" cy="58" r="5.4"/>
+<path class="k-p" d="M108 58L108 53.2"/>
+</g>
+<rect class="eng" x="101" y="70" width="14" height="2.5" rx="1.25"/>

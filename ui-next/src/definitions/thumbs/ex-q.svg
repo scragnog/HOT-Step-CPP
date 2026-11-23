@@ -1,0 +1,7 @@
+<!-- Thumbnail ex-q: inner drawing in the thumbnail kit's classes, on the side-unit canvas. Captured from the concept at vanilla-reference. -->
+<rect class="seg" x="64" y="48" width="54" height="16" rx="5"/>
+<rect class="seg-on" x="66" y="50" width="17" height="12" rx="4"/>
+<rect class="eng" x="89" y="54.5" width="10" height="3" rx="1.5"/>
+<rect class="eng" x="104" y="54.5" width="10" height="3" rx="1.5"/>
+<circle class="badge" cx="133" cy="56" r="10"/>
+<path class="badge-t" d="M128.5 56l3 3.2 6-6.4"/>
