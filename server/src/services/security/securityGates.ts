@@ -34,13 +34,26 @@ export function applySecurityGates(app: Express, opts: SecurityGateOptions = {})
   });
 }
 
+// Report fields come from the browser: anything on the page can POST one. Keep each
+// field short and printable, and drop URL queries and fragments, which can carry
+// tokens or user text.
+const MAX_FIELD = 200;
+function reportField(v: unknown, isUrl = false): string {
+  let s = typeof v === 'string' || typeof v === 'number' ? String(v) : '';
+  if (isUrl) s = s.split(/[?#]/, 1)[0];
+  s = s.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?');
+  return s.length > MAX_FIELD ? s.slice(0, MAX_FIELD) + '...' : s;
+}
+
 /** One console line per distinct violation (directive, blocked URI, source); capped so a loop can't flood the log. */
 const seenCsp = new Set<string>();
 export function logCspReport(body: unknown): string | null {
   const r = (body as { 'csp-report'?: Record<string, unknown> } | null)?.['csp-report'];
-  if (!r) return null;
-  const where = r['source-file'] ? ` at ${r['source-file']}:${r['line-number'] ?? '?'}` : '';
-  const line = `[CSP] ${r['disposition'] ?? 'report'} ${r['effective-directive'] ?? r['violated-directive']} ${r['blocked-uri'] || '(inline)'} on ${r['document-uri']}${where}`;
+  if (!r || typeof r !== 'object') return null;
+  const source = reportField(r['source-file'], true);
+  const where = source ? ` at ${source}:${reportField(r['line-number']) || '?'}` : '';
+  const directive = reportField(r['effective-directive'] ?? r['violated-directive']).split(' ')[0];
+  const line = `[CSP] ${reportField(r['disposition']) || 'report'} ${directive} ${reportField(r['blocked-uri'], true) || '(inline)'} on ${reportField(r['document-uri'], true)}${where}`;
   if (seenCsp.has(line) || seenCsp.size >= 500) return null;
   seenCsp.add(line);
   console.warn(line);

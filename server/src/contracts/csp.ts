@@ -1,5 +1,6 @@
 // Content-Security-Policy for the UI document: the page (skins included) may only
-// talk to this server. Node sends it with the production build (index.ts) and the
+// run scripts from, and connect to, this server. Images from any HTTPS host stay
+// allowed (img-src below), a known leak channel the doc spells out. Node sends it with the production build (index.ts) and the
 // Vite dev server sends the dev variant (ui/vite.config.ts), so both read this file,
 // which is why it sits in contracts/. No imports. Policy and how to extend it:
 // docs/dev/architecture.md, "Content-Security-Policy".
@@ -21,12 +22,13 @@ export function contentSecurityPolicy(dev = false): string {
     'default-src': ["'self'"],
     // Dev: Vite injects the React Refresh preamble as an inline module script.
     'script-src': ["'self'", ...(dev ? ["'unsafe-inline'"] : [])],
-    // Inline styles: React style props, Vite's dev CSS, wavesurfer's shadow-DOM <style>.
+    // Inline styles: React style props, Vite's dev CSS, library-injected <style> tags.
     'style-src': ["'self'", "'unsafe-inline'", GOOGLE_FONTS_CSS],
     'font-src': ["'self'", 'data:', GOOGLE_FONTS_FILES],
     // data: the favicon; blob: local previews. https: Lyric Studio artist and album art,
-    // stored as outside URLs (Genius, or any URL the user pastes). A server-side image
-    // cache would let this drop to 'self' (docs/dev/architecture.md).
+    // stored as outside URLs (Genius, or any URL the user pastes). Page code can leak data
+    // in an image URL; outside shells wait until that is accepted or a server artwork
+    // route lets this drop to 'self' (docs/dev/architecture.md).
     'img-src': ["'self'", 'data:', 'blob:', 'https:'],
     // blob: streamed previews (useStreamAudio) and abcjs MIDI playback.
     'media-src': ["'self'", 'data:', 'blob:'],

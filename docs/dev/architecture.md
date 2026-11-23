@@ -481,13 +481,15 @@ Four upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-o
 
 ## Content-Security-Policy
 
-The UI page carries a Content-Security-Policy, so code in the page (skins
-included) can only talk to this server. `server/src/contracts/csp.ts` holds the
-policy; it sits in `contracts/` because the UI build reads it too. Node sends it
-on every response from `ui/dist` (the built page, its assets and the service
-worker). The Vite dev server on :3000 sends the dev
-variant through `server.headers` in `ui/vite.config.ts`, and `vite preview`
-sends the production one. API, `/audio`, `/references` and `/listening`
+The UI page carries a Content-Security-Policy. Code in the page (skins included)
+can only run scripts from this server and can only fetch, stream or open sockets
+to this server. It can still load images from any HTTPS host, because Lyric
+Studio artwork is stored as outside URLs (see the table below).
+`server/src/contracts/csp.ts` holds the policy; it sits in `contracts/` because
+the UI build reads it too. Node sends it on every response from `ui/dist` (the
+built page, a deep link, its assets and the service worker; `services/uiDist.ts`).
+The Vite dev server on :3000 sends the dev variant through `server.headers` in
+`ui/vite.config.ts`, and `vite preview` sends the production one. API, `/audio`, `/references` and `/listening`
 responses carry no policy.
 
 Production policy:
@@ -529,8 +531,16 @@ comment saying what needs it, then load the affected pages with the console open
 `CSP_ENFORCE = false` switches to `Content-Security-Policy-Report-Only`, which
 reports violations without blocking, for trying out a change. Keep `connect-src`
 at `'self'`: it is the directive that stops page code from sending data to other
-origins. CSP does not stop a page from navigating away with data in the URL, so
-shell skins still get a code review.
+origins.
+
+What the policy does not stop, so shell skins still get a code review:
+
+- An image request to any HTTPS host. Page code can put data in the image URL
+  (`https://example.com/x.png?d=...`). The request goes one way and the reply
+  is never readable, but the data has left. Outside shell skins do not merge
+  until this is accepted or `img-src` is back to `'self'` behind a server
+  artwork route.
+- Navigating away with data in the URL. No CSP directive covers it.
 
 ## UI source layout
 

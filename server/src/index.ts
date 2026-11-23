@@ -9,7 +9,7 @@
 import express from 'express';
 import { isLoopbackHost } from './services/security/originPolicy.js';
 import { applySecurityGates } from './services/security/securityGates.js';
-import { CSP_HEADER, contentSecurityPolicy } from './contracts/csp.js';
+import { serveUiDist } from './services/uiDist.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -257,26 +257,7 @@ app.use('/references', express.static(refsDir, {
 // Serve React frontend (production only — in dev, Vite handles this)
 const uiDistPath = path.join(PROJECT_ROOT, 'ui', 'dist');
 if (fs.existsSync(uiDistPath)) {
-  // The UI document and its service worker carry the CSP; API, audio and /listening do not.
-  const csp = contentSecurityPolicy();
-  app.use((_req, res, next) => { res.setHeader(CSP_HEADER, csp); next(); });
-  // Assets with content hashes get long cache; index.html always revalidates
-  app.use(express.static(uiDistPath, {
-    setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
-      // index.html, the service worker and the manifest must revalidate so updates reach installed apps.
-      if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('.webmanifest')) {
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      } else {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      }
-    },
-  }));
-  // SPA fallback: serve index.html for all unmatched routes
-  app.get('/{*splat}', (_req, res) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.sendFile(path.join(uiDistPath, 'index.html'));
-  });
+  serveUiDist(app, uiDistPath);
   console.log(`[Server] Serving UI from ${uiDistPath}`);
 } else {
   console.log('[Server] No UI build found — run "npm run build" in ui/ for production');

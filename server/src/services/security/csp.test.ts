@@ -50,3 +50,29 @@ test('report route accepts application/csp-report and logs each violation once',
   assert.deepEqual(lines, ['[CSP] enforce img-src https://evil.example/p.png on http://localhost/x']);
   assert.equal(logCspReport({ nothing: true }), null);
 });
+
+test('report fields are stripped of queries, control characters and excess length', () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const line = logCspReport({ 'csp-report': {
+      'document-uri': 'http://localhost:3000/library?token=secret#frag',
+      'blocked-uri': 'https://evil.example/a.png?d=user-text',
+      'effective-directive': 'img-src\n[CSP] forged line',
+      'source-file': 'http://localhost:3000/x.js?v=1',
+      'line-number': 7,
+      disposition: 'enforce\u001b[31m',
+    } });
+    assert.equal(line, '[CSP] enforce?[31m img-src?[CSP] https://evil.example/a.png on http://localhost:3000/library at http://localhost:3000/x.js:7');
+    assert.ok(!/secret|user-text|frag|\n|\u001b/.test(line ?? ''));
+    const long = logCspReport({ 'csp-report': { 'document-uri': 'http://localhost/' + 'a'.repeat(5000), 'effective-directive': 'img-src' } });
+    assert.ok(long && long.length < 300, `bounded, got ${long?.length}`);
+    // Different queries on one page are one violation, not a new log line each.
+    const q1 = logCspReport({ 'csp-report': { 'document-uri': 'http://localhost/q?a=1', 'effective-directive': 'font-src', 'blocked-uri': 'https://f.example/x' } });
+    const q2 = logCspReport({ 'csp-report': { 'document-uri': 'http://localhost/q?a=2', 'effective-directive': 'font-src', 'blocked-uri': 'https://f.example/x' } });
+    assert.ok(q1);
+    assert.equal(q2, null);
+  } finally {
+    console.warn = warn;
+  }
+});
