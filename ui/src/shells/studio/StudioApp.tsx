@@ -21,7 +21,7 @@ const StudioContent: React.FC = () => {
   const queueLength = useAudioGenQueueSelector(s => s.items.length);
   const { data } = useQuery({ ...songsOptions(), enabled: !!token });
   const latest = data?.songs[0];
-  const { skin, setSkin } = useSkin();
+  const { skin, setSkin } = useSkin(true);
 
   if (isRestarting) return <RestartingOverlay />;
   if (isOffline) return <ServerOfflineOverlay />;

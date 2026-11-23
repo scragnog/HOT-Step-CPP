@@ -5,7 +5,6 @@
 // data-skin is set early by public/theme-boot.js; main.tsx drops it when it does not target the running shell.
 
 import { useCallback, useEffect, useState } from 'react';
-import { resolveShell } from '../app/shell';
 
 export interface ThemeManifest {
   id: string;
@@ -50,9 +49,10 @@ function setAttr(id: string | null): void {
 
 /** The studio skin shown by the studio shell and the /kit page (null = the default kit) and a setter.
  *  The page previews the skin only while mounted and restores whatever the shell had on exit, so /kit
- *  inside classic never leaks a studio skin. Only the studio shell saves a pick to hs-skin; in classic
- *  it is a session preview, so a saved classic skin is not overwritten. */
-export function useSkin(): { skin: string | null; setSkin: (id: string | null) => void } {
+ *  inside classic never leaks a studio skin. The caller decides persistence: the studio shell passes
+ *  true and saves picks to hs-skin; the kit page passes false (a session preview), so it never
+ *  overwrites the saved skin, whichever shell another tab has switched to. */
+export function useSkin(persist: boolean): { skin: string | null; setSkin: (id: string | null) => void } {
   const [skin, setSkinState] = useState<string | null>(stored);
   useEffect(() => {
     const prev = document.documentElement.getAttribute('data-skin');
@@ -62,10 +62,10 @@ export function useSkin(): { skin: string | null; setSkin: (id: string | null) =
   }, []);
   const setSkin = useCallback((id: string | null) => {
     setAttr(id);
-    if (resolveShell() === 'studio') {
+    if (persist) {
       try { if (id) localStorage.setItem(SKIN_KEY, id); else localStorage.removeItem(SKIN_KEY); } catch { /* storage blocked: session only */ }
     }
     setSkinState(id);
-  }, []);
+  }, [persist]);
   return { skin, setSkin };
 }

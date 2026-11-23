@@ -58,7 +58,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 export const KitGallery: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const { skin, setSkin } = useSkin();
+  const { skin, setSkin } = useSkin(false);
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
   const [font, setFont] = useState(skin ? 'skin' : '6');
