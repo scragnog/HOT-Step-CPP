@@ -88,3 +88,35 @@ test('pruneCache removes oldest files first until under the cap', () => {
   pruneCache(dir, 150);
   assert.deepEqual(fs.readdirSync(dir), ['new']);
 });
+
+test('one deadline covers a hung connection and a body that stalls', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artwork-'));
+  let stage: 'hang' | 'stall' = 'hang';
+  t.mock.method(https, 'get', ((_u: unknown, o: { signal: AbortSignal }, cb: (r: any) => void) => {
+    const reqH: Record<string, (e: Error) => void> = {};
+    const resH: Record<string, (e?: Error) => void> = {};
+    const res: any = { statusCode: 200, headers: { 'content-type': 'image/png' }, resume() {}, on(e: string, f: any) { resH[e] = f; return res; } };
+    o.signal.addEventListener('abort', () => { const err = new Error('aborted'); reqH.error?.(err); resH.error?.(err); });
+    if (stage === 'stall') queueMicrotask(() => cb(res)); // headers arrive, body never ends
+    return { on(e: string, f: any) { reqH[e] = f; return this; }, destroy() {} };
+  }) as any);
+  await assert.rejects(getArtwork('https://images.genius.com/a.png', { dir, timeoutMs: 30 }), (e: ArtworkError) => e.status === 504);
+  stage = 'stall';
+  await assert.rejects(getArtwork('https://images.genius.com/b.png', { dir, timeoutMs: 30 }), (e: ArtworkError) => e.status === 504);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('redirect and rejected responses destroy the request instead of draining the body', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artwork-'));
+  let destroyed = 0;
+  const respond = (res: any) => t.mock.method(https, 'get', ((_u: unknown, _o: unknown, cb: (r: any) => void) => {
+    queueMicrotask(() => cb({ headers: {}, resume() { assert.fail('drained'); }, on() {}, ...res }));
+    return { on() { return this; }, destroy() { destroyed++; } };
+  }) as any);
+  respond({ statusCode: 404 });
+  await assert.rejects(getArtwork('https://images.genius.com/c.png', { dir }), (e: ArtworkError) => e.status === 502);
+  t.mock.restoreAll();
+  respond({ statusCode: 302, headers: { location: 'https://127.0.0.1/x.png' } });
+  await assert.rejects(getArtwork('https://images.genius.com/d.png', { dir }), (e: ArtworkError) => e.status === 403);
+  assert.equal(destroyed, 2);
+});

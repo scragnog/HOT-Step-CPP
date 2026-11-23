@@ -535,10 +535,12 @@ origins.
 
 What the policy does not stop, so shell skins still get a code review:
 
-- Page code storing a URL on an artist, then asking the artwork route for it. The
-  server makes that request, so the data leaves from the server (one way, reply
-  unreadable). Outside shell skins get a code review for this; the route itself
-  cannot tell a user-pasted URL from a skin-written one.
+- Page code storing a URL on an artist (or any stored cover field), then requesting
+  it through the artwork route. The server makes that request, so the data leaves
+  from the server, and the route serves the reply on the app origin, so shell code
+  can read it. The route cannot tell a user-pasted URL from a skin-written one.
+  Outside shell skins do not merge until this is accepted or writes of those URL
+  fields need trusted approval.
 - Navigating away with data in the URL. No CSP directive covers it.
 
 ## UI source layout

@@ -101,14 +101,14 @@ export function pruneCache(dir = cacheDir(), max = MAX_CACHE_BYTES): void {
 
 type Hop = { status: number; location?: string; type: string; body: Buffer };
 
-function fetchOnce(u: URL, lookup: net.LookupFunction): Promise<Hop> {
+function fetchOnce(u: URL, lookup: net.LookupFunction, signal: AbortSignal): Promise<Hop> {
   return new Promise((resolve, reject) => {
-    const req = https.get(u, { lookup, timeout: TIMEOUT_MS, headers: { 'User-Agent': 'HOT-Step artwork cache', Accept: 'image/*' } }, res => {
+    const req = https.get(u, { lookup, signal, headers: { 'User-Agent': 'HOT-Step artwork cache', Accept: 'image/*' } }, res => {
       const status = res.statusCode ?? 0;
       const type = String(res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-      if (status >= 300 && status < 400) { res.resume(); return resolve({ status, location: res.headers.location, type, body: Buffer.alloc(0) }); }
-      if (status !== 200) { res.resume(); return reject(new ArtworkError(502, `Upstream ${status}`)); }
-      if (!EXT_BY_TYPE[type]) { res.resume(); return reject(new ArtworkError(415, 'Not a supported image type')); }
+      if (status >= 300 && status < 400) { req.destroy(); return resolve({ status, location: res.headers.location, type, body: Buffer.alloc(0) }); }
+      if (status !== 200) { req.destroy(); return reject(new ArtworkError(502, `Upstream ${status}`)); }
+      if (!EXT_BY_TYPE[type]) { req.destroy(); return reject(new ArtworkError(415, 'Not a supported image type')); }
       const chunks: Buffer[] = [];
       let n = 0;
       res.on('data', (c: Buffer) => {
@@ -116,23 +116,24 @@ function fetchOnce(u: URL, lookup: net.LookupFunction): Promise<Hop> {
         if (n > MAX_IMAGE_BYTES) { req.destroy(); reject(new ArtworkError(413, 'Image too large')); } else chunks.push(c);
       });
       res.on('end', () => resolve({ status, type, body: Buffer.concat(chunks) }));
-      res.on('error', reject);
+      res.on('error', () => reject(new ArtworkError(signal.aborted ? 504 : 502, signal.aborted ? 'Upstream timeout' : 'Upstream read failed')));
     });
-    req.on('timeout', () => req.destroy(new ArtworkError(504, 'Upstream timeout')));
-    req.on('error', e => reject(e instanceof ArtworkError ? e : new ArtworkError(502, e.message)));
+    req.on('error', e => reject(e instanceof ArtworkError ? e : signal.aborted ? new ArtworkError(504, 'Upstream timeout') : new ArtworkError(502, e.message)));
   });
 }
 
 /** Cached file for a URL, fetching it first when missing. Screens the URL on every hop. */
 export async function getArtwork(
-  url: string, opts: { dir?: string; lookup?: net.LookupFunction } = {},
+  url: string, opts: { dir?: string; lookup?: net.LookupFunction; timeoutMs?: number } = {},
 ): Promise<{ file: string; type: string }> {
   const dir = opts.dir ?? cacheDir();
   const hit = readCached(url, dir);
   if (hit) return hit;
   let u = parseArtworkUrl(url);
+  // One deadline for DNS, every redirect hop and the body reads.
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS);
   for (let hop = 0; ; hop++) {
-    const r = await fetchOnce(u, opts.lookup ?? safeLookup);
+    const r = await fetchOnce(u, opts.lookup ?? safeLookup, signal);
     if (r.status === 200) {
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `${keyOf(url)}.${EXT_BY_TYPE[r.type]}`);
