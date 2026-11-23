@@ -149,6 +149,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
     </div>}
     {job?.state === 'cancelled' && <p role="status">{t('settings.workspaceArchive.import.cancelled')}</p>}
     {job?.state === 'failed' && <div role="alert" className="text-red-600 dark:text-red-400">
+      {job.report && <p className="break-all font-medium">{t('settings.workspaceArchive.import.keptNotActive', { path: job.target })}</p>}
       <p>{t('settings.workspaceArchive.import.failed', { error: job.error ?? '' })}</p>
       {job.errors.filter(e => e !== job.error).map((e, i) => <p key={i}>{e}</p>)}
     </div>}
