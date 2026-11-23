@@ -1,0 +1,1 @@
+--k-on-tint on --grad-tint stop 1 is 1.00:1

@@ -1,0 +1,2 @@
+html[data-skin="bad-image-set"] { --tint: 56 189 248; --grad-well: image-set(x 1x); }
+html[data-skin="bad-image-set"]:not(.dark) { --tint: 56 189 248; --grad-well: image-set(x 1x); }
