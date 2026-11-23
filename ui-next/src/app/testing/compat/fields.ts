@@ -13,7 +13,7 @@ import type { Node, Value } from '../../../definitions/types.ts';
 import { applyChange, bindPart, has, isAuto, setValue, valueOf } from '../../../derive.ts';
 import { ix } from '../../model/index.ts';
 import { useDesk } from '../../store/desk.ts';
-import { asScene, expose, fromConcept, onMirror, onScene } from '../compat.ts';
+import { asScene, expose, fromConcept, onMirror, type Scene } from '../compat.ts';
 
 const FIELDS = '#prompt, .prompt-card input[data-bind], .paper textarea[data-bind]';
 const keyOf = (el: HTMLInputElement | HTMLTextAreaElement) => (el.id === 'prompt' ? 'prompt.text' : el.dataset.bind ?? '');
@@ -40,7 +40,7 @@ function take(vals: Record<string, string>): void {
 export function install(): void {
   const render = (window as unknown as { render: () => void }).render;
   expose({
-    render() { const w = written(); render(); take(w); },
+    render() { const w = written(), after = sceneOf((window as unknown as { S: Scene }).S); render(); after(); take(w); },
     setFieldText(el: HTMLInputElement | HTMLTextAreaElement, text: string, start = 0, end = el.value.length) {
       take(written());
       el.setRangeText(text, start, end, 'end'); el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -58,12 +58,16 @@ export function install(): void {
   });
   for (const t of ['pointerdown', 'keydown', 'focusin']) addEventListener(t, () => take(written()), true);
   onMirror((S, s) => { S.latent = typeof s.desk.state.latent === 'string' ? s.desk.state.latent : null; });
-  onScene(S => {
-    /* a parameter whose key ends in ".auto" (Expand on Generate, wild.auto) is a value, not another one's auto switch,
-       which the layer's core takes such a key for */
-    const vals = Object.entries(S.vals ?? {}).filter(([k, v]) => k.endsWith('.auto') && ix.params.has(k) && typeof v === 'boolean');
-    if (vals.length) { const s = useDesk.getState(); useDesk.setState({ desk: { ...s.desk, vals: { ...s.desk.vals, ...Object.fromEntries(vals) as Record<string, Value> } } }); }
-    const s = useDesk.getState(), want = typeof S.latent === 'string' && S.latent ? S.latent : null;
-    if ((s.desk.state.latent ?? null) !== want) useDesk.setState({ desk: { ...s.desk, state: { ...s.desk.state, latent: want } } });
+}
+
+/* What a scene says beyond the layer's core, read before render() applies it (applying it mirrors S afresh): a parameter
+   whose key ends in ".auto" (Expand on Generate, wild.auto) is a value, not another one's auto switch, which the core
+   takes such a key for; and the latent (S.latent). */
+function sceneOf(S: Scene): () => void {
+  const autos = Object.entries(S.vals ?? {}).filter(([k, v]) => k.endsWith('.auto') && ix.params.has(k) && typeof v === 'boolean') as [string, Value][];
+  const latent = typeof S.latent === 'string' && S.latent ? S.latent : null;
+  return () => asScene(() => {
+    const s = useDesk.getState();
+    useDesk.setState({ desk: { ...s.desk, vals: { ...s.desk.vals, ...Object.fromEntries(autos) }, state: { ...s.desk.state, latent } } });
   });
 }

@@ -1,0 +1,40 @@
+{
+ "about": "Package 4's accepted differences between the concept's page and the rebuild's in its states (slice-states/40-fields.mjs: the prompt card's column and the lyric tile), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+ "accepted": [
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:type$",
+   "n": 135,
+   "why": "Deviation 6: every button says its type (the tabs, the strip's segments, Expand, the suggestions, the dataset tags, the tools)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-v$",
+   "n": 20,
+   "why": "Deviation 10: the vocal gender's segments name their value in data-v (\"female\"), the concept's their label (\"Female\")."
+  },
+  {
+   "state": "^fields-mm3-",
+   "key": "data-m=\"lyrics\"\\]>div:1>div:2>span:1",
+   "field": "^sem:(role|name|aria-label|aria-hidden|title)$",
+   "n": 40,
+   "why": "The vocal gender beside Instrumental is the generic labelled pairing (containers.tsx Labelled) holding the segmented part: the segments are the named group (deviation 6), where the concept names the pairing and hides its caps label; the pairing carries no tip yet (\"Compose caption writes this into Vocal Details\", which the labelled pairing would draw from its node's tip, package 2's housing). Its segments' padding is the concept's (25-prompt.css)."
+  },
+  {
+   "state": "^fields-yue-studio-wildcards-dark$",
+   "key": "^#quickcol",
+   "field": "^(block-size|height|grid-template-rows|perspective-origin|transform-origin)$",
+   "n": 14,
+   "why": "The caption dataset's default is the definition's, the adapter's own dataset (value \"\", \"The adapter's dataset\", as the real application sends it), where the concept's default is its first dataset (\"my-band-ep\"): the From chip is wider, and on YuE2 at Studio with Expand on Generate showing the tools row wraps to a second line."
+  },
+  {
+   "state": "^fields-mm3-(lab|studio-caption-track)$",
+   "key": "^shot$",
+   "field": "^pixels$",
+   "n": 2,
+   "why": "The same From chip (\"The adapter's dataset\" for \"my-band-ep\") in the screenshots of MiniMax-Music3's card; nothing else differs in them (both shots are in tools/visual-baseline/out/*-fields/shots)."
+  }
+ ]
+}
