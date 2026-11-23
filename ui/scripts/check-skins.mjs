@@ -49,9 +49,9 @@ function defaults() {
 }
 
 function checkManifest(dir, id, errors) {
-  let m;
+  let m; // returns the targets array when valid
   try { m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); }
-  catch (e) { errors.push(`manifest: unreadable (${e.message})`); return; }
+  catch (e) { errors.push(`manifest: unreadable (${e.message})`); return null; }
   const str = k => typeof m[k] === 'string' && m[k].trim() !== '';
   if (m.id !== id) errors.push(`manifest: id "${m.id}" must equal the folder name "${id}"`);
   if (!/^[a-z][a-z0-9-]{1,31}$/.test(id)) errors.push(`manifest: folder/id "${id}" must be lowercase letters, digits and dashes`);
@@ -59,8 +59,11 @@ function checkManifest(dir, id, errors) {
   if (!str('version') || !/^\d+\.\d+\.\d+$/.test(m.version)) errors.push('manifest: "version" must be semver (1.0.0)');
   if (m.api !== 0) errors.push('manifest: "api" must be 0');
   if (m.kind !== 'theme') errors.push('manifest: "kind" must be "theme"');
+  const t = m.targets;
+  if (!Array.isArray(t) || t.length === 0 || !t.every(x => x === 'studio' || x === 'classic') || new Set(t).size !== t.length) errors.push('manifest: "targets" must be ["studio"], ["classic"] or both');
   const p = m.preview;
   if (!Array.isArray(p) || p.length < 2 || p.length > 4 || !p.every(c => /^#[0-9a-f]{6}$/i.test(c))) errors.push('manifest: "preview" must be 2 to 4 hex colours (#rrggbb)');
+  return t;
 }
 
 function checkCss(dir, id, errors) {
@@ -108,7 +111,10 @@ function checkContrast(sets, def, errors, label) {
 
 function checkTheme(dir, def) {
   const id = path.basename(dir), errors = [];
-  checkManifest(dir, id, errors);
+  const targets = checkManifest(dir, id, errors);
+  if (Array.isArray(targets) && targets.includes('classic')) console.log(`note ${id}: classic rules: not implemented yet (HOTSTEP-1322)`);
+  // Studio targets: token-only rules and contrast. Classic-only themes skip them until HOTSTEP-1322.
+  if (Array.isArray(targets) && !targets.includes('studio')) return errors;
   const sets = checkCss(dir, id, errors);
   if (sets) checkContrast(sets, def, errors, 'contrast ');
   return errors;

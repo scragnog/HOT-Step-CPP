@@ -9,14 +9,19 @@ import { AuthProvider } from './context/AuthContext.tsx'
 import { startHeapWatch } from './utils/heapWatch'
 import { ErrorBoundary } from './components/shared/ErrorBoundary'
 import { queryClient } from './queries/client'
+import { dropForeignSkin } from './themes/registry'
 
 // Sampling the heap while we track down the idle out-of-memory crash. Costs one
 // timer every 30 seconds and prints one line.
 startHeapWatch()
 
+// theme-boot.js set data-skin from hs-skin; keep it only if the skin targets this shell.
+const shellId = resolveShell()
+dropForeignSkin(shellId)
+
 // Only the chosen shell is downloaded (app/shell.ts). Both default-export a root.
 // eslint-disable-next-line react-refresh/only-export-components -- entry file, nothing hot-reloads it
-const Shell = lazy(() => resolveShell() === 'studio' ? import('./shells/studio/StudioApp') : import('./App'))
+const Shell = lazy(() => shellId === 'studio' ? import('./shells/studio/StudioApp') : import('./App'))
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

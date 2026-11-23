@@ -2,9 +2,8 @@
 
 A skin changes how HOT-Step looks without changing what it does. There are two
 kinds: **themes** (variables only, below) and shell skins (a separate section,
-added with the shell contract). Themes apply to the studio shell and the `/kit`
-page only. The classic UI has no semantic colour layer, so it never receives a
-skin.
+added with the shell contract). Studio themes apply to the studio shell and the `/kit`
+page. The classic UI has no semantic colour layer, so a theme reaches it only if its manifest targets `classic` (rules to follow).
 
 Status: the theme API is `api: 0` (unstable). Renaming or removing a token is a
 major API bump; adding one is not.
@@ -29,10 +28,11 @@ ui/src/themes/<id>/theme.css
 | `version` | Semver, `1.0.0`. |
 | `api` | `0`. |
 | `kind` | `"theme"`. |
+| `targets` | `["studio"]`, `["classic"]` or both. Studio themes set kit tokens only (the rules below). Classic rules are not defined yet; the checker skips them and says so. |
 | `preview` | 2 to 4 hex colours (`#rrggbb`) for the picker swatch. |
 
 The selection is stored as `hs-skin` (`hs-theme` is light or dark). The active
-theme is `html[data-skin="<id>"]`. With no skin set you get the default kit.
+theme is `html[data-skin="<id>"]`, set by `ui/public/theme-boot.js` before first paint and dropped by `main.tsx` when the skin does not target the running UI. With no skin set you get the default kit.
 
 ### Rules for `theme.css`
 

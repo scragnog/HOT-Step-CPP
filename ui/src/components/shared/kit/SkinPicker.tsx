@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Tabs } from './Tabs';
-import { THEMES } from '../../../themes/registry';
+import { themesFor } from '../../../themes/registry';
 
 const DEFAULT = 'default';
 
@@ -12,6 +12,6 @@ export const SkinPicker: React.FC<{ skin: string | null; onChange: (id: string |
     aria-label="Skin"
     value={skin ?? DEFAULT}
     onChange={v => onChange(v === DEFAULT ? null : v)}
-    items={[{ value: DEFAULT, label: 'Default' }, ...THEMES.map(t => ({ value: t.id, label: t.name }))]}
+    items={[{ value: DEFAULT, label: 'Default' }, ...themesFor('studio').map(t => ({ value: t.id, label: t.name }))]}
   />
 );
