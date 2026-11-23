@@ -40,7 +40,7 @@ export function switchEngine(ix: Index, deskIn: Desk, book0: EngineBook, to: Eng
   const models: string[] = []; let sets = 0;
   for (const k of mine) {
     if (!applies(ix, k, desk0) || !changed(ix, k, desk0)) continue;
-    if (isModel(ix, k, from)) models.push(formatValue(resolve(ix.params.get(k)!.p, from), valueOf(ix, k, desk0)!, desk0.lists)); else sets++;
+    if (isModel(ix, k, from)) models.push(formatValue(resolve(ix.params.get(k)!.p, from), valueOf(ix, k, desk0)!, desk0.lists, from)); else sets++;
   }
   const ownState = Object.keys(desk0.state).filter(k => ix.states.get(k)?.s.owner === 'engine');
   const slots = ownState.reduce((n, k) => n + (Array.isArray(desk0.state[k]) ? (desk0.state[k] as Json[]).length : 0), 0);

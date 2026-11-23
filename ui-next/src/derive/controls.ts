@@ -11,7 +11,7 @@ import {
   LANGUAGE_NATIVE, PLUGIN_BUILT_IN, PLUGIN_COMMUNITY, PLUGIN_FAMILIES, PLUGIN_FAMILY_OF, PLUGIN_FILES, PLUGIN_OTHER, PLUGIN_SYMBOLS,
   SCHEDULE_CURVES,
 } from '../definitions/option-faces.ts';
-import { type Desk, type Index, has, isAuto, mmss, resolve, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, choiceLists, has, isAuto, mmss, resolve, valueOf, wordsOf } from './core.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
 import { paramWords } from './strings.ts';
 
@@ -233,7 +233,7 @@ export function choicePos(nums: number[], v: number): { pos: number; beyond: -1 
 
 /* ---------------------------------------------------------------- an option's face in a picker */
 
-/** The card a model's size is drawn against (the concept's 31.8 GB; the engine panel's package gives the real one). */
+/** The card a model's size is drawn against until the models service tells the real one (desk.vram.card). */
 export const CARD_GB = 31.8;
 const QUANT = /(IQ\d_X+S-imat|Q\d_K_M-imat|Q\d_K_[MS]|Q\d_K|Q\d_0|BF16|F16|MXFP4|NVFP4)/;
 /** A model's quantisation as a badge and its class (22-pick.js quantOf). */
@@ -248,18 +248,17 @@ const curveOf = (label: string): number[] => { const f = SCHEDULE_CURVES[label] 
  *  model's name, quantisation and size; a language's own name. Words are the options' own (English labels as the
  *  server lists them); the tables are src/definitions/option-faces.ts. */
 export function optionFaces(ix: Index, key: string, desk: Desk, variant: 'plugin' | 'model' | 'stamp'): OptionFace[] {
-  const { p } = ix.params.get(key)!, f = wordsOf(ix, p, desk);
-  const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
+  const { p } = ix.params.get(key)!, f = wordsOf(ix, p, desk), card = desk.vram?.card ?? CARD_GB;
   const from = !Array.isArray(f.options) && f.options ? f.options : null;
-  const listed = from ? (desk.lists?.[from.from] ?? []).filter(x => !fixed.some(o => o.value === x.value) && (!from.only || from.only.includes(String(x.value)))) : [];
-  const all = [...fixed.map(o => ({ value: o.value, label: o.label })), ...listed.map(o => ({ value: o.value, label: o.label, gb: (o as { gb?: number }).gb }))];
+  const { fixed, listed } = choiceLists(f, desk);
+  const all = [...fixed.map(o => ({ value: o.value, label: o.label })), ...listed.map(o => ({ value: o.value, label: o.label, gb: o.gb }))];
   /* a list of schedules draws each one's curve: the scheduler plugins, or a list whose options the curves table knows */
   const schedule = (!!from && from.from === 'plugins.scheduler') || all.some(o => o.label in SCHEDULE_CURVES);
   return all.map((o, i) => {
     if (variant === 'stamp') return { native: LANGUAGE_NATIVE[o.label] ?? o.label, ink: i === 0 ? '#e0225a' : `hsl(${Math.round(i * 137.508) % 360} 62% 42%)` };
     if (variant === 'model') {
       const q = quantOf(o.label), gb = 'gb' in o && typeof o.gb === 'number' ? o.gb : null;
-      return { name: q ? o.label.split(' · ')[0]! : o.label, ...(q ?? {}), ...(gb ? { gb, gbText: `${gb.toFixed(1)} GB`, mem: Math.min(1, gb / CARD_GB) } : {}) };
+      return { name: q ? o.label.split(' · ')[0]! : o.label, ...(q ?? {}), ...(gb ? { gb, gbText: `${gb.toFixed(1)} GB`, mem: Math.min(1, gb / card) } : {}) };
     }
     const fam = PLUGIN_FAMILY_OF.params[key] ?? PLUGIN_FAMILY_OF.engines[desk.engine] ?? PLUGIN_FAMILIES.find(x => x.members.includes(o.label)) ?? (/^MD /.test(o.label) ? PLUGIN_COMMUNITY : PLUGIN_OTHER);
     const file = PLUGIN_FILES[o.label] ?? (/exp\./.test(o.label) ? PLUGIN_BUILT_IN.experimental : /^MD /.test(o.label) ? `md_${o.label.slice(3).toLowerCase().replace(/[^a-z0-9.]+/g, '_')}.lua` : PLUGIN_BUILT_IN.plain);

@@ -11,7 +11,7 @@
 import { CATEGORIES, type Definition, type EngineId, type ModuleDef, type Node, type PedalDef, type Tier, type UnitDef, type Value } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, stripOf, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, shownValue, stripOf, valueOf, wordsOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
 import {
@@ -22,6 +22,7 @@ import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
 import { controlModel, type ControlModel } from './controls.ts';
+import { modelRows, type ModelRow } from './vram.ts';
 
 /* ---------------------------------------------------------------- a part's model */
 
@@ -101,6 +102,8 @@ export interface PartModel {
   /** What a shared control draws beyond its parameters (src/derive/controls.ts): a box's text, a ruler, a fader, a
    *  look-back strip, a power chip, a row's value between its choices, a picker's option faces. */
   control?: ControlModel;
+  /** The engine panel's model rows (a modelPicker): each model's role, words and option faces (derive/vram.ts). */
+  models?: ModelRow[];
   /** Why the node stands back, when it does. */
   dim: Slot | null;
   small: boolean;
@@ -125,7 +128,9 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
     const [, , step] = f.range, steps = Math.round((hi - lo) / step);
     if (steps <= 12) out.options = Array.from({ length: steps + 1 }, (_, i) => { const x = +(lo + i * step).toFixed(10), w = formatMsg(ix, key, desk, x); return { value: x, label: w, lcd: w, pick: w, on: x === v }; });
   }
-  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === v }));
+  /* a model choice's "" is shown as the file it stands for */
+  const shown = shownValue(ix, key, desk, v);
+  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === shown }));
   if (f.placeholder) out.placeholder = fillMsg(ix, wordKey(ix, key, desk, 'placeholder'), f.placeholder, desk);
   if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
   const kept = p.type === 'text' ? keptMsg(ix, key, desk) : undefined;
@@ -170,6 +175,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
     if (ctl) m.control = ctl;
   }
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
+  if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
   return m;
 }

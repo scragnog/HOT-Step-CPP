@@ -1,10 +1,11 @@
-// The simulated engine: the concept's invented songs, its model catalogue (34-engine-panel.js MODELSETS) and its
+// The simulated engine: the concept's invented songs, its model catalogue (the models service's, services/models.ts) and its
 // queue, which renders each job on a clock as the concept's go bar does (35-gobar.js): planning for the first fifth,
 // then the steps, then decoding. No request leaves the page; the single-file build uses this one.
 
 import type { EngineId } from '../../definitions/types.ts';
 import type { CreateIntent } from '../../derive/request.ts';
-import type { Engine, Job, ModelFile, Song } from './engine.ts';
+import type { Engine, Job, Song } from './engine.ts';
+import { MODEL_FILES } from './models.ts';
 
 const SONGS: Song[] = [
   { id: '1', title: 'Studio sketch 01', style: 'Lo-fi hip hop, mellow electric piano', duration: 171, hue: 215, engine: 'ace', createdAt: 6 },
@@ -15,23 +16,8 @@ const SONGS: Song[] = [
   { id: '6', title: 'Rhodes at 2am', style: 'Soul, warm Rhodes, tight groove', duration: 198, hue: 5, engine: 'ace', createdAt: 1 },
 ];
 
-const m = (label: string, gb: number): ModelFile => ({ value: label, label, gb });
-/** Each engine's model buckets, as the concept lists them. */
-const MODELS: { [e in EngineId]: { [bucket: string]: ModelFile[] } } = {
-  ace: {
-    dit: [m('XL Turbo · Q8_0', 5.3), m('XL Turbo · MXFP4', 2.7), m('XL Turbo · Q4_K_M', 3.0), m('Turbo · Q8_0', 2.5), m('Turbo · Q4_K_M', 1.4), m('SFT · Q8_0', 2.5), m('Base · Q8_0', 2.5)],
-    lm: [m('4B · Q8_0', 4.5), m('4B · Q6_K', 3.4), m('4B · BF16', 8.4), m('1.7B · Q8_0', 2.0), m('0.6B · Q8_0', 0.71)],
-    vae: [m('ScragVAE', 0.34), m('Standard VAE', 0.34), m('Regrind V10b', 0.34)],
-  },
-  'minimax-m3': {
-    dit: [m('Flow DiT · Q8_0', 2.6), m('Flow DiT · Q6_K', 2.0), m('Flow DiT · Q4_K_M', 1.5), m('Flow DiT · F16', 4.9)],
-    lm: [m('8B planner · Q8_0', 9.1), m('8B planner · Q6_K', 7.1), m('8B planner · F16', 17.2)],
-    x: [m('Depth decoder · Q8_0', 0.69), m('Depth decoder · F16', 1.3)],
-  },
-  yue2: { dit: [m('YuE2 · Q8_0', 3.9), m('YuE2 · Q6_K', 3.1), m('YuE2 · BF16', 7.3)], vae: [m('Standard VAE', 0.3), m('Legacy VAE', 0.3)] },
-  sa3: { dit: [m('SA3 DiT · BF16', 2.9), m('SA3 DiT · NVFP4', 0.83), m('SA3 DiT · MXFP4', 0.79)] },
-  heartmula: { dit: [m('Global · Q8_0', 3.7), m('Global · F16', 6.9)], lm: [m('Local · Q8_0', 0.53), m('Local · F16', 0.99)], x: [m('Codec flow · Q8_0', 1.6)] },
-};
+/** Each engine's model buckets: the models service's catalogue (services/models.ts), one copy of the concept's. */
+const MODELS = MODEL_FILES;
 
 /* the concept's lists (25-module-sampler.js PLUG, 03-controls.js LANGS), so a picker draws what the concept draws */
 const LISTS: { [source: string]: { value: string | number; label: string }[] } = {
