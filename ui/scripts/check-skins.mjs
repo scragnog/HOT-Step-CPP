@@ -206,7 +206,7 @@ function checkContrast(sets, def, errors, label) {
 // Classic overlay skins restyle class names, so they cannot be held to a token list; they are reviewed by eye.
 // The checker only enforces what keeps them safe and inert: every selector is scoped to the skin, and a
 // skin cannot load anything or paint fake UI. Judgement calls: `position: fixed` and `content` are rejected
-// outright (no overlays, no injected text); @media, @keyframes and @supports are allowed, @import and
+// outright (no overlays, no injected text); @media and @supports are allowed (no @keyframes: names are global and would override the app's animations), @import and
 // @font-face are not; `!important` is allowed (the skin must beat utility classes, and it is scoped).
 const splitSelectors = sel => { // comma-split at depth 0, so :is(a, b) stays whole
   const out = []; let depth = 0, cur = '';
@@ -227,11 +227,15 @@ function checkClassicCss(dir, id, errors) {
   const scope = new RegExp(`^(html|html\\.dark|:root)\\[data-skin="${id}"\\](?![\\w-])`);
   root.walk(n => {
     if (n.type === 'atrule') {
-      if (!['media', 'keyframes', 'supports'].includes(n.name.toLowerCase())) errors.push(`theme.css: @${n.name} is not allowed`);
+      if (!['media', 'supports'].includes(n.name.toLowerCase())) errors.push(`theme.css: @${n.name} is not allowed`);
     } else if (n.type === 'rule') {
-      if (n.parent.type === 'atrule' && /keyframes$/i.test(n.parent.name)) return; // 0%, 50%, from, to
       for (const part of splitSelectors(n.selector)) if (!scope.test(part)) errors.push(`theme.css: selector "${part}" is not scoped to html[data-skin="${id}"] (or :root / html.dark with it)`);
     } else if (n.type === 'decl') {
+      // Strip data: URLs, then reject what could still load or hide something: any image function other than
+      // url() (image-set("x.png"), image(), cross-fade(), element(), paint(), src()) and CSS escapes.
+      const bare = n.value.replace(/url\(\s*(?:"data:[^"]*"|'data:[^']*'|data:[^)]*)\s*\)/gi, '');
+      if (bare.includes('\\')) errors.push(`theme.css: ${n.prop} uses a CSS escape, which is not allowed`);
+      if (/(?:^|[^\w-])(?:-webkit-)?(?:image-set|image|cross-fade|element|paint|src)\s*\(/i.test(bare)) errors.push(`theme.css: ${n.prop} uses an image function other than a data: url(); only data: URLs are allowed (external image)`);
       for (const m of n.value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) {
         if (!/^data:/i.test((m[1] ?? m[2] ?? m[3]).trim())) errors.push(`theme.css: ${n.prop} has an external url(); only data: URLs are allowed`);
       }

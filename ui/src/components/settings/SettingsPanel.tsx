@@ -684,13 +684,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           defaultValue="classic"
         />
 
-        {resolveShell() === 'classic' && classicSkins.length > 0 && (
+        {classicSkins.length > 0 && (
           <SelectRow
             id="setting-skin"
-            label="Skin"
-            description="A look for the classic layout. It applies at once and is remembered. The default is the standard look."
+            label={t('settings.general.skin', 'Skin')}
+            description={t('settings.general.skinDesc', 'A look for the classic layout. It applies at once and is remembered.')}
             value={skin}
-            options={[{ value: '', label: 'Default' }, ...classicSkins.map(t => ({ value: t.id, label: t.name }))]}
+            options={[{ value: '', label: t('settings.general.skinDefault', 'Default') }, ...classicSkins.map(t => ({ value: t.id, label: t.name }))]}
             onChange={(v) => {
               const html = document.documentElement;
               if (v) html.setAttribute('data-skin', v); else html.removeAttribute('data-skin');

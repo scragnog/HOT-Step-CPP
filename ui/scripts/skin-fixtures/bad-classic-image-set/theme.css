@@ -1,0 +1,1 @@
+html[data-skin="bad-classic-image-set"] body { background-image: image-set("https://example.com/x.png" 1x); }

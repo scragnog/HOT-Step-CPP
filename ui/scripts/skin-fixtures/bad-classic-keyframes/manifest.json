@@ -1,0 +1,1 @@
+{ "id": "bad-classic-keyframes", "name": "Fixture", "author": "test", "version": "1.0.0", "api": 0, "kind": "theme", "targets": ["classic"], "preview": ["#112233", "#445566"] }

@@ -147,8 +147,8 @@ saves `hs-skin`; the default is no skin.
 
 - Every selector is scoped to `html[data-skin="<id>"]`, `html.dark[data-skin="<id>"]`
   or `:root[data-skin="<id>"]`, so a skin is inert until selected.
-- No `@import`, `@font-face` or other at-rules except `@media`, `@keyframes`,
-  `@supports`. No `url()` except `data:` (the embedded images need `img-src data:`
+- No `@import`, `@font-face` or other at-rules except `@media` and
+  `@supports` (no `@keyframes`: names are global). No `url()` except `data:` (the embedded images need `img-src data:`
   in the CSP). Fonts: name system fonts only; a skin cannot ship a font file.
 - No `position: fixed` and no `content` property, so a skin cannot overlay the page
   or inject fake UI. `!important` is allowed.
