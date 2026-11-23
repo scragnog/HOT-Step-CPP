@@ -22,7 +22,7 @@ export function dispatch(d: Definition, a: Action, node?: Node, from?: string, a
   if ('change' in did) useDesk.getState().commit(did.change, from);
   else if ('go' in did) setTierFromView(did.go, { ring: did.ring });
   else if ('add' in did) useDesk.getState().add(did.add);
-  else runNamed(did.call, arg);
+  else runNamed(did.call, arg, from);
 }
 
 /** Runs action i of the strip a module's tile shows now (its definition's strip that holds). */

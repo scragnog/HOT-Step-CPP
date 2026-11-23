@@ -10,6 +10,7 @@ import { Desk, HiddenNote } from '../desk/Desk.tsx';
 import { setTierFromView } from './tier.ts';
 import { toggleDrawer } from './drawers.ts';
 import { usePanelStore } from '../store/panels.ts';
+import { Slot } from '../register/Slot.tsx';
 
 const TIERS: Tier[] = ['quick', 'studio', 'lab'];
 
@@ -69,7 +70,8 @@ export function Centre() {
       {/* the prompt card's place: the prompt package draws the card and the Quick lyric sheet here */}
       <div className="quickcol" id="quickcol">
         <h1 className="ask" id="ask" hidden={tier !== 'quick'}>{say(ui('ask'))}</h1>
-        <div id="quickLyrics" />
+        <Slot name="centre.prompt" />
+        <div id="quickLyrics"><Slot name="centre.quickLyrics" /></div>
       </div>
       <HiddenNote />
       <div className="deskwrap" id="deskwrap"><Desk /></div>

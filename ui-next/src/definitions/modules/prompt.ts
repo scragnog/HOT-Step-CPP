@@ -150,6 +150,7 @@ export const prompt = {
       state: ['capTracks', 'latent'],
       /* the card's tools, each a named action the prompt feature runs (src/app/features/prompt-tools.ts) */
       actions: [
+        { do: 'bespoke', name: 'stylePresets', label: 'Presets & genres' },
         { do: 'bespoke', name: 'promptWrite', label: 'Write it for me' },
         { do: 'bespoke', name: 'composeCaption', label: 'Compose caption', tip: "Turn your words into MiniMax-Music3's Structured Caption, using your BPM, key and vocals" },
         { do: 'bespoke', name: 'expandWildcards', label: 'Expand {a|b} choices', tip: 'Replace each {a|b|c} with one of its choices' },

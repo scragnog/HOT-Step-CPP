@@ -640,6 +640,7 @@ export const ACTIONS = {
   clearLatent: 'Stops using the latent.',
   promptLocked: 'Says why a caption a dataset supplies cannot be typed over.',
   insertSectionTag: 'Inserts the section tag it is given into the lyrics at a line boundary.',
+  stylePresets: 'Opens Presets & genres: style presets that replace the box, and genres added to it or taken out.',
 } as const;
 export type ActionName = keyof typeof ACTIONS;
 

@@ -34,7 +34,10 @@ export function Pick(v: PartView) {
     const value = say(opts[i]?.label ?? p.text);
     return <>{button(ch, <>{f.curve ? <Spark curve={f.curve} /> : <El f={f} />}<span className="pk-txt"><span className="pk-kind">{say(p.short ?? p.label)}</span><span className="pk-val" title={value}>{nbHyphen(value)}</span></span>{caret}</>, { 'data-ctl': p.key })}{list}</>;
   }
-  if (variant === 'chip') return <>{button(`pchip${ch}`, <><span className="k">{say(v.label)}</span><span className="pk-val">{say(p.text)}</span>{caret}</>, { 'data-ctl': p.key })}{list}</>;
+  /* a chip and a stamp say their tip on the button (the caption source's track, the language's hint: 33-prompt.js,
+     25-module-lyrics.js); a stamp whose node stands back cannot be used (Q-27) */
+  const tip = v.title ? { title: say(v.title) } : {};
+  if (variant === 'chip') return <>{button(`pchip${ch}`, <><span className="k">{say(v.label)}</span><span className="pk-val">{say(p.text)}</span>{caret}</>, { 'data-ctl': p.key, ...tip })}{list}</>;
   if (variant === 'model') {
     return <>{button(ch, <>
       <span className="pk-kind">{say(v.label)}</span><span className="pk-val">{f.name ?? say(p.text)}</span>
@@ -42,7 +45,7 @@ export function Pick(v: PartView) {
       {f.mem !== undefined ? <span className="mem"><i style={{ '--w': `${f.mem * 100}%` } as CSSProperties} /></span> : null}
     </>, { 'data-ctl': p.key })}{list}</>;
   }
-  if (variant === 'stamp') return <span className={`stamp-wrap${ch}`} data-ctl={p.key} style={{ '--ink': f.ink } as CSSProperties}>{button('', f.native ?? say(p.text))}{list}</span>;
+  if (variant === 'stamp') return <span className={`stamp-wrap${ch}`} data-ctl={p.key} style={{ '--ink': f.ink } as CSSProperties}>{button('', f.native ?? say(p.text), { ...tip, disabled: !!v.dim })}{list}</span>;
   const cycle = (d: number) => { const o = opts[(i + d + opts.length) % opts.length]; if (o) p.set(o.value); };
   return (
     <span className={`pk-lcdwrap${ch}`} data-ctl={p.key}>

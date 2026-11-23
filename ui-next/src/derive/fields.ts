@@ -9,7 +9,7 @@ import { engineName } from '../definitions/engines.ts';
 import { type Desk, type Index, applies, changed, has, isAuto, mmss, onDesk, valueOf } from './core.ts';
 import { EN, type Msg, type Slot, msg, say } from './messages.ts';
 import { optionsOf, paramWords, textMsg } from './strings.ts';
-import { songTempo } from './controls.ts';
+import { optionFaces, songTempo, type OptionFace } from './controls.ts';
 import { applyChange, type Change } from './parts.ts';
 import { stepWords } from './steps.ts';
 import { setValue } from './values.ts';
@@ -84,7 +84,7 @@ export function estimateTempo(ix: Index, desk: Desk, bpmKey: string | undefined,
   return { bpm, from: bpm === null ? null : field && !field.auto ? 'field' : 'box' };
 }
 
-export interface SheetSection { name: string; n: number; colour: string; start: number; tip: Msg; aria: Msg }
+export interface SheetSection { name: string; n: number; colour: string; start: number; tip: Msg; aria: Msg; labels: string[] }
 export interface SheetModel {
   lab: boolean;
   /** Instrumental is on: the text is kept but not sung, and everything that edits or measures it stands back. */
@@ -92,8 +92,9 @@ export interface SheetModel {
   /** The section tabs (Lab): each tag, its colour and its tip. */
   tabs: { tag: string; colour: string; tip: Msg }[] | null;
   tabsLabel: Msg;
-  /** The language stamp shows: at Quick only when it is not the default (Q-07). */
+  /** The language stamp shows: at Quick only when it is not the default (Q-07); each language's face. */
   stamp: boolean;
+  faces: OptionFace[];
   placeholder: Msg;
   readOnlyTip: Msg | null;
   /** The structure strip: its sections, or what it says instead. */
@@ -114,15 +115,16 @@ export function sheetModel(ix: Index, node: Node, desk: Desk): SheetModel | unde
   const secs = sections(text), lines = secs.reduce((a, s) => a + s.n, 0);
   const t = estimateTempo(ix, desk, bpmKey, boxKey_), bpm = t.bpm ?? 120;
   const stat: Slot = instr || !lines ? '' : msg('lyrics.stat', { n: lines, time: mmss(lines * 8 * 60 / bpm), bpm, how: t.from ?? 'guess', box: boxWord(desk) });
-  const ph = paramWords(ix, key, desk);
+  const ph = paramWords(ix, key, desk), labels = stripLabels(secs.map(s => s.name));
   return {
     lab, instr,
     tabs: lab ? SECTION_TAGS.map(x => ({ tag: `[${x}]`, colour: sectionColour(x), tip: msg('lyrics.tab.tip', { tag: `[${x}]` }) })) : null,
     tabsLabel: msg('lyrics.tabs'),
     stamp: !!lang && applies(ix, lang, desk) && (desk.tier !== 'quick' || changed(ix, lang, desk)),
+    faces: lang && has(ix, lang, desk.engine) ? optionFaces(ix, lang, desk, 'stamp') : [],
     placeholder: msg('lyrics.placeholder', { more: ph.face.placeholder ? { id: `create.${own(ix, key)!.d.id}.p.${key.replace(/\./g, '-')}.placeholder${(own(ix, key)!.p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && 'placeholder' in l) ? '@' + ((own(ix, key)!.p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine) && 'placeholder' in l) as { engines: string[] }).engines.join('+') : ''}`, en: ph.face.placeholder } : '' }),
     readOnlyTip: instr ? msg('lyrics.instrTip') : null,
-    strip: instr ? [] : secs.map((s, j) => ({ name: s.name, n: s.n, colour: sectionColour(s.name), start: sectionStart(text, j), tip: msg('lyrics.sec.tip', { name: s.name, n: s.n }), aria: msg('lyrics.sec.aria', { name: s.name, n: s.n }) })),
+    strip: instr ? [] : secs.map((s, j) => ({ name: s.name, n: s.n, colour: sectionColour(s.name), start: sectionStart(text, j), tip: msg('lyrics.sec.tip', { name: s.name, n: s.n }), aria: msg('lyrics.sec.aria', { name: s.name, n: s.n }), labels: labels[j]! })),
     stripSays: instr ? msg('lyrics.ignored') : secs.length ? null : msg('lyrics.noSections'),
     stat,
     wild: lab ? { expand: msg('lyrics.expand'), tip: msg('wild.tip'), auto: !!wildKey && applies(ix, wildKey, desk) } : null,
@@ -334,8 +336,9 @@ export function moveToLyrics(ix: Index, key: string, desk: Desk): ToolStep | nul
 
 /** Set the tempo field to a BPM the box names: the field on, at that BPM. `brings`: the module the field is on, when it
  *  is not on the desk (it comes with the step). */
-export function tempoStep(ix: Index, key: string, desk: Desk, bpm: number): { vals: Change['vals']; auto: Change['auto']; words: Change['words']; brings: string | null; said: Msg } | null {
-  const h = own(ix, KEYS.bpm); if (!h || !has(ix, KEYS.bpm, desk.engine)) return null;
+export function tempoStep(ix: Index, key: string, desk: Desk): { vals: Change['vals']; auto: Change['auto']; words: Change['words']; brings: string | null; said: Msg } | null {
+  const bpm = promptModel(ix, key, desk).suggestions.find(s => s.kind === 'bpm')?.bpm;
+  const h = own(ix, KEYS.bpm); if (bpm === undefined || !h || !has(ix, KEYS.bpm, desk.engine)) return null;
   const brings = onDesk(h.d, desk) ? null : h.d.id, at = brings ? { ...desk, on: new Set([...desk.on, brings]) } : desk;
   const v = setValue(ix, at, KEYS.bpm, bpm).value;
   const after = applyChange(at, { vals: { [KEYS.bpm]: v }, auto: { [KEYS.bpm]: false }, state: {}, words: { label: msg(''), put: msg('') } });
@@ -375,8 +378,13 @@ export function datasetStep(ix: Index, desk: Desk, ds: string): ToolStep | null 
   return { change: { vals, auto: {}, state: {}, words }, undo: false, said: drops ? msg('prompt.dsDrops', { src, ds: set!.name, box: boxWord(desk), label: paramWords(ix, KEYS.src, desk).label }) : null };
 }
 
-/** The tracks the caption source lists for the dataset in force (the server's list 'caption.sources'). */
-export const sourcesOf = (desk: Desk, ds: string): { value: string; label: string }[] => (datasetOf(desk, ds)?.set.tracks ?? []).map(t => ({ value: t.title, label: t.title }));
+/** The tracks the caption source lists (the server's list 'caption.sources'): those of the dataset in force. `ds` names
+ *  it, so the page asks again only when it changes. */
+export function captionSources(ix: Index, desk: Desk): { ds: string; list: { value: string; label: string }[] } | null {
+  if (!has(ix, KEYS.ds, desk.engine) || !desk.lists?.['caption.datasets']) return null;
+  const ds = datasetOf(desk, str(valueOf(ix, KEYS.ds, desk)));
+  return { ds: ds?.name ?? '', list: (ds?.set.tracks ?? []).map(t => ({ value: t.title, label: t.title })) };
+}
 
 /** A latent chosen (ACE-Step): its tempo and key, and the lyrics and the box where they are empty; the module that
  *  carries the tempo comes onto the desk with it (C-21). A file that is not a latent is refused. */

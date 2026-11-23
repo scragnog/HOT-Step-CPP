@@ -2,7 +2,7 @@
 // queue, which renders each job on a clock as the concept's go bar does (35-gobar.js): planning for the first fifth,
 // then the steps, then decoding. No request leaves the page; the single-file build uses this one.
 
-import type { EngineId } from '../../definitions/types.ts';
+import type { EngineId, Json } from '../../definitions/types.ts';
 import type { CreateIntent } from '../../derive/request.ts';
 import type { Engine, Job, ModelFile, Song } from './engine.ts';
 
@@ -34,7 +34,30 @@ const MODELS: { [e in EngineId]: { [bucket: string]: ModelFile[] } } = {
 };
 
 /* the concept's lists (25-module-sampler.js PLUG, 03-controls.js LANGS), so a picker draws what the concept draws */
-const LISTS: { [source: string]: { value: string | number; label: string }[] } = {
+/* the concept's caption datasets (33-prompt.js DATASETS, DSTAGS): each track with its BPM, its caption and MiniMax-Music3's
+   Structured Caption, and the dataset's tags */
+const track = (title: string, bpm: number, caption: string, ...structured: string[]) => ({ title, bpm, caption, structured: structured.join('\n') });
+const DATASETS = {
+  'my-band-ep': {
+    tracks: [
+      track('Track 01 · Night drive', 92, 'synthwave, 92 BPM, A minor, breathy female vocals, wistful night-time mood', 'Global Metadata: synthwave, 92 BPM, A minor, night-time and wistful',
+        'Vocal Details: breathy female lead, close-mic, doubled on the chorus', 'Arrangement: [Intro] arpeggiated synth, [Verse] bass and drums, [Chorus] full synth stack, [Outro] arpeggio alone'),
+      track('Track 04 · Paper boats', 118, 'indie pop, 118 BPM, D major, bright male vocals, handclaps, jangly guitars', 'Global Metadata: indie pop, 118 BPM, D major, bright and hopeful',
+        'Vocal Details: male lead, airy, gang vocals on the hook', 'Arrangement: [Intro] jangly guitar, [Verse] guitar and claps, [Chorus] full band, [Bridge] half-time, [Outro] claps fade'),
+      track('Track 07 · Slow burn', 76, 'soul ballad, 76 BPM, E♭ major, warm female vocals, Rhodes, brushed drums', 'Global Metadata: soul ballad, 76 BPM, E♭ major, warm and intimate',
+        'Vocal Details: female lead, chesty, runs at phrase ends', 'Arrangement: [Intro] Rhodes, [Verse] Rhodes and brushes, [Chorus] strings enter, [Outro] Rhodes alone'),
+    ],
+    tags: ['synthwave', 'night-time mood', 'breathy female vocals', 'gated drums', 'handclaps', 'jangly guitars', 'Rhodes', 'warm and intimate', 'doubled chorus vocals'],
+  },
+  'folk-sessions': {
+    tracks: [track('Track 02 · Hollow pine', 84, 'acoustic folk, 84 BPM, G major, soft male vocals, fingerpicked guitar, room reverb', 'Global Metadata: acoustic folk, 84 BPM, G major, soft and woody',
+      'Vocal Details: male lead, hushed, close-mic', 'Arrangement: [Intro] fingerpicking, [Verse] guitar and voice, [Chorus] harmony vocal enters, [Outro] guitar alone')],
+    tags: ['acoustic folk', 'fingerpicked guitar', 'room reverb', 'soft male vocals', 'harmony vocal'],
+  },
+};
+
+const LISTS: { [source: string]: { value: string | number; label: string; data?: Json }[] } = {
+  'caption.datasets': Object.entries(DATASETS).map(([name, data]) => ({ value: name, label: name, data })),
   'plugins.solver': [{ value: 'euler', label: 'Euler' }, { value: 'heun', label: 'Heun' }, { value: 'sde', label: 'SDE' }, { value: 'rfsolver', label: 'RF-Solver' }, { value: 'dpm2m', label: 'DPM++ 2M' }, { value: 'dpm2m_ada', label: 'DPM++ 2M Adaptive' }, { value: 'dpm3m', label: 'DPM++ 3M' }, { value: 'unipc', label: 'UniPC' }, { value: 'unipc_p', label: 'UniPC Predictor' }, { value: 'rk4', label: 'RK4' }, { value: 'rk5', label: 'RK5' }, { value: 'gl2s', label: 'GL2S' }, { value: 'dopri5', label: 'DOPRI5' }, { value: 'dop853', label: 'DOP853' }, { value: 'stork2', label: 'STORK 2' }, { value: 'stork4', label: 'STORK 4' }, { value: 'storm_sampler_core', label: 'STORM' }, { value: 'aflops', label: 'A-FloPS' }, { value: 'aflops2', label: 'A-FloPS Midpoint' }, { value: 'jkass_fast', label: 'JKASS Fast' }, { value: 'jkass_quality', label: 'JKASS Quality' }, { value: 'md_confluence_v3', label: 'MD Confluence V3' }, { value: 'md_confluence_v4', label: 'MD Confluence V4' }, { value: 'md_confluence_v5', label: 'MD Confluence V5' }, { value: 'md_dual_time_v2', label: 'MD Dual-Time V2' }, { value: 'md_dual_time_v3', label: 'MD Dual-Time V3' }, { value: 'md_eigenflow_v1', label: 'MD Eigenflow V1' }, { value: 'md_eigenflow_v2', label: 'MD Eigenflow V2' }, { value: 'md_fractional_solver', label: 'MD Fractional Solver' }, { value: 'md_granular_collider', label: 'MD Granular Collider' }, { value: 'md_hamiltonian_v2', label: 'MD Hamiltonian V2' }, { value: 'md_hamiltonian_v3', label: 'MD Hamiltonian V3' }, { value: 'md_l_vy_flight', label: 'MD Lévy Flight' }, { value: 'md_omnirelational_v3', label: 'MD OmniRelational V3' }, { value: 'md_omnirelational_v4', label: 'MD OmniRelational V4' }, { value: 'md_p_adic_solver', label: 'MD p-Adic Solver' }, { value: 'md_pingpong_blend', label: 'MD Pingpong Blend' }, { value: 'md_pingpong_simple', label: 'MD PingPong Simple' }, { value: 'md_storm_v4', label: 'MD STORM V4' }, { value: 'md_trajectory_anchor', label: 'MD Trajectory Anchor' }, { value: 'md_trajectory_anchor_v3', label: 'MD Trajectory Anchor V3' }, { value: 'md_trajectory_anchor_v5', label: 'MD Trajectory Anchor V5' }, { value: 'md_vortex_v1', label: 'MD Vortex V1' }, { value: 'md_vortex_v2', label: 'MD Vortex V2' }, { value: 'md_wasserstein_flow_v1_0', label: 'MD Wasserstein Flow v1.0' }, { value: 'md_wasserstein_flow_v1_2_1', label: 'MD Wasserstein Flow v1.2.1' }],
   'plugins.scheduler': [{ value: 'linear', label: 'Linear' }, { value: 'cosine', label: 'Cosine' }, { value: 'beta57', label: 'Beta57' }, { value: 'beta', label: 'Beta (Custom)' }, { value: 'power', label: 'Power' }, { value: 'composite', label: 'Composite (2-Stage)' }, { value: 'bong_tangent', label: 'Tangent' }, { value: 'sgm_uniform', label: 'SGM-Uniform (Karras)' }, { value: 'ddim_uniform', label: 'DDIM Uniform' }, { value: 'linear_quadratic', label: 'Linear-Quadratic' }, { value: 'md_causal', label: 'MD Causal' }, { value: 'md_hap', label: 'MD HAP' }, { value: 'md_ht_scheduler_v3', label: 'MD HT Scheduler V3' }, { value: 'md_ht_scheduler_v5_1', label: 'MD HT Scheduler v5.1' }, { value: 'md_noise_decay_v2', label: 'MD Noise Decay V2' }, { value: 'md_psychoacoustic', label: 'MD Psychoacoustic' }, { value: 'md_qrd_scatter', label: 'MD QRD Scatter' }],
   'plugins.guidance': [{ value: 'apg', label: 'APG' }, { value: 'adg', label: 'ADG (ACE-Step)' }, { value: 'cfg_pp', label: 'CFG++' }, { value: 'cfg_mp', label: 'CFG-MP' }, { value: 'cfg_zero_star', label: 'CFG-Zero⋆' }, { value: 'dynamic_cfg', label: 'Dynamic CFG' }, { value: 'rescaled_cfg', label: 'Rescaled CFG' }, { value: 'smc_cfg', label: 'SMC-CFG' }, { value: 'md_adg', label: 'MD ADG' }, { value: 'md_apg_v4', label: 'MD APG V4' }, { value: 'md_apt', label: 'MD APT' }, { value: 'md_bucket_brigade', label: 'MD Bucket Brigade' }, { value: 'md_clarity_v1', label: 'MD Clarity V1' }, { value: 'md_custom_noise_v3', label: 'MD Custom Noise V3' }, { value: 'md_firefly_ringdown_v2', label: 'MD Firefly Ringdown V2' }, { value: 'md_liquid_pro', label: 'MD Liquid PRO' }, { value: 'md_phase_inversion', label: 'MD Phase Inversion' }, { value: 'md_storm_guidance_v2', label: 'MD STORM Guidance V2' }],

@@ -65,6 +65,8 @@ export interface ParamModel {
   /** A choice: its options, with their words and whether each is the value in force. */
   options?: { value: string | number; label: Slot; short?: Slot; tip?: Slot; lcd: Slot; pick: Slot; detail?: Slot; on: boolean }[];
   placeholder?: Slot;
+  /** The most characters a text takes. */
+  maxLength?: number;
   /** The accessible name of the field a number is typed into. */
   typeName?: Slot;
   /** What its auto button's tip says auto does. */
@@ -133,6 +135,7 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   }
   if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === v }));
   if (f.placeholder) out.placeholder = fillMsg(ix, wordKey(ix, key, desk, 'placeholder'), f.placeholder, desk);
+  if (f.maxLength) out.maxLength = f.maxLength;
   if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
   const kept = p.type === 'text' ? keptMsg(ix, key, desk) : undefined;
   if (kept) out.kept = kept;

@@ -8,7 +8,7 @@
 // createIntent() (src/derive/request.ts) builds from the desk.
 
 import type { CreateIntent } from '../../derive/request.ts';
-import type { EngineId } from '../../definitions/types.ts';
+import type { EngineId, Json } from '../../definitions/types.ts';
 
 /** A song as the Latest list and the player show it (ui/src/types Song, narrowed to what the page reads). */
 export interface Song {
@@ -59,7 +59,7 @@ export interface Engine {
     list(engine: EngineId): Promise<{ buckets: { [bucket: string]: ModelFile[] }; selection: { [bucket: string]: string } }>;
   };
   /** The lists server-listed choices draw from (parts.ts OPTION_SOURCES), with their words. */
-  lists(): Promise<{ [source: string]: { value: string | number; label: string }[] }>;
+  lists(): Promise<{ [source: string]: { value: string | number; label: string; data?: Json }[] }>;
   vst: {
     /** The VST3 chain: how many plugins it holds (the desk fact `vstPlugins`). */
     chain(): Promise<{ plugins: { name: string; enabled: boolean }[] }>;

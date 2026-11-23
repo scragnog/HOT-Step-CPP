@@ -6,14 +6,15 @@ import type { ActionName } from '../../definitions/parts.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui } from '../i18n/index.ts';
 
-const RUN = new Map<string, (arg?: string) => void>();
+const RUN = new Map<string, (arg?: string, from?: string) => void>();
 
-/** `run` is given what the user chose when the part passes it (a tag, a file's name). */
-export function defineAction(name: ActionName, run: (arg?: string) => void): void {
+/** `run` is given what the user chose when the part passes it (a tag, a file's name), and the part it came from (its
+ *  changes then belong to that part's gesture, as its own setters' do). */
+export function defineAction(name: ActionName, run: (arg?: string, from?: string) => void): void {
   if (RUN.has(name)) throw new Error(`the action "${name}" is defined twice`);
   RUN.set(name, run);
 }
-export function runNamed(name: string, arg?: string): void {
+export function runNamed(name: string, arg?: string, from?: string): void {
   const f = RUN.get(name);
-  if (f) f(arg); else useDesk.getState().showToast({ text: ui(`action.${name}`) });
+  if (f) f(arg, from); else useDesk.getState().showToast({ text: ui(`action.${name}`) });
 }
