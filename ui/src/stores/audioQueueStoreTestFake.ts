@@ -3,7 +3,7 @@
 // by the app. Modeled on services/preferencesTestFake.ts (same idea, a
 // different route surface); reuses its MemoryStorage.
 
-export { MemoryStorage } from '../services/preferencesTestFake';
+export { MemoryStorage } from '@/services/preferencesTestFake';
 
 interface Call { method: string; path: string; body: any }
 

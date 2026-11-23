@@ -1,12 +1,12 @@
-import { projectQuery } from '../queries/global-models/projection';
-import { vstPresetsApi } from '../queries/global-models/presets';
-import type { MonitorStatus } from '../queries/global-models/options';
-import { queryClient } from '../queries/client';
-import type { ServerKey } from '../queries/keys';
-import { monitorOptions, openGuisOptions, vstChainOptions, vstScanOptions } from '../queries/global-models/options';
-import { queryManager } from '../queries/invalidation';
-import { keysPlan, writeAndInvalidate } from '../queries/writes';
-import { apiClient } from '../services/httpClient';
+import { projectQuery } from '@/queries/global-models/projection';
+import { vstPresetsApi } from '@/queries/global-models/presets';
+import type { MonitorStatus } from '@/queries/global-models/options';
+import { queryClient } from '@/queries/client';
+import type { ServerKey } from '@/queries/keys';
+import { monitorOptions, openGuisOptions, vstChainOptions, vstScanOptions } from '@/queries/global-models/options';
+import { queryManager } from '@/queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '@/queries/writes';
+import { apiClient } from '@/services/httpClient';
 // vstChainStore.ts — Zustand store for VST3 post-processing chain
 //
 // Manages the global VST3 plugin chain: scanning, ordering, enable/disable,
@@ -14,9 +14,10 @@ import { apiClient } from '../services/httpClient';
 
 import { create } from 'zustand';
 import { QueryObserver } from '@tanstack/react-query';
-import { vstApi, type VstPlugin, type VstChainEntry } from '../services/api';
-import { hashImportValue, type VstChainPresetBody } from '../services/preferencesApi';
-import { PresetCollection, type PresetCollectionSnapshot } from '../services/presetCollection';
+import { vstApi, type VstPlugin, type VstChainEntry } from '@/services/api';
+import { hashImportValue, type VstChainPresetBody } from '@/services/preferencesApi';
+import { PresetCollection, type PresetCollectionSnapshot } from '@/services/presetCollection';
+import { readJson } from '@/utils/storage/storageJson';
 
 // ── Presets (named chain snapshots) ──────────────────────────────────────────
 //
@@ -30,10 +31,8 @@ export const PRESETS_KEY = 'vst-chain-presets';
 export const MIGRATED_FLAG = 'vst-chain-presets:server-migrated';
 
 function loadLegacyPresetsFromStorage(): Record<string, VstChainEntry[]> {
-  try {
-    const v = JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}');
-    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
-  } catch { return {}; }
+  const v = readJson<Record<string, VstChainEntry[]>>(PRESETS_KEY, {});
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
 
 export function createVstPresetCollection(): PresetCollection<VstChainPresetBody> {

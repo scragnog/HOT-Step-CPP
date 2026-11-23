@@ -298,13 +298,13 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `App.tsx` | shell-queue | api, sharedEventSource | 7 | 1 | 2 | Query library; liveness transport, commands, log stream, queue projection observer |
 | `audio/peaksClient.ts` | shell-queue | - | 1 | - | - | Query: shared `peaks`; failures uncached, `forgetPeaks` removes the entry (R5) |
 | `components/assistant/AssistantPanel.tsx` | studios | assistantApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/ArtistSettingsPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/CoverArtistGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/cover-studio/source/ArtistSettingsPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/cover-studio/source/CoverArtistGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/CoverStudio.tsx` | cover-lyrics | api, coverWorkflowApi, lireekApi, studioDraftMirror, supersepApi, workflowApi, yue2CoverApi | 5 | - | 2 | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/SourcePanel.tsx` | cover-lyrics | api, supersepApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/Yue2Build.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/cover-studio/Yue2CoverPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/Yue2CoverScore.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/cover-studio/source/SourcePanel.tsx` | cover-lyrics | api, supersepApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/cover-studio/build/Yue2Build.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/cover-studio/build/Yue2CoverPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/cover-studio/build/Yue2CoverScore.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/create/AiGenerateModal.tsx` | shell-queue | inspireApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/CreatePanel.tsx` | shell-queue | api, studioDraftMirror, trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/create/Mm3ComposeButton.tsx` | shell-queue | lireekApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
@@ -326,24 +326,24 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/insta-gen/InstaGenPanel.tsx` | studios | api, inspireApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/library/CoverArtPromptModal.tsx` | shell-queue | - | 3 | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/library/ImportTracksModal.tsx` | shell-queue | exportImportApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/lyric-studio/AlbumGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/AlbumHeader.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/ArtistGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/ArtistPageSidebar.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/ArtistSidebar.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/CuratedProfileModal.tsx` | cover-lyrics | lireekApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/albums/AlbumGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/albums/AlbumHeader.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/artists/ArtistGrid.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/artists/ArtistPageSidebar.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/artists/ArtistSidebar.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/artists/CuratedProfileModal.tsx` | cover-lyrics | lireekApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/lyric-studio/LyricStudioV2.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/PresetSettingsModal.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/ProfilesTab.tsx` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/lyric-studio/PromptEditor.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/ProviderSelector.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/QueuePanel.tsx` | cover-lyrics | api, lireekApi, lyricWorkflowApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/RecordingsTab.tsx` | cover-lyrics | api, lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/RenderAcrossModal.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/lyric-studio/SourceLyricsTab.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/lyric-studio/WrittenSongsTab.tsx` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/lyric-studio/write/PresetSettingsModal.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/artists/ProfilesTab.tsx` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/lyric-studio/write/PromptEditor.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/write/ProviderSelector.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/queue/QueuePanel.tsx` | cover-lyrics | api, lireekApi, lyricWorkflowApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/albums/RecordingsTab.tsx` | cover-lyrics | api, lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/queue/RenderAcrossModal.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/lyric-studio/write/SourceLyricsTab.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/lyric-studio/albums/WrittenSongsTab.tsx` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `stores/playlistStore.ts` | cover-lyrics | studioDraftsApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/lyric-studio/useAudioGeneration.ts` | cover-lyrics | lireekApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/lyric-studio/queue/useAudioGeneration.ts` | cover-lyrics | lireekApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/midi-studio/MidiPlayer.tsx` | studios | midiStudioApi | - | 1 | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/midi-studio/MidiStudio.tsx` | studios | api, midiStudioApi | 1 | - | 2 | Query consumer; forms/commands/streams stay client-owned |
 | `components/midi-studio/midiSynth.ts` | studios | - | - | - | 1 | Client WebAudio scheduling |
@@ -356,13 +356,13 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/repaint-studio/RepaintStudio.tsx` | studios | api, repaintLayerWorkflowApi, studioDraftMirror, workflowApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/settings/DataFolderPanel.tsx` | shell-queue | dataFolderApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/settings/SettingsPanel.tsx` | shell-queue | api, lireekApi, stemStudioApi | 2 | - | - | Query consumer; env draft/save/restart lifecycle delegated to `useEnvSettingsForm` |
-| `components/shared/FileBrowserModal.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/shared/LatentImport.tsx` | shell-queue | - | 1 | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/shared/PresetSyncNotices.tsx` | shell-queue | presetCollection | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/shared/overlays/FileBrowserModal.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/shared/songs/LatentImport.tsx` | shell-queue | - | 1 | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/shared/feedback/PresetSyncNotices.tsx` | shell-queue | presetCollection | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/shared/StemMixer.tsx` | shell-queue | - | 1 | - | - | Binary media transport and client mixer |
-| `components/shared/StudioDraftPicker.tsx` | shell-queue | studioDraftMirror, studioDraftsApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/shared/UnifiedRecentSongs.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/shared/VramIndicator.tsx` | global-models | - | 3 | - | 2 | Query consumer; forms/commands/streams stay client-owned |
+| `components/shared/overlays/StudioDraftPicker.tsx` | shell-queue | studioDraftMirror, studioDraftsApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/shared/songs/UnifiedRecentSongs.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/shared/status/VramIndicator.tsx` | global-models | - | 3 | - | 2 | Query consumer; forms/commands/streams stay client-owned |
 | `components/song-builder/SongBuilder.tsx` | studios | api, workflowApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/song-builder/followSection.ts` | studios | workflowApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/stem-builder/RecentBuilds.tsx` | studios | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
@@ -375,51 +375,51 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/storm/StormLiveControls.tsx` | studios | inspireApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/storm/StormPage.tsx` | studios | - | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/terminal/TerminalPanel.tsx` | global-models | - | 1 | 1 | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/AuditionCard.tsx` | training-data | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/AuditionPlayer.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/BatchImportWizard.tsx` | training-data | api, trainingApi | - | - | - | Query: shared `browse`, `training-data/scan-preview` (R2); explicit pipeline command |
-| `components/training-studio/BuildPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/DatasetAssetChips.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/FolderPicker.tsx` | training-data | api | - | - | - | Query: shared `browse`, superseded navigation cancelled (R2) |
-| `components/training-studio/LabelPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/LmAdapterPicker.tsx` | training-data | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Mm3RunsPanel.tsx` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Mm3TrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/training-studio/MonitorPanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/NewDatasetWizard.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/scan-preview`, superseded scan cancelled (R2); explicit create command |
-| `components/training-studio/PipelineStageProgress.tsx` | training-data | trainingApi | - | - | - | Query job; selected-worker projection |
-| `components/training-studio/PreprocessOptionsForm.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/PreprocessPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/PreprocessVariantCard.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/RefinePanel.tsx` | training-runs | trainingApi, trainingReviewApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/ReviewPanel.tsx` | training-runs | stemStudioApi, trainingApi, trainingReviewApi | - | - | 3 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/SampleDrawer.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/sample-mm3`/`sample-yue2` seed the editor once per key; saves update the entry (R2) |
-| `components/training-studio/SampleGrid.tsx` | training-data | trainingApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/training-studio/SampleRow.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/SendToLyricStudio.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/lyric-studio-preview` seeds the form (R2); explicit export command |
-| `components/training-studio/TrainDitForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/TrainLmForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/TrainPanel.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/TrainingRunStats.tsx` | training-runs | - | - | - | - | Active job read from the job cache via `useActiveTrainingJob`; no independent HTTP read |
-| `components/training-studio/TrainingWorkerBar.tsx` | training-data | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/WorkersPanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2AitkTrainCard.tsx` | training-runs | api, preferencesApi, sharedEventSource, trainingApi, trainingOperations, trainingPreparationApi | - | 1 | 5 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2ArTrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2BatchPanel.tsx` | training-runs | trainingApi | - | - | 2 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2ClearPreparedCard.tsx` | training-data | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2LadderReview.tsx` | training-runs | trainingApi, trainingReviewApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2OptimisePanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2OptimizerFields.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/Yue2SplitChart.tsx` | training-data | sharedEventSource, trainingApi | - | 1 | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/training-studio/Yue2TrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/Yue2TrainStages.tsx` | training-runs | trainingPreparationApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/sendAuditionToCustomGen.ts` | training-data | trainingApi, trainingOperations | 1 | - | - | Query: local `training-data/dataset` revision read (R2); explicit draft command |
-| `components/training-studio/useMm3Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/useYue2ArStatus.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/useYue2Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/yue2ChartData.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/yue2JointCommand.ts` | training-data | trainingApi, trainingOperations, trainingPreparationApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/training-studio/yue2JointPresets.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/cards/AuditionCard.tsx` | training-data | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/runs/AuditionPlayer.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/datasets/BatchImportWizard.tsx` | training-data | api, trainingApi | - | - | - | Query: shared `browse`, `training-data/scan-preview` (R2); explicit pipeline command |
+| `components/training-studio/panels/BuildPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/datasets/DatasetAssetChips.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/FolderPicker.tsx` | training-data | api | - | - | - | Query: shared `browse`, superseded navigation cancelled (R2) |
+| `components/training-studio/panels/LabelPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/LmAdapterPicker.tsx` | training-data | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/runs/Mm3RunsPanel.tsx` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/cards/Mm3TrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/training-studio/runs/MonitorPanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/datasets/NewDatasetWizard.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/scan-preview`, superseded scan cancelled (R2); explicit create command |
+| `components/training-studio/panels/PipelineStageProgress.tsx` | training-data | trainingApi | - | - | - | Query job; selected-worker projection |
+| `components/training-studio/panels/PreprocessOptionsForm.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/PreprocessPanel.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/cards/PreprocessVariantCard.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/RefinePanel.tsx` | training-runs | trainingApi, trainingReviewApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/runs/ReviewPanel.tsx` | training-runs | stemStudioApi, trainingApi, trainingReviewApi | - | - | 3 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/runs/SampleDrawer.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/sample-mm3`/`sample-yue2` seed the editor once per key; saves update the entry (R2) |
+| `components/training-studio/runs/SampleGrid.tsx` | training-data | trainingApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/training-studio/runs/SampleRow.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/SendToLyricStudio.tsx` | training-data | trainingApi | - | - | - | Query: `training-data/lyric-studio-preview` seeds the form (R2); explicit export command |
+| `components/training-studio/panels/TrainDitForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/TrainLmForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/panels/TrainPanel.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/charts/TrainingRunStats.tsx` | training-runs | - | - | - | - | Active job read from the job cache via `useActiveTrainingJob`; no independent HTTP read |
+| `components/training-studio/panels/TrainingWorkerBar.tsx` | training-data | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/panels/WorkersPanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/cards/Yue2AitkTrainCard.tsx` | training-runs | api, preferencesApi, sharedEventSource, trainingApi, trainingOperations, trainingPreparationApi | - | 1 | 5 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/cards/Yue2ArTrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/panels/Yue2BatchPanel.tsx` | training-runs | trainingApi | - | - | 2 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/cards/Yue2ClearPreparedCard.tsx` | training-data | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/runs/Yue2LadderReview.tsx` | training-runs | trainingApi, trainingReviewApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/panels/Yue2OptimisePanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/panels/Yue2OptimizerFields.tsx` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/charts/Yue2SplitChart.tsx` | training-data | sharedEventSource, trainingApi | - | 1 | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/training-studio/cards/Yue2TrainCard.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/panels/Yue2TrainStages.tsx` | training-runs | trainingPreparationApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/lib/sendAuditionToCustomGen.ts` | training-data | trainingApi, trainingOperations | 1 | - | - | Query: local `training-data/dataset` revision read (R2); explicit draft command |
+| `components/training-studio/hooks/useMm3Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/hooks/useYue2ArStatus.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/hooks/useYue2Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/training-studio/lib/yue2ChartData.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/lib/yue2JointCommand.ts` | training-data | trainingApi, trainingOperations, trainingPreparationApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `components/training-studio/lib/yue2JointPresets.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `context/AuthContext.tsx` | foundation | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `hooks/useAssistantActions.ts` | studios | assistantApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `hooks/useCapabilities.ts` | global-models | - | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
@@ -469,13 +469,13 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `stores/streamingStore.ts` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Query-backed recovery; stream execution reducer |
 | `stores/trainingStore.ts` | training-data | trainingApi, trainingOperations, trainingPreparationApi | - | - | - | Query projection and commands; preparation follow reads shared `yue2-preparation`/`-job` (R1) |
 | `stores/vstChainStore.ts` | global-models | api, preferencesApi, presetCollection | 4 | - | - | Query projections/presets and editable command state |
-| `utils/downloadTrack.ts` | shell-queue | exportImportApi | - | - | - | Explicit export command and download transport |
-| `utils/heapWatch.ts` | shell-queue | - | - | - | 1 | Client heap sampling timer |
-| `utils/lrcUtils.ts` | shell-queue | - | 1 | - | - | Transport: canonical read for shared `lrc`; parsing is client (R5) |
-| `utils/wordLrcUtils.ts` | shell-queue | - | 1 | - | - | Transport: canonical read for shared `lyrics-json`; lookup is client (R5) |
-| `utils/yue2CaptionSource.ts` | shell-queue | - | 1 | - | - | Query snapshot and captured command assembly |
+| `utils/audio/downloadTrack.ts` | shell-queue | exportImportApi | - | - | - | Explicit export command and download transport |
+| `utils/audio/heapWatch.ts` | shell-queue | - | - | - | 1 | Client heap sampling timer |
+| `utils/lyrics/lrcUtils.ts` | shell-queue | - | 1 | - | - | Transport: canonical read for shared `lrc`; parsing is client (R5) |
+| `utils/lyrics/wordLrcUtils.ts` | shell-queue | - | 1 | - | - | Transport: canonical read for shared `lyrics-json`; lookup is client (R5) |
+| `utils/lyrics/yue2CaptionSource.ts` | shell-queue | - | 1 | - | - | Query snapshot and captured command assembly |
 | `components/global-bar/VstChainDropdown.tsx` | global-models | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/shared/SongActionsMenu.tsx` | shell-queue | - | - | - | - | Query consumer (shared `score-abc` once open); forms/commands/streams stay client-owned |
+| `components/shared/songs/SongActionsMenu.tsx` | shell-queue | - | - | - | - | Query consumer (shared `score-abc` once open); forms/commands/streams stay client-owned |
 | `queries/cover-lyrics/reads.ts` | cover-lyrics | httpClient | - | - | - | Query owner/policy; area contract applies |
 | `queries/cover-lyrics/songs.ts` | cover-lyrics | api, httpClient | - | - | - | Query owner/policy; area contract applies |
 | `queries/cover-lyrics/workflows.ts` | cover-lyrics | httpClient, workflowApi | - | - | - | Query owner/policy; area contract applies |
@@ -496,27 +496,27 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `queries/training-runs/hooks.ts` | training-runs | trainingApi | 1 | - | - | Query owner/policy; `useTrainingJobProjection` owns the active job's stream and cache, `useActiveTrainingJob` reads that cache, and the YuE2 chart cards keep their own metric-only subscription |
 | `queries/training-runs/queries.ts` | training-runs | api, trainingApi, trainingOperations, trainingPreparationApi, trainingRecipesApi, trainingReviewApi | - | - | - | Query owner/policy; area contract applies |
 | `stores/playbackStore.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `utils/mm3CaptionSource.ts` | shell-queue | - | - | - | - | Query-backed lireek read; client caption assembly |
-| `utils/paramProfiles.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `utils/lyrics/mm3CaptionSource.ts` | shell-queue | - | - | - | - | Query-backed lireek read; client caption assembly |
+| `utils/training/paramProfiles.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `queries/shell-queue/lyrics.ts` | shell-queue | - | 1 | - | - | Query owner for shared `lrc`/`lyrics-json` (R5); owner and transport for shared `score-abc` |
 | `components/compare-studio/CompareStudio.tsx` | compare | compareApi | - | - | - | Query consumer: sessions, session detail and library search; create/delete are mutations |
 | `components/compare-studio/DiffTrace.tsx` | compare | compareApi | - | - | - | Props only; the parent owns the diff query |
 | `components/compare-studio/SessionView.tsx` | compare | compareApi | - | - | - | Query consumer: per-take `analysis` and the active `diff`; archive/delete are mutations |
 | `components/compare-studio/TakeRow.tsx` | compare | compareApi | - | - | - | Query consumer: score and remove-take mutations over the session cache |
 | `components/compare-studio/useAbEngine.ts` | compare | - | 1 | - | - | Binary audio transport for the A/B engine's takes |
-| `components/cover-studio/PrepareLyrics.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/cover-studio/PrepareStructure.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Client/types/props; the interval loops a recording's playback window, no server reads |
-| `components/cover-studio/SectionPlayback.tsx` | cover-lyrics | - | - | - | 2 | Client audio playback timers; no server reads |
+| `components/cover-studio/lyrics/PrepareLyrics.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/cover-studio/lyrics/PrepareStructure.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Client/types/props; the interval loops a recording's playback window, no server reads |
+| `components/cover-studio/lyrics/SectionPlayback.tsx` | cover-lyrics | - | - | - | 2 | Client audio playback timers; no server reads |
 | `components/midi-studio/MidiExportPanel.tsx` | studios | midiStudioApi | - | - | - | Query consumer (`studios/midi-notes`); export and ABC lead-sheet commands, export invalidates notes and jobs |
 | `components/settings/AdapterReferencesAction.tsx` | shell-queue | lireekApi | - | - | - | Explicit cleanup command; `lireekApi` invalidates the lireek snapshots after it |
 | `components/settings/UpdatesPanel.tsx` | shell-queue | updatesApi | - | - | - | Query: `shell-queue/updates`, polled every 2 s while a check runs; Check now is a mutation that writes its result into the entry |
 | `components/storm/DriftPanel.tsx` | studios | - | - | - | - | Query consumer: 2 s `stormDriftOptions` snapshot poll while streaming; the four drift control POSTs are silent commands ([tanstack-query.md](tanstack-query.md) P4) |
-| `components/training-studio/Sa3TrainCard.tsx` | training-runs | api, sa3PreviewApi, trainingApi | - | - | - | Query consumer: component-local `training-data/sa3-status`, `training-runs/sa3-previews`, `global-models/sa3-adapters` and audition `shell-queue/generation-status`; start, cancel, render and audition are mutations; invalidates through `queryManager` ([tanstack-query.md](tanstack-query.md) F4#17) |
+| `components/training-studio/cards/Sa3TrainCard.tsx` | training-runs | api, sa3PreviewApi, trainingApi | - | - | - | Query consumer: component-local `training-data/sa3-status`, `training-runs/sa3-previews`, `global-models/sa3-adapters` and audition `shell-queue/generation-status`; start, cancel, render and audition are mutations; invalidates through `queryManager` ([tanstack-query.md](tanstack-query.md) F4#17) |
 | `components/training-studio/plugins/ace.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer (ACE LM/DiT status and recipes); scoped training-store actions submit |
 | `components/training-studio/plugins/chips.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/trainGates.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/trainingPluginTypes.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/training-studio/trainingTargets.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/lib/trainGates.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/lib/trainingPluginTypes.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/lib/trainingTargets.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `queries/sa3-previews/queries.ts` | training-runs | sa3PreviewApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/writes.ts` | foundation | httpClient | - | - | - | Query owner/policy: shared write helpers (`writeAndInvalidate`, `useUpload`) |
 | `services/axiosClient.ts` | foundation | apiError | 1 | - | - | Transport: the axios instance, its fetch adapter and the global error catch |
@@ -525,5 +525,5 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `services/updatesApi.ts` | shell-queue | httpClient | - | - | - | Transport; area Query caller owns reads, commands/streams explicit |
 | `queries/compare/queries.ts` | compare | compareApi | - | - | - | Query owner for sessions, session detail, picker search, analysis and diff |
 | `queries/compare/writes.ts` | compare | compareApi | - | - | - | Query owner: compare commands and the optimistic score cache follow-up |
-| `components/training-studio/useHeartmulaController.ts` | training-data | trainingApi | - | - | - | Query consumer (`training-data/heartmula-status`, `heartmula-previews`); prepare/train/batch are commands, the preview retry is a mutation |
+| `components/training-studio/hooks/useHeartmulaController.ts` | training-data | trainingApi | - | - | - | Query consumer (`training-data/heartmula-status`, `heartmula-previews`); prepare/train/batch are commands, the preview retry is a mutation |
 | `components/settings/useEnvSettingsForm.ts` | shell-queue | api | - | - | - | Query consumer (`shell-queue/env`, GPUs) and mutation owner (save/restart); draft seeded only while clean, `queryManager.env.values` invalidates |

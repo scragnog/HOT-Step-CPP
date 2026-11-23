@@ -1,9 +1,9 @@
-import { queryClient } from '../queries/client';
-import { resourceKey } from '../queries/keys';
-import { extractProgressOptions, extractResultOptions } from '../queries/studios/resources';
-import { queryManager } from '../queries/invalidation';
-import { ACTIVE_POLL_MS } from '../queries/contract';
-import { waitForQuery } from '../queries/wait';
+import { queryClient } from '@/queries/client';
+import { resourceKey } from '@/queries/keys';
+import { extractProgressOptions, extractResultOptions } from '@/queries/studios/resources';
+import { queryManager } from '@/queries/invalidation';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
+import { waitForQuery } from '@/queries/wait';
 import { apiClient, type ReadOptions } from './httpClient';
 // stemStudioApi.ts — API client for Stem Studio extraction
 //
@@ -183,11 +183,5 @@ export async function waitForExtraction(
   return result;
 }
 
-/** Format bytes for display */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
+/** Format bytes for display (the shared implementation). */
+export { formatBytes } from '@/utils/format/format';

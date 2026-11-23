@@ -1,9 +1,10 @@
 import { openStormStream } from '../services/stormStreamTransport';
 import { useRef, useState, useCallback, useEffect } from 'react';
-// Moved out to utils/wavStream.ts when the MM3 player needed the same parser —
+// Moved out to utils/audio/wavStream.ts when the MM3 player needed the same parser —
 // same function, same behaviour, one copy.
-import { extractWav } from '../utils/wavStream';
-import { apiClient } from '../services/httpClient';
+import { extractWav } from '@/utils/audio/wavStream';
+import { saveBlob } from '@/utils/storage/saveFile';
+import { apiClient } from '@/services/httpClient';
 // One copy of the slot analysis, shared with Node's stream sessions so both agree.
 import { detectBpm, detectKey } from '../../../server/src/contracts/streamAnalysis';
 
@@ -281,15 +282,8 @@ export function useStreamAudio(streamId = 'default') {
     mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
     mr.onstop = () => {
       const blob = new Blob(recordedChunksRef.current, { type: mimeType });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
       const ts   = new Date().toISOString().slice(0,19).replace(/[T:]/g, '-');
-      a.download = `storm-set-${ts}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      saveBlob(blob, `storm-set-${ts}.webm`);
       recordedChunksRef.current = [];
       mediaRecorderRef.current  = null;
     };

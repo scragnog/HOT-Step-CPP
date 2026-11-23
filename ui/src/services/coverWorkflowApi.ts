@@ -1,11 +1,12 @@
-import { changed, songsChanged } from '../queries/cover-lyrics/reads';
-import { waitForSnapshot } from '../queries/cover-lyrics/wait';
-import { workflowOptions } from '../queries/cover-lyrics/workflows';
+import { changed, songsChanged } from '@/queries/cover-lyrics/reads';
+import { waitForSnapshot } from '@/queries/cover-lyrics/wait';
+import { workflowOptions } from '@/queries/cover-lyrics/workflows';
 import { apiClient } from './httpClient';
 import type { WorkflowReplay } from '../../../server/src/contracts/workflow';
-import { coverLyricWorkflowApi as workflowApi } from '../queries/cover-lyrics/workflows';
+import { coverLyricWorkflowApi as workflowApi } from '@/queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../server/src/contracts/studioWorkflows';
+import { newId } from '@/utils/id';
 
 export interface CoverDraftResult {
   documentId: string;
@@ -40,24 +41,24 @@ export const coverWorkflowApi = {
   open: (assetId: string, cached?: {
     metadata: { artist: string; title: string; album: string; duration: number | null };
     analysis: { bpm: number; key: string; scale?: string };
-  }, leadSheetSource?: CoverLeadSheetSource) => workflowApi.submit('cover-open', crypto.randomUUID(), { assetId, cached, leadSheetSource }),
+  }, leadSheetSource?: CoverLeadSheetSource) => workflowApi.submit('cover-open', newId(), { assetId, cached, leadSheetSource }),
   /** A score-only draft for an imported MusicXML score: no recording, created already approved. */
-  openScore: (abc: string) => workflowApi.submit('cover-open', crypto.randomUUID(), { score: { abc } }),
+  openScore: (abc: string) => workflowApi.submit('cover-open', newId(), { score: { abc } }),
   /** Mixes a finished separation's stems down on the server; the result is an audio asset (`assetId`, `audioUrl`). */
   stems: (separationId: string, controls: { index: number; volume: number; muted: boolean }[]) =>
-    workflowApi.submit('cover-stems', crypto.randomUUID(), { separationId, controls }),
+    workflowApi.submit('cover-stems', newId(), { separationId, controls }),
   /** Save song of a YuE2 Build session: the server renders the kept takes from the session's own params. */
-  buildSave: (sessionId: string) => workflowApi.submit('cover-build-save', crypto.randomUUID(), { sessionId }),
+  buildSave: (sessionId: string) => workflowApi.submit('cover-build-save', newId(), { sessionId }),
   source: (documentId: string, revision: number, leadSheetSource: CoverLeadSheetSource, assetId?: string) =>
-    workflowApi.submit('cover-source', crypto.randomUUID(), { documentId, revision, leadSheetSource, assetId }),
+    workflowApi.submit('cover-source', newId(), { documentId, revision, leadSheetSource, assetId }),
   transcribe: (documentId: string, revision: number, force: boolean) =>
-    workflowApi.submit('cover-transcribe', crypto.randomUUID(), { documentId, revision, force }),
+    workflowApi.submit('cover-transcribe', newId(), { documentId, revision, force }),
   caption: (documentId: string, revision: number, artistId: number,
     provider: string, model: string, force: boolean) =>
-    workflowApi.submit('cover-caption', crypto.randomUUID(),
+    workflowApi.submit('cover-caption', newId(),
       { documentId, revision, artistId, provider, model, force }),
   render: (input: Record<string, unknown>) =>
-    workflowApi.submit('cover-render', crypto.randomUUID(), input),
+    workflowApi.submit('cover-render', newId(), input),
   approveScore: async (documentId: string, revision: number, abc: string) => {
     const data = await apiClient.post<{ document: { id: string; revision: number }; sourceId: string; sourceLabel: string; abc: string }>(
       `/yue2-cover/drafts/${encodeURIComponent(documentId)}/approve-score`, { revision, abc });

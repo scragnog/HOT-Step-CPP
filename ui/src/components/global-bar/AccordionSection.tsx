@@ -4,8 +4,8 @@
 
 import React from 'react';
 import { ChevronDown } from 'lucide-react';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { ParamLabel } from '../shared/ParamLabel';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { ToggleSwitch } from './BarSection';
 
 // ── Accordion Section ───────────────────────────────────────────

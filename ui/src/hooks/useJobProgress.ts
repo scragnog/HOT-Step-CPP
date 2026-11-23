@@ -6,8 +6,9 @@
  * the opt-in toggle), never on load.
  */
 import { useEffect, useRef } from 'react';
-import { useAudioGenQueue, useAudioGenQueueSelector } from '../stores/audioGenQueueStore';
-import { summarizeJobs, formatTitle, formatBadge, newlySucceeded, statusSnapshot, type JobSummary } from '../utils/jobBadge';
+import { useAudioGenQueue, useAudioGenQueueSelector } from '@/stores/audioGenQueueStore';
+import { summarizeJobs, formatTitle, formatBadge, newlySucceeded, statusSnapshot, type JobSummary } from '@/utils/jobBadge';
+import { emit } from '@/utils/appEvents';
 
 const ASKED_KEY = 'hotstep.notify.asked';
 
@@ -46,7 +47,7 @@ async function showDoneNotification(title: string, body: string, songId?: string
     const n = new Notification(title, options);
     n.onclick = () => {
       window.focus();
-      if (songId) window.dispatchEvent(new CustomEvent('hotstep:open-song', { detail: { songId } }));
+      if (songId) emit('hotstep:open-song', { songId });
       n.close();
     };
   } catch { /* some mobile browsers only allow SW notifications */ }
@@ -86,14 +87,14 @@ export function useJobProgressWatcher(doneTitle: string, doneBody: (name: string
         afterMount(() => e.ports[0]?.postMessage('ready'));
       }
       if (e.data?.type === 'open-song' && typeof e.data.songId === 'string' && e.data.songId) {
-        window.dispatchEvent(new CustomEvent('hotstep:open-song', { detail: { songId: e.data.songId } }));
+        emit('hotstep:open-song', { songId: e.data.songId });
       }
     };
     navigator.serviceWorker.addEventListener('message', onMsg);
     const url = new URL(window.location.href);
     const songId = url.searchParams.get('open-song');
     if (songId) afterMount(() => {
-      window.dispatchEvent(new CustomEvent('hotstep:open-song', { detail: { songId } }));
+      emit('hotstep:open-song', { songId });
       url.searchParams.delete('open-song');
       history.replaceState(history.state, '', url);
     });

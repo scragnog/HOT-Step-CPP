@@ -7,7 +7,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { GlobalParamsProvider } from '../context/GlobalParamsContext';
-import { ErrorBoundary } from '../components/shared/ErrorBoundary';
+import { ErrorBoundary } from '@/components/shared/feedback/ErrorBoundary';
 import { UpdateReconnectOverlay, UpdateRestartContext } from '../components/settings/UpdateReconnectOverlay';
 import { enqueueSimpleGen } from '../stores/audioGenQueueStore';
 import { requestNotifyPermissionFromGesture } from '../hooks/useJobProgress';

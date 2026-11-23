@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { modelsOptions, songsOptions } from '../../queries/studios/shared';
+import { modelsOptions, songsOptions } from '@/queries/studios/shared';
 // StemBuilder.tsx — Main Stem Builder orchestrator
 //
 // Lego mode UI: generates new instrument tracks layered over backing audio.
@@ -15,27 +15,31 @@ import { modelsOptions, songsOptions } from '../../queries/studios/shared';
 //   - Single track name required
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { notify } from '../shared/Toast';
+import { notify } from '@/components/shared/feedback/Toast';
 import { Upload, X, Loader2, Info, AlertTriangle, Layers, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { submitStudioRender, followStudioRender, type SourceRef } from '../../services/repaintLayerWorkflowApi';
-import { useUpload } from '../../queries/writes';
-import { studioWorkflowApi as workflowApi } from '../../queries/studios/workflows';
-import { useBackendStore } from '../../stores/backendStore';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { submitStudioRender, followStudioRender, type SourceRef } from '@/services/repaintLayerWorkflowApi';
+import { useUpload } from '@/queries/writes';
+import { studioWorkflowApi as workflowApi } from '@/queries/studios/workflows';
+import { useBackendStore } from '@/stores/backendStore';
 import { TrackPicker, type TrackName } from './TrackPicker';
 import { LayerStack, type LayerInfo } from './LayerStack';
 import { RecentBuilds } from './RecentBuilds';
 import { PreviewPlayer } from './PreviewPlayer';
-import { Section } from '../shared/ActivitySidebar';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
-import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
-import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
-import { queryManager } from '../../queries/invalidation';
+import { Section } from '@/components/shared/ActivitySidebar';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { BackendCapabilityGate } from '@/components/shared/status/BackendCapabilityGate';
+import { InlineAudioQueue } from '@/components/lyric-studio/queue/InlineAudioQueue';
+import { useAudioGenQueueSelector } from '@/stores/audioGenQueueStore';
+import { queryManager } from '@/queries/invalidation';
+import { readJson } from '@/utils/storage/storageJson';
+import { readString } from '@/utils/storage/storageJson';
+import { writeJson } from '@/utils/storage/storageJson';
+import { newId } from '@/utils/id';
 
 /** Filter DiT model list to only pure base models (no merge/sft/turbo) */
 function getBaseModels(ditModels: string[]): string[] {
@@ -48,16 +52,15 @@ function getBaseModels(ditModels: string[]): string[] {
 export const StemBuilder: React.FC = () => {
   const { token } = useAuth();
   const { t } = useTranslation();
-  const gp = useGlobalParamsStore();
 
   // ── Source audio ──
-  const [sourceAudioUrl, setSourceAudioUrl] = useState(() => localStorage.getItem('hs-sb-sourceUrl') || '');
+  const [sourceAudioUrl, setSourceAudioUrl] = useState(() => readString('hs-sb-sourceUrl'));
   const [sourceRef, setSourceRef] = useState<SourceRef | null>(() => {
-    try { return JSON.parse(localStorage.getItem('hs-sb-sourceRef') || 'null'); } catch { return null; }
+    return readJson<SourceRef | null>('hs-sb-sourceRef', null);
   });
   const sourceUrlRef = useRef(sourceAudioUrl);
   sourceUrlRef.current = sourceAudioUrl;
-  const [sourceFileName, setSourceFileName] = useState(() => localStorage.getItem('hs-sb-sourceFile') || '');
+  const [sourceFileName, setSourceFileName] = useState(() => readString('hs-sb-sourceFile'));
   const { mutate: uploadSource, isPending: isUploading } = useUpload<{ audio_url: string; asset_id?: string }>();
 
   // ── Track selection ──
@@ -117,7 +120,7 @@ export const StemBuilder: React.FC = () => {
 
   // ── Persist source ──
   useEffect(() => { localStorage.setItem('hs-sb-sourceUrl', sourceAudioUrl); }, [sourceAudioUrl]);
-  useEffect(() => { localStorage.setItem('hs-sb-sourceRef', JSON.stringify(sourceRef)); }, [sourceRef]);
+  useEffect(() => { writeJson('hs-sb-sourceRef', sourceRef); }, [sourceRef]);
   useEffect(() => { localStorage.setItem('hs-sb-sourceFile', sourceFileName); }, [sourceFileName]);
 
   useEffect(() => {
@@ -234,7 +237,7 @@ export const StemBuilder: React.FC = () => {
       showToast('Select a source, track, and model');
       return;
     }
-    const key = crypto.randomUUID();
+    const key = newId();
     submissionKeyRef.current = key;
     setIsGenerating(true);
     setGenStage('Submitting...');
@@ -242,7 +245,7 @@ export const StemBuilder: React.FC = () => {
     try {
       const { job } = await submitStudioRender('layer-render', {
         source: sourceRef, expectedBackend: useBackendStore.getState().activeBackendId,
-        engineParams: gp.getGlobalParams(), trackName: selectedTrack, buildModel, caption,
+        engineParams: useGlobalParamsStore.getState().getGlobalParams(), trackName: selectedTrack, buildModel, caption,
       }, key);
       if (submissionKeyRef.current !== key) { await workflowApi.cancel(job.id); return; }
       setActiveJobId(job.id);

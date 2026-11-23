@@ -1,11 +1,11 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiClient, type ReadOptions } from '../../services/httpClient';
-import { followJob, workflowApi } from '../../services/workflowApi';
+import { apiClient, type ReadOptions } from '@/services/httpClient';
+import { followJob, workflowApi } from '@/services/workflowApi';
 import type { WorkflowDocument, WorkflowReplay } from '../../../../server/src/contracts/workflow';
-import { queryClient } from '../client';
-import { resourceKey, sharedKeys } from '../keys';
-import { queryManager } from '../invalidation';
-import { followWorkflowJob } from '../workflowFollow';
+import { queryClient } from '@/queries/client';
+import { resourceKey, sharedKeys } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
+import { followWorkflowJob } from '@/queries/workflowFollow';
 
 export const workflowOptions = (id: string, after = 0, options: ReadOptions = {}) => {
   return queryOptions({

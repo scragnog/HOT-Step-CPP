@@ -4,7 +4,7 @@
 // openInStudio() to reload into classic for those.
 
 import React, { Suspense, lazy } from 'react';
-import { ErrorBoundary } from '../components/shared/ErrorBoundary';
+import { ErrorBoundary } from '@/components/shared/feedback/ErrorBoundary';
 
 const PAGES = {
   'training-studio': lazy(() => import('../components/training-studio/TrainingStudio').then(m => ({ default: m.TrainingStudio }))),

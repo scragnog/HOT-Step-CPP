@@ -4,7 +4,7 @@
 // Sources, which these must keep matching:
 //   expandWildcards, hasWildcards, randomWildcardSeed  ui/src/utils/wildcardUtils.ts
 //   composeCreateCaption                               ui/src/components/create/CreatePanel.tsx (buildCaption)
-//   estimateDuration, resolveDuration                  ui/src/utils/estimateDuration.ts
+//   estimateDuration, resolveDuration                  ui/src/utils/format/estimateDuration.ts
 
 import { randomInt } from 'node:crypto';
 

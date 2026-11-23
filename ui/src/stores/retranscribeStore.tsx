@@ -21,12 +21,12 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import { toast } from 'react-toastify';
-import type { Song } from '../types';
-import { retranscribeLyrics, whisperModels } from '../services/api';
-import { ApiError } from '../services/httpClient';
-import { queryClient } from '../queries/client';
-import { queryManager } from '../queries/invalidation';
-import { invalidateSongs } from '../queries/shell-queue/songs';
+import type { Song } from '@/types';
+import { retranscribeLyrics, whisperModels } from '@/services/api';
+import { ApiError } from '@/services/httpClient';
+import { queryClient } from '@/queries/client';
+import { queryManager } from '@/queries/invalidation';
+import { invalidateSongs } from '@/queries/shell-queue/songs';
 
 /** Song ids with a request in flight, and when each started. */
 let _running: Record<string, number> = {};
@@ -123,7 +123,8 @@ async function startRetranscribe(song: Song): Promise<void> {
         Cancel
       </button>
     </div>,
-    { closeButton: false, autoClose: false },
+    // The work continues if this is dismissed; Cancel is still the way to stop it.
+    { closeButton: true, autoClose: false },
   );
 
   try {

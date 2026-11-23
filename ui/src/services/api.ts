@@ -5,8 +5,8 @@
 // The bearer comes from the auth session accessor, so no function here takes
 // a token.
 
-import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, ModelRegistry } from '../types';
-import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
+import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, ModelRegistry } from '@/types';
+import { getGenerationTimeoutMinutes } from '@/utils/audio/generationTimer';
 import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
 import type { DownloadStartResponse } from '../../../server/src/contracts/modelManager';
 import type { HealthResponse } from '../../../server/src/contracts/health';
@@ -621,4 +621,144 @@ export function whisperModels(): Promise<{
   models: { file: string; label: string }[];
 }> {
   return get('/songs/retranscribe/model');
+}
+
+// ── Lyric alignment ────────────────────────────────────────
+
+/** A run's state. `stage` is the pipeline's own word: whisper, align, polish. */
+export interface LyricsAlignJob {
+  jobId: string;
+  audioUrl: string;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  stage: string;
+  startedAt: number;
+  finishedAt?: number;
+  error?: string;
+  result?: {
+    lineCount: number;
+    wordCount: number;
+    method: string;
+    wordsMoved: number;
+    vocalsIsolated: boolean;
+    dryRun?: boolean;
+    /** True while the diff is waiting for the user to accept or reject it. */
+    pending?: boolean;
+    cutBack?: number;
+    snapped?: number;
+    untouched?: number;
+    wordsFlagged?: number;
+    /** Hand-checked lines the run kept, and the ones it could not match. */
+    handPlacedKept?: number;
+    handPlacedLost?: number;
+    /** Where the run worked, so a re-attached editor can title the review. */
+    where?: string;
+    /** The sheet the run would write: the review's "new" side. */
+    proposed?: Array<{
+      start: number;
+      end: number;
+      text: string;
+      section?: string;
+      words: Array<{
+        word: string;
+        start: number;
+        end: number;
+        confidence?: number;
+        layer?: 'lead' | 'backing';
+      }>;
+    }>;
+    repairs?: Array<{
+      line: number;
+      word: number;
+      from: { start: number; end: number };
+      to: { start: number; end: number };
+      /** `repeat` is a word re-placed from an earlier occurrence of its line. */
+      reason: 'monotonic' | 'cut-back' | 'snap' | 'repeat';
+    }>;
+  };
+}
+
+/**
+ * Start an alignment run. `range` replaces only those lines, so fixing one
+ * chorus does not re-time the whole track. The server answers immediately and
+ * the run continues in the background; poll `getLyricsAlignJob`.
+ */
+export function startLyricsAlign(audioUrl: string, options: {
+  mode: 'full' | 'range' | 'polish';
+  /** Accepted for older callers. Every mode is a preview now: the diff is held
+   *  until `applyLyricsAlign`, so this changes nothing. */
+  dryRun?: boolean;
+  fromLine?: number;
+  toLine?: number;
+  /** The selection's own times, so the server can pick by time if an index
+   *  drifted (the editor drops a line the sidecar still holds). */
+  fromStart?: number;
+  toStart?: number;
+  force?: boolean;
+  isolateVocals?: boolean;
+  useCtc?: boolean;
+  dtw?: boolean;
+  /** The statistics pass's switches for a `polish` run. Omitted fields are on. */
+  polish?: { repeats?: boolean; cutBack?: boolean; snap?: boolean; monotonic?: boolean };
+}): Promise<LyricsAlignJob> {
+  // Silent: the editor's own toast owns progress and the outcome.
+  return post('/songs/lyrics/align', { audioUrl, ...options }, { silent: true });
+}
+
+/** One job, or null once the server has forgotten it. */
+export async function getLyricsAlignJob(jobId: string, opts?: ReadOptions): Promise<LyricsAlignJob | null> {
+  try {
+    return await get<LyricsAlignJob>(`/songs/lyrics/align/${encodeURIComponent(jobId)}`, opts);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === HttpStatus.notFound) return null;
+    throw err;
+  }
+}
+
+/** The newest job for a track, so a reopened editor can re-attach to a run. */
+export function latestLyricsAlignJob(audioUrl: string): Promise<LyricsAlignJob | null> {
+  return get(`/songs/lyrics/align?audioUrl=${encodeURIComponent(audioUrl)}`);
+}
+
+/** Stop a run. A finished job answers false rather than pretending to stop. */
+export function cancelLyricsAlign(jobId: string): Promise<{ cancelled: boolean }> {
+  return del(`/songs/lyrics/align/${encodeURIComponent(jobId)}`, { silent: true });
+}
+
+/**
+ * Accept the diff a run produced and write it.
+ *
+ * A run never writes on its own: alignment is minutes long and its output is a
+ * set of placements, so the editor shows `repairs` and calls this only when the
+ * person says yes. `force` applies over a file that moved on since the preview.
+ */
+export function applyLyricsAlign(jobId: string, opts: { force?: boolean } = {}): Promise<{
+  success: boolean;
+  revision: number;
+  lines: number;
+  words: number;
+}> {
+  return post(`/songs/lyrics/align/${encodeURIComponent(jobId)}/apply`, { force: opts.force === true }, { silent: true });
+}
+
+/** A section turned into its own library song, with its YuE2 ABC lead sheet. */
+export interface SectionMelodyResult {
+  song: { id: string; title: string; audio_url: string; duration: number; created_at: string };
+  abc: string;
+  createdAt: string;
+}
+
+/**
+ * Cut a waveform section out as its own track and transcribe a YuE2 ABC lead
+ * sheet for it. The new song is named after the source plus the moment it was
+ * made, and its creation date is that moment. Transcription blocks server-side,
+ * so this takes the slow-route timeout rather than the default.
+ */
+export function convertLyricsSectionToMelody(
+  audioUrl: string, startSec: number, endSec: number, title?: string, opts?: ClientOptions,
+): Promise<SectionMelodyResult> {
+  return post(
+    '/songs/lyrics/section-melody',
+    { audioUrl, startSec, endSec, ...(title ? { title } : {}) },
+    { timeout: SLOW_ROUTE_TIMEOUT_MS, silent: true, ...opts },
+  );
 }

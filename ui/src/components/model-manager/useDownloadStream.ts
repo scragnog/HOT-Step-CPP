@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { bridgeDownloads, downloadsKey } from '../../queries/global-models/downloads';
-import { subscribeEventSource } from '../../services/sharedEventSource';
+import { bridgeDownloads, downloadsKey } from '@/queries/global-models/downloads';
+import { subscribeEventSource } from '@/services/sharedEventSource';
 // useDownloadStream.ts — SSE hook for real-time download progress
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { modelManagerApi } from '../../services/api';
-import type { DownloadJob } from '../../types';
+import { modelManagerApi } from '@/services/api';
+import type { DownloadJob } from '@/types';
 
 interface UseDownloadStreamOptions {
   /** Called when any job transitions to 'completed' */

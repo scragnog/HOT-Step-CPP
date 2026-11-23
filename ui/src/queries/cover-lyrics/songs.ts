@@ -1,10 +1,10 @@
 import { queryOptions } from '@tanstack/react-query';
-import { songApi, normalizeSong } from '../../services/api';
-import { apiClient } from '../../services/httpClient';
-import type { Song } from '../../types';
-import { serverKey } from '../keys';
-import { queryManager } from '../invalidation';
-import { queryClient } from '../client';
+import { songApi, normalizeSong } from '@/services/api';
+import { apiClient } from '@/services/httpClient';
+import type { Song } from '@/types';
+import { serverKey } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
+import { queryClient } from '@/queries/client';
 import { songsChanged } from './reads';
 
 /** The filtered endpoint has its own key; it is not the shared full library. */

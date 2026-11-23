@@ -1,15 +1,15 @@
 import { queryOptions, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import * as api from '../../services/trainingApi';
-import * as preparation from '../../services/trainingPreparationApi';
-import { getReviewLadder } from '../../services/trainingReviewApi';
-import { trainingOperation } from '../../services/trainingOperations';
-import type { TrainingRecipe } from '../../services/trainingRecipesApi';
+import * as api from '@/services/trainingApi';
+import * as preparation from '@/services/trainingPreparationApi';
+import { getReviewLadder } from '@/services/trainingReviewApi';
+import { trainingOperation } from '@/services/trainingOperations';
+import type { TrainingRecipe } from '@/services/trainingRecipesApi';
 import type { TrainingRecipeFamily } from '../../../../server/src/contracts/trainingRecipes';
-import { scopeOf, serverKey, resourceKey, SHARED, type Resource, type Worker } from '../keys';
-import { gpusOptions } from '../shell-queue/settings';
-import { trainingQueries } from '../training-data/queries';
-import { pollWhile } from '../contract';
-import { queryManager } from '../invalidation';
+import { scopeOf, serverKey, resourceKey, SHARED, type Resource, type Worker } from '@/queries/keys';
+import { gpusOptions } from '@/queries/shell-queue/settings';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { pollWhile } from '@/queries/contract';
+import { queryManager } from '@/queries/invalidation';
 
 export type { Worker };
 const TR = {

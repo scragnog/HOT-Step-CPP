@@ -13,12 +13,13 @@ import {
 } from 'lucide-react';
 import { usePlaylist, type PlaylistItem } from '../../stores/playlistStore';
 import { playFromList, togglePlay, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
-import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
+import { downloadTrack, downloadAll } from '@/utils/audio/downloadTrack';
 import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
-import { SongActionsMenu, songFromPlaylistItem } from '../shared/SongActionsMenu';
-import { CoverImage } from '../shared/CoverImage';
+import { SongActionsMenu, songFromPlaylistItem } from '@/components/shared/songs/SongActionsMenu';
+import { CoverImage } from '@/components/shared/songs/CoverImage';
+import { formatClock } from '@/utils/format/format';
 
 /** Fraction of row width a swipe must travel to trigger an action. */
 const SWIPE_THRESHOLD = 0.3;
@@ -267,11 +268,10 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({
     playFromList(playlistItemToTrack(playlist.items[0]), playlist.items.map(playlistItemToTrack), 'playlist');
   }, [playlist.items]);
 
-  const totalDuration = useMemo(() => {
-    const total = playlist.items.reduce((sum, i) => sum + (i.duration || 0), 0);
-    if (total <= 0) return '0:00';
-    return `${Math.floor(total / 60)}:${String(Math.floor(total % 60)).padStart(2, '0')}`;
-  }, [playlist.items]);
+  const totalDuration = useMemo(
+    () => formatClock(playlist.items.reduce((sum, i) => sum + (i.duration || 0), 0)),
+    [playlist.items],
+  );
 
   return (
     <div className={`flex flex-col h-full ${embedded ? '' : 'bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-sm'}`}>
@@ -412,7 +412,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({
                   {/* Duration — always visible, pinned right */}
                   {item.duration && item.duration > 0 && (
                     <span className="text-[9px] text-zinc-600 font-mono flex-shrink-0 tabular-nums w-8 text-right ml-auto">
-                      {Math.floor(item.duration / 60)}:{String(Math.floor(item.duration % 60)).padStart(2, '0')}
+                      {formatClock(item.duration)}
                     </span>
                   )}
                 </>

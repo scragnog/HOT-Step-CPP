@@ -6,10 +6,11 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Song } from '../../types';
-import { CoverImage } from '../shared/CoverImage';
+import type { Song } from '@/types';
+import { CoverImage } from '@/components/shared/songs/CoverImage';
 import { Waveform } from './Waveform';
-import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { useDisguiseMode } from '@/hooks/useDisguiseMode';
+import { formatClock } from '@/utils/format/format';
 
 interface Props {
   song: Song;
@@ -27,10 +28,7 @@ interface Props {
   onClose: () => void;
 }
 
-const fmt = (s: number) => {
-  if (!s || !isFinite(s)) return '0:00';
-  return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
-};
+const fmt = (s: number) => (!s || !isFinite(s) ? '0:00' : formatClock(s));
 
 let nextHistoryOwner = 0;
 let pendingHistoryBack: Promise<void> | undefined;

@@ -113,10 +113,33 @@ Whisper's timings are usually close, and the error is often one constant offset:
 little early or a little late. The other common case is a line that covers two phrases, so it
 appears before it is sung. Both are fixed by hand, in the lyric editor.
 
-Expand the **Lyrics** strip under the waveform and click **Edit** in its header. The pencil is
-there only when the strip is open and the track has word timings (a Whisper retranscription, or
-a render whose lyric aligner wrote them), so editing is never one stray click away. The editor
-opens over the app:
+A song's **…** menu has **Edit Word Placement**, on the Library, Recent Songs, the playlist and
+Song Details alike, so the editor can be opened without going through the player's Lyrics strip.
+That item never asks you to press something else first. A track with line-level lyrics opens
+straight away: every word is split out of its line and placed inside the time that line already
+has, so the lines sit where they should and the words only need dragging within them. The header
+badge says **LRC lines** for those, and the first save writes the word timings beside the audio.
+A track with lyrics and no timing at all starts a retranscription and opens when it lands: Whisper
+listens to the audio, and the result keeps your lyrics as the text and takes only the timing from
+what it heard, so a word it mishears cannot rewrite the lyric sheet. That runs in the background
+with Cancel on its toast, and nothing is written until it finishes. Whether the track is loaded is
+never a question the editor asks either: opening it puts the track in the player, paused, so a row
+nobody has listened to yet — or the track a reload left in the bar without loading its file —
+opens with its audio ready to play.
+
+When the timings you open on are too rough to check by ear — words sharing one instant, or a sheet
+that has only ever been split from line times — the editor's header offers **Align my lyrics**. It
+runs the aligner over the whole track, keeps your lyrics as the text, shows the diff before writing
+anything, and can be cancelled while it listens. A track the aligner already placed is not offered
+it: its remaining work is listening, and the doubtful-word queue is where that happens.
+**Repair timings**, beside Re-align in the word row, runs only the statistics pass — no Whisper and
+no model — so a tail that swallowed the next syllable, an onset a syllable late or a word out of
+order is fixed in seconds, with the same diff-before-apply review.
+
+In the player, expand the **Lyrics** strip under the waveform and click **Edit** in its header. The
+pencil is there only when the strip is open and the track has timed lyrics — word timings from a
+Whisper retranscription or a render's aligner, or a line-level `.lrc` — so editing is never one
+stray click away. Either door opens the editor over the app:
 
 - **Transport**, along the bottom, is the player itself: play/pause, seek by 1 s or 0.1 s, speed
   at 0.5x, 0.75x or 1x, volume, and Follow, which keeps the playhead in view while it plays.
@@ -130,7 +153,9 @@ opens over the app:
   strip above it is the track's waveform, tall enough to place a word against the transient you
   hear rather than by arithmetic. Arrows on the left and right edges page the view by words: back
   scrolls left one window so the first word on screen ends up last, forward scrolls right one
-  window so the last word on screen becomes the first.
+  window so the last word on screen becomes the first. On a track with harmonies, a line sung
+  under the lead is labelled **BACKING** or **AD-LIB** at the end of its row and its chips are
+  tinted, and a line placed by ear is marked with a green span over it.
 - **The line being sung** is the last row of the editor, under the transport, as karaoke read
   from the editor's own timings, so a placement can be checked without closing the modal.
 - **Zoom** is the point of the modal. It lives in the bottom-left corner of the footer as a short
@@ -181,7 +206,9 @@ agree.
 Keys, while the editor is open: `Space` plays and pauses even when a word is selected, the arrow
 keys move the selected word by the step, `Shift` with them shortens and lengthens it, `Ctrl+-` and
 `Ctrl+=` zoom, `Ctrl+Z` and `Ctrl+Shift+Z` undo and redo, and `Esc` closes. Every button's tooltip
-names the key it answers to.
+names the key it answers to. The word row's **ⓘ** lists the pointer gestures — click to select,
+drag to move, double-click a chip to retype it — instead of spending the row on a sentence when
+no word is selected.
 
 A track whose timings were placed by hand is marked as hand-timed when it is saved.
 **Retranscribe Lyrics** then refuses the first click and says so; clicking again within a minute

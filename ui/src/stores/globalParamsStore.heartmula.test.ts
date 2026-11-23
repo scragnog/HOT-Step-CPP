@@ -11,9 +11,9 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
 } });
 const { useGlobalParamsStore } = await import('./globalParamsStore');
 const { useBackendStore } = await import('./backendStore');
-const { createContentParams, createContentFromDraft } = await import('../components/create/createContent');
-const { generateApi } = await import('../services/api');
-const { queryClient } = await import('../queries/client');
+const { createContentParams, createContentFromDraft } = await import('@/components/create/createContent');
+const { generateApi } = await import('@/services/api');
+const { queryClient } = await import('@/queries/client');
 
 test('HeartMuLa requests freeze components, preserve lyrics, cap duration/batch and cancel the submitted job after switching', async () => {
   const fetchBefore = globalThis.fetch;

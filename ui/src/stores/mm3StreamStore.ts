@@ -60,7 +60,8 @@ import { readMedia } from '../services/mediaTransport';
 // costs a preview and nothing else.
 
 import { useSyncExternalStore } from 'react';
-import { extractWav, wavFrameCount, wavSampleRate } from '../utils/wavStream';
+import { extractWav, wavFrameCount, wavSampleRate } from '@/utils/audio/wavStream';
+import { formatDecimal } from '@/utils/format/format';
 
 export interface Mm3StreamState {
   /** The job whose stream is open (or was last opened). */
@@ -441,7 +442,7 @@ async function open(jobId: string, take: number, expected: number, autoPlay: boo
 
   // Logged because the failure mode of this feature is SILENCE, and silence is
   // indistinguishable from "the engine has not produced a window yet".
-  console.log(`[MM3 Stream] opening ${jobId} take ${take} (expecting ${expected.toFixed(1)}s)`);
+  console.log(`[MM3 Stream] opening ${jobId} take ${take} (expecting ${formatDecimal(expected, 1)}s)`);
   const ctrl = new AbortController();
   r.abort = ctrl;
   if (!raf) raf = requestAnimationFrame(tick);
@@ -546,7 +547,7 @@ async function open(jobId: string, take: number, expected: number, autoPlay: boo
 
         if (chunks === 1) {
           console.log(`[MM3 Stream] ${jobId} take ${take} first window: `
-            + `${(n / r.rate).toFixed(2)}s @ ${r.rate} Hz, context ${ctx.state}`);
+            + `${formatDecimal((n / r.rate), 2)}s @ ${r.rate} Hz, context ${ctx.state}`);
           // Start the transport one headroom from now. The playhead holds at 0
           // until then (positionFrames' max(0, …)) — the pre-buffer the
           // reference Space uses.

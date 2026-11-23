@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { profilesOptions } from '../../queries/shell-queue/settings';
-import { queryManager } from '../../queries/invalidation';
+import { profilesOptions } from '@/queries/shell-queue/settings';
+import { queryManager } from '@/queries/invalidation';
 // ProfilesModal.tsx — named parameter-profile manager
 //
 // Lists server-stored profiles (every generation parameter as a raw
-// snapshot — see utils/paramProfiles.ts) and lets the user save the
+// snapshot — see utils/training/paramProfiles.ts) and lets the user save the
 // current config under a name, apply, overwrite, or delete. Applying is
 // live: no page reload, CreatePanel content included.
 
@@ -12,13 +12,15 @@ import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bookmark, Check, ChevronDown, ChevronRight, Download, Pencil, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { profileApi, type ParamProfile } from '../../services/api';
-import { validateProfileImport } from '../../services/exportImportApi';
-import { useAuth } from '../../context/AuthContext';
-import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '../../utils/paramProfiles';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
-import { Toggle } from '../shared/Toggle';
-import { useBackendStore } from '../../stores/backendStore';
+import { profileApi, type ParamProfile } from '@/services/api';
+import { validateProfileImport } from '@/services/exportImportApi';
+import { useAuth } from '@/context/AuthContext';
+import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '@/utils/training/paramProfiles';
+import { safeFileStem, saveJson } from '@/utils/storage/saveFile';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { useBackendStore } from '@/stores/backendStore';
+import { formatDateTime } from '@/utils/format/dateUtils';
 
 interface ProfilesModalProps {
   onClose: () => void;
@@ -107,13 +109,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   // ── JSON export/import (same preset format as saved profiles) ──
 
   const handleExportProfile = useCallback((p: ParamProfile) => {
-    const blob = new Blob([JSON.stringify(p.data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${p.name.replace(/[^a-zA-Z0-9 _-]/g, '_')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveJson(p.data, `${safeFileStem(p.name, 'profile')}.json`);
   }, []);
 
   const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,7 +242,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
                       </span>
                       <span className="block text-[10px] text-zinc-500 truncate">
                         {summarizeProfile(p.data)}
-                        {p.saved_at && <> · {new Date(p.saved_at).toLocaleString()}</>}
+                        {p.saved_at && <> · {formatDateTime(p.saved_at)}</>}
                       </span>
                     </span>
                   </button>

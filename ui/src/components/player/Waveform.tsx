@@ -16,8 +16,9 @@ import React, { useEffect, useRef } from 'react';
 import { useSyncExternalStore } from 'react';
 import {
   subscribe, getSnapshot, subscribeFrame, seekFraction,
-} from '../../audio/engine';
+} from '@/audio/engine';
 import { endEditGainAt, type EndEdit } from '../../../../server/src/contracts/fade';
+import { formatClock } from '@/utils/format/format';
 
 interface WaveformProps {
   height?: number;
@@ -202,11 +203,7 @@ export const Waveform: React.FC<WaveformProps> = ({
   // Playhead at frame rate, off the React path entirely.
   useEffect(() => subscribeFrame((t) => paint(t)), [paint]);
 
-  const fmt = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
+  const fmt = (s: number) => formatClock(s);
 
   const timeAt = (clientX: number): number | null => {
     const wrap = wrapRef.current;

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { ppVaeOptions, registryOptions, stableStepAdaptersOptions, stableStepOptions } from '../../queries/global-models/options';
-import { usePluginRegistry } from '../../hooks/usePluginRegistry';
-import { useReferenceTracks } from '../../queries/global-models/hooks';
+import { ppVaeOptions, registryOptions, stableStepAdaptersOptions, stableStepOptions } from '@/queries/global-models/options';
+import { usePluginRegistry } from '@/hooks/usePluginRegistry';
+import { useReferenceTracks } from '@/queries/global-models/hooks';
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
 //
 // Four collapsible accordion sections:
@@ -17,24 +17,28 @@ import {
   Upload, Trash2, Music2,
   ChevronDown, RotateCcw,
 } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { useGlobalParams } from '@/context/GlobalParamsContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { Accordion } from './AccordionSection';
-import { useAuth } from '../../context/AuthContext';
-import { useVstChainStore } from '../../stores/vstChainStore';
+import { useAuth } from '@/context/AuthContext';
+import { useVstChainStore } from '@/stores/vstChainStore';
 import { ToggleSwitch } from './BarSection';
 import { formatReferenceName } from './modelLabels';
 import { VstChainDropdown } from './VstChainDropdown';
-import { useCapabilities } from '../../hooks/useCapabilities';
+import { useCapabilities } from '@/hooks/useCapabilities';
 import { CoverArtContent, CoverArtBadge } from './CoverArtDropdown';
 import { PluginControls } from './PluginControls';
-import { EditableSlider } from '../shared/EditableSlider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
+import { EditableSlider } from '@/components/shared/controls/EditableSlider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
 import { Sa3SamplerControls } from './Sa3SamplerControls';
-import { QueryError } from '../shared/QueryError';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { formatBytes, formatDecimal } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
+import { plural } from '@/utils/format/plural';
 
 // LUFS normalization presets
 const LUFS_PRESETS = [
@@ -58,12 +62,6 @@ function useMm3RefinerAvailability() {
 // ── Mastering Content ───────────────────────────────────────────
 // (Extracted from MasteringDropdown — reference track management)
 
-
-const formatFileSize = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
 
 /** timbreOk: only ACE-Step reads a timbre reference, so the toggle hides elsewhere. */
 const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
@@ -109,7 +107,7 @@ const MasteringContent: React.FC<{ timbreOk: boolean }> = ({ timbreOk }) => {
             accent="amber"
             value={gp.masteringReference}
             onChange={gp.setMasteringReference}
-            options={references.map(r => ({ value: r.name, label: `${r.name} (${formatFileSize(r.size)})` }))}
+            options={references.map(r => ({ value: r.name, label: `${r.name} (${formatBytes(r.size)})` }))}
             placeholder={t('mastering.selectReference')}
             className="w-full"
           />
@@ -494,7 +492,7 @@ export const PostProcessingDropdown: React.FC = () => {
               tooltip={t('pp.mm3RefinerMixInfo', 'Blend the decoded refiner output with the original audio. 0% bypasses the stage without loading models; 100% uses the full refined output.')}
               value={gp.mm3RefinerMix} min={0} max={1} step={0.01}
               onChange={gp.setMm3RefinerMix} defaultValue={GLOBAL_PARAM_DEFAULTS.mm3RefinerMix}
-              formatDisplay={v => `${Math.round(v * 100)}%`} />
+              formatDisplay={formatPercent} />
           </>}
         </div>
       </Accordion>
@@ -666,19 +664,23 @@ export const PostProcessingDropdown: React.FC = () => {
                             </span>
                             {enabled && (
                               <span className="text-[10px] text-zinc-500 tabular-nums">
-                                {(scale * 100).toFixed(0)}%
+                                {formatPercent(scale)}
                               </span>
                             )}
                           </div>
                           {enabled && (
-                            <input
-                              type="range"
-                              min={0} max={2} step={0.05}
-                              value={scale}
-                              onChange={e => setSsAdapter(a.name, { scale: parseFloat(e.target.value) })}
-                              className="w-full mt-1 accent-sky-500"
-                              title="Adapter strength (100% = trained strength; >100% amplifies)"
-                            />
+                            <ParamLabel label={t('pp.adapterStrength', 'Adapter strength')}
+                              info={t('pp.adapterStrengthInfo', '100% = trained strength; above 100% amplifies the adapter.')}
+                              rootClassName="w-full mt-1">
+                              <input
+                                type="range"
+                                min={0} max={2} step={0.05}
+                                value={scale}
+                                onChange={e => setSsAdapter(a.name, { scale: parseFloat(e.target.value) })}
+                                aria-label={t('pp.adapterStrength', 'Adapter strength')}
+                                className="w-full accent-sky-500"
+                              />
+                            </ParamLabel>
                           )}
                         </div>
                       );
@@ -724,7 +726,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   min={-6} max={6} step={0.5}
                   onChange={gp.setStableStepVocalTrimDb}
                   defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepVocalTrimDb}
-                  formatDisplay={v => v === 0 ? '0 dB (source balance)' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`}
+                  formatDisplay={v => v === 0 ? '0 dB (source balance)' : `${v > 0 ? '+' : ''}${formatDecimal(v, 1)} dB`}
                   tooltip="Trim the vocal against the refined instrumental. 0 keeps the balance your generation had before separation."
                 />
                 <span className="block text-[10px] text-zinc-500 leading-relaxed mt-1">
@@ -810,7 +812,8 @@ export const PostProcessingDropdown: React.FC = () => {
                 {gp.stableStepSeedFollowsDit === false && (
                   <>
                     <ParamLabel
-                      label="Refine seed"
+                      label={t('pp.refineSeed', 'Refine seed')}
+                      info={t('pp.refineSeedInfo', 'Fixed SA3 refine seed. Used only while Follow generation seed is off.')}
                       rootClassName="mt-1.5 mb-1"
                       className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
                       onReset={gp.stableStepSeed !== GLOBAL_PARAM_DEFAULTS.stableStepSeed ? () => gp.setStableStepSeed(GLOBAL_PARAM_DEFAULTS.stableStepSeed) : undefined} />
@@ -818,8 +821,8 @@ export const PostProcessingDropdown: React.FC = () => {
                       type="number"
                       value={gp.stableStepSeed}
                       onChange={e => gp.setStableStepSeed(parseInt(e.target.value, 10) || 0)}
+                      aria-label={t('pp.refineSeed', 'Refine seed')}
                       className="w-full px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-sky-500/50"
-                      title="Fixed SA3 refine seed"
                     />
                   </>
                 )}
@@ -855,8 +858,10 @@ export const PostProcessingDropdown: React.FC = () => {
           {gp.spectralLifterEnabled && (
             <div className="space-y-2 pt-1">
               <div className="flex justify-end">
-                <button
-                  type="button"
+                <HintButton
+                  label={t('pp.resetSpectral', 'Reset Spectral Lifter parameters to defaults')}
+                  info={t('pp.resetSpectralInfo', 'Restores denoise strength, noise floor, HF mix, transient boost and shimmer reduction to their defaults.')}
+                  ariaLabel={t('pp.resetSpectralShort', 'Reset')}
                   onClick={() => {
                     gp.setSlDenoiseStrength(0.3);
                     gp.setSlNoiseFloor(0.1);
@@ -865,11 +870,10 @@ export const PostProcessingDropdown: React.FC = () => {
                     gp.setSlShimmerReduction(6.0);
                   }}
                   className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-cyan-400 transition-colors"
-                  title="Reset Spectral Lifter parameters to defaults"
                 >
                   <RotateCcw size={11} />
                   Reset
-                </button>
+                </HintButton>
               </div>
               <EditableSlider
                 label="Denoise Strength"
@@ -946,8 +950,10 @@ export const PostProcessingDropdown: React.FC = () => {
           {gp.vocalNaturalizerEnabled && (
             <div className="space-y-2 pt-1">
               <div className="flex justify-end">
-                <button
-                  type="button"
+                <HintButton
+                  label={t('pp.resetVocal', 'Reset Vocal Naturalizer parameters to defaults')}
+                  info={t('pp.resetVocalInfo', 'Restores amount, vibrato, formant, metallic reduction, quantization mask and transition smoothing to their defaults.')}
+                  ariaLabel={t('pp.resetVocalShort', 'Reset')}
                   onClick={() => {
                     gp.setNaturalizeAmount(0.5);
                     gp.setNatVibratoRate(4.5);
@@ -958,11 +964,10 @@ export const PostProcessingDropdown: React.FC = () => {
                     gp.setNatTransitionSmooth(1.0);
                   }}
                   className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-pink-400 transition-colors"
-                  title="Reset Vocal Naturalizer parameters to defaults"
                 >
                   <RotateCcw size={11} />
                   Reset
-                </button>
+                </HintButton>
               </div>
               <EditableSlider
                 label="Amount"
@@ -1052,7 +1057,7 @@ export const PostProcessingDropdown: React.FC = () => {
             min={-10} max={10} step={0.5}
             onChange={gp.setGainOffsetDb}
             defaultValue={GLOBAL_PARAM_DEFAULTS.gainOffsetDb}
-            formatDisplay={v => v === 0 ? '0 dB (bypass)' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`}
+            formatDisplay={v => v === 0 ? '0 dB (bypass)' : `${v > 0 ? '+' : ''}${formatDecimal(v, 1)} dB`}
             tooltip="dB gain applied to the audio before VST chain. 0 = no change."
           />
           {gp.gainOffsetDb !== 0 && (
@@ -1152,7 +1157,7 @@ export const PostProcessingDropdown: React.FC = () => {
                     min={-30} max={-5} step={0.5}
                     onChange={gp.setLufsTarget}
                     defaultValue={GLOBAL_PARAM_DEFAULTS.lufsTarget}
-                    formatDisplay={v => `${v.toFixed(1)} LUFS`}
+                    formatDisplay={v => `${formatDecimal(v, 1)} LUFS`}
                     tooltip="Target integrated loudness. Lower = quieter, higher = louder."
                   />
                 )}
@@ -1166,7 +1171,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   min={-6} max={0} step={0.1}
                   onChange={gp.setLufsCeilingDb}
                   defaultValue={GLOBAL_PARAM_DEFAULTS.lufsCeilingDb}
-                  formatDisplay={v => `${v.toFixed(1)} dBFS`}
+                  formatDisplay={v => `${formatDecimal(v, 1)} dBFS`}
                   tooltip="Peak ceiling held by the look-ahead limiter after the loudness gain is applied. Lower this if a maximizer earlier in the chain is already close to full scale."
                 />
 
@@ -1174,7 +1179,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
                   <AudioWaveform size={14} className="text-amber-400 flex-shrink-0" />
                   <span className="text-[10px] text-amber-300">
-                    Target: {gp.lufsTarget} LUFS &middot; Peak ceiling: {gp.lufsCeilingDb.toFixed(1)} dBFS
+                    Target: {gp.lufsTarget} LUFS &middot; Peak ceiling: {formatDecimal(gp.lufsCeilingDb, 1)} dBFS
                   </span>
                 </div>
               </div>
@@ -1263,7 +1268,7 @@ export const PostProcessingBadge: React.FC = () => {
   if (spectralLifterEnabled) parts.push('SL');
   if (vocalNaturalizerEnabled) parts.push('Nat');
   if (gainOffsetDb !== 0) parts.push(`${gainOffsetDb > 0 ? '+' : ''}${gainOffsetDb}dB`);
-  if (vstEnabled > 0) parts.push(`${vstEnabled} VST${vstEnabled !== 1 ? 's' : ''}`);
+  if (vstEnabled > 0) parts.push(`${vstEnabled} ${plural(vstEnabled, 'VST')}`);
   if (masteringEnabled && masteringReference) parts.push('Master');
   if (lufsEnabled) parts.push(`${lufsTarget} LUFS`);
   if (coverArtEnabled) parts.push('Cover');

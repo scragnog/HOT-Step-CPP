@@ -70,7 +70,7 @@ disco stem extraction it starts) twice.
 | Update notice | `shell-queue/updates` | Fresh each visit; polled every 2 s while a check started elsewhere (startup, another tab) is still running; Check now writes its result into the entry |
 | File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | shared `adapter-scan` | Fresh per click |
-| YuE2 caption source | `training-data/yue2-caption-source` | Fresh; read by `utils/yue2CaptionSource.ts`, which keeps the error surface and local cache |
+| YuE2 caption source | `training-data/yue2-caption-source` | Fresh; read by `utils/lyrics/yue2CaptionSource.ts`, which keeps the error surface and local cache |
 | Workflow job (queue) | shared `workflow-job`, `after` 0 | Fresh per read, no retry |
 | Waveform peaks | shared `peaks` | `audio/peaksClient.ts`; never stale, `forgetPeaks` removes a rewritten file's entry, failures uncached |
 | Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop (`TrimControls.tsx`) and retranscribe (`SongActionsMenu.tsx`) refresh them through `queryManager.sidecars.all` |
@@ -103,12 +103,12 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `components/settings/DataFolderPanel.tsx` | query; preview, schedule, cancel and restart are commands |
 | `components/settings/SettingsPanel.tsx` | query (health, GPUs, stem stats); the editable env form is `useEnvSettingsForm`; saves, purges and restart are mutations |
 | `components/settings/UpdatesPanel.tsx` | query (`shell-queue/updates`); Check now is a `useMutation` that writes its result into the entry |
-| `components/shared/FileBrowserModal.tsx` | query |
-| `components/shared/LatentImport.tsx` | mutation (upload) |
-| `components/shared/PresetSyncNotices.tsx` | query through `PresetCollection` |
+| `components/shared/overlays/FileBrowserModal.tsx` | query |
+| `components/shared/songs/LatentImport.tsx` | mutation (upload) |
+| `components/shared/feedback/PresetSyncNotices.tsx` | query through `PresetCollection` |
 | `components/shared/StemMixer.tsx` | transport: audio file blobs |
-| `components/shared/StudioDraftPicker.tsx` | consumer of cover-lyrics' draft service; its Query adoption is that owner's |
-| `components/shared/UnifiedRecentSongs.tsx` | query |
+| `components/shared/overlays/StudioDraftPicker.tsx` | consumer of cover-lyrics' draft service; its Query adoption is that owner's |
+| `components/shared/songs/UnifiedRecentSongs.tsx` | query |
 | `hooks/usePolling.ts` | deleted; it had no callers |
 | `services/audioQueueApi.ts`, `dataFolderApi.ts`, `preferencesApi.ts`, `updatesApi.ts`, `workflowApi.ts` | transport; reads take `ReadOptions` |
 | `services/exportImportApi.ts` | mutation (imports, export resolve, profile validation) |
@@ -117,11 +117,11 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `stores/discoStore.ts` | transport: static per-track disco JSON |
 | `stores/mm3StreamStore.ts` | stream |
 | `stores/postProcessStore.ts` | query |
-| `utils/downloadTrack.ts` | mutation (export download) |
-| `utils/heapWatch.ts` | client timer |
-| `utils/lrcUtils.ts`, `wordLrcUtils.ts` | transport: canonical sidecar reads for the shared keys |
-| `utils/mm3CaptionSource.ts` (not in the manifest: dynamic import) | transport: reads cover-lyrics' `lireekApi.getLyricsSet` |
-| `utils/yue2CaptionSource.ts` | query |
+| `utils/audio/downloadTrack.ts` | mutation (export download) |
+| `utils/audio/heapWatch.ts` | client timer |
+| `utils/lyrics/lrcUtils.ts`, `wordLrcUtils.ts` | transport: canonical sidecar reads for the shared keys |
+| `utils/lyrics/mm3CaptionSource.ts` (not in the manifest: dynamic import) | transport: reads cover-lyrics' `lireekApi.getLyricsSet` |
+| `utils/lyrics/yue2CaptionSource.ts` | query |
 
 ## Runtime acceptance handoff
 

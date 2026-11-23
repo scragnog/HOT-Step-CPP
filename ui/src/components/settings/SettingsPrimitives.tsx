@@ -5,15 +5,15 @@
 
 import React, { useState } from 'react';
 import { Eye, EyeOff, FolderOpen, ChevronRight } from 'lucide-react';
-import { Toggle as SharedToggle } from '../shared/Toggle';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { Toggle as SharedToggle } from '@/components/shared/controls/Toggle';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 /** This file's own highlight colour — its one existing accent cue was the
  *  select's emerald focus ring. Passed to every StyledSelect/Toggle here. */
 const ACCENT = 'emerald' as const;
 
-/** The shared Toggle (components/shared/Toggle.tsx); this name stays for the
+/** The shared Toggle (components/shared/controls/Toggle.tsx); this name stays for the
  *  settings tabs. New code imports Toggle from shared. */
 export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string; disabled?: boolean }> = ({ checked, onChange, id, disabled }) => (
   <SharedToggle id={id} checked={checked} onChange={onChange} accent={ACCENT} disabled={disabled} />

@@ -8,8 +8,8 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { skipThinking } from '../services/lireekApi';
-import { lyricWorkflowApi, runLyricOperation, type LyricBatchRequest, type LyricBatchResult } from '../services/lyricWorkflowApi';
+import { skipThinking } from '@/services/lireekApi';
+import { lyricWorkflowApi, runLyricOperation, type LyricBatchRequest, type LyricBatchResult } from '@/services/lyricWorkflowApi';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 
 // ── Types ────────────────────────────────────────────────────────────────────

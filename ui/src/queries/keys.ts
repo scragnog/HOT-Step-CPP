@@ -19,7 +19,7 @@
 // ['hs', 'training-data/datasets', { worker: 'A' }] every dataset list on A.
 
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import { apiClient } from '../services/httpClient';
+import { apiClient } from '@/services/httpClient';
 
 export type Area = 'training-data' | 'training-runs' | 'global-models' | 'cover-lyrics' | 'studios' | 'shell-queue' | 'compare';
 
@@ -67,11 +67,11 @@ export const SHARED = {
    *  played: raw `Peaks` (may carry `unsupported`). Owner: shell-queue. */
   peaks: 'peaks',
   /** `.lrc` sidecar text or null when missing, id = `sidecarUrl(audio, '.lrc')`
-   *  so every variant of a track shares it (`utils/lrcUtils.ts` fetchLrc).
+   *  so every variant of a track shares it (`utils/lyrics/lrcUtils.ts` fetchLrc).
    *  Owner: shell-queue. */
   lrc: 'lrc',
   /** `.lyrics.json` word timings or null when missing, id =
-   *  `sidecarUrl(audio, '.lyrics.json')` (`utils/wordLrcUtils.ts`
+   *  `sidecarUrl(audio, '.lyrics.json')` (`utils/lyrics/wordLrcUtils.ts`
    *  fetchLyricsJson). Owner: shell-queue. */
   lyricsJson: 'lyrics-json',
   /** YuE2's `.score.abc` lead sheet text or null when missing, id =

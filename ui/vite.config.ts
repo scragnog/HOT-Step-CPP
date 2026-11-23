@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { CSP_HEADER, contentSecurityPolicy } from '../server/src/contracts/csp.ts'
+import { fileURLToPath } from 'node:url'
 
 // Metadata-only releases also install a new worker and retire old assets.
 function appShellWorker(): Plugin {
@@ -46,6 +47,10 @@ export default defineConfig({
   plugins: [react(), appShellWorker()],
   // Production policy for `vite preview` of a build, so the service worker can be checked under it.
   preview: { headers: { [CSP_HEADER]: contentSecurityPolicy() } },
+  resolve: {
+    // Matches tsconfig's `paths`: `@/x` is src/x, so imports stop counting ../
+    alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
   server: {
     port: 3000,
     host: '0.0.0.0',

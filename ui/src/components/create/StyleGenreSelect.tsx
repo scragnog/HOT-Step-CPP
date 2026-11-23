@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { StyledSelect } from '../shared/StyledSelect';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { GENRE_TAXONOMY } from '../../data/genres';
 
 const OPTIONS = GENRE_TAXONOMY.flatMap(c => c.genres.map(g => ({ value: g, label: g, hint: c.name })));

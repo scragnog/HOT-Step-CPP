@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useStudioSongs } from '../../queries/studios/shared';
-import { removeSongs } from '../../queries/shell-queue/songs';
+import { useStudioSongs } from '@/queries/studios/shared';
+import { removeSongs } from '@/queries/shell-queue/songs';
 // RecentBuilds.tsx — Recent stem builds sidebar section
 //
 // Fetches recent songs generated via Stem Builder (source = 'stem-builder')
@@ -9,8 +9,8 @@ import { removeSongs } from '../../queries/shell-queue/songs';
 
 import React, { useMemo } from 'react';
 import { Play, ArrowUp, Trash2 } from 'lucide-react';
-import { songApi } from '../../services/api';
-import { useAuth } from '../../context/AuthContext';
+import { songApi } from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
 
 interface RecentBuild {
   id: string;

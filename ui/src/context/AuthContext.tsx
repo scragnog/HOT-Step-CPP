@@ -3,11 +3,11 @@
 // Auto-logs in on mount, provides user + token to all children.
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { authApi } from '../services/api';
-import { queryClient } from '../queries/client';
-import { getSessionEpoch, startAuthSession } from '../queries/keys';
-import { setAuthToken, setOnUnauthorized } from '../services/axiosClient';
-import type { User } from '../types';
+import { authApi } from '@/services/api';
+import { queryClient } from '@/queries/client';
+import { getSessionEpoch, startAuthSession } from '@/queries/keys';
+import { setAuthToken, setOnUnauthorized } from '@/services/axiosClient';
+import type { User } from '@/types';
 
 interface AuthContextValue {
   user: User | null;

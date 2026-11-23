@@ -4,8 +4,8 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { useVstChainStore, _resetVstPresetsForTests, PRESETS_KEY, MIGRATED_FLAG } from './vstChainStore';
-import { tick, withBrowser } from '../services/preferencesTestFake';
-import { queryClient } from '../queries/client';
+import { tick, withBrowser } from '@/services/preferencesTestFake';
+import { queryClient } from '@/queries/client';
 
 after(() => queryClient.clear());
 
@@ -133,8 +133,8 @@ test('deleting a preset while its create is in flight deletes the created docume
 });
 
 test('reopening an editor against an older empty open-GUI entry keeps the marker until a fresh read', async () => {
-  const { vstApi } = await import('../services/api');
-  const { openGuisOptions } = await import('../queries/global-models/options');
+  const { vstApi } = await import('@/services/api');
+  const { openGuisOptions } = await import('@/queries/global-models/options');
   const saved = { openGui: vstApi.openGui, openGuis: vstApi.openGuis };
   let answer: (v: { uids: string[] }) => void = () => {};
   vstApi.openGui = async () => ({}) as never;

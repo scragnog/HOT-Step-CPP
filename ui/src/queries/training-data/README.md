@@ -36,8 +36,8 @@ snapshots.
 | Scan preview | `training-data/scan-preview` | Worker-scoped; New dataset and each batch import row |
 | MM3 and YuE2 caption files | `training-data/sample-mm3`, `sample-yue2` | Seed the drawer's editors |
 | Lyric Studio export preview | `training-data/lyric-studio-preview` | Seeds the artist/album fields |
-| YuE2 caption source | `training-data/yue2-caption-source` | Fresh per handle (`dataset`, `lyricsSet` or `adapter`). Called by `utils/yue2CaptionSource.ts`; the util keeps the error surface and its local cache |
-| SA3 training status | `training-data/sa3-status` | Worker-scoped; polls while a job is active. Built inline in `components/training-studio/Sa3TrainCard.tsx`, not in `queries.ts` ([tanstack-query.md](../../../../docs/dev/tanstack-query.md) F4#17) |
+| YuE2 caption source | `training-data/yue2-caption-source` | Fresh per handle (`dataset`, `lyricsSet` or `adapter`). Called by `utils/lyrics/yue2CaptionSource.ts`; the util keeps the error surface and its local cache |
+| SA3 training status | `training-data/sa3-status` | Worker-scoped; polls while a job is active. Built inline in `components/training-studio/cards/Sa3TrainCard.tsx`, not in `queries.ts` ([tanstack-query.md](../../../../docs/dev/tanstack-query.md) F4#17) |
 | HeartMuLa status and checkpoint takes | `training-data/heartmula-status`, `heartmula-previews` | Worker-scoped. Status is live (`staleTime` 0) and polls while a job or batch runs; takes poll per run while one is rendering. Read by `useHeartmulaController` and the review plugin; the preview retry is a mutation that invalidates both |
 
 The folder listing, scan preview, caption file and export preview rows are
@@ -48,7 +48,7 @@ over the user's edits:
 - Folder picker and New dataset cancel the read they replace, unless the new
   read has the same key, in which case it joins.
 - The sample drawer observes its caption files with `useQuery`
-  (`components/training-studio/useCaptionFile.ts`), so Query cancels the read
+  (`components/training-studio/hooks/useCaptionFile.ts`), so Query cancels the read
   when the drawer moves to another sample or worker. The editor is seeded only
   by the first answer fetched on each visit to a key, never by a cached copy
   or a later refetch; returning to a sample is a new visit and seeds again. A

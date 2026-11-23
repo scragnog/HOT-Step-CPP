@@ -1,17 +1,17 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { QueryObserver } from '@tanstack/react-query';
-import { queryClient, createQueryClient } from '../client';
-import { sharedKeys, startAuthSession, serverKey } from '../keys';
-import { pollWhile } from '../contract';
+import { queryClient, createQueryClient } from '@/queries/client';
+import { sharedKeys, startAuthSession, serverKey } from '@/queries/keys';
+import { pollWhile } from '@/queries/contract';
 import { snapshotOptions, songsChanged } from './reads';
-import { lireekApi } from '../../services/lireekApi';
-import { studioDraftsApi } from '../../services/studioDraftsApi';
-import { yue2CoverApi } from '../../services/yue2CoverApi';
+import { lireekApi } from '@/services/lireekApi';
+import { studioDraftsApi } from '@/services/studioDraftsApi';
+import { yue2CoverApi } from '@/services/yue2CoverApi';
 import { waitForSnapshot } from './wait';
 import { coverSongsOptions, deleteCovers } from './songs';
-import { waitForCoverJob } from '../../services/coverWorkflowApi';
-import { setAuthToken } from '../../services/axiosClient';
+import { waitForCoverJob } from '@/services/coverWorkflowApi';
+import { setAuthToken } from '@/services/axiosClient';
 
 const originalFetch = globalThis.fetch;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });

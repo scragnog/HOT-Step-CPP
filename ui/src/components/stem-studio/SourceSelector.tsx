@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { studioRecentSongsOptions } from '../../queries/studios/resources';
+import { studioRecentSongsOptions } from '@/queries/studios/resources';
 // SourceSelector.tsx — Upload or pick existing track for stem extraction
 import React, { useState, useCallback, useRef } from 'react';
 import { Upload, Music, Search, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
-import { useUpload } from '../../queries/writes';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { useAuth } from '@/context/AuthContext';
+import { useUpload } from '@/queries/writes';
 
 interface SourceSelectorProps {
   sourceAudioUrl: string;
@@ -177,36 +178,44 @@ export const SourceSelector: React.FC<SourceSelectorProps> = ({ sourceAudioUrl, 
                 </button>
                 {hasMastered && (
                   <div style={styles.versionToggle}>
-                    <button
-                      onClick={() => {
-                        onSourceChange(song.audio_url, song.title, {
-                          style: song.caption || '',
-                          lyrics: song.lyrics || '',
-                        });
-                        setShowPicker(false);
-                      }}
-                      style={{
-                        ...styles.versionBtn,
-                        background: sourceAudioUrl === song.audio_url ? '#a78bfa' : 'transparent',
-                        color: sourceAudioUrl === song.audio_url ? '#000' : '#888',
-                      }}
-                      title="Use unmastered version"
-                    >Raw</button>
-                    <button
-                      onClick={() => {
-                        onSourceChange(song.mastered_audio_url!, `${song.title} (Mastered)`, {
-                          style: song.caption || '',
-                          lyrics: song.lyrics || '',
-                        });
-                        setShowPicker(false);
-                      }}
-                      style={{
-                        ...styles.versionBtn,
-                        background: sourceAudioUrl === song.mastered_audio_url ? '#a78bfa' : 'transparent',
-                        color: sourceAudioUrl === song.mastered_audio_url ? '#000' : '#888',
-                      }}
-                      title="Use mastered version"
-                    >Mastered</button>
+                    <ParamLabel label={t('stem.source.raw', 'Raw')}
+                      info={t('stem.source.rawInfo', 'Uses the unmastered render as the source for stem separation.')}
+                      rootClassName="inline-flex">
+                      <button
+                        onClick={() => {
+                          onSourceChange(song.audio_url, song.title, {
+                            style: song.caption || '',
+                            lyrics: song.lyrics || '',
+                          });
+                          setShowPicker(false);
+                        }}
+                        style={{
+                          ...styles.versionBtn,
+                          background: sourceAudioUrl === song.audio_url ? '#a78bfa' : 'transparent',
+                          color: sourceAudioUrl === song.audio_url ? '#000' : '#888',
+                        }}
+                        aria-pressed={sourceAudioUrl === song.audio_url}
+                      >Raw</button>
+                    </ParamLabel>
+                    <ParamLabel label={t('stem.source.mastered', 'Mastered')}
+                      info={t('stem.source.masteredInfo', 'Uses the mastered render as the source for stem separation.')}
+                      rootClassName="inline-flex">
+                      <button
+                        onClick={() => {
+                          onSourceChange(song.mastered_audio_url!, `${song.title} (Mastered)`, {
+                            style: song.caption || '',
+                            lyrics: song.lyrics || '',
+                          });
+                          setShowPicker(false);
+                        }}
+                        style={{
+                          ...styles.versionBtn,
+                          background: sourceAudioUrl === song.mastered_audio_url ? '#a78bfa' : 'transparent',
+                          color: sourceAudioUrl === song.mastered_audio_url ? '#000' : '#888',
+                        }}
+                        aria-pressed={sourceAudioUrl === song.mastered_audio_url}
+                      >Mastered</button>
+                    </ParamLabel>
                   </div>
                 )}
               </div>

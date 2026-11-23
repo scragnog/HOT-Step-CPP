@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { backendModelsOptions } from '../../queries/global-models/options';
-import { useBackendStore } from '../../stores/backendStore';
-import { useGlobalParamsStore } from '../../stores/globalParamsStore';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
+import { backendModelsOptions } from '@/queries/global-models/options';
+import { useBackendStore } from '@/stores/backendStore';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { BackendExtensionControls } from './BackendExtensionControls';
+import { isPresent } from '@/utils/guards';
 
 const fileName = (value: string) => value.split(/[\\/]/).pop() || value;
 
@@ -39,7 +40,7 @@ export function HeartmulaAdapterDropdown() {
           ...(missing ? [{ value: selected, label: `${fileName(selected)} ${t('globalBar.fileNotFound', '(file not found)')}` }] : []),
           ...adapters.map(value => {
             const m = data?.lmAdapterMeta?.[value];
-            const tags = [m?.trigger ? `"${m.trigger}"` : '', m?.variant && m.variant.toLowerCase() !== loadedVariant.toLowerCase() ? m.variant : '', m?.mlp ? 'MLP' : ''].filter(Boolean);
+            const tags = [m?.trigger ? `"${m.trigger}"` : '', m?.variant && m.variant.toLowerCase() !== loadedVariant.toLowerCase() ? m.variant : '', m?.mlp ? 'MLP' : ''].filter(isPresent);
             return { value, label: [fileName(value), ...tags].join(' · ') };
           }),
         ]}

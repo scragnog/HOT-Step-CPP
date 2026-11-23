@@ -7,7 +7,7 @@
 // hangs off a "?" beside the label instead (see ParamLabel).
 
 import React from 'react';
-import { ParamLabel } from '../ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 interface SliderProps {
   label: string;

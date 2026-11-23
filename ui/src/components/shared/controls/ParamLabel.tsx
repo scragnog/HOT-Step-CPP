@@ -1,0 +1,379 @@
+// ParamLabel.tsx — a form field label that explains itself on hover.
+//
+// The Training Studio's Advanced drawers are ~30 numeric knobs each, most of
+// them named after the thing they scale rather than the thing they do
+// ("Timestep bias", "SNR gamma", "Unconditional dropout"). The inline help
+// lines under a field are one clause long by necessity — there is no room for
+// "what happens if I raise it" next to every box. This puts that sentence in a
+// hover card instead: point at the label, get the paragraph.
+//
+// Portalled and fixed-positioned for the same reason StyledSelect's panel is —
+// these live inside <details> drawers and scrolling panes, both of which clip
+// an absolutely-positioned card.
+//
+// WHERE the card lands depends on whether an ancestor is marked
+// data-hovercard-boundary. Without one — the Training Studio's drawers — it
+// sits under the label and flips above near the bottom of the viewport. With
+// one, it flanks that element instead: pinned just outside its left or right
+// edge, vertically level with the label. The global bar's dropdown panels mark
+// themselves, because a card anchored under a label there covers the very
+// knobs you opened the panel to reach, and you have to dismiss it to get at
+// them.
+//
+// Flanking picks the side with room for a full-width card, preferring the one
+// with more space when neither fits outright; if the boundary is centred in a
+// narrow window with no room either side, it gives up and falls back to the
+// under-the-label placement rather than hanging the card off-screen.
+//
+// Keyboard/touch: the icon is focusable and handles Enter/Space, so the card
+// also opens on focus and on tap, not hover alone. It is a <span role="button">
+// rather than a <button> on purpose — the global bar's accordion headers are
+// themselves <button>s, and a nested <button> is invalid HTML that the parser
+// reparents out of its ancestor, silently breaking the accordion's click
+// target. A span nests anywhere and keeps the same semantics for a screen
+// reader. Clicks stopPropagation for the same reason: pointing at "?" inside a
+// header must not toggle the section.
+
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
+import { HelpCircle, RotateCcw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { claimOpenCard, hoverCardIsOpen, noteCardOpenState, releaseOpenCard } from '@/components/shared/status/hoverCardState';
+import { useGlobalEvent } from '@/hooks/useGlobalEvent';
+
+const CARD_W = 340;
+const GAP = 10;      // breathing room between the card and whatever it flanks
+const MIN_CARD_H = 120;
+// The card is the topmost surface in the UI. It is portalled to <body>, so its
+// z-index competes with every modal and popover rather than with the control's
+// own stacking context: the Repair-timings panel sits at 16000 and full-screen
+// dialogs at 10000, and a hint painted behind the panel that contains it is
+// unreadable. The CSS maximum keeps a hint on top of any overlay, present or
+// future. Lowering this is what puts a toggle's explanation behind its panel.
+// Hover waits this long before a card opens, so sweeping the pointer along a
+// toolbar on the way to a button does not throw a card up for every icon it
+// crosses. Keyboard focus and a click on the "?" still open it at once.
+const SHOW_DELAY = 500;
+
+interface Props {
+  /** The field name, shown as the label and as the hover card's heading. */
+  label: string;
+  /** A control to explain, instead of the label-plus-icon trigger. The card
+   *  opens from the control itself, so a row of icon buttons explains itself
+   *  the same way a field does. `label` is still the card's heading. */
+  children?: React.ReactNode;
+  /** The explanation. Nothing renders the hover affordance without it. */
+  info?: React.ReactNode;
+  /** Optional one-liner under the heading — default value, accepted range. */
+  meta?: string;
+  /** Classes for the label text. Defaults to the studios' field-label style. */
+  className?: string;
+  /** Layout classes for the wrapper (margins, `block`, alignment). Keep these
+   *  off `className`, which lands on the inner text span where a `block` or a
+   *  margin has no effect inside the flex row. */
+  rootClassName?: string;
+  /** Dotted underline hinting the label is explainable. Off for section
+   *  headings, where the whole row is already an affordance and the underline
+   *  reads as noise under uppercase tracking. */
+  underline?: boolean;
+  /** Open the card when the control takes focus. Off for a box whose own edit
+   *  state should not be covered while it is being typed in. */
+  openOnFocus?: boolean;
+  /** Keep the card shut while this is true: editing is not the moment to read
+   *  the explanation. Reaching for the control again re-opens on hover. */
+  suppress?: boolean;
+  /** Shows a reset-to-default icon after the help icon. Pass this only while
+   *  the value differs from its default — the caller decides visibility. */
+  onReset?: () => void;
+}
+
+interface CardPos {
+  left: number;
+  top?: number;
+  bottom?: number;
+  /** Set when flanking a boundary: the card is top-anchored and scrolls
+   *  internally rather than growing past the bottom of the window. */
+  maxHeight?: number;
+}
+
+// How many hover cards are open anywhere on the page.
+//
+// A flanking card is portalled to <body> and lands outside the panel it
+// describes, so reaching for it fires that panel's mouseleave — and the global
+// bar's panels close themselves ~400ms after the pointer leaves. The panel
+// would take the card down with it on the way to being read. The shared count
+// in `hoverCardState` is what those panels ask before closing; it lives in its
+// own module so this file only exports a component and Fast Refresh can rebuild
+// it without resetting that count.
+
+/** The nearest ancestor the card should sit beside instead of on top of. */
+function findBoundary(el: HTMLElement | null): HTMLElement | null {
+  return el?.closest<HTMLElement>('[data-hovercard-boundary]') ?? null;
+}
+
+export const ParamLabel: React.FC<Props> = ({
+  label,
+  children,
+  info,
+  meta,
+  className = 'text-xs font-semibold text-zinc-600 dark:text-zinc-400',
+  rootClassName = '',
+  underline = true,
+  openOnFocus = true,
+  suppress = false,
+  onReset,
+}) => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<CardPos | null>(null);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Stable, so the global "who is open" pointer can compare identity. */
+  const closeSelf = useCallback(() => setOpen(false), []);
+
+  const cancelHide = () => {
+    if (hideTimer.current) {
+      clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+    }
+  };
+  // A short grace period so the pointer can travel from the label to the card
+  // (they are 6px apart) without the card vanishing underneath it.
+  const scheduleHide = () => {
+    cancelHide();
+    // A card that flanks the panel is a long way from its label — the pointer
+    // has the whole panel to cross before it lands. 140ms was enough when the
+    // card sat 6px below the label and is not enough now.
+    hideTimer.current = setTimeout(() => {
+      setOpen(false);
+      releaseOpenCard(closeSelf);
+    }, 320);
+  };
+  const cancelShow = () => {
+    if (showTimer.current) {
+      clearTimeout(showTimer.current);
+      showTimer.current = null;
+    }
+  };
+  useEffect(() => () => {
+    cancelHide();
+    cancelShow();
+    releaseOpenCard(closeSelf);
+  }, [closeSelf]);
+
+  const measure = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+
+    // Flank the panel, if this label lives in one.
+    const boundary = findBoundary(el);
+    if (boundary) {
+      const b = boundary.getBoundingClientRect();
+      const roomRight = window.innerWidth - b.right - GAP * 2;
+      const roomLeft = b.left - GAP * 2;
+      const side = roomRight >= CARD_W ? 'right'
+        : roomLeft >= CARD_W ? 'left'
+        : roomRight >= roomLeft ? 'right' : 'left';
+      const room = side === 'right' ? roomRight : roomLeft;
+
+      if (room >= CARD_W) {
+        const left = side === 'right' ? b.right + GAP : b.left - GAP - CARD_W;
+        // Level with the label, but never so low that the card has no height
+        // left to open into.
+        const top = Math.max(GAP, Math.min(r.top - 4, window.innerHeight - MIN_CARD_H - GAP));
+        setPos({ left, top, maxHeight: window.innerHeight - top - GAP });
+        return;
+      }
+      // No room either side — fall through to the under-the-label placement
+      // rather than parking the card half off-screen.
+    }
+
+    const below = window.innerHeight - r.bottom;
+    // 220 is a comfortable card height; below that, put it above the label.
+    const flip = below < 220 && r.top > below;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - CARD_W - 8));
+    setPos(flip
+      ? { left, bottom: window.innerHeight - r.top + 6, maxHeight: r.top - 6 - GAP }
+      : { left, top: r.bottom + 6, maxHeight: below - 6 - GAP });
+  }, []);
+
+  // Publish this card's open state for hover-close containers to consult, and
+  // make sure a card that unmounts while open (its panel closed underneath it)
+  // still gives its count back.
+  useEffect(() => {
+    if (!open) return;
+    noteCardOpenState(true);
+    return () => { noteCardOpenState(false); };
+  }, [open]);
+
+  // A card still up when the pointer presses somewhere else is a lid: the press
+  // lands on the card instead of the control underneath it (the waveform, say),
+  // and dragging from there selects the card's paragraph. Any press outside the
+  // trigger and the card closes it, so the surface under it is reachable on the
+  // press after this one rather than never.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (anchorRef.current?.contains(target) || cardRef.current?.contains(target)) return;
+      setOpen(false);
+      releaseOpenCard(closeSelf);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [open, closeSelf]);
+
+  // A field that suppresses the card while it is being edited must also close
+  // one that was already up: focusing the box is the signal to get out of the
+  // way, not an instruction to wait for the pointer to leave. Adjusted during
+  // render — the pattern React documents for state that follows a prop — so an
+  // effect cannot paint the card once more before taking it down.
+  if (suppress && open) setOpen(false);
+
+  useLayoutEffect(() => { if (open) measure(); }, [open, measure]);
+  useGlobalEvent('scroll', measure, { enabled: open, capture: true });
+  useGlobalEvent('resize', measure, { enabled: open });
+
+  const resetIcon = onReset && (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={t('paramLabel.resetToDefault', 'Reset {{label}} to default', { label })}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReset(); }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        onReset();
+      }}
+      className="shrink-0 inline-flex text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors cursor-pointer"
+    >
+      <RotateCcw size={12} />
+    </span>
+  );
+
+  if (!info) {
+    if (!onReset) return <span className={`${className} ${rootClassName}`}>{label}</span>;
+    return (
+      <span className={`inline-flex items-center gap-1 w-fit ${rootClassName}`}>
+        <span className={className}>{label}</span>
+        {resetIcon}
+      </span>
+    );
+  }
+
+  const show = () => {
+    if (suppress) return;
+    cancelHide();
+    cancelShow();
+    // Only one card is up at a time: take whichever one held the slot down in
+    // this same frame, so neighbouring buttons never show two.
+    claimOpenCard(closeSelf);
+    // Measured before opening rather than in a layout effect after it: the card
+    // then appears already positioned, in the frame the pointer entered, with no
+    // second pass and no flash at the top-left corner first.
+    measure();
+    setOpen(true);
+  };
+  const hoverShow = () => {
+    cancelHide();
+    if (open || showTimer.current) return;
+    // While a card is up the next hover opens at once, so reading along a row of
+    // buttons does not pay the delay at every stop.
+    if (hoverCardIsOpen()) { show(); return; }
+    showTimer.current = setTimeout(show, SHOW_DELAY);
+  };
+  const hoverHide = () => { cancelShow(); scheduleHide(); };
+  // A mouse click focuses the button too; only keyboard focus opens at once.
+  const focusShow = (e: React.FocusEvent) => {
+    if ((e.target as HTMLElement).matches?.(':focus-visible')) show();
+  };
+  const toggle = () => { cancelShow(); setOpen(o => !o); };
+
+  const card = open && pos && ReactDOM.createPortal(
+    <div
+      ref={cardRef}
+      role="tooltip"
+      onMouseEnter={cancelHide}
+      onMouseLeave={hoverHide}
+      className="fixed z-[2147483647] rounded-xl p-3
+                 bg-white dark:bg-zinc-900
+                 border border-zinc-200 dark:border-white/10
+                 shadow-xl shadow-black/25"
+      style={{
+        left: pos.left,
+        width: CARD_W,
+        ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }),
+        ...(pos.maxHeight !== undefined
+          ? { maxHeight: pos.maxHeight, overflowY: 'auto' as const }
+          : {}),
+      }}
+    >
+      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-100">{label}</div>
+      {meta && (
+        <div className="mt-0.5 text-[10px] font-mono text-amber-600 dark:text-amber-500/90">{meta}</div>
+      )}
+      <p className="mt-1.5 whitespace-pre-line text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+        {info}
+      </p>
+    </div>,
+    document.body,
+  );
+
+  if (children) {
+    return (
+      <span
+        ref={anchorRef}
+        className={`inline-flex items-center ${rootClassName}`}
+        onMouseEnter={hoverShow}
+        onMouseLeave={hoverHide}
+        onFocus={openOnFocus ? focusShow : undefined}
+        onBlur={hoverHide}
+      >
+        {children}
+        {card}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className={`inline-flex items-center gap-1 w-fit ${rootClassName}`}
+      onMouseEnter={hoverShow}
+      onMouseLeave={hoverHide}
+    >
+      <span className={`${className} cursor-help${underline ? ' decoration-dotted underline underline-offset-[3px] decoration-zinc-400/40' : ''}`}>
+        {label}
+      </span>
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label={`About ${label}`}
+        aria-expanded={open}
+        onFocus={focusShow}
+        onBlur={hoverHide}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          e.stopPropagation();
+          toggle();
+        }}
+        className="shrink-0 inline-flex text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors cursor-help"
+      >
+        <HelpCircle size={12} />
+      </span>
+      {resetIcon}
+
+      {card}
+    </span>
+  );
+};
+
+export default ParamLabel;

@@ -1,7 +1,7 @@
-import { queryClient } from '../queries/client';
-import { separationProgressOptions, separationResultOptions } from '../queries/studios/resources';
-import { ACTIVE_POLL_MS } from '../queries/contract';
-import { waitForQuery } from '../queries/wait';
+import { queryClient } from '@/queries/client';
+import { separationProgressOptions, separationResultOptions } from '@/queries/studios/resources';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
+import { waitForQuery } from '@/queries/wait';
 import { apiClient, type ReadOptions } from './httpClient';
 // supersepApi.ts — API client for SuperSep stem separation
 //

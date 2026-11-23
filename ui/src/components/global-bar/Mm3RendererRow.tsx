@@ -15,8 +15,8 @@
 import React from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 /** Mirrors server/src/services/backends/minimax/client.ts Mm3DitRuntime.
  *  Every field beyond the original four is optional: an engine build from

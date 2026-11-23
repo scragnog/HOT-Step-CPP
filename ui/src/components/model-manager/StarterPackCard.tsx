@@ -3,19 +3,15 @@
 import React from 'react';
 import { Download, CheckCircle, Package } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { RegistryFile, DownloadJob } from '../../types';
+import type { RegistryFile, DownloadJob } from '@/types';
+import { formatBytes } from '@/utils/format/format';
+import { plural } from '@/utils/format/plural';
 
 interface Props {
   pack: { id: string; name: string; description: string; fileIds: string[] };
   files: RegistryFile[];
   downloadJobs: DownloadJob[];
   onDownloadPack: (fileIds: string[]) => void;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1_073_741_824) return (bytes / 1_073_741_824).toFixed(1) + ' GB';
-  if (bytes >= 1_048_576) return (bytes / 1_048_576).toFixed(0) + ' MB';
-  return (bytes / 1024).toFixed(0) + ' KB';
 }
 
 export const StarterPackCard: React.FC<Props> = ({ pack, files, downloadJobs, onDownloadPack }) => {
@@ -63,7 +59,7 @@ export const StarterPackCard: React.FC<Props> = ({ pack, files, downloadJobs, on
               {f.displayName}
             </span>
             <span className="text-zinc-600 font-mono text-[10px] ml-auto flex-shrink-0">
-              {formatSize(f.sizeBytes)}
+              {formatBytes(f.sizeBytes)}
             </span>
           </div>
         ))}
@@ -71,8 +67,8 @@ export const StarterPackCard: React.FC<Props> = ({ pack, files, downloadJobs, on
 
       {/* Size summary */}
       <div className="text-[10px] text-zinc-600 mb-3 font-mono">
-        {formatSize(totalSize)} {t('models.total')}
-        {!allInstalled && <span className="text-zinc-500"> · {formatSize(remainingSize)} {t('models.remaining')}</span>}
+        {formatBytes(totalSize)} {t('models.total')}
+        {!allInstalled && <span className="text-zinc-500"> · {formatBytes(remainingSize)} {t('models.remaining')}</span>}
       </div>
 
       {/* Download button */}
@@ -83,7 +79,7 @@ export const StarterPackCard: React.FC<Props> = ({ pack, files, downloadJobs, on
         </div>
       ) : isDownloading ? (
         <div className="flex items-center justify-center gap-1.5 py-2 rounded-xl bg-sky-500/10 text-sky-400 text-xs font-medium animate-pulse">
-          Downloading {activeJobCount} file{activeJobCount > 1 ? 's' : ''}...
+          Downloading {activeJobCount} {plural(activeJobCount, 'file')}...
         </div>
       ) : (
         <button
@@ -91,7 +87,7 @@ export const StarterPackCard: React.FC<Props> = ({ pack, files, downloadJobs, on
           className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-pink-600 text-white text-xs font-medium hover:from-pink-400 hover:to-pink-500 transition-all shadow-lg shadow-pink-500/10"
         >
           <Download size={14} />
-          {t('models.download')} {missing.length} model{missing.length > 1 ? 's' : ''} ({formatSize(remainingSize)})
+          {t('models.download')} {missing.length} {plural(missing.length, 'model')} ({formatBytes(remainingSize)})
         </button>
       )}
     </div>

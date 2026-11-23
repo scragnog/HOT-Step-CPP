@@ -7,7 +7,7 @@
 // so a fix in one path cannot miss the other (same reasoning as queries/wait.ts).
 
 import type { QueryKey } from '@tanstack/react-query';
-import { followJob } from '../services/workflowApi';
+import { followJob } from '@/services/workflowApi';
 import { queryClient } from './client';
 import { resourceKey, getSessionEpoch, sharedKeys, SHARED, type KeyScope } from './keys';
 import { queryManager } from './invalidation';

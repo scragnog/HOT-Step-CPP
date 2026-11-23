@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
-import { createQueryClient } from '../client';
+import { createQueryClient } from '@/queries/client';
 import { sa3PreviewKeys } from './keys';
 import { invalidateSa3Previews, manualRenderRequest, renderSa3PreviewCommand, sa3PreviewOptions, sa3PreviewsPending } from './queries';
 

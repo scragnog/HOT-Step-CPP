@@ -14,7 +14,8 @@ import React, { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Wand2, Loader2, AlertTriangle, Dices } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { composeMm3Caption, type Mm3ComposeControls, type Mm3ComposeResult } from '../../services/lireekApi';
+import { composeMm3Caption, type Mm3ComposeControls, type Mm3ComposeResult } from '@/services/lireekApi';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 interface Mm3ComposeButtonProps {
   /** Current caption box contents — used as the brief. */
@@ -42,7 +43,7 @@ export const Mm3ComposeButton: React.FC<Mm3ComposeButtonProps> = ({ brief, contr
     },
   });
   const busy = composeMut.isPending;
-  const error = composeMut.error ? (composeMut.error instanceof Error ? composeMut.error.message : String(composeMut.error)) : null;
+  const error = composeMut.error ? (errorMessage(composeMut.error)) : null;
 
   const run = (nextSeed: number) => {
     if (!trimmed || busy) return;

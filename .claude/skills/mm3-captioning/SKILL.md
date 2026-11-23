@@ -373,7 +373,7 @@ Four design points, each load-bearing:
    `validateMm3Caption` passes 998 of those 1,000 (the two misses run
    `* Primary:` inline). It is advisory: it drives ONE retry and never rejects,
    because a partly-malformed Structured Caption still beats an ACE caption.
-4. **Consumers pick by ACTIVE backend**, via `ui/src/utils/captionForBackend.ts`
+4. **Consumers pick by ACTIVE backend**, via `ui/src/utils/lyrics/captionForBackend.ts`
    (server-side twin `captionForEngine` in `server/src/services/generation/resolve/captionSource.ts`,
    used when `/api/resolve/preview` builds the request).
    Read it live from `backendStore`, never from a queued param snapshot:
@@ -411,7 +411,7 @@ plan-only, same six seeds, candidates off:
   album B songs. That is what the Automatic caption source (nearest-tempo
   dataset track) in Lyric Studio / Create relies on: `pickNearestMm3Track` /
   `resolveMm3Caption` in `server/src/services/generation/resolve/captionSource.ts`
-  (modes `auto`, `track`, `custom`), ported from `ui/src/utils/mm3CaptionSource.ts`.
+  (modes `auto`, `track`, `custom`), ported from `ui/src/utils/lyrics/mm3CaptionSource.ts`.
 - The shared dataset-wide caption (a comma list with no arc) took the same
   recipe to 0/6 and was removed as a feature.
 - Lyric Studio's own generated MM3 captions are being screened the same way

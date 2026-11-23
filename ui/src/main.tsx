@@ -10,8 +10,8 @@ import { CLASSIC, resolveShell } from './app/shell'
 import { loadShell } from './app/shellRegistry'
 import { ShellHost } from './app/ShellHost'
 import { AuthProvider } from './context/AuthContext.tsx'
-import { startHeapWatch } from './utils/heapWatch'
-import { ErrorBoundary } from './components/shared/ErrorBoundary'
+import { startHeapWatch } from './utils/audio/heapWatch'
+import { ErrorBoundary } from './components/shared/feedback/ErrorBoundary'
 import { queryClient } from './queries/client'
 import { dropForeignSkin } from './themes/registry'
 
@@ -34,8 +34,12 @@ createRoot(document.getElementById('root')!).render(
       {/* One stable client (queries/client.ts), outside auth and every view. */}
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          {/* Global error toasts from the axios interceptor (axiosClient.ts). */}
-          <ToastContainer />
+          {/* Global error toasts from the axios interceptor (axiosClient.ts).
+              Every toast is dismissible and stays while hovered, including the
+              long-running ones that never auto-close. */}
+          {/* Above every modal and panel: an error raised inside one has to be
+              readable while it is open. Still below ParamLabel's card. */}
+          <ToastContainer closeOnClick pauseOnHover closeButton style={{ zIndex: 2147483000 }} />
           <Suspense fallback={null}>
             {shellId === CLASSIC ? <Shell /> : <ShellHost shellId={shellId}><Shell /></ShellHost>}
           </Suspense>

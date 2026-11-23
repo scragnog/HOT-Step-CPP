@@ -29,6 +29,7 @@ import type {
   HeartmulaCheckpointNowRequest, HeartmulaDatasetAssets, HeartmulaPrepareRequest, HeartmulaPreviewListResponse, HeartmulaPreviewRenderRequest,
   HeartmulaStatusResponse, HeartmulaTrainRequest,
 } from '../../../server/src/contracts/heartmulaTraining';
+import { byNumber } from '@/utils/sort';
 
 /** `silent` rides here too: a caller that renders the command's failure
  *  itself (an inline error line) opts out of the global toast per call. */
@@ -2846,7 +2847,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
   const picked = byId(pickedRun);
   if (picked) return picked;
   if (activeJobId && !byId(activeJobId)) return undefined;
-  return byId(activeJobId) ?? runs.find(r => r.live) ?? [...runs].sort((a, b) => b.createdAt - a.createdAt)[0];
+  return byId(activeJobId) ?? runs.find(r => r.live) ?? [...runs].sort(byNumber(x => x.createdAt, 'desc'))[0];
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */

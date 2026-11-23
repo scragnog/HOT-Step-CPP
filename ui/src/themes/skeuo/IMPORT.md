@@ -18,4 +18,4 @@ Recipe: diff the new `skeuo.css` against this `theme.css`, apply the new drop, t
 What classic gained instead:
 
 - `ui/tailwind.config.js` and `ui/src/index.css`: `pink-*` and `rose-*` read `--pink-NNN` / `--rose-NNN` channels, defaulting to Tailwind's stock values.
-- `ui/src/components/shared/EditableSlider.tsx`: the `sk-fader`, `sk-fader-fill` and `sk-fader-thumb` class hooks the CSS styles. They have no styling of their own.
+- `ui/src/components/shared/controls/EditableSlider.tsx`: the `sk-fader`, `sk-fader-fill` and `sk-fader-thumb` class hooks the CSS styles. They have no styling of their own.

@@ -13,6 +13,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Square, Volume2, VolumeX, X } from 'lucide-react';
+import { formatClock } from '@/utils/format/format';
 
 interface PreviewPlayerProps {
   sourceUrl: string;
@@ -130,11 +131,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({
     setCurrentTime(t);
   }, [duration]);
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
+  const formatTime = (s: number) => formatClock(s);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 

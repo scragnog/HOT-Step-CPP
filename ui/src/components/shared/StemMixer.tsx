@@ -7,6 +7,8 @@ import { readMedia } from '../../services/mediaTransport';
 
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Download } from 'lucide-react';
+import { formatClock } from '@/utils/format/format';
+import { formatPercent } from '@/utils/format/format';
 
 export interface MixerStemInfo {
   name: string;
@@ -73,11 +75,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
     playbackOffsetRef.current = 0;
   }, [jobId]);
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = Math.floor(secs % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  const formatTime = (secs: number) => formatClock(secs);
 
 
   // Group stems by category
@@ -391,7 +389,7 @@ export const StemMixer: React.FC<StemMixerProps> = ({ jobId, stems, controls, on
                       style={styles.slider}
                     />
                     <span style={styles.volumeLabel}>
-                      {Math.round(ctrl.volume * 100)}%
+                      {formatPercent(ctrl.volume)}
                     </span>
 
                     {onDownloadStem && (

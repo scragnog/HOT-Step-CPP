@@ -3,25 +3,33 @@
 // MDMAchine / A&E Concepts 2026
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
-import { runLlmInspire } from '../../services/inspireApi';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { runLlmInspire } from '@/services/inspireApi';
 import { AiContinuePresetModal, loadTemplate, DEFAULT_TEMPLATE, type AiPreset, type PresetCategory } from './AiContinuePresetModal';
-import { SeedManagerDrawer } from '../global-bar/SeedManagerDrawer';
-import { expandWildcards, expandInPlace, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
-import type { useStreamAudio } from '../../hooks/useStreamAudio';
+import { SeedManagerDrawer } from '@/components/global-bar/SeedManagerDrawer';
+import { expandWildcards, expandInPlace, hasWildcards, randomWildcardSeed } from '@/utils/wildcardUtils';
+import type { useStreamAudio } from '@/hooks/useStreamAudio';
+import { formatClock } from '@/utils/format/format';
+import { readJsonString } from '@/utils/storage/storageJson';
+import { formatPercent } from '@/utils/format/format';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { isPresent } from '@/utils/guards';
 
 // ── Shared types (re-exported for consumers) ──────────────────────────────────
 export type LyricsMode = 'loop' | 'cycle' | 'shuffle';
 
 function parseLyricSections(lyrics: string): string[] {
-  const byHeader = lyrics.split(/\n(?=\[)/).map(s => s.trim()).filter(Boolean);
+  const byHeader = lyrics.split(/\n(?=\[)/).map(s => s.trim()).filter(isPresent);
   if (byHeader.length > 1) return byHeader;
-  const byBlank = lyrics.split(/\n\n+/).map(s => s.trim()).filter(Boolean);
+  const byBlank = lyrics.split(/\n\n+/).map(s => s.trim()).filter(isPresent);
   if (byBlank.length > 1) return byBlank;
-  return [lyrics.trim()].filter(Boolean);
+  return [lyrics.trim()].filter(isPresent);
 }
 
-function fmtT(s: number) { const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+const fmtT = (s: number) => formatClock(s);
 
 // ── Next-slot param definitions ───────────────────────────────────────────────
 const NEXT_SLOT_PARAMS = [
@@ -117,6 +125,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
   hideAceControls = false,
   onSlotMetaUpdate,
 }) => {
+  const { t } = useTranslation();
   const received = sa.currentSlot || 0;
   const playing  = sa.playingSlot || 0;
 
@@ -244,8 +253,8 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
   const prevPlayingForAi = React.useRef(0);
 
   const triggerAiContinuation = React.useCallback(async (targetSlot: number) => {
-    const provider = (() => { try { return JSON.parse(localStorage.getItem('hs-customgen-ai-provider') || '""'); } catch { return ''; } })();
-    const model    = (() => { try { return JSON.parse(localStorage.getItem('hs-customgen-ai-model')    || '""'); } catch { return ''; } })();
+    const provider = readJsonString('hs-customgen-ai-provider');
+    const model    = readJsonString('hs-customgen-ai-model');
     if (!provider) {
       setAiStatus({ msg: 'No AI provider configured — set one in AI Generate settings', type: 'warn' });
       console.warn('[AI ↻] no provider configured');
@@ -316,7 +325,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
         setTimeout(() => setAiStatus({ msg: '', type: 'idle' }), 5000);
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       console.warn('[AI ↻] failed:', msg);
       setAiStatus({ msg: `Failed: ${msg.slice(0, 40)}`, type: 'err' });
       setTimeout(() => setAiStatus({ msg: '', type: 'idle' }), 5000);
@@ -348,8 +357,8 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
   const handlePresetFire = React.useCallback((preset: AiPreset, category: PresetCategory) => {
     setRecentPresets(prev => [preset, ...prev.filter(p => p.id !== preset.id)].slice(0, 3));
     const targetSlot = received + 2;
-    const provider = (() => { try { return JSON.parse(localStorage.getItem('hs-customgen-ai-provider') || '""'); } catch { return ''; } })();
-    const model    = (() => { try { return JSON.parse(localStorage.getItem('hs-customgen-ai-model')    || '""'); } catch { return ''; } })();
+    const provider = readJsonString('hs-customgen-ai-provider');
+    const model    = readJsonString('hs-customgen-ai-model');
     if (!provider) return;
     // Use most recent slot lyrics for lyric presets, same as triggerAiContinuation
     const recentSlotLyrics = (() => {
@@ -510,10 +519,16 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
                 {appliedFlash ? `✓ applied at slot ${appliedFlash}` : `Slot ${playing || received || 0}`}
               </span>
               {sa.detectedKey && (
-                <span className="text-[9px] text-violet-400 font-medium" title="Detected key">🎹 {sa.detectedKey}</span>
+                <ParamLabel label={t('storm.live.detectedKey', 'Detected key')}
+                  info={t('storm.live.detectedKeyInfo', 'Key detected from the audio in the current slot.')}>
+                  <span className="text-[9px] text-violet-400 font-medium">🎹 {sa.detectedKey}</span>
+                </ParamLabel>
               )}
               {sa.detectedBpm > 0 && (
-                <span className="text-[9px] text-orange-400 tabular-nums" title="Measured BPM">♩{sa.detectedBpm}</span>
+                <ParamLabel label={t('storm.live.measuredBpm', 'Measured BPM')}
+                  info={t('storm.live.measuredBpmInfo', 'Tempo measured from the audio in the current slot.')}>
+                  <span className="text-[9px] text-orange-400 tabular-nums">♩{sa.detectedBpm}</span>
+                </ParamLabel>
               )}
               {/* Record button */}
               <button onClick={sa.isRecording ? sa.stopRecording : sa.startRecording}
@@ -534,7 +549,7 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
             <span className="text-[10px] text-zinc-500 w-8">Vol</span>
             <input type="range" min={0} max={1} step={0.05} value={sa.volume}
               onChange={e => sa.setVolume(Number(e.target.value))} className="flex-1 accent-red-500 h-1" />
-            <span className="text-[10px] text-zinc-400 w-8 text-right tabular-nums">{Math.round(sa.volume * 100)}%</span>
+            <span className="text-[10px] text-zinc-400 w-8 text-right tabular-nums">{formatPercent(sa.volume)}</span>
           </div>
         </div>
       )}
@@ -605,12 +620,18 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
               )}
             </span>
           )}
-          <button onClick={randomizeSeed} title="Randomize seed"
-            className="text-[11px] px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors">🎲</button>
-          <button onClick={() => setSeedDrawerOpen(v => !v)} title="Seed manager — save / load seeds"
+          <HintButton onClick={randomizeSeed}
+            label={t('storm.live.randomizeSeed', 'Randomize seed')}
+            info={t('storm.live.randomizeSeedInfo', 'Picks a new random seed for the next slot.')}
+            ariaLabel={t('storm.live.randomizeSeed', 'Randomize seed')}
+            className="text-[11px] px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400 hover:text-white transition-colors">🎲</HintButton>
+          <HintButton onClick={() => setSeedDrawerOpen(v => !v)}
+            label={t('storm.live.seedManager', 'Seed manager')}
+            info={t('storm.live.seedManagerInfo', 'Save the current stream seed or load a saved one.')}
+            ariaLabel={t('storm.live.seedManager', 'Seed manager')}
             className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${seedDrawerOpen ? 'bg-amber-600/30 text-amber-300' : 'text-zinc-600 hover:bg-zinc-700 hover:text-zinc-400'}`}>
             💾
-          </button>
+          </HintButton>
           <button
             onClick={() => { const v = !streamSeedLock; onStreamSeedLockChange(v); sa.sendControl('seed_lock', v); }}
             title={streamSeedLock ? 'Seed locked' : 'Seed unlocked'}
@@ -695,10 +716,14 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
                 <span className="text-[9px] text-zinc-600">slots</span>
               </>
             )}
-            <button onClick={() => setPresetModalOpen(true)} title="Manage AI presets & template"
-              className={`ml-auto text-[9px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5 ${ isCustomTemplate ? 'text-violet-400 hover:text-violet-300 hover:bg-zinc-800' : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'}`}>
+            <HintButton onClick={() => setPresetModalOpen(true)}
+              label={t('storm.live.aiPresets', 'AI presets & template')}
+              info={t('storm.live.aiPresetsInfo', 'Manage the built-in and saved continuation presets, and edit the prompt template sent to the LLM.')}
+              ariaLabel={t('storm.live.aiPresets', 'AI presets & template')}
+              rootClassName="ml-auto"
+              className={`text-[9px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-0.5 ${ isCustomTemplate ? 'text-violet-400 hover:text-violet-300 hover:bg-zinc-800' : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800'}`}>
               ⚙{isCustomTemplate && <span className="text-[7px] text-violet-400 font-bold">CUSTOM</span>}
-            </button>
+            </HintButton>
           </div>
           {aiContinueEnabled && (
             <input type="text" value={aiContinueDir} onChange={e => setAiContinueDir(e.target.value)}
@@ -763,18 +788,22 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
           {/* Wildcard controls */}
           <div className="flex items-center gap-1.5 min-h-[18px]">
             {promptTab === 'style' && hasWildcards(streamPrompt) && (
-              <button onClick={() => handleExpandWildcards('style')}
-                title="Expand {A|B} wildcards in style (slot-seeded)"
+              <HintButton onClick={() => handleExpandWildcards('style')}
+                label={t('storm.live.expandStyle', 'Expand wildcards in style')}
+                info={t('storm.live.expandStyleInfo', 'Resolves every {A|B} choice in the style once, using the current slot seed.')}
+                ariaLabel={t('storm.live.expandStyle', 'Expand wildcards in style')}
                 className="text-[9px] px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 hover:bg-pink-700/60 hover:text-pink-100 transition-colors font-mono">
                 {'{·}'} expand
-              </button>
+              </HintButton>
             )}
             {promptTab === 'lyrics' && hasWildcards(streamLyrics) && (
-              <button onClick={() => handleExpandWildcards('lyrics')}
-                title="Expand {A|B} wildcards in lyrics (slot-seeded)"
+              <HintButton onClick={() => handleExpandWildcards('lyrics')}
+                label={t('storm.live.expandLyrics', 'Expand wildcards in lyrics')}
+                info={t('storm.live.expandLyricsInfo', 'Resolves every {A|B} choice in the lyrics once, using the current slot seed.')}
+                ariaLabel={t('storm.live.expandLyrics', 'Expand wildcards in lyrics')}
                 className="text-[9px] px-1.5 py-0.5 rounded bg-purple-900/40 text-purple-300 hover:bg-purple-700/60 hover:text-purple-100 transition-colors font-mono">
                 {'{·}'} expand
-              </button>
+              </HintButton>
             )}
             <button onClick={() => setAutoExpand(v => !v)}
               title={autoExpand ? 'Auto-expand ON: wildcards resolved before each Send' : 'Auto-expand OFF'}
@@ -832,11 +861,11 @@ export const StormLiveControls: React.FC<StormLiveControlsProps> = ({
 
           {promptTab === 'style' ? (
             <textarea ref={styleTextareaRef} value={streamPrompt} onChange={e => onStreamPromptChange(e.target.value)}
-              placeholder="New style for next slot..." rows={2}
+              placeholder={t('storm.live.newStylePlaceholder', 'New style for next slot…')} rows={2}
               className="w-full px-2 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none resize-none focus:border-pink-500/50 transition-colors" />
           ) : (
             <textarea ref={lyricsTextareaRef} value={streamLyrics} onChange={e => onStreamLyricsChange(e.target.value)}
-              placeholder="Lyrics for next slot..." rows={2}
+              placeholder={t('storm.live.newLyricsPlaceholder', 'Lyrics for next slot…')} rows={2}
               className="w-full px-2 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-200 placeholder:text-zinc-600 outline-none resize-none focus:border-purple-500/50 transition-colors" />
           )}
 

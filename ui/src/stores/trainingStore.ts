@@ -6,20 +6,20 @@
 // reconnect that replays the whole buffer is idempotent.
 
 import { create } from 'zustand';
-import * as trainingApi from '../services/trainingApi';
+import * as trainingApi from '@/services/trainingApi';
 import type { HeartmulaPrepareRequest, HeartmulaTrainRequest } from '../../../server/src/contracts/heartmulaTraining';
-import * as preparationApi from '../services/trainingPreparationApi';
-import type { Yue2PreparationPayload } from '../services/trainingPreparationApi';
-import { snapshotFor, type TrainingWorkerRef } from '../services/trainingOperations';
-import { queryClient } from '../queries/client';
-import { ACTIVE_POLL_MS } from '../queries/contract';
-import { resourceKey } from '../queries/keys';
-import { queryManager } from '../queries/invalidation';
-import { keysPlan, writeAndInvalidate } from '../queries/writes';
-import { cancelWorkerReads, TD, trainingQueries as tq, workerReads } from '../queries/training-data/queries';
-import { runQueries } from '../queries/training-runs/queries';
+import * as preparationApi from '@/services/trainingPreparationApi';
+import type { Yue2PreparationPayload } from '@/services/trainingPreparationApi';
+import { snapshotFor, type TrainingWorkerRef } from '@/services/trainingOperations';
+import { queryClient } from '@/queries/client';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
+import { resourceKey } from '@/queries/keys';
+import { queryManager } from '@/queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '@/queries/writes';
+import { cancelWorkerReads, TD, trainingQueries as tq, workerReads } from '@/queries/training-data/queries';
+import { runQueries } from '@/queries/training-runs/queries';
 import { TRAINING_RECIPE_VERSION } from '../../../server/src/contracts/trainingRecipes';
-import { computeTrainingEta, type TrainingEta } from '../utils/trainingEta';
+import { computeTrainingEta, type TrainingEta } from '@/utils/training/trainingEta';
 import type {
   AuditionOptions,
   AuditionPreview,
@@ -51,7 +51,10 @@ import type {
   TrainingPreview,
   TrainingSample,
   TrainingStreamEvent,
-} from '../services/trainingApi';
+} from '@/services/trainingApi';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { newId } from '@/utils/id';
+import { byText, byNumber } from '@/utils/sort';
 
 /** A preview plus the run it belongs to — the run name is what the audio
  *  URL needs, and it lives on the event rather than on the preview. */
@@ -460,13 +463,13 @@ function indexSamples(samples: TrainingSample[]): { byId: Record<string, Trainin
   const byId: Record<string, TrainingSample> = {};
   for (const s of samples) byId[s.sampleId] = s;
   const order = [...samples]
-    .sort((a, b) => a.relPath.localeCompare(b.relPath))
+    .sort(byText(x => x.relPath))
     .map(s => s.sampleId);
   return { byId, order };
 }
 
 function errMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return errorMessage(err);
 }
 
 export const useTrainingStore = create<TrainingState>((set, get) => ({
@@ -1418,7 +1421,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
             const next = [...get().trainDitEpochs.filter(e => e.epoch !== epoch), {
               epoch, loss: ev.loss, lr: ev.lr ?? 0,
               gradNorm: ev.gradNorm ?? 0, ms: ev.ms ?? 0,
-            }].sort((a, b) => a.epoch - b.epoch);
+            }].sort(byNumber(x => x.epoch));
             set({
               trainDitEpochs: next,
               trainDitLast: {
@@ -1464,7 +1467,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
           const next = [...get().trainLmEpochs.filter(e => e.epoch !== epoch), {
             epoch, loss: ev.loss, lr: ev.lr ?? 0,
             gradNorm: ev.gradNorm ?? 0, ms: ev.ms ?? 0,
-          }].sort((a, b) => a.epoch - b.epoch);
+          }].sort(byNumber(x => x.epoch));
           set({
             trainLmEpochs: next,
             trainLmLast: {
@@ -1667,7 +1670,7 @@ async function runPreparation(
     // other store write here.
     const pipeline = await writeAndInvalidate(queryClient,
       () => preparationApi.startYue2Preparation(snapshotFor({
-        kind: 'yue2-preparation', idempotencyKey: crypto.randomUUID(), worker: workerRef(worker),
+        kind: 'yue2-preparation', idempotencyKey: newId(), worker: workerRef(worker),
         dataset: context.dataset, sources: [context.source], payload: payload(),
       })),
       keysPlan(runQueries.preparations(datasetId).queryKey));

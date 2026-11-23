@@ -1,6 +1,6 @@
 // resolve/captionSource.ts — which caption a render uses, per engine.
 //
-// Server-side port of ui/src/utils/captionForBackend.ts, mm3CaptionSource.ts
+// Server-side port of ui/src/utils/lyrics/captionForBackend.ts, mm3CaptionSource.ts
 // and yue2CaptionSource.ts (resolution functions only). Behaviour must match
 // those files exactly, including every fallback, so the same inputs give the
 // same caption whichever side resolves it. The browser's stored selections are

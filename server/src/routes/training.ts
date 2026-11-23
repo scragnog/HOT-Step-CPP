@@ -5512,7 +5512,7 @@ router.get('/yue2-dataset-captions', async (req: Request, res: Response) => {
  *  one trained adapter was trained on.
  *
  *  Not under /datasets/:id: the caller (Create's caption-source picker, see
- *  ui/src/utils/yue2CaptionSource.ts) holds an adapter path and nothing else —
+ *  ui/src/utils/lyrics/yue2CaptionSource.ts) holds an adapter path and nothing else —
  *  the adapter is engine state on this backend. Joint checkpoint paths resolve
  *  through the durable run index to the exact prepared style strings. Legacy
  *  paths resolve through their run manifest to `yue2_preprocess.json`.

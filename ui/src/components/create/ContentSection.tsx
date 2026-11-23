@@ -4,11 +4,11 @@
 import React from 'react';
 import { Music, ChevronDown, ChevronRight, Plug, Drum } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { hasWildcards, expandInPlace, randomWildcardSeed } from '../../utils/wildcardUtils';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
-import { Fold } from '../shared/Fold';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { hasWildcards, expandInPlace, randomWildcardSeed } from '@/utils/wildcardUtils';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { Fold } from '@/components/shared/controls/Fold';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { StylePresetSelect } from './StylePresetSelect';
 import { StyleGenreSelect } from './StyleGenreSelect';
 import { useBackendStore } from '../../stores/backendStore';

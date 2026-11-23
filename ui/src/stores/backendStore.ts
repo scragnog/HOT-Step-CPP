@@ -10,14 +10,15 @@
 // mount / on backend switch) rather than the store running an interval loop.
 
 import { create } from 'zustand';
-import { queryClient } from '../queries/client';
-import { backendsOptions, backendModelsOptions, capabilitiesOptions, usableCapabilities } from '../queries/global-models/options';
-import { queryManager } from '../queries/invalidation';
-import { keysPlan, writeAndInvalidate } from '../queries/writes';
-import { scopeOf } from '../queries/keys';
-import { apiClient } from '../services/httpClient';
-import { projectQuery } from '../queries/global-models/projection';
+import { queryClient } from '@/queries/client';
+import { backendsOptions, backendModelsOptions, capabilitiesOptions, usableCapabilities } from '@/queries/global-models/options';
+import { queryManager } from '@/queries/invalidation';
+import { keysPlan, writeAndInvalidate } from '@/queries/writes';
+import { scopeOf } from '@/queries/keys';
+import { apiClient } from '@/services/httpClient';
+import { projectQuery } from '@/queries/global-models/projection';
 import type { Query } from '@tanstack/react-query';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 // ── Active-backend mirror ──
 //
@@ -298,8 +299,8 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       // Advisory — a failed fetch must not break generation. Every consumer
       // (getGlobalParams, BackendToggle) treats an empty/single-entry list as
       // "no multi-backend UI", which is exactly the pre-feature behaviour.
-      console.warn('[Backends] fetch failed:', err instanceof Error ? err.message : String(err));
-      set({ loading: false, error: err instanceof Error ? err.message : String(err) });
+      console.warn('[Backends] fetch failed:', errorMessage(err));
+      set({ loading: false, error: errorMessage(err) });
     }
   },
 
@@ -309,7 +310,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     try {
       await queryClient.query(capabilitiesOptions(backendId));
     } catch (err) {
-      console.warn(`[Backends] capabilities fetch failed for "${backendId}":`, err instanceof Error ? err.message : String(err));
+      console.warn(`[Backends] capabilities fetch failed for "${backendId}":`, errorMessage(err));
     }
   },
 
@@ -321,7 +322,7 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     } catch (err) {
       // Advisory, like fetchCapabilities: an empty catalogue renders as
       // "no models found", which is the honest degrade.
-      console.warn(`[Backends] models fetch failed for "${backendId}":`, err instanceof Error ? err.message : String(err));
+      console.warn(`[Backends] models fetch failed for "${backendId}":`, errorMessage(err));
     }
   },
 

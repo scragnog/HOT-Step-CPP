@@ -3,8 +3,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { CompareDiff } from '../../services/compareApi';
-import { ParamLabel } from '../shared/ParamLabel';
+import type { CompareDiff } from '@/services/compareApi';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 interface Props { diff: CompareDiff | null; activeTitle: string; baselineTitle: string; same: boolean; }
 

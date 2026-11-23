@@ -2,14 +2,19 @@
 // MDMAchine / A&E Concepts 2026
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { stormDriftOptions } from '../../queries/shell-queue/queue';
-import { apiClient } from '../../services/httpClient';
-import type { useStreamAudio } from '../../hooks/useStreamAudio';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
-import { QueryError } from '../shared/QueryError';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { stormDriftOptions } from '@/queries/shell-queue/queue';
+import { apiClient } from '@/services/httpClient';
+import type { useStreamAudio } from '@/hooks/useStreamAudio';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { clamp01 } from '@/utils/format/clamp';
+import { formatDecimal } from '@/utils/format/format';
+import { isPresent } from '@/utils/guards';
 
 // ---------------------------------------------------------------------------
 // Types mirrored from server/src/services/storm/drift.ts
@@ -130,7 +135,7 @@ function denormalize(spec: ParamSpec, u: number): number {
 }
 
 function fmtVal(spec: ParamSpec, u: number): string {
-  const v = denormalize(spec, Math.max(0, Math.min(1, u)));
+  const v = denormalize(spec, clamp01(u));
   return spec.int ? String(v) : v.toFixed(2);
 }
 
@@ -171,14 +176,14 @@ function SliderRow({
         className="flex-1 h-1 accent-purple-500"
       />
       <span className="text-[11px] text-zinc-300 w-10 text-right tabular-nums shrink-0">
-        {fmt ? fmt(value) : value.toFixed(2)}
+        {fmt ? fmt(value) : formatDecimal(value, 2)}
       </span>
     </div>
   );
 }
 
 function TagWeightBar({ tag, weight }: { tag: string; weight: number }) {
-  const pct = Math.round(Math.max(0, Math.min(1, weight)) * 100);
+  const pct = Math.round(clamp01(weight) * 100);
   const active = weight > 0.5;
   return (
     <div className="flex items-center gap-1.5 text-[10px]">
@@ -206,6 +211,7 @@ export interface DriftPanelProps {
 }
 
 export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPanelProps) {
+  const { t } = useTranslation();
   const specs = isYue2 ? YUE2_PARAM_SPECS : isSa3 ? SA3_PARAM_SPECS : ACE_PARAM_SPECS;
 
   // Persisted pressure
@@ -291,7 +297,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
 
   // Commit caption input on blur or Enter
   const commitCaption = useCallback(() => {
-    const tags = captionInput.split(',').map(t => t.trim()).filter(Boolean);
+    const tags = captionInput.split(',').map(t => t.trim()).filter(isPresent);
     update({ targetCaption: tags, captionPool: Array.from(new Set([...pressure.captionPool, ...tags])) });
   }, [captionInput, pressure.captionPool, update]);
 
@@ -339,7 +345,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
   const [genreInput, setGenreInput] = useState('');
   const applyGenre = useCallback(() => {
     if (!genreInput.trim()) return;
-    const tags = genreInput.split(',').map(t => t.trim()).filter(Boolean);
+    const tags = genreInput.split(',').map(t => t.trim()).filter(isPresent);
     update({ targetCaption: tags, captionPool: Array.from(new Set([...pressure.captionPool, ...tags])) });
     setCaptionInput(tags.join(', '));
   }, [genreInput, pressure.captionPool, update]);
@@ -347,7 +353,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
   // Add custom tag set
   const addCustomSet = useCallback(() => {
     if (!newSetName.trim() || !newSetTags.trim()) return;
-    const tags = newSetTags.split(',').map(t => t.trim()).filter(Boolean);
+    const tags = newSetTags.split(',').map(t => t.trim()).filter(isPresent);
     const customTagSets = { ...(pressure.customTagSets ?? {}), [newSetName.trim()]: tags };
     update({ customTagSets });
     setNewSetName('');
@@ -383,7 +389,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
               <ParamLabel label="Target Caption" info="Comma-separated tags to steer future slots toward. Tags gain weight as the stream drifts." className={labelCls} />
               <textarea
                 rows={3}
-                aria-label="Target caption"
+                aria-label={t('storm.drift.targetCaption', 'Target caption')}
                 value={captionInput}
                 onChange={e => setCaptionInput(e.target.value)}
                 onBlur={commitCaption}
@@ -398,14 +404,16 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 >
                   Pull now
                 </button>
-                <button
+                <HintButton
                   onClick={anchor}
                   disabled={!snapshot}
+                  label={t('storm.drift.anchor', 'Anchor')}
+                  info={t('storm.drift.anchorInfo', 'Sets the drift targets to the current live values.')}
+                  ariaLabel={t('storm.drift.anchor', 'Anchor')}
                   className="text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 text-white rounded-md px-3 py-1 transition-colors"
-                  title="Anchor: set targets to current live values"
                 >
                   Anchor
-                </button>
+                </HintButton>
               </div>
             </div>
 
@@ -439,7 +447,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 <input
                   type="text"
                   value={genreInput}
-                  aria-label="Genre tags"
+                  aria-label={t('storm.drift.genreTags', 'Genre tags')}
                   onChange={e => setGenreInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') applyGenre(); }}
                   placeholder="Genre tags..."
@@ -482,7 +490,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 <input
                   type="text"
                   value={newSetName}
-                  aria-label="Tag set name"
+                  aria-label={t('storm.drift.tagSetName', 'Tag set name')}
                   onChange={e => setNewSetName(e.target.value)}
                   placeholder="Name"
                   className="w-20 bg-zinc-800/60 border border-zinc-700 rounded-md px-1.5 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-purple-600"
@@ -490,7 +498,7 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                 <input
                   type="text"
                   value={newSetTags}
-                  aria-label="Tag set tags"
+                  aria-label={t('storm.drift.tagSetTags', 'Tag set tags')}
                   onChange={e => setNewSetTags(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') addCustomSet(); }}
                   placeholder="tag1, tag2..."
@@ -519,21 +527,21 @@ export function DriftPanel({ sa, isYue2, isSa3, streamId = 'default' }: DriftPan
                   info="How strongly each slot moves toward your targets. Zero lets it wander; one pulls directly toward the targets."
                   value={pressure.pull}
                   onChange={v => update({ pull: v })}
-                  fmt={v => v.toFixed(2)}
+                  fmt={v => formatDecimal(v, 2)}
                 />
                 <SliderRow
                   label="Rate"
                   info="How far parameters and caption weights move per slot. Higher values change the stream faster."
                   value={pressure.rate}
                   onChange={v => update({ rate: v })}
-                  fmt={v => v.toFixed(2)}
+                  fmt={v => formatDecimal(v, 2)}
                 />
                 <SliderRow
                   label="Jitter"
                   info="Random variation added to each slot's drift. Higher values make the path less predictable."
                   value={pressure.jitter}
                   onChange={v => update({ jitter: v })}
-                  fmt={v => v.toFixed(2)}
+                  fmt={v => formatDecimal(v, 2)}
                 />
               </div>
             </div>

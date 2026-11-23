@@ -13,8 +13,8 @@ import {
   ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { UnifiedRecentSongs } from './UnifiedRecentSongs';
-import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
+import { UnifiedRecentSongs } from '@/components/shared/songs/UnifiedRecentSongs';
+import { InlineAudioQueue } from '@/components/lyric-studio/queue/InlineAudioQueue';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { PlaylistSidebar } from '../playlist/PlaylistSidebar';
 import { TerminalPanel } from '../terminal/TerminalPanel';

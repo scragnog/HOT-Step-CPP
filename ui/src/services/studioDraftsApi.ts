@@ -5,8 +5,8 @@
 import type { PlaylistBody, StudioDraftBody } from '../../../server/src/contracts/studioDrafts';
 import type { DocumentImportReceipt, TypedDocument, WorkflowDocument } from '../../../server/src/contracts/workflow';
 import { apiClient, type ClientOptions, type ReadOptions } from './httpClient';
-import { readSnapshot, changed } from '../queries/cover-lyrics/reads';
-import { getSessionEpoch } from '../queries/keys';
+import { readSnapshot, changed } from '@/queries/cover-lyrics/reads';
+import { getSessionEpoch } from '@/queries/keys';
 
 async function request<T>(url: string, method = 'GET', body?: unknown, options: ClientOptions = {}): Promise<T> {
   const target = { session: getSessionEpoch(), api: apiClient.baseUrl };

@@ -11,10 +11,11 @@ import { GENERATION_DEFAULTS as GLOBAL_PARAM_DEFAULTS } from '../../../server/sr
 import type { GenerationParams, LmRepMode, StableStepBackend } from '../types';
 import { DEFAULT_SETTINGS, type AppSettings } from '../app/appSettings';
 import { useBackendStore } from './backendStore';
-import { normalizeSeed, type Seed } from '../utils/seed';
+import { normalizeSeed, type Seed } from '@/utils/seed';
+import { writeJson } from '@/utils/storage/storageJson';
 
 const STRING_SEED_BACKENDS = new Set(['heartmula', 'yue2']);
-import { apiClient } from '../services/httpClient';
+import { apiClient } from '@/services/httpClient';
 
 // -- Types --
 
@@ -37,7 +38,7 @@ function readKey<T>(key: string, fallback: T): T {
 }
 
 function writeKey<T>(key: string, value: T): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full */ }
+  try { writeJson(key, value); } catch { /* full */ }
 }
 
 type Mm3RefinerSettings = Pick<GenerationParams, 'mm3RefinerEnabled' | 'mm3RefinerSteps'
@@ -112,7 +113,7 @@ function activeBackendId(): string {
  * localStorage key for `base` under `backendId`. Unscoped keys pass through
  * unchanged, so this is safe to call on any hs-* key.
  *
- * Exported because the preset/profile writer (utils/paramProfiles.ts) persists
+ * Exported because the preset/profile writer (utils/training/paramProfiles.ts) persists
  * store fields by key without going through the setters -- applying a preset
  * while MM3 is active must land in MM3's slot, not ACE's.
  */

@@ -1,9 +1,9 @@
-import { queryClient } from '../queries/client';
-import { serverKey } from '../queries/keys';
+import { queryClient } from '@/queries/client';
+import { serverKey } from '@/queries/keys';
 import { apiClient, type ClientOptions, type ReadOptions } from './httpClient';
-import { readSnapshot, changed } from '../queries/cover-lyrics/reads';
-import { getSessionEpoch } from '../queries/keys';
-import type { PrepareV2 } from '../utils/yue2Prepare';
+import { readSnapshot, changed } from '@/queries/cover-lyrics/reads';
+import { getSessionEpoch } from '@/queries/keys';
+import type { PrepareV2 } from '@/utils/lyrics/yue2Prepare';
 import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../server/src/contracts/studioWorkflows';
 // Authenticated YuE2 cover transcription endpoints.
 const BASE = '/api/yue2-cover';

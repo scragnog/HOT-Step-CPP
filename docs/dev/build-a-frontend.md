@@ -11,7 +11,7 @@ as any other client. Node owns request resolution, execution and generation defa
 UI imports from the server are limited to shared `server/src/contracts/` modules;
 HTTP transports live in `ui/src/services/` and `ui/src/queries/`, enforced by UI lint.
 The known exception is the SA3 training audition in
-`ui/src/components/training-studio/Sa3TrainCard.tsx:153`, which still builds a flat
+`ui/src/components/training-studio/cards/Sa3TrainCard.tsx:153`, which still builds a flat
 `/api/generate` body. It is outside this decoupling pass.
 
 This page proves the contracts are enough to build and orchestrate a client under fake

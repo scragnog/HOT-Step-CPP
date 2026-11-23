@@ -2,11 +2,12 @@
 // Supports two modes: Extract (pick individual tracks) and SuperSep (pick separation level)
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { EXTRACT_TRACKS, TRACK_LABELS, TRACK_CATEGORIES } from '../../services/stemStudioApi';
-import { SEPARATION_LEVELS, type SeparationLevel } from '../../services/supersepApi';
-import { Toggle } from '../shared/Toggle';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { EXTRACT_TRACKS, TRACK_LABELS, TRACK_CATEGORIES } from '@/services/stemStudioApi';
+import { SEPARATION_LEVELS, type SeparationLevel } from '@/services/supersepApi';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { plural } from '@/utils/format/plural';
 
 /** What each Extract track does — all of them run the same DiT re-synthesis
  *  pass, so the wording only varies where the track has its own quirk
@@ -88,7 +89,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
     ? '⏳ Processing...'
     : isSupersep
       ? '▶ Separate Audio'
-      : `▶ Extract ${selectedTracks.length} Track${selectedTracks.length !== 1 ? 's' : ''}`;
+      : `▶ Extract ${selectedTracks.length} ${plural(selectedTracks.length, 'Track')}`;
 
   // Can proceed?
   const canProceed = isSupersep

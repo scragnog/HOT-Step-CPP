@@ -26,15 +26,16 @@ import { ReportIssuePanel } from './ReportIssuePanel';
 import { StemStorage } from './StemStorage';
 import { DangerZone } from './DangerZone';
 import { AdapterReferencesAction } from './AdapterReferencesAction';
-import { FileBrowserModal } from '../shared/FileBrowserModal';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { FileBrowserModal } from '@/components/shared/overlays/FileBrowserModal';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import {
   SettingRow, SelectRow, Toggle,
   EnvTextRow, EnvPasswordRow, EnvPathRow, EnvSubsection,
 } from './SettingsPrimitives';
 import './SettingsPanel.css';
-import { COVER_SETS, FALLBACK_SET, getCoverSet, setCoverSet, type CoverSet } from '../../utils/defaultCover';
+import { COVER_SETS, FALLBACK_SET, getCoverSet, setCoverSet, type CoverSet } from '@/utils/storage/defaultCover';
+import { isPresent } from '@/utils/guards';
 
 // Defined in app/appSettings.ts so the studio shell can read them without this panel.
 export { DEFAULT_SETTINGS, type AppSettings };
@@ -113,7 +114,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const gpuSelectUnknown = !!gpuRaw && gpuRaw.toLowerCase() !== 'all' && !gpuMatch;
 
   // Multi-GPU opt-in: comma-separated UUIDs, same stable ids as the picker above.
-  const workerGpuSet = new Set((envValues.ACESTEPCPP_WORKER_GPUS || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+  const workerGpuSet = new Set((envValues.ACESTEPCPP_WORKER_GPUS || '').split(',').map(x => x.trim().toLowerCase()).filter(isPresent));
   const toggleWorkerGpu = (uuid: string) => {
     const key = uuid.toLowerCase();
     const chosen = detectedGpus.filter(g => g.uuid && (g.uuid.toLowerCase() === key ? !workerGpuSet.has(key) : workerGpuSet.has(g.uuid.toLowerCase())));

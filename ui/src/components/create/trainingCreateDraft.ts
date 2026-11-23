@@ -6,7 +6,7 @@
 // unrelated unsaved form is never overwritten. Applying sets the form content,
 // every generation parameter of the mirrored recipe and the LM codes cache
 // setting; it never starts a generation.
-import { trainingOperation } from '../../services/trainingOperations';
+import { trainingOperation } from '@/services/trainingOperations';
 
 export const TRAINING_DRAFT_QUERY = 'trainingDraft';
 

@@ -1,12 +1,13 @@
 import React from 'react';
 import { useMutation } from '@tanstack/react-query';
-import type { Song } from '../../types';
-import { useAuth } from '../../context/AuthContext';
-import { yue2CoverApi, type Yue2CoverDriftResult } from '../../services/yue2CoverApi';
+import type { Song } from '@/types';
+import { useAuth } from '@/context/AuthContext';
+import { yue2CoverApi, type Yue2CoverDriftResult } from '@/services/yue2CoverApi';
+import { formatDecimal } from '@/utils/format/format';
 
 const measuredThisSession = new Map<string, Yue2CoverDriftResult>();
 
-function seconds(value: number): string { return `${value.toFixed(1)}s`; }
+function seconds(value: number): string { return `${formatDecimal(value, 1)}s`; }
 function span(value: { start: number; end: number } | null): string {
   return value ? `${seconds(value.start)}–${seconds(value.end)}` : 'Unscored';
 }
@@ -67,7 +68,7 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
     {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
     {result && <>
       <p className="font-medium text-zinc-800 dark:text-zinc-200">
-        Mean absolute start offset: {result.meanAbsoluteOffsetBars === null ? 'No aligned sections' : `${result.meanAbsoluteOffsetBars.toFixed(2)} bars`}
+        Mean absolute start offset: {result.meanAbsoluteOffsetBars === null ? 'No aligned sections' : `${formatDecimal(result.meanAbsoluteOffsetBars, 2)} bars`}
       </p>
       <p className="text-zinc-500">
         {result.tempoBpm} BPM · {result.meter} · {result.tempoSource === 'source-score-fallback'
@@ -94,7 +95,7 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
             <td className="pr-2">{skipped(section) ? 'N/A' : span(section.sung)}</td>
             <td>{section.offsetBars === null
               ? section.unscoredReason ? unscoredText[section.unscoredReason] : 'Unscored'
-              : `${section.offsetBars >= 0 ? '+' : ''}${section.offsetBars.toFixed(2)} bars`}</td>
+              : `${section.offsetBars >= 0 ? '+' : ''}${formatDecimal(section.offsetBars, 2)} bars`}</td>
           </tr>)}</tbody>
         </table>
       </div>

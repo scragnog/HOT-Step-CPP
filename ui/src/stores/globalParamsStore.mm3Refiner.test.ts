@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register } from 'node:module';
-import type { GenerationParams } from '../types';
+import type { GenerationParams } from '@/types';
 
 register('data:text/javascript,' + encodeURIComponent(
   'export async function load(url, ctx, next) { if (url.endsWith(".css")) return { format: "module", source: "export default {}", shortCircuit: true }; return next(url, ctx); }'));

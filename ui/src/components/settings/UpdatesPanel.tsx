@@ -3,13 +3,16 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { updatesApi, type UpdateChannel, type UpdatesStatus } from '../../services/updatesApi';
-import { updatesStatusOptions } from '../../queries/shell-queue/settings';
-import { ParamLabel } from '../shared/ParamLabel';
+import { updatesApi, type UpdateChannel, type UpdatesStatus } from '@/services/updatesApi';
+import { updatesStatusOptions } from '@/queries/shell-queue/settings';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { SelectRow } from './SettingsPrimitives';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
 import { UpdateOutcome, UpdateRestartContext } from './UpdateReconnectOverlay';
 import { updateRefusal, updatesViewState } from '../../stores/updatesViewState';
+import { formatBytes } from '@/utils/format/format';
+import { formatDateTime } from '@/utils/format/dateUtils';
+import { isPresent } from '@/utils/guards';
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 8) : null);
 
@@ -64,10 +67,10 @@ export function UpdatesPanel() {
   const view = s ? updatesViewState(s, command.error ? updateRefusal(command.error) : null) : null;
   const busy = check.isPending || !!s?.checking || command.isPending || !!view?.active || !!attempt;
   const error = check.error?.message ?? query.error?.message ?? '';
-  const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : t('settings.updates.never'));
+  const when = (iso: string | null) => (iso ? formatDateTime(iso) : t('settings.updates.never'));
   const notice = s ? noticeKey(s) : null;
   const latest = s?.channel === 'release' ? s.latest.release?.tag : short(s?.latest.master?.sha ?? null);
-  const installedLabel = s && [s.installed.tag ?? short(s.installed.sha) ?? t('settings.updates.unknown'), s.installed.variant].filter(Boolean).join(' · ');
+  const installedLabel = s && [s.installed.tag ?? short(s.installed.sha) ?? t('settings.updates.unknown'), s.installed.variant].filter(isPresent).join(' · ');
   const notesLink = s?.notesUrl && <a className="settings-save-btn" href={s.notesUrl} target="_blank" rel="noreferrer">
     {t(s.channel === 'release' ? 'settings.updates.notes' : 'settings.updates.commit')}
     <ExternalLink size={14} aria-hidden="true" />
@@ -157,7 +160,3 @@ export function UpdatesPanel() {
   </section>;
 }
 
-function formatBytes(bytes: number) {
-  const unit = bytes >= 1024 ** 3 ? 'GB' : 'MB';
-  return `${(bytes / (unit === 'GB' ? 1024 ** 3 : 1024 ** 2)).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`;
-}

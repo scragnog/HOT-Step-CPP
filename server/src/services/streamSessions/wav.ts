@@ -67,7 +67,7 @@ export function channel0(wav: ParsedWav): Float32Array {
 }
 
 /** Split whole WAVs off the front of a growing byte stream. Same framing rule
- *  as the client's extractWav (ui/src/utils/wavStream.ts): RIFF size + 8, and
+ *  as the client's extractWav (ui/src/utils/audio/wavStream.ts): RIFF size + 8, and
  *  resynchronise on the next "RIFF" after garbage. */
 export class WavSplitter {
   private buf = new Uint8Array(0);

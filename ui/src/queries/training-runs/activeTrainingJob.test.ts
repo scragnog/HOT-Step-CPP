@@ -6,9 +6,9 @@ import test, { afterEach } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
-import { trainingQueries } from '../training-data/queries';
-import { useTrainingStore } from '../../stores/trainingStore';
+import { createQueryClient } from '@/queries/client';
+import { trainingQueries } from '@/queries/training-data/queries';
+import { useTrainingStore } from '@/stores/trainingStore';
 import { useActiveTrainingJob } from './hooks';
 
 // The store module reads localStorage at import time in the browser; the Node

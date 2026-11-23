@@ -15,7 +15,8 @@ import { useAppRuntime } from './app/useAppRuntime';
 import { UpdateReconnectOverlay, UpdateRestartContext } from './components/settings/UpdateReconnectOverlay';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
-import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
+import { GlobalParamsProvider } from './context/GlobalParamsContext';
+import { useGlobalParamsStore } from './stores/globalParamsStore';
 import { usePersistedState } from './hooks/usePersistedState';
 import { useTheme } from './hooks/useTheme';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -30,11 +31,13 @@ import { CreateBuildTab, CreateTabs } from './components/create/CreateBuildTab';
 import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
 import { enqueueSimpleGen, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
-import { NoModelsBanner } from './components/shared/NoModelsBanner';
-import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
-import { AudioQueueMigrationBanner } from './components/shared/AudioQueueMigrationBanner';
-import { ErrorBoundary } from './components/shared/ErrorBoundary';
-import { PostProcessDock } from './components/shared/PostProcessActivity';
+import { NoModelsBanner } from '@/components/shared/feedback/NoModelsBanner';
+import { RestoredQueueBanner } from '@/components/shared/feedback/RestoredQueueBanner';
+import { AudioQueueMigrationBanner } from '@/components/shared/feedback/AudioQueueMigrationBanner';
+import { ErrorBoundary } from '@/components/shared/feedback/ErrorBoundary';
+import { PostProcessDock } from '@/components/shared/status/PostProcessActivity';
+import { plural } from '@/utils/format/plural';
+import { PostProcessFailureToasts } from './components/shared/feedback/PostProcessFailureToasts';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
 import { Player } from './components/player/Player';
 import { Waveform } from './components/player/Waveform';
@@ -50,14 +53,15 @@ import { SongDetailsSlideOver } from './components/details/SongDetailsSlideOver'
 import { MetadataEditorModal } from './components/details/MetadataEditorModal';
 import { CoverArtPromptModal } from './components/library/CoverArtPromptModal';
 import { ImportTracksModal } from './components/library/ImportTracksModal';
-import { notify, type ToastType } from './components/shared/Toast';
+import { notify, type ToastType } from './components/shared/feedback/Toast';
 import { toast } from 'react-toastify';
-import { HotkeyHelpModal } from './components/shared/HotkeyHelpModal';
-import { CommandPalette, OPEN_PALETTE_EVENT } from './components/shared/CommandPalette';
+import { HotkeyHelpModal } from './components/shared/overlays/HotkeyHelpModal';
+import { CommandPalette, OPEN_PALETTE_EVENT } from './components/shared/overlays/CommandPalette';
 import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
-import { ConfirmDialog } from './components/shared/ConfirmDialog';
-import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
+import { downloadTrack, downloadTrackVersion } from '@/utils/audio/downloadTrack';
 import { SettingsPanel } from './components/settings/SettingsPanel';
+import { saveBlob } from './utils/storage/saveFile';
 import { AssistantPanel } from './components/assistant/AssistantPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import { CoverStudio } from './components/cover-studio/CoverStudio';
@@ -99,11 +103,11 @@ import type { Song, GenerationParams } from './types';
 import type { CreateIntent } from '../../server/src/contracts/resolution';
 import { addToPlaylist, usePlaylist, DELETE_CONFIRM_KEY, type PlaylistItem } from './stores/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
-import { ABCompareModal } from './components/shared/ABCompareModal';
+import { ABCompareModal } from './components/shared/overlays/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
 import { useDiscoMode, toggleDiscoMode, setDiscoPlaying, setDiscoDataUrl, syncStems, updateMainTime } from './stores/discoStore';
 import { DiscoPulseWrapper } from './components/shared/DiscoPulseWrapper';
-import { Toggle } from './components/shared/Toggle';
+import { Toggle } from './components/shared/controls/Toggle';
 
 import { HiHatParticles } from './components/shared/HiHatParticles';
 
@@ -393,19 +397,19 @@ const AppContent: React.FC = () => {
     // Turning on — check if stem extraction is enabled
     if (!settings.discoKickExtract) {
       setConfirmDialog({
-        title: '🪩 Enable Disco Mode?',
-        message: 'Disco mode uses separated drum stems (kick, snare, hi-hat) for beat-reactive visuals. This requires extracting drum stems after each generation (~60-90s extra per song). Enable stem extraction and activate disco mode?',
-        confirmLabel: 'Enable & Activate',
+        title: t('app.confirm.discoTitle', '🪩 Enable Disco Mode?'),
+        message: t('app.confirm.discoMessage', 'Disco mode uses separated drum stems (kick, snare, hi-hat) for beat-reactive visuals. This requires extracting drum stems after each generation (~60-90s extra per song). Enable stem extraction and activate disco mode?'),
+        confirmLabel: t('app.confirm.discoEnable', 'Enable & Activate'),
         onConfirm: () => {
           setSettings(prev => ({ ...prev, discoKickExtract: true }));
           toggleDiscoMode();
-          showToast('🪩 Disco mode enabled! Drum stems will be extracted for new songs.', 'success');
+          showToast(t('app.confirm.discoEnabled', '🪩 Disco mode enabled! Drum stems will be extracted for new songs.'), 'success');
         },
       });
     } else {
       toggleDiscoMode();
     }
-  }, [discoMode, settings.discoKickExtract]);
+  }, [discoMode, settings.discoKickExtract, t]);
 
   // Play a song from the library (used by SongList, RightSidebar)
   const playSong = useCallback((song: Song) => {
@@ -439,9 +443,6 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('hotstep:open-song', onOpen);
   }, []);
 
-  // Global params from context
-  const globalParams = useGlobalParams();
-
   // The Create panel hands its current content params up through this ref; the
   // Build by section tab starts its session from them.
   const createParamsRef = useRef<(() => Partial<GenerationParams>) | null>(null);
@@ -457,7 +458,7 @@ const AppContent: React.FC = () => {
     // First Generate click is a user gesture: ask once for done notifications.
     void requestNotifyPermissionFromGesture();
     // Merge: global engine params + content-specific params + settings
-    const engineParams = globalParams.getGlobalParams();
+    const engineParams = useGlobalParamsStore.getState().getGlobalParams();
     const enrichedParams = enrichCreateParams(contentParams);
 
     enqueueSimpleGen(
@@ -469,7 +470,7 @@ const AppContent: React.FC = () => {
         parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
         parallelCoverArt: settings.parallelCoverArt } } : undefined,
     );
-  }, [token, settings, globalParams, enrichCreateParams, handleSongCreated]);
+  }, [token, settings, enrichCreateParams, handleSongCreated]);
 
   // Handle delete
   const handleDelete = useCallback(async (song: Song) => {
@@ -546,9 +547,9 @@ const AppContent: React.FC = () => {
   const handleBulkDelete = useCallback((ids: string[]) => {
     if (!token || ids.length === 0) return;
     setConfirmDialog({
-      title: `Delete ${ids.length} song${ids.length !== 1 ? 's' : ''}?`,
-      message: `This will permanently delete ${ids.length} track${ids.length !== 1 ? 's' : ''} and their audio files from disk.`,
-      confirmLabel: `Delete ${ids.length}`,
+      title: t('app.confirm.bulkDeleteTitle', 'Delete {{count}} {{song}}?', { count: ids.length, song: plural(ids.length, 'song') }),
+      message: t('app.confirm.bulkDeleteMessage', 'This will permanently delete {{count}} {{track}} and their audio files from disk.', { count: ids.length, track: plural(ids.length, 'track') }),
+      confirmLabel: t('app.confirm.bulkDeleteConfirm', 'Delete {{count}}', { count: ids.length }),
       danger: true,
       onConfirm: async () => {
         setConfirmDialog(null);
@@ -557,13 +558,13 @@ const AppContent: React.FC = () => {
           const idSet = new Set(ids);
           void removeSongs(queryClient, ids);
           if (selectedSong && idSet.has(selectedSong.id)) setSelectedSong(null);
-          showToast(`Deleted ${ids.length} track${ids.length !== 1 ? 's' : ''}`, 'success');
+          showToast(t('app.confirm.bulkDeleted', 'Deleted {{count}} {{track}}', { count: ids.length, track: plural(ids.length, 'track') }), 'success');
         } catch (err: any) {
           showToast(`Delete failed: ${err.message}`, 'error');
         }
       },
     });
-  }, [token, selectedSong, queryClient]);
+  }, [token, selectedSong, queryClient, t]);
 
   // Reuse handler
   const [reuseData, setReuseData] = useState<{ song: Song; timestamp: number; scoreOnly?: boolean } | null>(null);
@@ -878,10 +879,7 @@ const AppContent: React.FC = () => {
                   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `HTTP ${res.status}`);
                   const blob = await res.blob();
                   const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'hotstep-library.zip';
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-                  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+                  saveBlob(blob, name);
                 } catch (e) {
                   showToast(t('library.exportZipFailed', 'Zip export failed: {{error}}', { error: (e as Error).message }), 'error');
                 }
@@ -1177,6 +1175,7 @@ const AppContent: React.FC = () => {
                 Docked at the root so it is visible from every view, Library
                 included. */}
             <PostProcessDock />
+            <PostProcessFailureToasts />
 
             <Player
               currentSong={currentSong}
@@ -1335,17 +1334,22 @@ const AppContent: React.FC = () => {
             onClick={handleDeleteCancel}
           />
           <div className="relative bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl drawer-slide-in-right">
-            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">Delete song?</h3>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">{t('app.confirm.deleteSongTitle', 'Delete song?')}</h3>
             <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4">
-              Delete "{pendingDeleteItem.title}"{pendingDeleteItem.artistName ? ` by ${pendingDeleteItem.artistName}` : ''}? This cannot be undone.
+              {t('app.confirm.deleteSongMessage', 'Delete "{{title}}"{{by}}? This cannot be undone.', {
+                title: pendingDeleteItem.title,
+                by: pendingDeleteItem.artistName
+                  ? t('app.confirm.deleteSongBy', ' by {{artist}}', { artist: pendingDeleteItem.artistName })
+                  : '',
+              })}
             </p>
             <Toggle
               size="sm"
               className="mb-6"
               checked={deleteConfirmDismissed}
               onChange={setDeleteConfirmDismissed}
-              label="Don't ask again"
-              info="From now on a left swipe on the phone playlist deletes the song without asking, in this browser only. Clearing the site's data in the browser brings the prompt back."
+              label={t('app.confirm.dontAsk', "Don't ask again")}
+              info={t('app.confirm.dontAskInfo', "From now on a left swipe on the phone playlist deletes the song without asking, in this browser only. Clearing the site's data in the browser brings the prompt back.")}
             />
             <div className="flex items-center justify-end gap-3">
               <button
@@ -1358,7 +1362,7 @@ const AppContent: React.FC = () => {
                 onClick={handleDeleteConfirm}
                 className="px-4 py-2 rounded-lg font-semibold transition-colors bg-red-600 text-white hover:bg-red-500"
               >
-                Delete
+                {t('app.confirm.deleteSongConfirm', 'Delete')}
               </button>
             </div>
           </div>

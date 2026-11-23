@@ -12,9 +12,9 @@ import ReactDOM from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Image as ImageIcon, Loader2, Save } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { Song } from '../../types';
-import { songApi } from '../../services/api';
-import { events, useUpload, writeAndInvalidate } from '../../queries/writes';
+import type { Song } from '@/types';
+import { songApi } from '@/services/api';
+import { events, useUpload, writeAndInvalidate } from '@/queries/writes';
 
 interface MetadataEditorModalProps {
   song: Song;

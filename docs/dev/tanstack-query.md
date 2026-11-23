@@ -145,7 +145,7 @@ areas.
 | SSE streams (`sharedEventSource.ts`, `useEventSource.ts`, `bridgeEvents`) | Axios cannot stream response bodies; the bridge fills the same cache entries. |
 | Media blobs and peaks (`StemMixer`, `useAbEngine`, `useStreamAudio`, `audio/peaksClient`) | Binary playback, not JSON server state. |
 | `/api/health` probes (`App.tsx`) | Liveness transport that may reload the page; it must not pollute the cache. |
-| Sidecar text reads (`utils/lrcUtils.ts`, `utils/wordLrcUtils.ts`, `LyricsBar`, `SectionMarkers`) | Text payloads outside the JSON transport, keyed through `sharedKeys`; absent and failed both mean "no lyrics". |
+| Sidecar text reads (`utils/lyrics/lrcUtils.ts`, `utils/lyrics/wordLrcUtils.ts`, `LyricsBar`, `SectionMarkers`) | Text payloads outside the JSON transport, keyed through `sharedKeys`; absent and failed both mean "no lyrics". |
 | Queryable POST (`yue2CoverApi.ts`, `cover-lyrics/cover` for `/source-metadata` and `/sections/review`) | Read-only and idempotent; `filters` carry only answer-changing fields (`songId`/`sourceAudioUrl`, `abc`/`lyrics`), never hints such as `sourceLabel` or `force`. |
 | `useDownloadStream` disabled observer (`components/model-manager/useDownloadStream.ts`, `global-models/downloads`) | Deliberate SSE cache slot: the download bridge replaces the whole entry with each validated frame, so there is no snapshot to fetch. |
 | `waitForSnapshot` / `waitForQuery` | Services and stores cannot use hooks; the observer reuses the same cache and polling policy. |
@@ -411,7 +411,7 @@ site, and `npx eslint src` reports zero project-guard hits.
 These keep their imperative read. The final exception table gets this list.
 
 - Binary and text payloads: `audio/peaksClient.ts:52`,
-  `utils/yue2CaptionSource.ts:214`.
+  `utils/lyrics/yue2CaptionSource.ts:214`.
 - Service or executor reads: `services/yue2CoverApi.ts:210`,
   `services/supersepApi.ts:122`, `services/stemStudioApi.ts:181`,
   `queries/shell-queue/queue.ts:125-146` (six executor reads),
@@ -420,7 +420,7 @@ These keep their imperative read. The final exception table gets this list.
   `queries/cover-lyrics/workflows.ts:27,28`, `queries/studios/workflows.ts:13,14`.
 - Store flows: `trainingStore.ts:633`, `:1624`, `:1675`, `:1679`;
   `backendStore.ts:273`, `:294`, `:304`; `vstChainStore.ts:179`.
-- Pure handler: `components/training-studio/sendAuditionToCustomGen.ts:14`.
+- Pure handler: `components/training-studio/lib/sendAuditionToCustomGen.ts:14`.
 
 ### Definition of done
 

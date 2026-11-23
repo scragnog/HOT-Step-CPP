@@ -13,12 +13,12 @@
 
 import { useSyncExternalStore } from 'react';
 import { QueryObserver } from '@tanstack/react-query';
-import type { Song } from '../types';
-import { runSongPostProcessing, revertSongPostProcessing } from '../services/api';
-import { queryClient } from '../queries/client';
-import { postProcessStatusOptions } from '../queries/shell-queue/songs';
+import type { Song } from '@/types';
+import { runSongPostProcessing, revertSongPostProcessing } from '@/services/api';
+import { queryClient } from '@/queries/client';
+import { postProcessStatusOptions } from '@/queries/shell-queue/songs';
 import { useGlobalParamsStore } from './globalParamsStore';
-import { forgetPeaks } from '../audio/peaksClient';
+import { forgetPeaks } from '@/audio/peaksClient';
 
 export interface PostProcessRun {
   songId: string;
@@ -169,31 +169,45 @@ function startPolling(songId: string, jobId: string): void {
 }
 
 /**
+ * Send one run to the server and start polling it.
+ *
+ * Shared by the menu path and the failure toast's retry, so both build the same
+ * payload and leave the same state behind. The payload is the whole
+ * getGlobalParams() object rather than a hand-picked set of PP keys: a
+ * whitelist here would go stale the first time someone adds a PP knob, and a
+ * silently-dropped param is this codebase's most-repeated bug. The server
+ * replaces the fields that belong to the song rather than the form
+ * (instrumental, caption, seed) before it runs anything.
+ */
+async function queuePostProcessingRun(songId: string, title: string): Promise<void> {
+  // Clear the old job id: it belongs to the run that failed, and the toast
+  // dedupe keys on it, so a failed retry must not reuse it.
+  setRun(songId, { title, jobId: undefined, status: 'starting', stage: 'Queueing...', error: undefined });
+  try {
+    const params = useGlobalParamsStore.getState().getGlobalParams({ postProcessingEnabled: true });
+    const { jobId, stage } = await runSongPostProcessing(songId, params as Record<string, any>);
+    setRun(songId, { jobId, status: 'pending', stage: stage || 'Queued' });
+    startPolling(songId, jobId);
+  } catch (err: unknown) {
+    setRun(songId, {
+      status: 'failed',
+      stage: 'Failed',
+      error: err instanceof Error ? err.message : 'Post-processing failed',
+    });
+    throw err;
+  }
+}
+
+/**
  * Queue a post-processing pass for `song` using the PP settings currently in
  * the panel, with the master toggle forced on.
- *
- * The payload is the whole getGlobalParams() object rather than a hand-picked
- * set of PP keys. A whitelist here would go stale the first time someone adds a
- * PP knob, and a silently-dropped param is this codebase's most-repeated bug.
- * The server replaces the fields that belong to the song rather than the form
- * (instrumental, caption, seed) before it runs anything.
  */
 export async function startPostProcessing(song: Song): Promise<void> {
   const availability = canPostProcess(song);
   if (!availability.enabled) throw new Error(availability.reason);
 
-  setRun(song.id, {
-    title: song.title || 'Untitled',
-    status: 'starting',
-    stage: 'Queueing...',
-    error: undefined,
-  });
-
   try {
-    const params = useGlobalParamsStore.getState().getGlobalParams({ postProcessingEnabled: true });
-    const { jobId, stage } = await runSongPostProcessing(song.id, params as Record<string, any>);
-    setRun(song.id, { jobId, status: 'pending', stage: stage || 'Queued' });
-    startPolling(song.id, jobId);
+    await queuePostProcessingRun(song.id, song.title || 'Untitled');
   } catch (err: any) {
     // A stale song object is the usual reason for this refusal — the list was
     // fetched before the pass finished. Correct every surface holding this
@@ -204,13 +218,73 @@ export async function startPostProcessing(song: Song): Promise<void> {
         detail: { songId: song.id, masteredAudioUrl: err.masteredAudioUrl },
       }));
     }
-    setRun(song.id, {
-      status: 'failed',
-      stage: 'Failed',
-      error: err.message,
-      alreadyProcessed: !!err?.alreadyProcessed,
-    });
+    setRun(song.id, { alreadyProcessed: !!err?.alreadyProcessed });
     throw err;
+  }
+}
+
+/**
+ * Run a failed pass again, after its dependency was enabled from the toast.
+ * The server re-checks eligibility, so a stale local copy of the song cannot
+ * start a run it would refuse.
+ */
+export async function retryPostProcessing(songId: string, title?: string): Promise<void> {
+  await queuePostProcessingRun(songId, title || _runs[songId]?.title || 'Untitled');
+}
+
+// ── Failure triage ───────────────────────────────────────────────────────────
+
+export type PpFailureKind = 'resources' | 'dependency' | 'other';
+
+export interface PpDependencyInfo {
+  /** The setting `enablePpDependency` turns on before the retry. */
+  id: 'ppVae' | 'stableStep' | 'spectral' | 'naturalizer' | 'plugin';
+  label: string;
+}
+
+const RESOURCE_RE = /out of memory|\boom\b|vram|gpu memory|cuda|allocation|alloc|insufficient memory|not enough memory|resources? (limit|exhaust)|memory (limit|exhaust)/i;
+const DEPENDENCY_RE = /not installed|missing model|model .*missing|missing .*model|pp-?vae|stable-?step|sa3|vst|plugin|no stage produced audio|dependency|weights|tokenizer/i;
+
+/**
+ * Why a failed pass failed, as far as its message can say.
+ *
+ * Resources are checked first: a memory message usually also names the model it
+ * was loading, and freeing VRAM is the only thing that helps there. A missing
+ * description is an input problem, not an install — enabling the stage again
+ * would fail the same way, so it is not treated as a dependency.
+ */
+export function ppFailureKind(message: string): PpFailureKind {
+  if (RESOURCE_RE.test(message)) return 'resources';
+  if (/needs a description of this track|genre or style/i.test(message)) return 'other';
+  return DEPENDENCY_RE.test(message) ? 'dependency' : 'other';
+}
+
+/** The stage a dependency failure names, when it has a switch to turn on. */
+export function ppDependency(message: string): PpDependencyInfo | null {
+  // "Nothing ran" lists the stages it tried, not a switch that is off; the
+  // remedy is installing what is missing, not re-enabling what was requested.
+  if (/no stage produced audio/i.test(message)) return null;
+  // A missing model file is installed in Model Manager; turning the stage on
+  // again cannot conjure it.
+  if (/not installed|missing model|model .*missing|missing .*model/i.test(message)) return null;
+  if (/pp-?vae/i.test(message)) return { id: 'ppVae', label: 'PP-VAE' };
+  if (/stable-?step|sa3/i.test(message)) return { id: 'stableStep', label: 'StableStep' };
+  if (/spectral/i.test(message)) return { id: 'spectral', label: 'Spectral Lifter' };
+  if (/naturalizer/i.test(message)) return { id: 'naturalizer', label: 'Vocal Naturalizer' };
+  if (/plugin/i.test(message)) return { id: 'plugin', label: 'post-process plugin' };
+  // A VST chain has no switch of its own; it is configured in its editor.
+  return null;
+}
+
+/** Turn on the stage a failure named, so the retry can include it. */
+export function enablePpDependency(dependency: PpDependencyInfo): void {
+  const gp = useGlobalParamsStore.getState();
+  switch (dependency.id) {
+    case 'ppVae': gp.setPpVaeReencode(true); break;
+    case 'stableStep': gp.setStableStepOn(true); break;
+    case 'spectral': gp.setSpectralLifterEnabled(true); break;
+    case 'naturalizer': gp.setVocalNaturalizerEnabled(true); break;
+    case 'plugin': gp.setPostprocessEnabled(true); break;
   }
 }
 

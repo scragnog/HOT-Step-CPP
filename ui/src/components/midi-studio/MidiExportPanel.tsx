@@ -9,13 +9,15 @@ import React, { useState } from 'react';
 import { Copy, Download, Loader2, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { midiJobsOptions, midiNotesOptions } from '../../queries/studios/midi';
-import { queryManager } from '../../queries/invalidation';
-import { channelLabel, exportMidi, getMidiAbc, type MidiExportOptions } from '../../services/midiStudioApi';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
-import { QueryError } from '../shared/QueryError';
+import { midiJobsOptions, midiNotesOptions } from '@/queries/studios/midi';
+import { queryManager } from '@/queries/invalidation';
+import { channelLabel, exportMidi, getMidiAbc, type MidiExportOptions } from '@/services/midiStudioApi';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { saveText } from '@/utils/storage/saveFile';
+import { formatDecimal } from '@/utils/format/format';
 
 interface Props {
   jobId: string;
@@ -68,7 +70,7 @@ export const MidiExportPanel: React.FC<Props> = ({ jobId, initial }) => {
         <label className="flex flex-col gap-1">
           <ParamLabel label={t('midiStudio.export.bpmLabel')} meta={t('midiStudio.export.blankDetected')}
             info={t('midiStudio.export.bpmInfo')} />
-          <input className={input} type="number" min={20} max={400} step={0.1} placeholder={grid.bpm.toFixed(1)}
+          <input className={input} type="number" min={20} max={400} step={0.1} placeholder={formatDecimal(grid.bpm, 1)}
             value={opts.bpm ?? ''} onChange={e => set({ bpm: num(e.target.value) })} />
         </label>
         <label className="flex flex-col gap-1">
@@ -164,12 +166,7 @@ const AbcRow: React.FC<{ jobId: string }> = ({ jobId }) => {
       const r = await getMidiAbc(jobId, { ins: ins >= 0 ? ins : undefined, melodyOnly: !chords });
       if (action === 'copy') await navigator.clipboard.writeText(r.abc);
       else {
-        const url = URL.createObjectURL(new Blob([r.abc], { type: 'text/plain' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'lead-sheet.abc';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        saveText(r.abc, 'lead-sheet.abc', 'text/plain');
       }
       return { action, summary: r.summary };
     },

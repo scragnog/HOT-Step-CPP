@@ -9,23 +9,23 @@
 import React, { useEffect, useRef } from 'react';
 import { AlertTriangle, GraduationCap, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useBackendStore } from '../../stores/backendStore';
-import { useTrainingStore, type TrainingPhase } from '../../stores/trainingStore';
-import { CapabilityBanner } from './CapabilityBanner';
-import { DatasetDetail } from './DatasetDetail';
-import { DatasetList } from './DatasetList';
-import { MonitorPanel } from './MonitorPanel';
-import { PhaseStepper } from './PhaseStepper';
-import { RefinePanel } from './RefinePanel';
-import { ReviewPanel } from './ReviewPanel';
-import { PreprocessPanel } from './PreprocessPanel';
-import { TrainPanel } from './TrainPanel';
-import { TrainingWorkerBar } from './TrainingWorkerBar';
-import { Yue2BatchPanel } from './Yue2BatchPanel';
-import { getTrainingPlugin } from './trainingPlugins';
-import { resolvePhase } from './trainingTargets';
-import { useTrainingTarget } from './useTrainingTarget';
-import { useTrainingJobProjection } from '../../queries/training-runs/hooks';
+import { useBackendStore } from '@/stores/backendStore';
+import { useTrainingStore, type TrainingPhase } from '@/stores/trainingStore';
+import { CapabilityBanner } from './panels/CapabilityBanner';
+import { DatasetDetail } from './datasets/DatasetDetail';
+import { DatasetList } from './datasets/DatasetList';
+import { MonitorPanel } from './runs/MonitorPanel';
+import { PhaseStepper } from './panels/PhaseStepper';
+import { RefinePanel } from './panels/RefinePanel';
+import { ReviewPanel } from './runs/ReviewPanel';
+import { PreprocessPanel } from './panels/PreprocessPanel';
+import { TrainPanel } from './panels/TrainPanel';
+import { TrainingWorkerBar } from './panels/TrainingWorkerBar';
+import { Yue2BatchPanel } from './panels/Yue2BatchPanel';
+import { getTrainingPlugin } from './lib/trainingPlugins';
+import { resolvePhase } from './lib/trainingTargets';
+import { useTrainingTarget } from './hooks/useTrainingTarget';
+import { useTrainingJobProjection } from '@/queries/training-runs/hooks';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 //

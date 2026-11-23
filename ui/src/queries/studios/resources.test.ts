@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createQueryClient, queryClient } from '../client';
+import { createQueryClient, queryClient } from '@/queries/client';
 import { projectOptions, inspirePromptOptions } from './resources';
 import { lyricsOptions } from './lyrics';
-import { lrcOptions } from '../shell-queue/lyrics';
+import { lrcOptions } from '@/queries/shell-queue/lyrics';
 import { waitForSnapshot } from './wait';
-import { serverKey } from '../keys';
-import { saveInstagenPrompt } from '../../services/inspireApi';
+import { serverKey } from '@/queries/keys';
+import { saveInstagenPrompt } from '@/services/inspireApi';
 import { QueryObserver } from '@tanstack/react-query';
 import { studioPluginsOptions } from './shared';
-import { sharedKeys } from '../keys';
-import { apiClient } from '../../services/httpClient';
-import type { PluginRegistry } from '../../types/pluginTypes';
+import { sharedKeys } from '@/queries/keys';
+import { apiClient } from '@/services/httpClient';
+import type { PluginRegistry } from '@/types/pluginTypes';
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -27,7 +27,7 @@ test('Repaint and player variants share the LRC request and sidecar invalidation
     const results = await Promise.all([client.query(studio), client.query(player)]);
     assert.deepEqual(results, ['[00:01] Words', '[00:01] Words']);
     assert.equal(calls, 1);
-    const { queryManager } = await import('../invalidation');
+    const { queryManager } = await import('@/queries/invalidation');
     await queryManager.sidecars.all(client);
     assert.equal(client.getQueryState(studio.queryKey)?.isInvalidated, true);
   } finally { globalThis.fetch = original; client.clear(); }

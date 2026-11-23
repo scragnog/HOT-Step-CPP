@@ -1,8 +1,9 @@
 import { apiClient, type ClientOptions, type ReadOptions } from './httpClient';
-import { readSnapshot } from '../queries/cover-lyrics/reads';
-import { coverLyricWorkflowApi as workflowApi, followCoverLyricJob as followJob } from '../queries/cover-lyrics/workflows';
+import { readSnapshot } from '@/queries/cover-lyrics/reads';
+import { coverLyricWorkflowApi as workflowApi, followCoverLyricJob as followJob } from '@/queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 import type { WrittenSongIntent } from '../../../server/src/contracts/resolution';
+import { newId } from '@/utils/id';
 
 export type LyricBatchRequest = {
   type: 'profile' | 'generate' | 'refine' | 'fetch';
@@ -20,9 +21,9 @@ async function submit(path: string, body: unknown, opts?: ClientOptions): Promis
 }
 
 export const lyricWorkflowApi = {
-  submitBatch: (items: LyricBatchRequest[], options: { concurrency?: number; silent?: boolean } = {}, idempotencyKey = crypto.randomUUID()) =>
+  submitBatch: (items: LyricBatchRequest[], options: { concurrency?: number; silent?: boolean } = {}, idempotencyKey = newId()) =>
     submit('workflow-batches', { items, idempotencyKey, concurrency: options.concurrency }, options.silent ? { silent: true } : undefined),
-  submitRenders: (intents: WrittenSongIntent[], idempotencyKey = crypto.randomUUID()) =>
+  submitRenders: (intents: WrittenSongIntent[], idempotencyKey = newId()) =>
     submit('workflow-renders', { intents, idempotencyKey }),
   cancel: (id: string) => workflowApi.cancel(id),
   list: (options: ReadOptions = {}) => readSnapshot<{ jobs: WorkflowJob[] }>('workflow', '/workflows/jobs?kind=lyric-batch', options, 0),

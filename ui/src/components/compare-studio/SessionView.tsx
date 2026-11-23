@@ -2,25 +2,23 @@
 // Keys: Space play/pause, 1-9 switch active take, B (or Tab) A/B quick switch.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { compareQueries } from '../../queries/compare/queries';
-import { useArchiveCompareSession, useDeleteCompareSession } from '../../queries/compare/writes';
-import type { CompareAnalysis, CompareSession } from '../../services/compareApi';
+import { compareQueries } from '@/queries/compare/queries';
+import { useArchiveCompareSession, useDeleteCompareSession } from '@/queries/compare/writes';
+import type { CompareAnalysis, CompareSession } from '@/services/compareApi';
 import { useAbEngine, type AbEngine } from './useAbEngine';
 import { TakeRow } from './TakeRow';
 import { DiffTrace } from './DiffTrace';
 import { LoopOverlay, Playhead } from './Waveform';
-import { Toggle } from '../shared/Toggle';
-import { QueryError } from '../shared/QueryError';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { formatClock } from '@/utils/format/format';
+import { QueryError } from '@/components/shared/feedback/QueryError';
 import { initialPair, normalizePair, setSlot, tapTake, toggleTarget, type AbPair } from './abPair';
 
-const mmss = (s: number) => {
-  const v = Math.max(0, s || 0);
-  return `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}`;
-};
+const mmss = (s: number) => formatClock(s);
 
 const TimeLabel: React.FC<{ engine: AbEngine; duration: number }> = ({ engine, duration }) => {
   const t = engine.useCurrentTime();

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { QueryObserver } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
+import { createQueryClient } from '@/queries/client';
 import { midiJobsOptions, midiStatusOptions, midiNotesOptions, removeMidiJob } from './midi';
-import { ApiError } from '../../services/httpClient';
-import type { MidiJobSummary } from '../../services/midiStudioApi';
+import { ApiError } from '@/services/httpClient';
+import type { MidiJobSummary } from '@/services/midiStudioApi';
 
 const job: MidiJobSummary = { id: 'test-job', status: 'transcribing', sourceFileName: 'test.wav', model: 'small', noteCount: 0, durationSec: 1, createdAt: '' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

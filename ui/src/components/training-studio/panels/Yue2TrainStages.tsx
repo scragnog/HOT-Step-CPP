@@ -1,0 +1,348 @@
+// Yue2TrainStages.tsx — Training Studio phase 3, YuE2 branch: the seven-stage
+// page.
+//
+// Seven stages, fixed top-to-bottom order: 1 latent cache, 2 codes, 3 lead
+// sheets, 4 vocal stems, 5 lyric cursor spans, 6 NAR LoRA training, 7 AR LoRA
+// training. Each stage is its own card — exported from Yue2TrainCard.tsx (1
+// Yue2PreprocessCard, 6 Yue2NarTrainCard) or Yue2ArTrainCard.tsx (2
+// Yue2TokenizeCard, 3 Yue2SheetCard, 4 Yue2StemsCard, 5 Yue2AlignCard, 7
+// Yue2ArTrainStageCard) — and this file owns nothing about
+// any one stage's form. What it DOES own: the ONE useYue2Status() and ONE
+// useYue2ArStatus() call every stage reads from, so seven cards never
+// independently re-fetch the same two payloads; the licence banner and the
+// status-fetch error banner, both rendered once, above every stage; and the
+// "Perform all stages" control — identical top and bottom — submits a
+// captured server preparation command.
+//
+// THE RELOAD CALLBACK REFRESHES BOTH HOOKS. Stage 1 (latents) and stage 4
+// (NAR training) change what useYue2ArStatus considers blocked for stages 2,
+// 3 and 5 — its own `stages.preprocess.done` mirrors the same latent cache —
+// and stage 2 or 3 finishing changes the manifest useYue2Status would be
+// reading if anything here still read it. Two stale copies of "is the cache
+// ready" is how a card starts lying, so both hooks reload together.
+//
+// The preflight line is advisory; the server checks current artifacts before
+// each accepted stage. The status panel polls the durable command on reconnect.
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ListChecks, Loader2, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { pollWhile } from '@/queries/contract';
+import { runQueries, trainingWritePlan } from '@/queries/training-runs/queries';
+import type { Yue2PreparationSummary } from '@/services/trainingPreparationApi';
+
+import { commandYue2Preparation } from '@/services/trainingPreparationApi';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { Yue2AitkTrainCard } from '@/components/training-studio/cards/Yue2AitkTrainCard';
+import {
+  Yue2AlignCard, Yue2SheetCard,
+  Yue2StemsCard,
+  Yue2TokenizeCard,
+} from '@/components/training-studio/cards/Yue2ArTrainCard';
+import { Yue2ClearPreparedCard } from '@/components/training-studio/cards/Yue2ClearPreparedCard';
+import { Yue2PreprocessCard } from '@/components/training-studio/cards/Yue2TrainCard';
+import { useYue2ArStatus } from '@/components/training-studio/hooks/useYue2ArStatus';
+import { useYue2Status } from '@/components/training-studio/hooks/useYue2Status';
+import { TrainingAllStagesCard, TrainingBatchCard } from '@/components/training-studio/cards/Yue2StageCard';
+import { useActiveTrainingJob } from '@/queries/training-runs/hooks';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { CARD } from '@/components/training-studio/lib/yue2CardUi';
+
+const LYRIC_TIMING_KEY = 'hs-yue2-aitk-lyric-timing:';
+const RunAllControl: React.FC<{
+  datasetId: string;
+  trigger: string;
+  skipLabels: string[];
+  disabled: boolean;
+  jobBusyElsewhere: boolean;
+  runAllActive: boolean;
+  runAllStage: number | null;
+  onQueueMultiple: () => void;
+  /** Joint Training submits the card's current form in the server command. */
+  onRun?: () => void;
+  /** Joint Training's shorter stage list; overrides the legacy seven-name map. */
+  stageNames?: Record<number, string>;
+  /** Pre-flight line for the nothing-is-skipped case. */
+  preflightAll?: string;
+}> = ({ datasetId, trigger, skipLabels, disabled, jobBusyElsewhere, runAllActive, runAllStage, onQueueMultiple, onRun, stageNames, preflightAll }) => {
+  const { t } = useTranslation();
+  const runYue2AllStages = useTrainingStore(s => s.runYue2AllStages);
+
+  const total = stageNames ? Object.keys(stageNames).length : 7;
+  const stageName = (n: number): string => {
+    if (stageNames && stageNames[n]) return stageNames[n];
+    switch (n) {
+      case 1: return t('trainingStudio.yue2.runAllStageName1', 'latent cache');
+      case 2: return t('trainingStudio.yue2.runAllStageName2', 'codes');
+      case 3: return t('trainingStudio.yue2.runAllStageName3', 'lead sheets');
+      case 4: return t('trainingStudio.yue2.runAllStageName4', 'vocal stems');
+      case 5: return t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans');
+      case 6: return t('trainingStudio.yue2.runAllStageName6', 'NAR LoRA training');
+      case 7: return t('trainingStudio.yue2.runAllStageName7', 'AR LoRA training');
+      default: return '';
+    }
+  };
+
+  return (
+    <TrainingAllStagesCard
+      description={skipLabels.length > 0
+        ? t('trainingStudio.yue2.runAllPreflightSkip',
+            'Runs every stage below that is not already complete, in order. Already done, so skipped: '
+            + '{{skip}}.', { skip: skipLabels.join(', ') })
+        : preflightAll ?? t('trainingStudio.yue2.runAllPreflight',
+            'Runs all seven stages below in order, from the latent cache through the AR LoRA.')}
+      hint={t('trainingStudio.yue2.runAllReloadWarning',
+        'Preparation continues on the server if you close or reload this page. Return here to see its status.')}
+      onRun={() => { if (onRun) onRun(); else void runYue2AllStages(datasetId, trigger); }}
+      disabled={disabled}
+      icon={runAllActive ? <Loader2 size={15} className="animate-spin" /> : <ListChecks size={15} />}
+      label={runAllActive && runAllStage
+        ? t('trainingStudio.yue2.runAllRunning', 'Running stage {{n}} of {{total}}: {{name}}',
+            { n: runAllStage, total, name: stageName(runAllStage) })
+        : t('trainingStudio.yue2.runAllStart', 'Perform all stages')}>
+      {!runAllActive && jobBusyElsewhere && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-2">
+          {t('trainingStudio.yue2.runAllBusyElsewhere',
+            'A stage is already running from its own Start button — wait for it to finish.')}
+        </p>
+      )}
+      {/* The same chain over SEVERAL datasets. Offered here as well as on the
+          dataset grid because this page is where someone stands when they
+          realise they have five more albums to get through. */}
+      <button
+        onClick={onQueueMultiple}
+        className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline"
+      >
+        <ListChecks size={12} /> {t('trainingStudio.yue2.batch.ctaInline', 'Queue several datasets…')}
+      </button>
+    </TrainingAllStagesCard>
+  );
+};
+
+/** `section`: 'prepare' = the Prepare phase (cache, codes, lead sheets, optional
+ *  stems and alignment); 'train' = the Train phase (joint training, batches and
+ *  the ladder). The one-click chain on Train still runs any missing preparation. */
+export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; section?: 'prepare' | 'train' }> = ({ datasetId, trigger, section = 'train' }) => {
+  const { t } = useTranslation();
+  const [lyricTiming, setLyricTiming] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    // 2026-09-28 reset of every stored training setting: lyric timing back off, once.
+    const reset = `${LYRIC_TIMING_KEY}${datasetId}:reset-2026-09-28`;
+    try {
+      if (!window.localStorage.getItem(reset)) {
+        window.localStorage.removeItem(`${LYRIC_TIMING_KEY}${datasetId}`);
+        window.localStorage.setItem(reset, '1');
+        return false;
+      }
+      return window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`) === 'true';
+    } catch { return false; /* storage full or unavailable */ }
+  });
+  const [, setTimingLocked] = useState(false);
+  const storeError = useTrainingStore(s => s.error);
+  const activeJob = useActiveTrainingJob();
+  const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
+  const yue2RunAllStage = useTrainingStore(s => s.yue2RunAllStage);
+  const runYue2JointStages = useTrainingStore(s => s.runYue2JointStages);
+
+  // The Joint Training card hands its own start function out through this
+  // Capture the card's current form before submitting the whole chain.
+  const jointStartRef = React.useRef<(() => Promise<Record<string, unknown>>) | null>(null);
+  const exposeJointStart = React.useCallback((fn: () => Promise<Record<string, unknown>>) => { jointStartRef.current = fn; }, []);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const client = useQueryClient();
+  const preparationQuery = useQuery({ ...runQueries.preparations(datasetId),
+    refetchInterval: pollWhile<Yue2PreparationSummary[]>(data => yue2RunAllActive || !data
+      || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))) });
+  const preparation = preparationQuery.data?.[0] ?? null;
+  const controlMut = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'pause' | 'resume' | 'cancel' | 'retry' }) => commandYue2Preparation(id, action),
+    onSuccess: () => void trainingWritePlan(client, null),
+    onError: error => setCaptureError(errorMessage(error)),
+  });
+  const controlPreparation = (action: 'pause' | 'resume' | 'cancel' | 'retry') => {
+    if (!preparation) return;
+    setCaptureError(null);
+    controlMut.mutate({ id: preparation.id, action });
+  };
+  const startJointChain = async () => {
+    setCaptureError(null);
+    try {
+      if (!jointStartRef.current) throw new Error('Joint training form is unavailable');
+      const overrides = await jointStartRef.current();
+      await runYue2JointStages(datasetId, lyricTiming, overrides);
+    } catch (error) {
+      setCaptureError(errorMessage(error));
+    }
+  };
+
+  const { status: yue2Status, error: yue2StatusError, reload: reloadYue2Status } = useYue2Status(datasetId);
+  const { status: arStatus, error: arStatusError, reload: reloadArStatus } = useYue2ArStatus(datasetId);
+
+  // Bumped on every explicit reload, on top of the two hooks' own
+  // job-finished auto-refresh — the outcomes poll below has no `activeJob`
+  // awareness of its own, so it rides this one nonce instead of duplicating
+  // that logic a third time.
+  const [aitkBatchOpen, setAitkBatchOpen] = useState(false);
+  const reload = () => { reloadYue2Status(); reloadArStatus(); };
+
+  const jobStatus = activeJob?.status;
+  const jobBusy = jobStatus === 'queued' || jobStatus === 'running';
+  const preparationBusy = !!preparation && ['running', 'pausing', 'paused', 'cancelling'].includes(preparation.status);
+
+  const effectiveTrigger = trigger ?? '';
+
+  if ((!yue2Status && !yue2StatusError) || (!arStatus && !arStatusError)) {
+    return (
+      <div className="flex items-center justify-center py-20 text-zinc-500 text-sm">
+        <Loader2 size={18} className="animate-spin mr-2" /> …
+      </div>
+    );
+  }
+
+
+  const setAitkLyricTiming = (value: boolean) => {
+    setLyricTiming(value);
+    window.localStorage.setItem(`${LYRIC_TIMING_KEY}${datasetId}`, String(value));
+  };
+
+  {
+    // Preparation skip preview for the joint chain: stems and alignment only
+    // matter while the lyric-timing objective is on.
+    const jointSkipLabels: string[] = [];
+    if (arStatus?.stages.preprocess.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName1', 'latent cache'));
+    if (arStatus?.stages.tokenize.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName2', 'codes'));
+    if (arStatus?.stages.sheet.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'lead sheets'));
+    if (lyricTiming) {
+      if ((arStatus?.stages.align.stemsReady ?? 0) > 0) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'vocal stems'));
+      if (arStatus?.stages.align.done) jointSkipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'));
+    }
+    // With timing off the chain's final stage lands on the slot-4 number, so
+    // the name map agrees with the chain's own numbering.
+    const jointTrainingName = t('trainingStudio.yue2.runAllJointStageName', 'joint training');
+    const jointStageNames: Record<number, string> = lyricTiming
+      ? {
+        1: t('trainingStudio.yue2.runAllStageName1', 'latent cache'),
+        2: t('trainingStudio.yue2.runAllStageName2', 'codes'),
+        3: t('trainingStudio.yue2.runAllStageName3', 'lead sheets'),
+        4: t('trainingStudio.yue2.runAllStageName4', 'vocal stems'),
+        5: t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'),
+        6: jointTrainingName,
+      }
+      : {
+        1: t('trainingStudio.yue2.runAllStageName1', 'latent cache'),
+        2: t('trainingStudio.yue2.runAllStageName2', 'codes'),
+        3: t('trainingStudio.yue2.runAllStageName3', 'lead sheets'),
+        4: jointTrainingName,
+      };
+    const prepareStageNames: Record<number, string> = lyricTiming
+      ? { 1: jointStageNames[1], 2: jointStageNames[2], 3: jointStageNames[3], 4: jointStageNames[4], 5: jointStageNames[5] }
+      : { 1: jointStageNames[1], 2: jointStageNames[2], 3: jointStageNames[3] };
+    const prepareRunAllControl = (
+      <RunAllControl
+        datasetId={datasetId}
+        trigger={effectiveTrigger}
+        skipLabels={jointSkipLabels}
+        disabled={yue2RunAllActive || jobBusy || preparationBusy}
+        jobBusyElsewhere={jobBusy}
+        runAllActive={yue2RunAllActive}
+        runAllStage={yue2RunAllStage}
+        onQueueMultiple={() => setAitkBatchOpen(true)}
+        onRun={() => void runYue2JointStages(datasetId, lyricTiming)}
+        stageNames={prepareStageNames}
+        preflightAll={t('trainingStudio.yue2.runAllPreparePreflight',
+          'Runs every preparation stage below in order. Training is on the Train page.')}
+      />
+    );
+    const jointRunAllControl = (
+      <RunAllControl
+        datasetId={datasetId}
+        trigger={effectiveTrigger}
+        skipLabels={jointSkipLabels}
+        disabled={yue2RunAllActive || jobBusy || preparationBusy}
+        jobBusyElsewhere={jobBusy}
+        runAllActive={yue2RunAllActive}
+        runAllStage={yue2RunAllStage}
+        onQueueMultiple={() => setAitkBatchOpen(true)}
+        onRun={() => void startJointChain()}
+        stageNames={jointStageNames}
+        preflightAll={t('trainingStudio.yue2.runAllJointPreflight',
+          'Runs every stage below in order, ending with joint training.')}
+      />
+    );
+    const errorBanner = (storeError || captureError) && (
+      <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
+        <XCircle size={16} className="mt-0.5 flex-shrink-0" />
+        <span className="min-w-0 break-words">{captureError || storeError}</span>
+      </div>
+    );
+    const preparationStatus = preparation && (
+      <div className={CARD}>
+        <p className="text-xs font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.yue2.preparationStatus', 'Preparation')}: {preparation.status}
+        </p>
+        <div className="mt-1 text-[11px] text-zinc-500">
+          {preparation.stages.map(stage => <p key={stage.stage}>
+            {stage.stage}: {stage.status}{stage.jobId ? ` · ${stage.jobId}` : ''}
+            {stage.error ? ` · ${stage.error}` : ''}
+          </p>)}
+        </div>
+        {preparation.error && <p className="mt-1 text-xs text-red-500">{preparation.error}</p>}
+        <div className="mt-2 flex gap-2 text-xs">
+          {preparation.status === 'running' && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('pause')}>{t('trainingStudio.yue2.preparationPause', 'Pause')}</button>}
+          {(preparation.status === 'paused' || preparation.status === 'pausing') && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('resume')}>{t('trainingStudio.yue2.preparationResume', 'Resume')}</button>}
+          {['running', 'pausing', 'paused'].includes(preparation.status) && <button className="text-red-500 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('cancel')}>{t('trainingStudio.yue2.preparationCancel', 'Cancel')}</button>}
+          {['failed', 'interrupted'].includes(preparation.status) && <button className="text-amber-600 hover:underline" disabled={controlMut.isPending} onClick={() => controlPreparation('retry')}>{t('trainingStudio.yue2.preparationRetry', 'Retry')}</button>}
+        </div>
+      </div>
+    );
+    if (section === 'prepare') {
+      return (
+        <div className="flex flex-col gap-4">
+          {errorBanner}
+          {preparationStatus}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {prepareRunAllControl}
+            <Yue2ClearPreparedCard datasetId={datasetId} disabled={jobBusy || yue2RunAllActive} />
+          </div>
+          {yue2Status && <Yue2PreprocessCard datasetId={datasetId} status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
+          {arStatus && <Yue2TokenizeCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          <div className={CARD}>
+            <Toggle
+              accent="amber"
+              checked={lyricTiming}
+              disabled={yue2RunAllActive}
+              onChange={setAitkLyricTiming}
+              label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
+              info={lyricTiming
+                ? t('trainingStudio.yue2.method.lyricTimingOn', 'Runs the vocal stem and forced-alignment stages before training. The current recipe does not use the timing loss, so this only costs time; leave it off unless you want the alignment data for something else.')
+                : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
+            />
+          </div>
+          {lyricTiming && arStatus && <Yue2StemsCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          {lyricTiming && arStatus && <Yue2AlignCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-4">
+        {errorBanner}
+        {preparationStatus}
+        <TrainingBatchCard onOpen={() => setAitkBatchOpen(true)}
+          description={t('trainingStudio.yue2.aitkBatch.short', 'Run preparation and joint AR + NAR training for multiple datasets in sequence.')} />
+        {jointRunAllControl}
+        <p className="text-[11px] text-zinc-500 -mt-2">{t('trainingStudio.yue2.prepareMoved', 'Latent cache, codes, lead sheets and lyric timing are on the Prepare page. Perform all stages still runs any of them that are missing before training.')}</p>
+        <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
+          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} onTimingLockedChange={setTimingLocked}
+          exposeStart={exposeJointStart} />
+        <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
+      </div>
+    );
+  }
+};
+
+export default Yue2TrainStages;

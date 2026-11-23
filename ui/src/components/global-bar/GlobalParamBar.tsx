@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { aceModelsOptions } from '../../queries/global-models/options';
+import { aceModelsOptions } from '@/queries/global-models/options';
 // GlobalParamBar.tsx — Horizontal top bar with hover-to-expand engine config sections
 //
 // Renders 5 sections: Models, Adapters, Generation, LM/Thinking, Post-Processing.
@@ -11,10 +11,10 @@ import { createPortal } from 'react-dom';
 import { Cpu, Plug, Sliders, Brain, AudioWaveform, Bookmark, AlertTriangle, Download, X, Menu, ChevronDown, Settings, ListMusic } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarSection, ToggleSwitch, ACCENT_STYLES } from './BarSection';
-import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { useBackendStore } from '../../stores/backendStore';
-import { ModelManagerModal } from '../model-manager/ModelManagerModal';
+import { useGlobalParams, useGlobalParamsStore } from '@/context/GlobalParamsContext';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { useBackendStore } from '@/stores/backendStore';
+import { ModelManagerModal } from '@/components/model-manager/ModelManagerModal';
 import { ModelsDropdown, ModelsBadge } from './ModelsDropdown';
 import { BackendModelsDropdown, BackendModelsBadge } from './BackendModelsDropdown';
 import { AdaptersDropdown, AdaptersBadge } from './AdaptersDropdown';
@@ -26,13 +26,13 @@ import { BackendGenerationDropdown, BackendGenerationBadge } from './BackendGene
 import { LmThinkingDropdown, LmThinkingBadge } from './LmThinkingDropdown';
 import { BackendLmDropdown, BackendLmBadge } from './BackendLmDropdown';
 import { PostProcessingDropdown, PostProcessingBadge } from './PostProcessingDropdown';
-import { DiscoPulseWrapper } from '../shared/DiscoPulseWrapper';
+import { DiscoPulseWrapper } from '@/components/shared/DiscoPulseWrapper';
 import { MonitorBar } from './MonitorBar';
-import { useVstChainStore } from '../../stores/vstChainStore';
+import { useVstChainStore } from '@/stores/vstChainStore';
 import { ProfilesModal } from './ProfilesModal';
-import { QueryError } from '../shared/QueryError';
+import { QueryError } from '@/components/shared/feedback/QueryError';
 import { healthOptions } from '../../queries/shell-queue/settings';
-import { engineNotice, noModelsRefetchInterval } from '../shared/noModelsPoll';
+import { engineNotice, noModelsRefetchInterval } from '@/components/shared/status/noModelsPoll';
 import { usePlaylist } from '../../stores/playlistStore';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;

@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { QueryObserver } from '@tanstack/react-query';
-import { createQueryClient } from '../client';
-import { sharedKeys } from '../keys';
-import { ApiError } from '../../services/httpClient';
+import { createQueryClient } from '@/queries/client';
+import { sharedKeys } from '@/queries/keys';
+import { ApiError } from '@/services/httpClient';
 import { pluginsOptions, capabilitiesOptions, backendModelsOptions, registryOptions,
   vramOptions, invalidateModels, usableCapabilities } from './options';
 import { bridgeDownloads, downloadsKey, downloadFrame } from './downloads';
 import { adapterScanOptions } from './options';
-import { adapterScanOptions as shellScanOptions } from '../shell-queue/settings';
+import { adapterScanOptions as shellScanOptions } from '@/queries/shell-queue/settings';
 import { projectQuery } from './projection';
-import type { BackendCapabilities } from '../../stores/backendStore';
+import type { BackendCapabilities } from '@/stores/backendStore';
 
 const clients: ReturnType<typeof createQueryClient>[] = [];
 const client = () => { const c = createQueryClient(); clients.push(c); return c; };

@@ -7,7 +7,7 @@ import { queryClient } from '../../queries/client';
 import { TD } from '../../queries/training-data/queries';
 import { resourceKey } from '../../queries/keys';
 import { keysPlan, writeAndInvalidate } from '../../queries/writes';
-import { ParamLabel } from '../shared/ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 export const CaptionReplace: React.FC<{
   datasetId: string; worker: string | null; sampleIds: string[]; onClose: () => void;

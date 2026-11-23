@@ -1,4 +1,5 @@
 import type { UpdateApplyResult, UpdatesStatus, UpdateRestartAttempt } from '../services/updatesApi';
+import { clamp01 } from '@/utils/format/clamp';
 
 const activePhases = new Set(['checking', 'downloading', 'verifying', 'extracting']);
 export interface UpdateRefusal { error: string; blockers: string[]; errors: string[] }
@@ -31,7 +32,7 @@ export function updatesViewState(s: UpdatesStatus, refusal: UpdateRefusal | null
     action: ready ? 'install' as const : offered && !active ? 'download' as const : null,
     candidate: offered ? p!.candidate : null,
     phase: p?.phase ?? 'idle',
-    progress: p && p.totalBytes > 0 ? Math.min(1, Math.max(0, p.downloadedBytes / p.totalBytes)) : null,
+    progress: p && p.totalBytes > 0 ? clamp01(p.downloadedBytes / p.totalBytes) : null,
     prepareError: offered && p!.phase === 'failed' ? p!.error : null,
     reason: offered ? null : p?.reason || s.install?.reason || null,
     stopping: s.install?.phase === 'stopping',

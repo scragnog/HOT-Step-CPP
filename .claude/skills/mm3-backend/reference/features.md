@@ -41,7 +41,7 @@ so changing the solver in MM3 mode rewrote ACE's). `BACKEND_SCOPED_FIELDS` in
 for `ace` and `hs-*@<backendId>` for anything else; a backend's first visit
 seeds from the bare key, and `useBackendStore.subscribe` re-hydrates the store
 on every switch. Anything writing one of those keys **outside the setters**
-(`utils/paramProfiles.ts`, `sendAuditionToCustomGen.ts`) must route through the
+(`utils/training/paramProfiles.ts`, `sendAuditionToCustomGen.ts`) must route through the
 exported `scopedKey()` — a bare-key write lands where the live store will never
 read it back, and the next backend switch silently undoes it.
 

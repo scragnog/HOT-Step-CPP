@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { coverArtStatusOptions, type CoverArtStatus } from '../../queries/shell-queue/queue';
-import { pollWhile } from '../../queries/contract';
-import { queryManager } from '../../queries/invalidation';
-import { apiClient } from '../../services/httpClient';
+import { coverArtStatusOptions, type CoverArtStatus } from '@/queries/shell-queue/queue';
+import { pollWhile } from '@/queries/contract';
+import { queryManager } from '@/queries/invalidation';
+import { apiClient } from '@/services/httpClient';
 // CoverArtDropdown.tsx — AI cover art toggle + download status
 //
 // Renders as an accordion section inside PostProcessingDropdown.
@@ -10,20 +10,16 @@ import { apiClient } from '../../services/httpClient';
 
 import React from 'react';
 import { Image, Download, X, Check, Loader2 } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
 import { ToggleSwitch } from './BarSection';
-import { QueryError } from '../shared/QueryError';
-import { ParamLabel } from '../shared/ParamLabel';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import { formatBytes } from '@/utils/format/format';
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-};
 
 const formatSpeed = (bytesPerSec: number): string => {
   if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
@@ -33,7 +29,9 @@ const formatSpeed = (bytesPerSec: number): string => {
 // ── Component ───────────────────────────────────────────────────
 
 export const CoverArtContent: React.FC = () => {
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    coverArtEnabled: s.coverArtEnabled, setCoverArtEnabled: s.setCoverArtEnabled,
+  })));
   const client = useQueryClient();
   const options = coverArtStatusOptions();
   const { data: status, isError, error, refetch } = useQuery({ ...options,
@@ -90,13 +88,15 @@ export const CoverArtContent: React.FC = () => {
                 Downloading... {status.download.overallProgress}%
               </span>
             </div>
-            <button
+            <HintButton
               onClick={() => cancelMut.mutate()} disabled={cancelMut.isPending}
+              label="Cancel download"
+              info="Stops the cover-art model download. Files already fetched stay cached, so a later download resumes."
+              ariaLabel="Cancel download"
               className="p-1 rounded hover:bg-red-500/10 text-zinc-500 hover:text-red-400 transition-colors"
-              title="Cancel download"
             >
               <X size={12} />
-            </button>
+            </HintButton>
           </div>
 
           {/* Overall progress bar */}
@@ -164,7 +164,7 @@ export const CoverArtContent: React.FC = () => {
 // ── Badge ────────────────────────────────────────────────────────
 
 export const CoverArtBadge: React.FC = () => {
-  const { coverArtEnabled } = useGlobalParams();
+  const coverArtEnabled = useGlobalParamsStore(s => s.coverArtEnabled);
   if (!coverArtEnabled) return null;
   return (
     <span className="text-[10px] text-pink-400/60 font-mono">Cover Art</span>

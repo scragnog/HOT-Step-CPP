@@ -6,14 +6,16 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { Slider } from '../shared/Slider';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
+import { useGlobalParams } from '@/context/GlobalParamsContext';
+import { Slider } from '@/components/shared/controls/Slider';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { HintButton } from '@/components/shared/controls/HintButton';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
-import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
-import type { LmRepMode } from '../../types';
+import { GLOBAL_PARAM_DEFAULTS } from '@/stores/globalParamsStore';
+import type { LmRepMode } from '@/types';
+import { formatDecimal } from '@/utils/format/format';
 
 /** One line each on what the mode costs you, since the audible trade-off is
  *  the whole point of the choice. */
@@ -152,7 +154,7 @@ export const LmThinkingDropdown: React.FC = () => {
             <p className="mt-1.5 text-[11px] leading-snug text-zinc-500">{REP_MODE_HELP[gp.lmRepMode] ?? REP_MODE_HELP.presence}</p>
           </div>
 
-          <Slider label={`Rep. Window (codes) — ${(gp.lmRepWindow / 5).toFixed(1)}s`} value={gp.lmRepWindow}
+          <Slider label={`Rep. Window (codes) — ${formatDecimal((gp.lmRepWindow / 5), 1)}s`} value={gp.lmRepWindow}
             onChange={gp.setLmRepWindow} min={8} max={256} step={8} showInput
             defaultValue={GLOBAL_PARAM_DEFAULTS.lmRepWindow}
             infoMeta="default 64 codes (12.8s) · range 8-256"
@@ -165,7 +167,7 @@ export const LmThinkingDropdown: React.FC = () => {
                 defaultValue={GLOBAL_PARAM_DEFAULTS.lmDryBase}
                 infoMeta="default 1.75 · range 1.05-4"
                 info="How fast the DRY penalty grows with the length of a verbatim repeat. Higher shuts down a repeating loop faster once it starts; lower lets a repeat run longer before the penalty bites." />
-              <Slider label={`DRY Min Match — ${(gp.lmDryMinLen / 5).toFixed(1)}s`} value={gp.lmDryMinLen}
+              <Slider label={`DRY Min Match — ${formatDecimal((gp.lmDryMinLen / 5), 1)}s`} value={gp.lmDryMinLen}
                 onChange={gp.setLmDryMinLen} min={2} max={32} step={1} showInput
                 defaultValue={GLOBAL_PARAM_DEFAULTS.lmDryMinLen}
                 infoMeta="default 3 codes (0.6s) · range 2-32"
@@ -238,10 +240,13 @@ export const LmThinkingDropdown: React.FC = () => {
               info="The random seed for caption rewriting, lyric handling and audio-code sampling. A fixed value with Use DiT Seed off reproduces the same LM output across runs; leave Use DiT Seed on to tie it to the Generation seed instead."
               onReset={!gp.lmSeedFollowsDit && gp.lmSeed !== GLOBAL_PARAM_DEFAULTS.lmSeed ? () => gp.setLmSeed(GLOBAL_PARAM_DEFAULTS.lmSeed) : undefined}
             />
-            <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
+            <HintButton onClick={() => setSeedDrawerOpen(true)}
+              label={t('seed.manager', 'Seed Manager')}
+              info={t('seed.managerLmInfo', 'Save the current LM seed or load a saved one. Saved seeds are shared by every generator.')}
+              ariaLabel={t('seed.manager', 'Seed Manager')}
               className="text-zinc-500 hover:text-amber-400 transition-colors">
               <Save size={12} />
-            </button>
+            </HintButton>
           </div>
           <div className="flex items-center gap-1.5">
             <ParamLabel label="Use DiT Seed" className="text-xs text-zinc-500"
@@ -276,11 +281,11 @@ export const LmThinkingBadge: React.FC = () => {
   const seedLabel = lmSeedFollowsDit ? 'DiT' : 'Fix';
   const csLabel = lmCodesMode === 'steps'
     ? (lmCodesSteps < inferenceSteps ? ` · CS ${lmCodesSteps}st` : '')
-    : (lmCodesStrength < 1.0 ? ` · CS ${lmCodesStrength.toFixed(2)}` : '');
+    : (lmCodesStrength < 1.0 ? ` · CS ${formatDecimal(lmCodesStrength, 2)}` : '');
 
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">
-      {useCotCaption ? 'CoT · ' : ''}T{lmTemperature.toFixed(2)} · CFG {lmCfgScale.toFixed(1)}{csLabel} · Seed {seedLabel}
+      {useCotCaption ? 'CoT · ' : ''}T{formatDecimal(lmTemperature, 2)} · CFG {formatDecimal(lmCfgScale, 1)}{csLabel} · Seed {seedLabel}
     </span>
   );
 };

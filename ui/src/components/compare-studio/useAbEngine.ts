@@ -11,7 +11,9 @@ import { readMedia } from '../../services/mediaTransport';
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { dbToLinear, levelMatchGainsDb } from './levelMatch';
-import { pauseGlobalPlayback, registerExternalPlayer } from '../../stores/playbackStore';
+import { pauseGlobalPlayback, registerExternalPlayer } from '@/stores/playbackStore';
+import { errorMessage } from '@/utils/format/errorMessage';
+import { useGlobalEvent } from '@/hooks/useGlobalEvent';
 
 export interface AbTake {
   id: string;
@@ -327,7 +329,7 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
         return buf;
       })
       .catch((e: unknown) => {
-        setErrors(er => ({ ...er, [id]: e instanceof Error ? e.message : String(e) }));
+        setErrors(er => ({ ...er, [id]: errorMessage(e) }));
         return null;
       })
       .finally(() => {
@@ -422,19 +424,15 @@ export function useAbEngine(takes: AbTake[]): AbEngine {
 
   // Tab background: the browser may suspend the context. Pause cleanly so the
   // playhead stays correct, and resume the context on return.
-  useEffect(() => {
-    const onVis = () => {
-      const ctx = ctxRef.current;
-      if (!ctx) return;
-      if (document.hidden) {
-        if (playingRef.current) pause();
-      } else if (ctx.state === 'suspended') {
-        void ctx.resume().catch(() => { /* needs a gesture */ });
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [pause]);
+  useGlobalEvent('visibilitychange', () => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    if (document.hidden) {
+      if (playingRef.current) pause();
+    } else if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => { /* needs a gesture */ });
+    }
+  }, { target: 'document' });
 
   // Cleanup on unmount.
   useEffect(() => () => {

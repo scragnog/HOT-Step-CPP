@@ -16,7 +16,7 @@
 // nothing explaining it is the case the rulebook exists to stop.
 
 import React from 'react';
-import { ParamLabel } from '../ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 
 const SIZE = {

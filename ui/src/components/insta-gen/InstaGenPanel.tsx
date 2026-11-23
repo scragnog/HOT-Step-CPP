@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { inspireProvidersOptions, inspirePromptOptions } from '../../queries/studios/resources';
-import { readSong } from '../../queries/shell-queue/queue';
-import { queryManager } from '../../queries/invalidation';
+import { inspireProvidersOptions, inspirePromptOptions } from '@/queries/studios/resources';
+import { readSong } from '@/queries/shell-queue/queue';
+import { queryManager } from '@/queries/invalidation';
 // InstaGenPanel.tsx — Main Insta-Gen studio container
 //
 // Genre-first music generation with three lyric modes:
@@ -14,9 +14,9 @@ import { queryManager } from '../../queries/invalidation';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sparkles, Music, Eye, EyeOff, Mic, MicOff, Bot, PenLine, Code2, Save, RotateCcw, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../../context/AuthContext';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
+import { useAuth } from '@/context/AuthContext';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { GenreSelector } from './GenreSelector';
 import { InspirePreview } from './InspirePreview';
 import {
@@ -26,22 +26,24 @@ import {
   followJob,
   type InstaWorkflowInput,
   type InspireResult,
-} from '../../services/inspireApi';
+} from '@/services/inspireApi';
 import {
   addManualQueueItem,
   updateManualQueueItem,
   completeManualQueueItem,
   failManualQueueItem,
-} from '../../stores/audioGenQueueStore';
-import { VOCAL_LANGUAGES } from '../../constants/languages';
-import { useBackendStore } from '../../stores/backendStore';
-import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
-import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
-import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
-import { StyledSelect } from '../shared/StyledSelect';
-import { Toggle } from '../shared/Toggle';
-import { ParamLabel } from '../shared/ParamLabel';
+} from '@/stores/audioGenQueueStore';
+import { VOCAL_LANGUAGES } from '@/constants/languages';
+import { useBackendStore } from '@/stores/backendStore';
+import { MM3_BACKEND_ID } from '@/utils/lyrics/captionForBackend';
+import { YUE2_BACKEND_ID } from '@/utils/lyrics/yue2CaptionSource';
+import { CoverArtSubjectSection } from '@/components/shared/songs/CoverArtSubjectSection';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { Toggle } from '@/components/shared/controls/Toggle';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { resolveInstaDuration } from './instaDuration';
+import { readJson } from '@/utils/storage/storageJson';
+import { writeJson } from '@/utils/storage/storageJson';
 
 type LyricMode = 'instrumental' | 'lyrics' | 'lyrics-ai';
 type Phase = 'input' | 'inspiring' | 'preview' | 'generating';
@@ -72,7 +74,6 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   const { token, sessionEpoch } = useAuth();
   void sessionEpoch;
   const client = useQueryClient();
-  const globalParams = useGlobalParams();
 
   // ── Persisted state ──
   const [previewEnabled, setPreviewEnabled] = usePersistedState('hs-instagen-preview', true);
@@ -167,17 +168,16 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   }, [token]);
 
   const captureInput = useCallback((): InstaWorkflowInput => {
-    let settings: Record<string, unknown> = {};
-    try { settings = JSON.parse(localStorage.getItem('ace-settings') || '{}'); } catch { /* defaults */ }
+    const settings = readJson<Record<string, unknown>>('ace-settings', {});
     return {
       caption: computedCaption, genres: [...selectedGenres], lyricMode, subject: subject.trim(),
       randomSubject, provider: selectedProvider, model: selectedModel, vocalLanguage, thinking,
-      engineParams: { ...globalParams.getGlobalParams(), duration: resolveInstaDuration(isAutoDurationRender()) },
+      engineParams: { ...useGlobalParamsStore.getState().getGlobalParams(), duration: resolveInstaDuration(isAutoDurationRender()) },
       expectedBackend: useBackendStore.getState().activeBackendId,
       coResident: typeof settings.coResident === 'boolean' ? settings.coResident : false,
       cacheLmCodes: typeof settings.cacheLmCodes === 'boolean' ? settings.cacheLmCodes : true,
     };
-  }, [computedCaption, selectedGenres, lyricMode, subject, randomSubject, selectedProvider, selectedModel, vocalLanguage, thinking, globalParams]);
+  }, [computedCaption, selectedGenres, lyricMode, subject, randomSubject, selectedProvider, selectedModel, vocalLanguage, thinking]);
 
   const trackRender = useCallback(async (jobId: string, queueId: string, capturedToken: string) => {
     updateManualQueueItem(queueId, { workflowJob: { id: jobId, token: capturedToken }, stage: 'Preparing song...' });
@@ -280,21 +280,21 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     if (!inspireResult) return;
     try {
       // Write to the same localStorage keys that CreatePanel's usePersistedState reads
-      localStorage.setItem('hs-caption', JSON.stringify(editedCaption));
-      localStorage.setItem('hs-lyrics', JSON.stringify(editedLyrics));
-      localStorage.setItem('hs-instrumental', JSON.stringify(lyricMode === 'instrumental'));
-      if (inspireResult.bpm) localStorage.setItem('hs-bpm', JSON.stringify(inspireResult.bpm));
+      writeJson('hs-caption', editedCaption);
+      writeJson('hs-lyrics', editedLyrics);
+      writeJson('hs-instrumental', lyricMode === 'instrumental');
+      if (inspireResult.bpm) writeJson('hs-bpm', inspireResult.bpm);
       // Not in MM3 mode: the Create panel hides its duration control there, so
       // writing one would leave a number in a box nobody can see or clear.
       if (inspireResult.duration && !isAutoDurationRender()) {
-        localStorage.setItem('hs-duration', JSON.stringify(inspireResult.duration));
+        writeJson('hs-duration', inspireResult.duration);
       }
-      if (inspireResult.keyScale) localStorage.setItem('hs-keyScale', JSON.stringify(inspireResult.keyScale));
-      if (inspireResult.timeSignature) localStorage.setItem('hs-timeSignature', JSON.stringify(inspireResult.timeSignature));
-      if (vocalLanguage) localStorage.setItem('hs-vocalLanguage', JSON.stringify(vocalLanguage));
+      if (inspireResult.keyScale) writeJson('hs-keyScale', inspireResult.keyScale);
+      if (inspireResult.timeSignature) writeJson('hs-timeSignature', inspireResult.timeSignature);
+      if (vocalLanguage) writeJson('hs-vocalLanguage', vocalLanguage);
       // Title from LLM or derived
       const title = inspireResult.title || '';
-      if (title) localStorage.setItem('hs-title', JSON.stringify(title));
+      if (title) writeJson('hs-title', title);
     } catch { /* ignore storage errors */ }
 
     localStorage.removeItem('hs-instagen-preview-document');

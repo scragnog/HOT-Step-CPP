@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { StyledSelect } from '../shared/StyledSelect';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 
 interface StylePreset {
   id: string;

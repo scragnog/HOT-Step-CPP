@@ -37,7 +37,7 @@ try {
       plugins: sheetRef < 0 ? [] : [{
         name: 'original-sheet-repro', enforce: 'pre',
         load(id) {
-          if (id.replaceAll('\\', '/').endsWith('/src/components/shared/BottomSheet.tsx')) {
+          if (id.replaceAll('\\', '/').endsWith('/src/components/shared/overlays/BottomSheet.tsx')) {
             return execFileSync('git', ['show', `${process.argv[sheetRef + 1]}:ui/src/components/shared/BottomSheet.tsx`], { cwd: ui, encoding: 'utf8' });
           }
         },

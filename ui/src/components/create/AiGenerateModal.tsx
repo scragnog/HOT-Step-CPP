@@ -15,13 +15,15 @@ import {
   runLlmInspire,
   generateRandomSubject,
   type InspireProvider,
-} from '../../services/inspireApi';
-import { VOCAL_LANGUAGES } from '../../constants/languages';
+} from '@/services/inspireApi';
+import { VOCAL_LANGUAGES } from '@/constants/languages';
 // The studios area's provider list: Insta-Gen reads the same cache entry.
-import { inspireProvidersOptions } from '../../queries/studios/resources';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
-import { QueryError } from '../shared/QueryError';
+import { inspireProvidersOptions } from '@/queries/studios/resources';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { QueryError } from '@/components/shared/feedback/QueryError';
+import { readJsonString, writeJson } from '@/utils/storage/storageJson';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 
 // ── Result type for the parent callback ──────────────────────────────────
 export interface AiGenerateResult {
@@ -48,10 +50,10 @@ const STORAGE_KEY_PROVIDER = 'hs-customgen-ai-provider';
 const STORAGE_KEY_MODEL = 'hs-customgen-ai-model';
 
 function loadPersisted(key: string): string {
-  try { return JSON.parse(localStorage.getItem(key) || '""'); } catch { return ''; }
+  return readJsonString(key);
 }
 function savePersisted(key: string, value: string) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+  writeJson(key, value);
 }
 
 // ── Component ────────────────────────────────────────────────────────────
@@ -180,14 +182,7 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
   }, [canSubmit, loading, generateMut]);
 
   // ── Keyboard shortcuts ──
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !loading) onClose();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [isOpen, loading, onClose]);
+  useEscapeKey(onClose, isOpen && !loading);
 
   if (!isOpen) return null;
 

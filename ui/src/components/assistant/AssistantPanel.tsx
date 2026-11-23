@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { assistantProvidersOptions } from '../../queries/studios/resources';
+import { assistantProvidersOptions } from '@/queries/studios/resources';
 // AssistantPanel.tsx — AI Assistant sidebar with streaming chat
 //
 // Follows the same sidebar pattern as TerminalPanel.tsx. Streams LLM
@@ -8,12 +8,12 @@ import { assistantProvidersOptions } from '../../queries/studios/resources';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Send, Trash2, Sparkles, ArrowRight, Check } from 'lucide-react';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { useAssistantActions, type ActionDiff } from '../../hooks/useAssistantActions';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { useAssistantActions, type ActionDiff } from '@/hooks/useAssistantActions';
 import { SimpleMarkdown } from './SimpleMarkdown';
-import { StyledSelect } from '../shared/StyledSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '@/components/shared/controls/StyledSelect';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import {
   chatStream,
   parseActions,
@@ -22,7 +22,7 @@ import {
   extractThinkingAndResponse,
   type ChatMessage,
   type AssistantAction,
-} from '../../services/assistantApi';
+} from '@/services/assistantApi';
 import './AssistantPanel.css';
 
 interface AssistantPanelProps {
@@ -60,7 +60,6 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, activeV
   const abortRef = useRef<AbortController | null>(null);
 
   // ── Hooks ──
-  const globalParams = useGlobalParams();
   const { applyActions, previewActions } = useAssistantActions();
 
   // ── Load providers on mount ──
@@ -122,7 +121,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, activeV
       try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
     };
     const currentSettings = {
-      ...globalParams.getGlobalParams(),
+      ...useGlobalParamsStore.getState().getGlobalParams(),
       // Active mode/view
       _activeView: activeView || 'create',
       // Content fields (stored in localStorage by CreatePanel)
@@ -181,7 +180,7 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, activeV
     );
 
     abortRef.current = abort;
-  }, [input, isStreaming, selectedProvider, selectedModel, globalParams, buildHistory]);
+  }, [input, isStreaming, selectedProvider, selectedModel, buildHistory]);
 
   // ── Handle Enter key ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

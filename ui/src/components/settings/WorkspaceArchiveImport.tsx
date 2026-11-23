@@ -7,9 +7,9 @@ import { workspaceArchiveImportJobOptions } from '../../queries/shell-queue/sett
 import { serverKey } from '../../queries/keys';
 import { dataFolderApi } from '../../services/dataFolderApi';
 import { queryManager } from '../../queries/invalidation';
-import { ConfirmDialog } from '../shared/ConfirmDialog';
-import { FileBrowserModal } from '../shared/FileBrowserModal';
-import { ParamLabel } from '../shared/ParamLabel';
+import { ConfirmDialog } from '@/components/shared/overlays/ConfirmDialog';
+import { FileBrowserModal } from '@/components/shared/overlays/FileBrowserModal';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 
 const gb = (n: number) => `${(n / 1e9).toFixed(2)} GB`;
 // The accepted import (id and target) survives the restart's page reload here, so the outcome can be checked afterwards.

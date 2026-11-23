@@ -1,7 +1,7 @@
 // yue2BestRung.ts — the Refine scoreboard's "best by score" rung, server side,
 // so a batch can finish a scored ladder without the page open.
 //
-// rungOverall mirrors ui/src/components/training-studio/RefinePanel.tsx
+// rungOverall mirrors ui/src/components/training-studio/panels/RefinePanel.tsx
 // (rungOverall + rungStats). Change both together.
 
 import { createHash } from 'node:crypto';

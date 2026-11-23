@@ -6,8 +6,8 @@ import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { createQueryClient } from '../../queries/client';
-import { envOptions, gpusOptions } from '../../queries/shell-queue/settings';
+import { createQueryClient } from '@/queries/client';
+import { envOptions, gpusOptions } from '@/queries/shell-queue/settings';
 import { useEnvSettingsForm, type EnvSettingsForm } from './useEnvSettingsForm';
 
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });

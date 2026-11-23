@@ -14,8 +14,9 @@
 //   a same-name collision waits for an explicit keep-both or replace.
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
 import { preferencesApi, type ImportPreferenceItem, type PresetFamily } from './preferencesApi';
-import { queriedPresetsApi } from '../queries/shell-queue/preferences';
+import { queriedPresetsApi } from '@/queries/shell-queue/preferences';
 import { ApiError, HttpStatus } from './apiError';
+import { errorMessage } from '@/utils/format/errorMessage';
 
 export type PresetEntryStatus = 'saved' | 'creating' | 'saving' | 'deleting' | 'failed' | 'conflict';
 
@@ -67,7 +68,7 @@ export interface PresetCollectionOptions {
   api?: PresetsApi;
 }
 
-const message = (err: unknown) => err instanceof Error ? err.message : String(err);
+const message = (err: unknown) => errorMessage(err);
 
 export class PresetCollection<B extends Record<string, unknown>> {
   private snap: PresetCollectionSnapshot<B> = { entries: [], importConflicts: [], loaded: false, loadError: null };

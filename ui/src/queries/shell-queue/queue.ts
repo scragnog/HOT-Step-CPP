@@ -9,14 +9,14 @@
 // Submits, cancels and other commands stay direct transport calls.
 
 import { queryOptions } from '@tanstack/react-query';
-import { generateApi, songApi } from '../../services/api';
-import { audioQueueApi } from '../../services/audioQueueApi';
-import { apiClient } from '../../services/httpClient';
-import { queryClient } from '../client';
-import { ACTIVE_POLL_MS } from '../contract';
-import { serverKey } from '../keys';
+import { generateApi, songApi } from '@/services/api';
+import { audioQueueApi } from '@/services/audioQueueApi';
+import { apiClient } from '@/services/httpClient';
+import { queryClient } from '@/queries/client';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
+import { serverKey } from '@/queries/keys';
 import { songOptions } from './songs';
-import { workflowOptions } from '../cover-lyrics/workflows';
+import { workflowOptions } from '@/queries/cover-lyrics/workflows';
 
 export const audioQueueItemsOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/audio-queue', { auth: true }),

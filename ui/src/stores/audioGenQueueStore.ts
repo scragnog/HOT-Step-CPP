@@ -19,18 +19,19 @@ import { generateApi, withIntentTimeout, fetchAudioBlob } from '../services/api'
 import type { Generation, AlbumPreset } from '../services/lireekApi';
 import { addToPlaylist } from './playlistStore';
 import type { GenerationParams, GenerationJob } from '../types';
-import { MM3_BACKEND_ID } from '../utils/captionForBackend';
-import { yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID } from '../utils/yue2CaptionSource';
-import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
-import { masterToAlbumEnabled } from '../utils/masterToAlbumPref';
+import { MM3_BACKEND_ID } from '@/utils/lyrics/captionForBackend';
+import { yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID } from '@/utils/lyrics/yue2CaptionSource';
+import { lmAdapterEnabled } from '@/utils/training/lmAdapterPref';
+import { masterToAlbumEnabled } from '@/utils/training/masterToAlbumPref';
+import { saveJson } from '@/utils/storage/saveFile';
 import { useBackendStore } from './backendStore';
 import type { CreateIntent, WrittenSongIntent } from '../../../server/src/contracts/resolution';
-import { readMm3CaptionSelection } from '../utils/mm3CaptionSource';
-import { readYue2SongSelection, readYue2DatasetForLyricsSet } from '../utils/yue2CaptionSource';
-import { getUseLlmDuration } from '../utils/estimateDuration';
-import { audioQueueApi } from '../services/audioQueueApi';
-import { queryClient } from '../queries/client';
-import { ACTIVE_POLL_MS } from '../queries/contract';
+import { readMm3CaptionSelection } from '@/utils/lyrics/mm3CaptionSource';
+import { readYue2SongSelection, readYue2DatasetForLyricsSet } from '@/utils/lyrics/yue2CaptionSource';
+import { getUseLlmDuration } from '@/utils/format/estimateDuration';
+import { audioQueueApi } from '@/services/audioQueueApi';
+import { queryClient } from '@/queries/client';
+import { ACTIVE_POLL_MS } from '@/queries/contract';
 import {
   readAudioQueue, readGenerationStatus, readSong, readWorkflowJob,
 } from '../queries/shell-queue/queue';
@@ -40,6 +41,10 @@ import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 import { exportQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
 import { decideQueueOwnerAction } from './audioQueueOwnerDecision';
 import type { AudioIntentItem, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
+import { readJson, readJsonString } from '@/utils/storage/storageJson';
+import { writeJson } from '@/utils/storage/storageJson';
+import { emit } from '@/utils/appEvents';
+import { isPresent } from '@/utils/guards';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -374,12 +379,7 @@ function migrationStore(): QueueBackupStore {
 }
 
 function downloadQueueExport(name: string, value: unknown): void {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  saveJson(value, name);
 }
 
 function backupItems(backup: QueueBackup): AudioQueueItem[] {
@@ -409,18 +409,15 @@ async function resolvedRequestForImport(item: AudioQueueItem): Promise<Record<st
 function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
   const backendId = typeof item.globalParams.backend === 'string'
     ? item.globalParams.backend : useBackendStore.getState().activeBackendId;
-  const appSettings = JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>;
-  const readSetting = (key: string, fallback: string) => {
-    try { return JSON.parse(localStorage.getItem(key) || '') as string; }
-    catch { return fallback; }
-  };
+  const appSettings = readJson<Record<string, unknown>>('ace-settings', {});
+  const readSetting = (key: string, fallback: string) => readJsonString(key, fallback);
   const datasetId = backendId === YUE2_BACKEND_ID ? readYue2DatasetForLyricsSet(item.lyricsSetId) : '';
   return {
     kind: 'written-song', engine: backendId, generationId: item.generation.id,
     lyricsSetId: item.lyricsSetId, sourceLyricsSetId: item.sourceLyricsSetId,
     artistName: item.artistName, params: item.globalParams,
     settings: {
-      useLlmDuration: getUseLlmDuration(), useLmAdapter: useLmAdapterEnabled(),
+      useLlmDuration: getUseLlmDuration(), useLmAdapter: lmAdapterEnabled(),
       triggerUseFilename: appSettings.triggerUseFilename === true,
       triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
         ? appSettings.triggerPlacement : 'prepend',
@@ -643,7 +640,7 @@ async function applyServerItemsNow(items: AudioIntentItem[]): Promise<void> {
     // render reaches the server queue: a Cover workflow queued behind another
     // has no intent until the first finishes. Keep it until a server item
     // carries its job or workflow, or every refresh wipes a queued row.
-    const claimed = new Set(items.flatMap(server => [server.jobId, server.meta?.workflowJobId]).filter(Boolean));
+    const claimed = new Set(items.flatMap(server => [server.jobId, server.meta?.workflowJobId]).filter(isPresent));
     const local = _state.items.filter(item => _manualIds.has(item.id) && !item.serverQueueId
       && !claimed.has(item.jobId) && !claimed.has(item.workflowJobId));
     _state.items = items.flatMap(server => {
@@ -1255,7 +1252,7 @@ export function getSendToPlaylist(): boolean {
 
 /** Write the "Send To Playlist" toggle to localStorage. */
 export function setSendToPlaylist(enabled: boolean): void {
-  localStorage.setItem(SEND_TO_PLAYLIST_KEY, JSON.stringify(enabled));
+  writeJson(SEND_TO_PLAYLIST_KEY, enabled);
 }
 
 /** If the toggle is on, auto-add the completed item to the playlist. */
@@ -1286,7 +1283,7 @@ async function _notifySongCreated(songId: string): Promise<void> {
   try {
     const { song } = await readSong(songId);
     if (song) {
-      if (_claimSongDelivery(songId)) window.dispatchEvent(new CustomEvent('song-created', { detail: { song } }));
+      if (_claimSongDelivery(songId)) emit('song-created', { song });
       // This IS the row the restore sweep would have asked for.
       _hydratedSongIds.add(songId);
       const item = _state.items.find(i => i.songId === songId);

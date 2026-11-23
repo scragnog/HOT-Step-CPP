@@ -6,7 +6,7 @@
 // is docs/dev/ui-server-state.md.
 
 import type { Query } from '@tanstack/react-query';
-import { ApiError } from '../services/httpClient';
+import { ApiError } from '@/services/httpClient';
 
 export const QUERY_STALE_MS = 30_000;
 export const QUERY_GC_MS = 5 * 60_000;

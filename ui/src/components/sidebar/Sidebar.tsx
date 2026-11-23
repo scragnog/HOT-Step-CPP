@@ -5,11 +5,11 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap, X, GitCompare } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { usePersistedState } from '../../hooks/usePersistedState';
-import { useJobBadge } from '../../hooks/useJobProgress';
-import { useCapabilities } from '../../hooks/useCapabilities';
-import { useBackendStore, type BackendCapabilities } from '../../stores/backendStore';
-import { BackendToggle } from '../global-bar/BackendToggle';
+import { usePersistedState } from '@/hooks/usePersistedState';
+import { useJobBadge } from '@/hooks/useJobProgress';
+import { useCapabilities } from '@/hooks/useCapabilities';
+import { useBackendStore, type BackendCapabilities } from '@/stores/backendStore';
+import { BackendToggle } from '@/components/global-bar/BackendToggle';
 
 // ── Studios per generation engine ───────────────────────────────────────────
 // A studio that only works on some engines is listed only while one of them

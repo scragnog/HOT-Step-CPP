@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { aceModelsOptions } from '../../queries/global-models/options';
-import { QueryError } from '../shared/QueryError';
+import { aceModelsOptions } from '@/queries/global-models/options';
+import { QueryError } from '@/components/shared/feedback/QueryError';
 // ModelsDropdown.tsx — Model selection UI for the global param bar
 //
 // Uses custom ModelSelect dropdown to show GGUF/SafeTensors format badges.
@@ -8,11 +8,13 @@ import { QueryError } from '../shared/QueryError';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Download } from 'lucide-react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
 import { formatDitModel, formatLmModel, formatVaeModel, formatEmbeddingModel, getDitModelDescription, getLmModelDescription, getVaeModelDescription } from './modelLabels';
-import { ModelManagerModal } from '../model-manager/ModelManagerModal';
+import { ModelManagerModal } from '@/components/model-manager/ModelManagerModal';
 import { VariantModelSelect, ModelSelect, getModelFormat } from './ModelSelect';
-import { ParamLabel } from '../shared/ParamLabel';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
+import { writeJson } from '@/utils/storage/storageJson';
 
 type ModelFormat = 'gguf' | 'safetensors' | 'onnx';
 const FORMAT_ORDER: ModelFormat[] = ['gguf', 'safetensors', 'onnx'];
@@ -36,7 +38,10 @@ function loadFormatFilter(): Record<ModelFormat, boolean> {
 }
 
 export const ModelsDropdown: React.FC = () => {
-  const gp = useGlobalParams();
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    ditModel: s.ditModel, lmModel: s.lmModel, vaeModel: s.vaeModel, embeddingModel: s.embeddingModel,
+    setDitModel: s.setDitModel, setLmModel: s.setLmModel, setVaeModel: s.setVaeModel, setEmbeddingModel: s.setEmbeddingModel,
+  })));
   const { t } = useTranslation();
   const { data: models, isError, error, refetch } = useQuery(aceModelsOptions());
   const [showModelManager, setShowModelManager] = useState(false);
@@ -74,7 +79,7 @@ export const ModelsDropdown: React.FC = () => {
   // selected model stays selected even when its format is filtered out.
   const [formatFilter, setFormatFilter] = useState<Record<ModelFormat, boolean>>(loadFormatFilter);
   useEffect(() => {
-    try { localStorage.setItem(FORMAT_FILTER_KEY, JSON.stringify(formatFilter)); } catch { /* ignore */ }
+    try { writeJson(FORMAT_FILTER_KEY, formatFilter); } catch { /* ignore */ }
   }, [formatFilter]);
 
   // Only surface chips for formats that actually exist across the available models.
@@ -203,7 +208,9 @@ export const ModelsDropdown: React.FC = () => {
 
 /** Summary badge for the Models section */
 export const ModelsBadge: React.FC = () => {
-  const { ditModel, lmModel, vaeModel } = useGlobalParams();
+  const { ditModel, lmModel, vaeModel } = useGlobalParamsStore(useShallow(s => ({
+    ditModel: s.ditModel, lmModel: s.lmModel, vaeModel: s.vaeModel,
+  })));
 
   return (
     <span className="text-[10px] text-zinc-500 font-mono truncate">

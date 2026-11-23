@@ -5,8 +5,8 @@ import { Archive, FolderOpen } from 'lucide-react';
 import { workspaceArchiveApi, type ArchiveCategoryId, type ArchiveChoice } from '../../services/workspaceArchiveApi';
 import { workspaceArchiveImportJobOptions, workspaceArchiveJobOptions, workspaceArchivePreviewOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
-import { FileBrowserModal } from '../shared/FileBrowserModal';
-import { ParamLabel } from '../shared/ParamLabel';
+import { FileBrowserModal } from '@/components/shared/overlays/FileBrowserModal';
+import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { Toggle } from './SettingsPrimitives';
 import { WorkspaceArchiveImport } from './WorkspaceArchiveImport';
 

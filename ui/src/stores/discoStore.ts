@@ -17,6 +17,8 @@ import { readMedia } from '../services/mediaTransport';
 //   3. HI-HAT — shimmer → floating particles
 
 import { useSyncExternalStore, useRef, useCallback } from 'react';
+import { writeJson } from '@/utils/storage/storageJson';
+import { formatDecimal } from '@/utils/format/format';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,7 +53,7 @@ function loadDiscoPrefs(): { discoMode: boolean } {
 }
 
 function saveDiscoPrefs(discoMode: boolean): void {
-  localStorage.setItem(DISCO_PREFS_KEY, JSON.stringify({ discoMode }));
+  writeJson(DISCO_PREFS_KEY, { discoMode });
 }
 
 // ── Disco Data Management ────────────────────────────────────────────────────
@@ -300,7 +302,7 @@ function beatDetectionLoop(): void {
   _debugFrameCount++;
   if (_debugFrameCount % 30 === 0) {
     const mode = usingDiscoData ? 'DISCO' : 'FALLBACK';
-    console.log(`[Disco] [${mode}] t=${t.toFixed(2)}s kick=${_kickPulse.toFixed(3)} snare=${_snarePulse.toFixed(3)} hihat=${_hihatSmoothed.toFixed(3)}`);
+    console.log(`[Disco] [${mode}] t=${formatDecimal(t, 2)}s kick=${_kickPulse.toFixed(3)} snare=${_snarePulse.toFixed(3)} hihat=${_hihatSmoothed.toFixed(3)}`);
   }
 
   // Notify subscribers if anything changed

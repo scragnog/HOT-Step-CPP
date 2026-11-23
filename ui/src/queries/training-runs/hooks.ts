@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import * as api from '../../services/trainingApi';
+import * as api from '@/services/trainingApi';
 import { bridgeRunEvents, type RunBridgeOptions } from './events';
-import { pollWhile } from '../contract';
-import { trainingQueries } from '../training-data/queries';
+import { pollWhile } from '@/queries/contract';
+import { trainingQueries } from '@/queries/training-data/queries';
 import { activeJob, type Worker } from './queries';
-import { useTrainingStore } from '../../stores/trainingStore';
-import { queryManager } from '../invalidation';
-import { subscribeEventSource } from '../../services/sharedEventSource';
+import { useTrainingStore } from '@/stores/trainingStore';
+import { queryManager } from '@/queries/invalidation';
+import { subscribeEventSource } from '@/services/sharedEventSource';
 
 /** The stream is shared with the chart/log reducers. Replayed terminal
  * frames invalidate once per job; they never start a command or audition.

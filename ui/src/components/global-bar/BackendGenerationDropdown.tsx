@@ -23,8 +23,9 @@
 // them rendered without touching this file.
 
 import React from 'react';
-import { useGlobalParams } from '../../context/GlobalParamsContext';
-import { useCapabilities } from '../../hooks/useCapabilities';
+import { useShallow } from 'zustand/react/shallow';
+import { useGlobalParamsStore } from '@/stores/globalParamsStore';
+import { useCapabilities } from '@/hooks/useCapabilities';
 import { SeedControl } from './SeedControl';
 import { SamplerPluginControls } from './SamplerPluginControls';
 import {
@@ -35,7 +36,9 @@ import {
 } from './BackendExtensionControls';
 
 export const BackendGenerationDropdown: React.FC = () => {
-  const gp = useGlobalParams() as any;
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    backendParams: s.backendParams, randomSeed: s.randomSeed, seed: s.seed,
+  })));
   const { capabilities } = useCapabilities();
 
   const extensions = useBackendExtensions('generation');
@@ -75,7 +78,9 @@ export const BackendGenerationDropdown: React.FC = () => {
 
 /** Summary badge — seed mode plus any declared knob moved off its default. */
 export const BackendGenerationBadge: React.FC = () => {
-  const gp = useGlobalParams() as any;
+  const gp = useGlobalParamsStore(useShallow(s => ({
+    backendParams: s.backendParams, randomSeed: s.randomSeed, seed: s.seed,
+  })));
   const changed = useBackendExtensionSummary('generation');
   const parts = [gp.randomSeed ? 'Rnd' : `Seed ${gp.seed}`, ...changed];
   return (
