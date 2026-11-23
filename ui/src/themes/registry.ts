@@ -4,7 +4,8 @@
 // html[data-skin="<id>"], so loading every theme is inert until one is selected.
 // data-skin is set early by public/theme-boot.js; main.tsx drops it when it does not target the running shell.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { resolveShell } from '../app/shell';
 
 export interface ThemeManifest {
   id: string;
@@ -34,21 +35,36 @@ export function dropForeignSkin(shell: 'studio' | 'classic'): void {
   if (id && !themesFor(shell).some(t => t.id === id)) html.removeAttribute('data-skin');
 }
 
+/** The saved id if it is a studio theme, else null: the picker only ever offers studio themes. */
 function stored(): string | null {
   try {
     const id = localStorage.getItem(SKIN_KEY);
-    return THEMES.some(t => t.id === id) ? id : null;
+    return themesFor('studio').some(t => t.id === id) ? id : null;
   } catch { return null; }
 }
 
-/** The saved skin id (null = the default kit) and a setter. The attribute itself is set at boot;
- *  this only changes it on a pick. */
+function setAttr(id: string | null): void {
+  const html = document.documentElement;
+  if (id) html.setAttribute('data-skin', id); else html.removeAttribute('data-skin');
+}
+
+/** The studio skin shown by the studio shell and the /kit page (null = the default kit) and a setter.
+ *  The page previews the skin only while mounted and restores whatever the shell had on exit, so /kit
+ *  inside classic never leaks a studio skin. Only the studio shell saves a pick to hs-skin; in classic
+ *  it is a session preview, so a saved classic skin is not overwritten. */
 export function useSkin(): { skin: string | null; setSkin: (id: string | null) => void } {
   const [skin, setSkinState] = useState<string | null>(stored);
+  useEffect(() => {
+    const prev = document.documentElement.getAttribute('data-skin');
+    setAttr(skin);
+    return () => setAttr(prev);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply on mount; picks go through setSkin
+  }, []);
   const setSkin = useCallback((id: string | null) => {
-    const html = document.documentElement;
-    if (id) html.setAttribute('data-skin', id); else html.removeAttribute('data-skin');
-    try { if (id) localStorage.setItem(SKIN_KEY, id); else localStorage.removeItem(SKIN_KEY); } catch { /* storage blocked: session only */ }
+    setAttr(id);
+    if (resolveShell() === 'studio') {
+      try { if (id) localStorage.setItem(SKIN_KEY, id); else localStorage.removeItem(SKIN_KEY); } catch { /* storage blocked: session only */ }
+    }
     setSkinState(id);
   }, []);
   return { skin, setSkin };
