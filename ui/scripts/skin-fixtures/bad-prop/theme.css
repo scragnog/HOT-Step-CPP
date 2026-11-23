@@ -1,0 +1,2 @@
+html[data-skin="bad-prop"] { --tint: 56 189 248; display: none; }
+html[data-skin="bad-prop"]:not(.dark) { --tint: 56 189 248; }

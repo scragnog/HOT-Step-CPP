@@ -12,6 +12,8 @@ import { songsOptions } from '../../queries/shell-queue/songs';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { Button } from '../../components/shared/kit/Button';
 import { SectionPanel } from '../../components/shared/kit/Panels';
+import { SkinPicker } from '../../components/shared/kit/SkinPicker';
+import { useSkin } from '../../themes/registry';
 
 const StudioContent: React.FC = () => {
   const { token } = useAuth();
@@ -19,6 +21,7 @@ const StudioContent: React.FC = () => {
   const queueLength = useAudioGenQueueSelector(s => s.items.length);
   const { data } = useQuery({ ...songsOptions(), enabled: !!token });
   const latest = data?.songs[0];
+  const { skin, setSkin } = useSkin();
 
   if (isRestarting) return <RestartingOverlay />;
   if (isOffline) return <ServerOfflineOverlay />;
@@ -33,6 +36,7 @@ const StudioContent: React.FC = () => {
         <p>This is the empty studio shell. It runs the same app runtime as classic.</p>
         <p data-testid="studio-queue">Queue: {queueLength} item{queueLength === 1 ? '' : 's'}, {activeJobCount} running</p>
         <p data-testid="studio-latest">Latest song: {latest?.title ?? 'none yet'}</p>
+        <div className="flex items-center gap-2 text-xs text-ink-muted">Skin <SkinPicker skin={skin} onChange={setSkin} /></div>
       </SectionPanel>
     </div>
   );

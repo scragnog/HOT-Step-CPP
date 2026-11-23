@@ -47,8 +47,8 @@ export default {
       },
       borderRadius: { ctl: '6px', panel: '10px' },
       boxShadow: {
-        bevel: 'inset 0 1px 0 rgb(255 255 255 / 0.08), 0 2px 4px rgb(0 0 0 / 0.35)',
-        press: 'inset 0 2px 4px rgb(0 0 0 / 0.55)',
+        bevel: 'inset 0 1px 0 rgb(var(--k-hi) / 0.08), 0 2px 4px rgb(var(--k-shade) / 0.35)',
+        press: 'inset 0 2px 4px rgb(var(--k-shade) / 0.55)',
         glow: '0 0 14px rgb(var(--tint-glow) / 0.24)',
       },
       transitionDuration: { glow: '140ms', press: '70ms' },

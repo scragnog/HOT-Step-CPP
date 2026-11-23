@@ -15,6 +15,8 @@ import { EmptyState, Module, Rail, SectionPanel, SongItem, Well } from './Panels
 import { MockCreate } from './MockCreate';
 import { MockLayouts } from './MockLayouts';
 import { useTheme } from '../../../hooks/useTheme';
+import { useSkin } from '../../../themes/registry';
+import { SkinPicker } from './SkinPicker';
 
 const SIZES: ButtonSize[] = ['sm', 'md', 'lg'];
 const VARIANTS: ButtonVariant[] = ['primary', 'secondary', 'ghost', 'danger'];
@@ -56,6 +58,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 export const KitGallery: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
+  const { skin, setSkin } = useSkin();
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
   const [font, setFont] = useState('6');
@@ -107,6 +110,9 @@ export const KitGallery: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Theme
             <Tabs aria-label="Theme" value={theme} onChange={v => v !== theme && toggleTheme()} items={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-ink-muted">Skin
+            <SkinPicker skin={skin} onChange={setSkin} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Tint
             <Tabs aria-label="Tint" value={tint} onChange={setTint} items={TINTS} />

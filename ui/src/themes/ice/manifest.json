@@ -1,0 +1,9 @@
+{
+  "id": "ice",
+  "name": "Ice",
+  "author": "HOT-Step",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "preview": ["#0c1119", "#1c2636", "#38bdf8", "#e8f0f8"]
+}

@@ -1,0 +1,2 @@
+html[data-skin="bad-url"] { --tint: 56 189 248; --grad-raised: url(https://example.com/x.png); }
+html[data-skin="bad-url"]:not(.dark) { --tint: 56 189 248; --grad-raised: url(https://example.com/x.png); }

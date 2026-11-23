@@ -1,0 +1,1 @@
+{ "id": "bad-manifest", "name": "Fixture", "author": "test", "version": "one", "api": 1, "kind": "shell", "preview": ["red"] }

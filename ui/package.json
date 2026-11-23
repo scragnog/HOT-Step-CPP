@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check:skins": "node scripts/check-skins.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

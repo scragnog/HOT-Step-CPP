@@ -1,0 +1,2 @@
+html[data-skin="bad-manifest"] { --tint: 56 189 248; }
+html[data-skin="bad-manifest"]:not(.dark) { --tint: 56 189 248; }
