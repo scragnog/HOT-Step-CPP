@@ -97,6 +97,7 @@ Curated starter packs for different hardware tiers, from minimal setups to Black
 ## Documentation
 
 - [Documentation index](docs/README.md): every page, for users and contributors.
+- [Contribute a skin or a UI design](SKINS.md)
 - [FEATURES.md](FEATURES.md): one line per feature, each linking to its page.
 - [Getting started](docs/user/getting-started.md): download, first launch, first model pack, first song.
 - [Backends](docs/user/backends.md): what each of the four models does, and a capability matrix.

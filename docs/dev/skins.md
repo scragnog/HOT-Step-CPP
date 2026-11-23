@@ -1,5 +1,7 @@
 # Skins
 
+Start with the [skin contributor guide](../../SKINS.md) to set up a preview and submit a skin.
+
 A skin changes how HOT-Step looks without changing what it does. There are two
 kinds: **themes** (variables only, below) and [shell skins](#shell-skins) (a whole
 React UI, for developers who replace the layout). Studio themes apply to the studio shell and the `/kit`

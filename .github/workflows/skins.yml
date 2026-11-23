@@ -1,0 +1,58 @@
+name: Skins
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check skin PR scope
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync } from 'node:fs';
+
+          const { BASE_SHA, HEAD_SHA, GITHUB_OUTPUT } = process.env;
+          const paths = execFileSync('git', [
+            'diff', '--name-only', '-z', '--no-renames', `${BASE_SHA}...${HEAD_SHA}`, '--',
+          ], { encoding: 'utf8' }).split('\0').filter(Boolean);
+          const skinPath = /^ui\/src\/(?:themes|shells)\//;
+          const skinChange = paths.find(path => skinPath.test(path));
+          if (skinChange) {
+            const folder = skinChange.match(/^ui\/src\/(?:themes|shells)\/[a-z0-9-]+\//)?.[0];
+            const outside = paths.filter(path => !folder || !path.startsWith(folder));
+            if (outside.length) {
+              console.error('Skin PRs must touch only one skin folder. Send core changes for separate review.');
+              console.error(JSON.stringify(outside));
+              process.exit(1);
+            }
+          }
+          appendFileSync(GITHUB_OUTPUT, `skin=${Boolean(skinChange)}\n`);
+          NODE
+      - if: steps.scope.outputs.skin == 'true'
+        run: npm ci --ignore-scripts
+        working-directory: server
+      - if: steps.scope.outputs.skin == 'true'
+        run: npm ci --ignore-scripts
+        working-directory: ui
+      - if: steps.scope.outputs.skin == 'true'
+        run: npm run check:skins
+        working-directory: ui
+      - if: steps.scope.outputs.skin == 'true'
+        run: npx tsc -b
+        working-directory: ui
