@@ -57,6 +57,9 @@ struct HeartMuLaServer {
     std::string        adapter_loaded;
     ggml_backend_dev_t device = nullptr;  // published by the worker; registry-owned
     uint64_t           resident_bytes = 0;
+    // What POST /heartmula/preflight needs to tell kept weights from stale ones.
+    std::string        lm_key, codec_key, adapter_home;
+    uint64_t           lm_bytes = 0, codec_bytes = 0, adapter_bytes = 0;
     std::map<std::string, std::shared_ptr<HeartMuLaJobInfo>> jobs;
     std::deque<std::string>                                  job_order;
 };
@@ -126,6 +129,12 @@ static void hm_publish() {
     g_hm.resident[HM_TOKENIZER] = g_hm.tok != nullptr;
     g_hm.resident_bytes         = heartmula_resident_bytes(g_hm_rt);
     g_hm.adapter_loaded         = g_hm_rt.adapter.loaded() ? g_hm_rt.adapter.path : "";
+    g_hm.adapter_home           = g_hm_rt.adapter.loaded() ? g_hm_rt.adapter.home_path : "";
+    g_hm.adapter_bytes          = g_hm_rt.adapter.wctx.buffer ? ggml_backend_buffer_get_size(g_hm_rt.adapter.wctx.buffer) : 0;
+    g_hm.lm_key                 = g_hm_rt.lm.loaded ? g_hm_rt.lm_key : "";
+    g_hm.lm_bytes               = g_hm_rt.lm_bytes;
+    g_hm.codec_key              = g_hm_rt.codec_key;
+    g_hm.codec_bytes            = g_hm_rt.codec_bytes;
     if (g_hm_rt.bp_ref) g_hm.device = ggml_backend_get_device(g_hm_rt.bp.backend);
 }
 
@@ -794,6 +803,127 @@ static void heartmula_handle_cover(const httplib::Request & req, httplib::Respon
     hm_submit(req, res, true);
 }
 
+// POST /heartmula/preflight[?cover=1]: a dry run of heartmula_admit for a /heartmula/synth
+// (or, with cover=1, /heartmula/cover) body. Same parse, pick, prompt and byte counts as
+// heartmula_generate, against the residency snapshot and the VRAM free now; nothing loads
+// or queues. Each phase may use what is free plus the HeartMuLa weights it would drop
+// (stale ones, and the other phase's, which the pipeline frees when both do not fit).
+// Verdict: fits; passes (only after reclaiming other backends' idle VRAM); refused; or
+// unknown while the GPU worker runs a job. A cover's style pass (the Qwen embedding,
+// freed before the LM loads) is not counted.
+static void heartmula_handle_preflight(const httplib::Request & req, httplib::Response & res) {
+    const bool       cover = req.has_param("cover") && req.get_param_value("cover") == "1";
+    HeartMuLaRequest r;
+    std::string      err;
+    if (!heartmula_parse_request(req.body, &r, &err, cover)) {
+        hm_error(res, 400, "bad_request", err);
+        return;
+    }
+    auto answer = [&](const char * verdict, uint64_t need, uint64_t free_b, uint64_t reclaimable, const char * phase,
+                      const std::string & detail) {
+        yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        yyjson_mut_obj_add_str(doc, root, "verdict", verdict);
+        yyjson_mut_obj_add_uint(doc, root, "need_bytes", need);
+        yyjson_mut_obj_add_uint(doc, root, "free_bytes", free_b);
+        yyjson_mut_obj_add_uint(doc, root, "reclaimable_bytes", reclaimable);
+        yyjson_mut_obj_add_str(doc, root, "phase", phase);
+        yyjson_mut_obj_add_strcpy(doc, root, "detail", detail.c_str());
+        res.set_content(hm_write(doc), "application/json");
+    };
+    if (g_work_busy) {
+        answer("unknown", 0, 0, 0, "", "the GPU is busy with another job");
+        return;
+    }
+    // hm_reclaimable, without waiting on a lock a starting job may hold for its whole run.
+    uint64_t reclaimable = g_store ? store_vram_bytes(g_store) : 0;
+    {
+        std::unique_lock<std::mutex> m(g_mm3_mutex, std::try_to_lock);
+        std::unique_lock<std::mutex> y(g_yue2_mutex, std::try_to_lock);
+        if (!m.owns_lock() || !y.owns_lock()) {
+            answer("unknown", 0, 0, 0, "", "the GPU is busy with another job");
+            return;
+        }
+        reclaimable += mm3_vram_bytes(g_mm3) + g_mm3_lm.kv_bytes + yue2_vram_bytes(g_yue2);
+    }
+    std::lock_guard<std::mutex> lock(g_hm.mtx);
+    HeartMuLaResolved p;
+    int               status = 0;
+    const char *      code   = "";
+    if (cover) {
+        if (!hm_cover_ready_locked(r, &p, &status, &code, &err)) {
+            hm_error(res, status, code, err);
+            return;
+        }
+    } else if (hm_is_cover(heartmula_request_pick(g_hm.requested, r).variant)) {
+        hm_error(res, 409, "incompatible", "MuLaCover renders covers only (POST /heartmula/cover)");
+        return;
+    } else if (!hm_resolve_locked(heartmula_request_pick(g_hm.requested, r), &p, &status, &err)) {
+        hm_error(res, status, hm_status_code(status), err);
+        return;
+    }
+    // The device the worker published, or the one backend_init would pick.
+    ggml_backend_dev_t dev = g_hm.device;
+    if (!dev) {
+        const char * forced = std::getenv("GGML_BACKEND");
+        dev = forced ? ggml_backend_dev_by_name(forced) : ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+        if (!dev && !forced) dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+        if (!dev && !forced) dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    }
+    if (!dev) {
+        answer("unknown", 0, 0, 0, "", "no compute device to measure");
+        return;
+    }
+    const uint64_t free_b  = heartmula_device_free(dev);
+    const uint64_t reserve = heartmula_reserve_bytes();
+    // As heartmula_lm_need and heartmula_codec_need, from the snapshot.
+    const bool lm_kept    = !g_hm.lm_key.empty() && g_hm.lm_key == p.file[HM_GLOBAL].path + "|" + p.file[HM_LOCAL].path;
+    const bool ad_kept    = lm_kept && !g_hm.adapter_loaded.empty() && g_hm.adapter_loaded == p.adapter &&
+                         g_hm.adapter_home == p.adapter_home;
+    const bool codec_kept = !g_hm.codec_key.empty() &&
+                            g_hm.codec_key == p.file[HM_RVQ].path + "|" + p.file[HM_FLOW].path + "|" + p.file[HM_SCALAR].path;
+    const uint64_t kept_lm = (lm_kept ? g_hm.lm_bytes : 0) + (ad_kept ? g_hm.adapter_bytes : 0);
+    const uint64_t kept_codec = codec_kept ? g_hm.codec_bytes : 0;
+
+    struct Phase { const char * name; uint64_t need, avail; };
+    Phase phases[2];
+    int   n = 0;
+    if (r.codes.empty()) {
+        auto tok = hm_tokenizer_locked(p.file[HM_TOKENIZER].path, &err);
+        if (!tok) {
+            hm_error(res, 500, "load_failed", err);
+            return;
+        }
+        int64_t       muq = 0;
+        const int64_t T   = (int64_t) (cover ? mulacover_prompt(*tok, r.tags, r.lyrics).ids
+                                             : heartmula_prompt_ids(*tok, r.tags, r.lyrics, &muq)).size();
+        const int64_t positions = T + heartmula_max_frames(r.duration_s) + 1;
+        if (positions > heartmula_global_config().n_ctx) {
+            hm_error(res, 400, "context_overflow", "the prompt and the requested duration exceed the context length");
+            return;
+        }
+        const int      B       = r.cfg_scale != 1.0f ? 2 : 1;
+        const uint64_t weights = (lm_kept ? 0 : p.file[HM_GLOBAL].gpu_bytes + p.file[HM_LOCAL].gpu_bytes) +
+                                 (p.adapter.empty() || ad_kept ? 0 : p.adapter_bytes);
+        const uint64_t kv = heartmula_kv_bytes(positions, B) + (r.cover ? heartmula_cover_cache_bytes(r.cover->steps, B) : 0);
+        phases[n++] = { "lm", weights + kv + reserve, free_b + g_hm.resident_bytes - kept_lm };
+    }
+    const uint64_t codec = codec_kept ? 0 : p.file[HM_RVQ].gpu_bytes + p.file[HM_FLOW].gpu_bytes + p.file[HM_SCALAR].gpu_bytes;
+    phases[n++] = { "codec", codec + reserve, free_b + g_hm.resident_bytes - kept_codec };
+
+    // The phase furthest from fitting decides.
+    const Phase * worst = &phases[0];
+    for (int i = 1; i < n; i++) {
+        if ((int64_t) (phases[i].need - phases[i].avail) > (int64_t) (worst->need - worst->avail)) worst = &phases[i];
+    }
+    const char * verdict = worst->need <= worst->avail ? "fits" : worst->need <= worst->avail + reclaimable ? "passes" : "refused";
+    const std::string detail = !strcmp(verdict, "passes") ? "idle models of other backends are unloaded first"
+                             : !strcmp(verdict, "refused") ? std::string("the ") + worst->name + " phase does not fit"
+                                                           : "";
+    answer(verdict, worst->need, worst->avail, reclaimable, worst->name, detail);
+}
+
 static void heartmula_handle_job(const httplib::Request & req, httplib::Response & res) {
     const std::string id  = req.has_param("id") ? req.get_param_value("id") : "";
     auto              job = job_find(id);
@@ -871,6 +1001,7 @@ static void heartmula_register_routes(httplib::Server & svr, const char * models
     svr.Post("/heartmula/unload", on_worker(heartmula_handle_unload));
     svr.Post("/heartmula/synth", heartmula_handle_synth);
     svr.Post("/heartmula/cover", heartmula_handle_cover);
+    svr.Post("/heartmula/preflight", heartmula_handle_preflight);
     svr.Get("/heartmula/job", heartmula_handle_job);
     svr.Post("/heartmula/encode", heartmula_handle_not_implemented);
     svr.Post("/heartmula/imatrix", heartmula_handle_not_implemented);

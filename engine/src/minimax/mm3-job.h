@@ -705,6 +705,66 @@ static bool mm3_a2a_encode(MM3SynthRequest * req, std::string * err) {
     return mm3_enc_encode(enc, ch, padded, &req->gen.a2a_src, &req->gen.a2a_cols, err);
 }
 
+// ── Stage-1 VRAM fit inputs ─────────────────────────────────────────────────
+//
+// What mm3_vram_admit sees for a request now. mm3_synth_worker gates on it and
+// POST /mm3/preflight answers from it, so the dry run cannot drift from the
+// gate. Caller holds g_mm3_mutex.
+
+// n_ctx the AR stage will want: prompt + every frame it may emit, plus the
+// slack mm3_lm_prepare() adds for the feedback position.
+static int64_t mm3_n_ctx_needed(const MM3SynthRequest & req) {
+    return req.n_tokens + req.max_frames + 8;
+}
+
+// The plan dial doubles the LM rows (base pairs). Counted whenever it could
+// apply; the AR loop may still stand it down (soft prompt), which only
+// over-reserves.
+static bool mm3_plan_rows(const MM3SynthRequest & req) {
+    return req.lm_adapter_plan < 1.0f && !req.lm_adapter.empty() && req.lm_adapter_mode != "merge";
+}
+
+// The AR slot holds a complete plan under `key`.
+static bool mm3_ar_slot_holds(const std::string & key) {
+    return !g_mm3_ar_cache.key.empty() && g_mm3_ar_cache.key == key && g_mm3_ar_cache.frames > 0 &&
+           (int64_t) g_mm3_ar_cache.hiddens.size() ==
+               g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks * (int64_t) g_mm3.lm_cfg.embedding_length;
+}
+
+struct MM3FitInputs {
+    bool   q8_in = false, one_song = false, can_q8 = false, measured = false;
+    int    rows_take = 0;
+    size_t kv_row = 0, weights = 0, resident = 0, ace = 0, free_b = 0, budget = 0;
+    double env_gb = 0.0;
+};
+
+// The budget is what stage 1 can have: free VRAM, plus the ACE modules
+// arbitration would evict, plus the MM3 parts and KV cache this run reuses.
+// Stage 1 holds the LM and the depth decoder when staged, everything under
+// keep-loaded. No measurement (Metal, Vulkan, CPU) means no gate unless
+// MM3_VRAM_BUDGET_GB stands in for the whole budget. `dit_backend`: the
+// renderer the job runs on.
+static MM3FitInputs mm3_fit_inputs(const MM3SynthRequest & req, const std::string & dit_backend) {
+    MM3FitInputs in;
+    in.q8_in     = mm3_lm_kv_type(req.lm_kv_q8) == GGML_TYPE_Q8_0;
+    in.can_q8    = mm3_lm_kv_type(true) == GGML_TYPE_Q8_0;
+    in.one_song  = req.gen.require_eos && req.gen.stop_after_first_eos;
+    in.rows_take = mm3_cfg_rows(g_mm3.lm_cfg) * (mm3_plan_rows(req) ? 2 : 1);
+    in.kv_row    = mm3_kv_bytes_estimate(g_mm3, mm3_n_ctx_needed(req), 1);
+    in.weights   = g_keep_loaded
+        ? (size_t) mm3_total_tensor_bytes(g_mm3) + (dit_backend == "tensorrt" ? (size_t) 1 << 30 : 0)
+        : (size_t) (g_mm3.lm_file.tensor_bytes + g_mm3.role_file[MM3_R_DEPTH].tensor_bytes);
+    in.resident = (g_keep_loaded ? mm3_vram_bytes(g_mm3) : g_mm3.vram_lm + g_mm3.vram_depth) + g_mm3_lm.kv_bytes;
+    in.ace      = !g_mm3.loaded && g_store ? store_vram_bytes(g_store) : 0;
+
+    const char * env_b = std::getenv("MM3_VRAM_BUDGET_GB");
+    in.env_gb          = env_b && env_b[0] ? atof(env_b) : 0.0;
+    size_t total_b     = 0;
+    in.measured        = in.env_gb > 0.0 || mm3_cuda_free_bytes(&in.free_b, &total_b);
+    in.budget          = in.env_gb > 0.0 ? (size_t) (in.env_gb * 1073741824.0) : in.free_b + in.ace + in.resident;
+    return in;
+}
+
 static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobState> st, MM3SynthRequest req) {
     auto set_stage = [&](const char * stage, int64_t window, int64_t n_windows, int64_t step, int64_t n_steps) {
         std::lock_guard<std::mutex> lock(st->mtx);
@@ -974,59 +1034,36 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             k               = mm3_ar_cache_key(g_mm3, req, merge_backend);
             req.lm_kv_q8    = keep;
         }
-        return (req.reuse_ar || ar_from_file) && takes <= 1 && !g_mm3_ar_cache.key.empty() &&
-               g_mm3_ar_cache.key == k && g_mm3_ar_cache.frames > 0 &&
-               (int64_t) g_mm3_ar_cache.hiddens.size() ==
-                   g_mm3_ar_cache.frames * (int64_t) g_mm3.lm_cfg.num_codebooks *
-                       (int64_t) g_mm3.lm_cfg.embedding_length;
+        return (req.reuse_ar || ar_from_file) && takes <= 1 && mm3_ar_slot_holds(k);
     };
 
-    // n_ctx the AR stage will want: prompt + every frame it may emit, plus the
-    // slack mm3_lm_prepare() adds for the feedback position.
-    const int64_t n_ctx_needed = req.n_tokens + req.max_frames + 8;
-    // The plan dial doubles the LM rows (base pairs). Counted whenever it could
-    // apply; the AR loop may still stand it down (soft prompt), which only
-    // over-reserves.
-    const bool plan_rows = req.lm_adapter_plan < 1.0f && !req.lm_adapter.empty() && req.lm_adapter_mode != "merge";
+    const int64_t n_ctx_needed = mm3_n_ctx_needed(req);
+    const bool    plan_rows    = mm3_plan_rows(req);
 
     // ── VRAM fit: does stage 1 fit, and in what shape? ──────────────────────
     //
     // mm3_vram_admit (mm3-vram-fit.h) takes the decisions in order. A valid hit
     // as sent skips stage 1 and is never refused. Anything that plans fresh is
     // fitted, including a saved plan ignored or rejected above. A changed shape
-    // is looked up again under its own key. The budget is what stage 1 can
-    // have: free VRAM, plus the ACE modules arbitration would evict, plus the
-    // MM3 parts and KV cache this run reuses. Stage 1 holds the LM and the depth
-    // decoder when staged, everything under keep-loaded. No measurement (Metal,
-    // Vulkan, CPU) means no gate unless MM3_VRAM_BUDGET_GB stands in for the
-    // whole budget. mm3_vram_need stays the eviction figure; it adds every role
-    // file and a 3 GB headroom, so as a gate it would refuse 24 GB cards that work.
+    // is looked up again under its own key. The budget: mm3_fit_inputs.
+    // mm3_vram_need stays the eviction figure; it adds every role file and a
+    // 3 GB headroom, so as a gate it would refuse 24 GB cards that work.
     bool ar_hit = false;
     {
-        const bool   q8_in    = mm3_lm_kv_type(req.lm_kv_q8) == GGML_TYPE_Q8_0;
-        const bool   one_song  = req.gen.require_eos && req.gen.stop_after_first_eos;
-        const int    rows_take = mm3_cfg_rows(g_mm3.lm_cfg) * (plan_rows ? 2 : 1);
-        const size_t kv_row    = mm3_kv_bytes_estimate(g_mm3, n_ctx_needed, 1);
-        const size_t weights   = g_keep_loaded
-            ? (size_t) mm3_total_tensor_bytes(g_mm3) + (g_mm3.dit_backend == "tensorrt" ? (size_t) 1 << 30 : 0)
-            : (size_t) (g_mm3.lm_file.tensor_bytes + g_mm3.role_file[MM3_R_DEPTH].tensor_bytes);
-        const size_t resident  =
-            (g_keep_loaded ? mm3_vram_bytes(g_mm3) : g_mm3.vram_lm + g_mm3.vram_depth) + g_mm3_lm.kv_bytes;
-        const size_t ace = !g_mm3.loaded && g_store ? store_vram_bytes(g_store) : 0;
-
-        const char * env_b    = std::getenv("MM3_VRAM_BUDGET_GB");
-        const double env_gb   = env_b && env_b[0] ? atof(env_b) : 0.0;
-        size_t       free_b   = 0, total_b = 0;
-        const bool   measured = env_gb > 0.0 || mm3_cuda_free_bytes(&free_b, &total_b);
-        const size_t budget   = env_gb > 0.0 ? (size_t) (env_gb * 1073741824.0) : free_b + ace + resident;
-        const double GB       = 1073741824.0;
+        const MM3FitInputs in = mm3_fit_inputs(req, g_mm3.dit_backend);
+        const bool   q8_in = in.q8_in, one_song = in.one_song, measured = in.measured;
+        const int    rows_take = in.rows_take;
+        const size_t kv_row = in.kv_row, weights = in.weights, resident = in.resident, ace = in.ace;
+        const size_t free_b = in.free_b, budget = in.budget;
+        const double env_gb = in.env_gb;
+        const double GB     = 1073741824.0;
         const int    takes_in = st->n_takes;
 
         // The fit reports the effective type; the slot is keyed on the flag.
         // Same flag when the type is unchanged, true when the fit switched it.
         const MM3AdmitResult adm = mm3_vram_admit(
             [&](bool q8, int takes) { return slot_hit(q8 == q8_in ? req.lm_kv_q8 : true, takes); }, measured,
-            budget, weights, kv_row, rows_take, takes_in, q8_in, mm3_lm_kv_type(true) == GGML_TYPE_Q8_0, one_song);
+            budget, weights, kv_row, rows_take, takes_in, q8_in, in.can_q8, one_song);
         const MM3VramFit & f = adm.fit;
 
         std::string note;
@@ -1986,6 +2023,101 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     }
 }
 
+// ── POST /mm3/preflight ─────────────────────────────────────────────────────
+//
+// Dry run of the stage-1 VRAM fit for a /mm3/synth body: the same parse,
+// tokenizer, take clamp, mm3_fit_inputs and mm3_vram_admit as the worker,
+// against what is free now. Never loads, never queues. Answers
+// {verdict, need_bytes, free_bytes, budget_bytes, detail}: free_bytes is the budget
+// without unloading anything, budget_bytes after unloading the idle ACE modules
+// (the worker evicts them) and the other families (Node frees those before every
+// render: evictOtherFamilies). Verdicts as in mm3_preflight_verdict, plus
+// "unknown" while the GPU worker runs a job.
+// Differences from the worker: a saved plan (forced_frame_hiddens_file) is
+// not read, and a merge-mode adapter's AR key needs a backend, so both are
+// fitted as fresh plans. That can only over-report.
+//
+// g_mm3_preflight_others: the other families' idle VRAM (HeartMuLa, YuE2). Their
+// globals come later in hot-step-server.cpp, which sets it before serving.
+static uint64_t (*g_mm3_preflight_others)() = nullptr;
+
+static void mm3_handle_preflight(const httplib::Request & hreq, httplib::Response & res) {
+    auto answer = [&](const char * verdict, size_t need, size_t budget, size_t free_b, const std::string & detail) {
+        yyjson_mut_doc * o = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val * r = yyjson_mut_obj(o);
+        yyjson_mut_doc_set_root(o, r);
+        yyjson_mut_obj_add_str(o, r, "verdict", verdict);
+        yyjson_mut_obj_add_uint(o, r, "need_bytes", need);
+        yyjson_mut_obj_add_uint(o, r, "budget_bytes", budget);
+        yyjson_mut_obj_add_uint(o, r, "free_bytes", free_b);
+        yyjson_mut_obj_add_strcpy(o, r, "detail", detail.c_str());
+        char * json = yyjson_mut_write(o, 0, NULL);
+        yyjson_mut_doc_free(o);
+        res.set_content(json ? json : "{}", "application/json");
+        free(json);
+    };
+    if (!mm3_available(g_mm3)) {
+        mm3_json_error(res, 501, "MiniMax-Music3 model files were not found (see GET /mm3/props)");
+        return;
+    }
+    yyjson_doc * doc  = hreq.body.empty() ? nullptr : yyjson_read(hreq.body.data(), hreq.body.size(), 0);
+    yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
+    MM3SynthRequest req;
+    std::string     err;
+    const bool      parsed = root && yyjson_is_obj(root) && mm3_parse_synth_request(g_mm3, root, &req, &err);
+    if (doc) {
+        yyjson_doc_free(doc);
+    }
+    if (!parsed) {
+        mm3_json_error(res, 400, err.empty() ? "body must be a JSON object" : err);
+        return;
+    }
+    // The worker holds g_mm3_mutex for a whole MM3 job: never wait on it here.
+    std::unique_lock<std::mutex> lock(g_mm3_mutex, std::try_to_lock);
+    if (g_work_busy || !lock.owns_lock()) {
+        answer("unknown", 0, 0, 0, "the GPU is busy with another job");
+        return;
+    }
+    if (!mm3_request_tokenize(g_mm3, &g_mm3_tokenizer, &req, &err)) {
+        mm3_json_error(res, 400, err);
+        return;
+    }
+    const int          takes = mm3_clamp_takes(g_mm3.lm_cfg, req.takes, mm3_plan_rows(req));
+    const MM3FitInputs in    = mm3_fit_inputs(req, req.dit_backend);
+    auto slot_hit = [&](bool q8, int t) {
+        if (!req.reuse_ar || t > 1 || (!req.lm_adapter.empty() && req.lm_adapter_mode == "merge")) {
+            return false;
+        }
+        MM3SynthRequest r = req;
+        r.lm_kv_q8        = q8 == in.q8_in ? req.lm_kv_q8 : true;
+        return mm3_ar_slot_holds(mm3_ar_cache_key(g_mm3, r, ""));
+    };
+    // MM3_VRAM_BUDGET_GB stands in for the whole budget, as in the worker.
+    const size_t others = in.env_gb > 0.0 || !g_mm3_preflight_others ? 0 : (size_t) g_mm3_preflight_others();
+    const size_t budget = in.budget + others;
+    const MM3AdmitResult adm = mm3_vram_admit(slot_hit, in.measured, budget, in.weights, in.kv_row, in.rows_take,
+                                              takes, in.q8_in, in.can_q8, in.one_song);
+    const size_t own = in.env_gb > 0.0 ? in.budget : in.budget - in.ace;
+    const MM3Preflight v = mm3_preflight_verdict(adm, in.measured, in.q8_in, takes, own);
+    const MM3VramFit & f = adm.fit;
+    std::string detail;
+    if (adm.what == MM3Admit::HIT) {
+        detail = "the plan is in the AR cache, so planning is skipped";
+    } else if (v == MM3Preflight::UNKNOWN) {
+        detail = "no VRAM measurement on this device";
+    } else if (v == MM3Preflight::REFUSED) {
+        detail = "planning does not fit even with the planner cache at Q8_0";
+    } else if (v == MM3Preflight::PASSES) {
+        if (f.q8 != in.q8_in) detail = "planner cache at Q8_0";
+        if (f.takes != takes) {
+            detail += (detail.empty() ? "" : ", ") + std::string("ending candidates cut from ") + std::to_string(takes) +
+                      " to " + std::to_string(f.takes);
+        }
+        if (detail.empty()) detail = "idle models of other backends are unloaded first";
+    }
+    answer(mm3_preflight_str(v), f.need, budget, own, detail);
+}
+
 // ── GET /mm3/job?id=... ─────────────────────────────────────────────────────
 //
 // MM3-native progress. GET /job?id=... already gives coarse status plus the
@@ -2330,6 +2462,7 @@ static void mm3_handle_take(const httplib::Request & hreq, httplib::Response & r
 // The second half of the hook. Called next to mm3_register_routes().
 static void mm3_register_job_routes(httplib::Server & svr) {
     svr.Post("/mm3/synth", mm3_handle_synth);
+    svr.Post("/mm3/preflight", mm3_handle_preflight);
     svr.Get("/mm3/take", mm3_handle_take);
     svr.Get("/mm3/job", mm3_handle_job);
     svr.Get("/mm3/stream", mm3_handle_stream);

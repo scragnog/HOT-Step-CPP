@@ -16,8 +16,9 @@ import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listMm3Planks } from './plank.js';
 import { MM3_HIDDENS_EXT, listMm3Hiddens } from './hiddens.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
-import { mm3Props, mm3PropsCached, mm3SelectModel, mm3Unload } from './client.js';
-import { MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, runMinimaxGeneration } from './generate.js';
+import { mm3Preflight, mm3Props, mm3PropsCached, mm3SelectModel, mm3Unload } from './client.js';
+import { MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, mapMinimaxParams, runMinimaxGeneration } from './generate.js';
+import { preflightFromEngine } from '../../generation/preflight.js';
 import type { Mm3Props, Mm3RoleVariants } from './client.js';
 import type {
   EngineBackend,
@@ -962,6 +963,14 @@ export const minimaxBackend: EngineBackend = {
     return outcomeFromJob(job);
   },
   arbitratesResidencyInEngine: true,
+  /** The body runMinimaxGeneration would send, renderer resolved the same way. */
+  async preflight(envelope) {
+    const { req } = mapMinimaxParams(structuredClone(envelope.submission));
+    if (req.dit_backend === 'auto') {
+      req.dit_backend = (await mm3Props()).props?.dit_runtime?.available === true ? 'tensorrt' : 'ggml';
+    }
+    return preflightFromEngine(await mm3Preflight(req));
+  },
   /** Model-residency arbitration (plan §4.4): switching away from MM3 frees
    *  its ~13 GB rather than leaving it parked next to the ACE pipeline.
    *

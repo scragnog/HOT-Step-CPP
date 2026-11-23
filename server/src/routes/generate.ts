@@ -36,7 +36,7 @@ import type { DriftRuntime, DriftPressure } from '../services/storm/drift.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
-import { isGenerationIntent, readBackendOverride } from '../contracts/generation.js';
+import { isGenerationIntent, readBackendOverride, type GenerationPreflight } from '../contracts/generation.js';
 import { preparedParams } from '../contracts/yue2Prepare.js';
 import { GenerationIntentError, resolveGenerationIntent } from '../services/generation/intent.js';
 import { evictOtherFamilies, noteEnqueued, noteFinished } from '../services/generation/residency.js';
@@ -373,10 +373,63 @@ export function withoutPrepareDocument(submission: any): { submission: any } | {
   return { submission: rest };
 }
 
+type PreparedGeneration =
+  | { ok: true; submission: any; envelope: ReturnType<typeof buildEnvelope>; userId: string; jobId: string; enqueuedAt: number }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
 /** Validate and queue one generation, exactly as POST /api/generate does.
  *  Exported so the durable audio intent queue (services/audioQueue) submits
  *  through the same checks, job map and GPU lane instead of a second path. */
 export async function submitGeneration(raw: any, userId: string | null): Promise<SubmitGenerationResult> {
+  const prepared = await prepareGeneration(raw, userId);
+  if (!prepared.ok) return prepared;
+  const { submission, envelope, jobId, enqueuedAt } = prepared;
+  const job: GenerationJob = {
+    id: jobId,
+    userId: prepared.userId,
+    envelope,
+    status: 'pending',
+    stage: 'Queued',
+    progress: 0,
+    params: structuredClone(submission),
+    attempts: [],
+    createdAt: enqueuedAt,
+  };
+
+  if (envelope.submittedBackendMismatch !== undefined) {
+    console.log(`[Generate] Job ${job.id} submitted for '${envelope.submittedBackendMismatch}' but runs on '${envelope.backendId}'`);
+  }
+
+  jobs.set(job.id, job);
+  withLedger('open', ledger => ledger.opened(job));
+
+  // Enqueue — runs immediately if nothing else is generating,
+  // otherwise waits until the current job finishes.
+  enqueueGeneration(job);
+
+  return { ok: true, jobId: job.id, status: job.status };
+}
+
+/** Would this body fit in VRAM now? The same checks and envelope as a submit, then
+ *  the backend's admission dry run; nothing is queued, loaded or rendered. A body
+ *  generate would refuse gets the same status here. Engine trouble is `unknown`. */
+export async function preflightGeneration(raw: any, userId: string | null): Promise<
+  { ok: true; preflight: GenerationPreflight } | { ok: false; status: number; body: Record<string, unknown> }
+> {
+  const prepared = await prepareGeneration(raw, userId);
+  if (!prepared.ok) return prepared;
+  const backend = getBackend(prepared.envelope.backendId);
+  if (!backend?.preflight) {
+    return { ok: true, preflight: { verdict: 'unknown', detail: `${backend?.displayName ?? prepared.envelope.backendId} has no VRAM admission model` } };
+  }
+  try {
+    return { ok: true, preflight: await backend.preflight(prepared.envelope) };
+  } catch (err) {
+    return { ok: true, preflight: { verdict: 'unknown', detail: err instanceof Error ? err.message : String(err) } };
+  }
+}
+
+async function prepareGeneration(raw: any, userId: string | null): Promise<PreparedGeneration> {
   // The engine is deliberately stopped while a training preprocess job owns the
   // GPU — say so instead of the generic "not ready" boot message.
   if (isEngineSuspended()) {
@@ -472,30 +525,7 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
     const clientError = err instanceof GenerationEnvelopeError && err.code !== 'unknown_backend';
     return { ok: false, status: clientError ? 400 : 500, body: { error: err instanceof Error ? err.message : 'Cannot resolve generation request' } };
   }
-  const job: GenerationJob = {
-    id: jobId,
-    userId,
-    envelope,
-    status: 'pending',
-    stage: 'Queued',
-    progress: 0,
-    params: structuredClone(submission),
-    attempts: [],
-    createdAt: enqueuedAt,
-  };
-
-  if (envelope.submittedBackendMismatch !== undefined) {
-    console.log(`[Generate] Job ${job.id} submitted for '${envelope.submittedBackendMismatch}' but runs on '${envelope.backendId}'`);
-  }
-
-  jobs.set(job.id, job);
-  withLedger('open', ledger => ledger.opened(job));
-
-  // Enqueue — runs immediately if nothing else is generating,
-  // otherwise waits until the current job finishes.
-  enqueueGeneration(job);
-
-  return { ok: true, jobId: job.id, status: job.status };
+  return { ok: true, submission, envelope, userId, jobId, enqueuedAt };
 }
 
 /** True while a queued or running job will render build session `id` (Save song reads its files when it runs). */
@@ -512,6 +542,13 @@ router.post('/', generateCapture, async (req, res) => {
   const result = await submitGeneration(req.body, getUserId(req));
   if (!result.ok) { res.status(result.status).json(result.body); return; }
   res.json({ jobId: result.jobId, status: result.status });
+});
+
+// POST /api/generate/preflight — will this body fit in VRAM now? (contracts/generation.ts)
+router.post('/preflight', async (req, res) => {
+  const result = await preflightGeneration(req.body, getUserId(req));
+  if (!result.ok) { res.status(result.status).json(result.body); return; }
+  res.json(result.preflight);
 });
 
 // GET /api/generate/status/:id — poll job status

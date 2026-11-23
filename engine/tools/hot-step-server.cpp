@@ -205,6 +205,9 @@ static std::deque<std::function<void()>> g_work_queue;
 static std::mutex                        mtx_work;
 static std::condition_variable           cv_work;
 static bool                              g_work_stop = false;
+// True while the worker runs a job. The VRAM preflight routes answer "unknown"
+// then: what is free mid-job says nothing about the next one.
+static std::atomic<bool>                 g_work_busy{ false };
 
 static void work_push(std::function<void()> fn) {
     std::lock_guard<std::mutex> lock(mtx_work);
@@ -226,7 +229,9 @@ static void worker_main() {
             fn = std::move(g_work_queue.front());
             g_work_queue.pop_front();
         }
+        g_work_busy = true;
         fn();
+        g_work_busy = false;
     }
 }
 
@@ -3663,6 +3668,17 @@ int main(int argc, char ** argv) {
     // HOT-STEP: HeartMuLa backend, /heartmula/* (engine/docs/HEARTMULA_CONTRACT.md).
     // Progress, result and cancel ride the shared /job routes like YuE2.
     heartmula_register_routes(svr, models_dir);
+    // POST /mm3/preflight counts what Node frees before an MM3 render (the other
+    // families' idle weights); those globals only exist from here on.
+    g_mm3_preflight_others = []() -> uint64_t {
+        uint64_t b = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_hm.mtx);
+            b += g_hm.resident_bytes;
+        }
+        std::unique_lock<std::mutex> y(g_yue2_mutex, std::try_to_lock);  // held for a whole YuE2 job
+        return b + (y.owns_lock() ? yue2_vram_bytes(g_yue2) : 0);
+    };
 
     // HOT-STEP: GET /vram — GPU memory usage (CUDA only)
     svr.Get("/vram", [](const httplib::Request &, httplib::Response & res) {

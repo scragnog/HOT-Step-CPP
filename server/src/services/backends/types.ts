@@ -8,6 +8,7 @@
 import type { PluginParamSchema } from '../aceClient.js';
 import type { GenerationJob, StageTiming } from '../generation/jobTypes.js';
 import type { LaneLease } from '../generation/gpuLane.js';
+import type { GenerationPreflight } from '../../contracts/generation.js';
 
 /** Which job queue a backend's generations serialize against (plan §3.2/§4.4). */
 export type ResourcePool = 'gpu' | 'remote';
@@ -407,4 +408,8 @@ export interface EngineBackend {
    *  because of it. Declared here rather than branching on backend id in
    *  routes/backends.ts — see plan §2 principle 2. */
   releaseVram?(): Promise<void>;
+  /** Dry-run VRAM admission for a resolved request (POST /api/generate/preflight).
+   *  Never loads or renders. A backend without an admission model omits it and
+   *  the route answers `unknown`. */
+  preflight?(envelope: Readonly<GenerationEnvelope>): Promise<GenerationPreflight>;
 }

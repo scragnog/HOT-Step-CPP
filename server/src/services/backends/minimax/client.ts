@@ -588,6 +588,14 @@ export async function mm3Synth(req: Mm3SynthRequest): Promise<Mm3SynthResponse> 
   return mm3Post<Mm3SynthResponse>('/mm3/synth', req, TIMEOUT_QUICK);
 }
 
+/** POST /mm3/preflight: the stage-1 VRAM fit as a dry run for a /mm3/synth body.
+ *  Never loads or queues; tokenizes, so it may read the tokenizer cold. */
+export async function mm3Preflight(req: Mm3SynthRequest): Promise<{
+  verdict: string; need_bytes: number; free_bytes: number; budget_bytes: number; detail: string;
+}> {
+  return mm3Post('/mm3/preflight', req, TIMEOUT_TOKENIZE);
+}
+
 /** The engine URL of a job's live audio stream — a chunked body of
  *  concatenated self-contained WAVs, same transport as STORM's.
  *

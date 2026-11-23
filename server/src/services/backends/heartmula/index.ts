@@ -3,6 +3,7 @@ import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { heartmulaClient } from './client.js';
 import { heartmulaModels, heartmulaSelection, selectHeartmulaModel } from './models.js';
 import { mapHeartmulaRequest, runHeartmulaGeneration } from './generate.js';
+import { preflightFromEngine } from '../../generation/preflight.js';
 import type { EngineBackend, BackendExtensionParam } from '../types.js';
 
 const extensions: BackendExtensionParam[] = [
@@ -81,4 +82,8 @@ export const heartmulaBackend: EngineBackend = {
   },
   generate: runHeartmulaGeneration,
   releaseVram: () => heartmulaClient.unload(),
+  async preflight(envelope) {
+    return preflightFromEngine(await heartmulaClient.preflight(
+      envelope.options.heartmula as unknown as Parameters<typeof heartmulaClient.preflight>[0]));
+  },
 };

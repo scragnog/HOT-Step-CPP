@@ -46,3 +46,19 @@ export function readBackendOverride(raw: unknown): string | undefined {
   if (!parsed.success) throw new Error('backendOverride must be a non-empty string when supplied');
   return parsed.data;
 }
+
+/** POST /api/generate/preflight: would this request fit in VRAM now?
+ *  fits: runs as sent without unloading anything. passes: runs, but only after
+ *  the engine unloads another backend's idle models or plans in a smaller shape
+ *  (`detail` says which). refused: the engine would refuse it now. unknown: no
+ *  admission model for this backend, no measurement, or the GPU is busy. */
+export type GenerationPreflightVerdict = 'fits' | 'passes' | 'refused' | 'unknown';
+
+export interface GenerationPreflight {
+  verdict: GenerationPreflightVerdict;
+  /** What the request needs at its largest stage, GiB. */
+  estimateGb?: number;
+  /** What it can use without unloading another backend, GiB. */
+  freeGb?: number;
+  detail?: string;
+}

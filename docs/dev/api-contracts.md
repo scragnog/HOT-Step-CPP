@@ -191,6 +191,33 @@ Any failure, including an empty caption or `cot` off, is `500 { error }`. Closin
 cancels the preview. To render the approved score, send it as `yue2Abc` on an ordinary
 `POST /api/generate` with the returned `seed` pinned.
 
+## VRAM preflight
+
+`POST /api/generate/preflight` asks whether a Generate body would fit in VRAM now, so a
+client can warn before it submits. The body is exactly what `POST /api/generate` takes, and it
+goes through the same checks and the same envelope (`preflightGeneration` in
+`server/src/routes/generate.ts`), so a body generate would refuse gets the same `400`, `401`,
+`409` or `503` here. Nothing is queued, loaded or rendered. The answer
+(`GenerationPreflight` in `server/src/contracts/generation.ts`) is
+`{ verdict, estimateGb?, freeGb?, detail? }`:
+
+| `verdict` | Meaning |
+|---|---|
+| `fits` | Runs as sent without unloading anything |
+| `passes` | Runs, but only after the engine unloads another backend's idle models, or (MM3) plans in a smaller shape: planner cache at Q8_0, fewer ending candidates. `detail` says which |
+| `refused` | The engine would refuse it now |
+| `unknown` | No admission model for this backend, no VRAM measurement on this device, the GPU is busy with another job, or the engine did not answer. `detail` says which |
+
+`estimateGb` is what the request needs at its largest stage and `freeGb` what it can use
+without unloading another backend; both come with every verdict except `unknown`. The numbers
+come from the engine's own admission arithmetic, run as a dry run: `heartmula_admit` through
+`POST /heartmula/preflight`, and the MM3 stage-1 fit (`mm3-vram-fit.h`) through
+`POST /mm3/preflight`. ACE-Step, YuE2 and Stable Audio 3 have no admission model yet and
+always answer `unknown`. A backend adds one by implementing `preflight()` on its
+`EngineBackend`. The answer describes the GPU at the moment of asking: a render queued ahead
+of this one changes it. The UI reads it through `ui/src/services/generatePreflightApi.ts` and
+never estimates VRAM itself.
+
 ## Media
 
 | Mount | Serves | Auth |

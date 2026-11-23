@@ -1689,6 +1689,7 @@ response details are in [the endpoint reference](../../engine/docs/ARCHITECTURE.
 | `POST /mm3/synth`, `GET /mm3/job`, `GET /mm3/take`, `GET /mm3/stream` | MM3 generation, progress, ensemble takes, live audio |
 | `POST /mm3/refine` | MM3 latent refiner on any audio (progress and result through `/job`; see [MM3 latent refiner](#mm3-latent-refiner-audio-in-audio-out)) |
 | `POST /mm3/tokenize-check`, `POST /mm3/imatrix` | MM3 prompt token count, imatrix collection for `quantize` |
+| `POST /mm3/preflight`, `POST /heartmula/preflight` | Dry-run VRAM admission for a synth body: `fits`, `passes`, `refused` or `unknown`, with the bytes. They run on the HTTP thread, never load, and answer `unknown` while the GPU worker runs a job. Behind `POST /api/generate/preflight` ([API contracts](api-contracts.md#vram-preflight)) |
 | `POST /mm3/voc-decode`, `/mm3/dit-forward`, `/mm3/flow-sample`, `/mm3/depth-frame`, `/mm3/cond-encode`, `/mm3/lm-plan`, `/mm3/synth-e2e` | MM3 bring-up and parity endpoints. They run GPU work outside the job queue; do not build features on them |
 | `GET /yue2/props`, `POST /yue2/warm`, `POST /yue2/unload`, `POST /yue2/select-model` | YuE2 status, residency, quant and adapter selection |
 | `POST /yue2/synth` | YuE2 generation (progress and result through `/job`) |

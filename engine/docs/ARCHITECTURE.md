@@ -1063,6 +1063,12 @@ GET  /mm3/stream?id=             Live audio chunks of a running job (one reader)
 POST /mm3/refine                 MM3 latent refiner job on the shared queue (audio in,
                                  audio out); progress and result through /job.
 POST /mm3/tokenize-check         Prompt token count (5000-token limit).
+POST /mm3/preflight              /mm3/synth body in; the stage-1 VRAM fit as a dry
+                                 run: {verdict, need_bytes, free_bytes, budget_bytes,
+                                 detail}. free_bytes unloads nothing; budget_bytes
+                                 adds the idle ACE modules the job evicts and the
+                                 other families Node frees before every render.
+                                 "unknown" while the GPU worker runs a job.
 POST /mm3/imatrix                Activation statistics for quantize --imatrix.
 POST /mm3/voc-decode, /mm3/dit-forward, /mm3/flow-sample, /mm3/depth-frame,
      /mm3/cond-encode, /mm3/lm-plan, /mm3/synth-e2e

@@ -110,3 +110,29 @@ static inline MM3AdmitResult mm3_vram_admit(SlotHit slot_hit, bool measured, siz
     }
     return r;
 }
+
+// POST /mm3/preflight's verdict for an admission result. FITS runs as sent
+// without evicting anything; PASSES runs, but only after evicting idle ACE
+// modules or in a smaller shape (Q8_0 KV, fewer candidates); REFUSED is what
+// the worker would refuse now; UNKNOWN has no budget to fit against.
+// `own_budget`: the budget without what eviction adds.
+enum class MM3Preflight { FITS, PASSES, REFUSED, UNKNOWN };
+
+static inline MM3Preflight mm3_preflight_verdict(const MM3AdmitResult & r, bool measured, bool q8, int takes,
+                                                 size_t own_budget) {
+    if (r.what == MM3Admit::HIT) {
+        return MM3Preflight::FITS;
+    }
+    if (!measured) {
+        return MM3Preflight::UNKNOWN;
+    }
+    if (r.what == MM3Admit::REFUSE) {
+        return MM3Preflight::REFUSED;
+    }
+    const bool shrunk = r.fit.q8 != q8 || r.fit.takes != (takes < 1 ? 1 : takes);
+    return shrunk || r.fit.need > own_budget ? MM3Preflight::PASSES : MM3Preflight::FITS;
+}
+
+static inline const char * mm3_preflight_str(MM3Preflight v) {
+    return v == MM3Preflight::FITS ? "fits" : v == MM3Preflight::PASSES ? "passes" : v == MM3Preflight::REFUSED ? "refused" : "unknown";
+}

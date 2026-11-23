@@ -73,6 +73,22 @@ int main() {
     // Miss everywhere: run degraded.
     admit("miss, degrade", false, false, true, b, MM3Admit::RUN, true, 1);
 
+    // ── POST /mm3/preflight verdicts (mm3_preflight_verdict) ──
+    auto verdict = [&](const char * name, bool hit, bool measured, size_t budget, size_t own, MM3Preflight want) {
+        auto slot = [&](bool, int) { return hit; };
+        const MM3AdmitResult r = mm3_vram_admit(slot, measured, budget, w, ROW_7680, 2, 3, false, true, true);
+        const MM3Preflight   v = mm3_preflight_verdict(r, measured, false, 3, own);
+        printf("%s: preflight %s - %s\n", v == want ? "PASS" : "FAIL", name, mm3_preflight_str(v));
+        fails += v == want ? 0 : 1;
+    };
+    const size_t roomy = mm3_fit_need(w, ROW_7680, 6, false);
+    verdict("fits as sent", false, true, roomy, roomy, MM3Preflight::FITS);
+    verdict("fits only after evicting ACE", false, true, roomy, roomy - 1, MM3Preflight::PASSES);
+    verdict("GH #324 shape cut", false, true, b, b, MM3Preflight::PASSES);
+    verdict("refused", false, true, GiB, GiB, MM3Preflight::REFUSED);
+    verdict("unmeasured", false, false, 0, 0, MM3Preflight::UNKNOWN);
+    verdict("plan cached, budget 1 GiB", true, true, GiB, GiB, MM3Preflight::FITS);
+
     printf("%s\n", fails ? "MM3 VRAM FIT: FAIL" : "MM3 VRAM FIT: PASS");
     return fails ? 1 : 0;
 }

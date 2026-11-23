@@ -80,6 +80,17 @@ export interface HeartmulaJob {
   error?: { code: string; message: string } | null;
 }
 
+export interface HeartmulaPreflight {
+  verdict: 'fits' | 'passes' | 'refused' | 'unknown';
+  need_bytes: number;
+  /** Free VRAM plus the HeartMuLa weights the request would drop. */
+  free_bytes: number;
+  /** Other backends' idle VRAM the engine would reclaim. */
+  reclaimable_bytes: number;
+  phase: string;
+  detail: string;
+}
+
 export class HeartmulaEngineError extends Error {
   constructor(readonly status: number, readonly code: string, message: string,
     readonly detail: unknown) { super(message); }
@@ -133,6 +144,11 @@ export const heartmulaClient = {
     const result = await (await request(route, wire, 'rolls' in wire ? 60_000 : 15_000)).json() as { id?: string };
     if (!result.id) throw new Error('HeartMuLa returned no job id');
     return result.id;
+  },
+  /** POST /heartmula/preflight: heartmula_admit as a dry run, off the GPU worker. */
+  async preflight(wire: HeartmulaRequest | HeartmulaCoverRequest): Promise<HeartmulaPreflight> {
+    const route = 'rolls' in wire ? '/heartmula/preflight?cover=1' : '/heartmula/preflight';
+    return (await request(route, wire, 'rolls' in wire ? 60_000 : 15_000)).json();
   },
   async job(id: string): Promise<HeartmulaJob> {
     return (await request(`/heartmula/job?id=${encodeURIComponent(id)}`)).json();

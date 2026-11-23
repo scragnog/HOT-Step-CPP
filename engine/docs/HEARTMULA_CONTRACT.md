@@ -81,6 +81,7 @@ with the status below. Field names are snake_case.
 | `POST /heartmula/unload` | Free every HeartMuLa buffer. Idempotent |
 | `POST /heartmula/synth` | Queue a generation; returns the shared job id |
 | `POST /heartmula/cover` | Queue a MuLaCover cover from lead-sheet rolls; returns the shared job id |
+| `POST /heartmula/preflight[?cover=1]` | Admission as a dry run for a synth (or cover) body; nothing loads |
 | `GET /heartmula/job?id=` | HeartMuLa progress detail and failure reasons |
 | `GET /job?id=`, `GET /job?id=&result=1` | Shared coarse status and the WAV result |
 | `POST /job?id=&cancel=1` | Shared cancel |
@@ -195,6 +196,18 @@ admission object. Response `{"loaded": true, "already_loaded": bool,
 Unload waits for the GPU worker to be idle, frees every HeartMuLa buffer and
 returns `{"unloaded": true}`. The tokenizer stays loaded; it is a few MB of host
 memory.
+
+### `POST /heartmula/preflight`
+
+Takes a `/heartmula/synth` body, or with `?cover=1` a `/heartmula/cover` body, and runs
+the same parse, pick, prompt and byte counts as a job against the VRAM free now and the
+residency snapshot. Nothing loads and nothing queues. Each phase may use the free VRAM
+plus the HeartMuLa weights it would drop: stale ones, and the other phase's, which the
+pipeline frees when both do not fit. The phase furthest from fitting decides. Response
+`{"verdict", "need_bytes", "free_bytes", "reclaimable_bytes", "phase", "detail"}`;
+`verdict` is `fits`, `passes` (only after reclaiming other backends' idle VRAM),
+`refused`, or `unknown` while the GPU worker runs a job. A cover's style pass is not
+counted. Bad bodies and picks get the same errors as synth.
 
 ### `POST /heartmula/synth`
 
