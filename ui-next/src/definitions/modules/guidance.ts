@@ -24,7 +24,7 @@ export const guidance = {
       when: { param: 'samp.guide', is: 'apg' },
       engines: ['ace', 'sa3', 'heartmula'],
       wire: 'param:apgMomentum',
-      per: [{ engines: ['sa3', 'heartmula'], wire: { to: 'param:apgMomentum', note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
+      per: [{ engines: ['sa3', 'heartmula'], wire: { to: 'param:apgMomentum', differs: ['unread'], note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
     },
     {
       key: 'apg.norm',
@@ -35,7 +35,7 @@ export const guidance = {
       when: { param: 'samp.guide', is: 'apg' },
       engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],
       wire: 'param:apgNormThreshold',
-      per: [{ engines: ['sa3'], wire: { to: 'param:apgNormThreshold', note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
+      per: [{ engines: ['sa3'], wire: { to: 'param:apgNormThreshold', differs: ['unread'], note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
     },
   ],
   strip: [

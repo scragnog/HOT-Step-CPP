@@ -26,14 +26,14 @@ them directly.
 
 | Item | Kind | Engines | Params | Class | Its own parts, and why |
 | --- | --- | --- | --- | --- | --- |
-| Prompt (`prompt`) | built in | all | 7 | Mostly bespoke | `promptBox`: the main box, its placeholder, Write it for me, Compose caption and the caption source are behaviour, not layout. |
+| Prompt (`prompt`) | built in | all | 8 | Mostly bespoke | `promptBox`: the main box, its placeholder, Write it for me, Compose caption, the caption source, the trigger word and the imported latent are behaviour, not layout; its named steps are the definition's. |
 | Lyrics (`lyrics`) | built in | ace, mm3, yue2, hm | 4 | Mostly bespoke | `lyricSheet`: tag insertion at line boundaries, the structure strip, the line count and wildcard expansion. The foot (Instrumental, vocal gender) is data. |
 | Models (`models`) | built in | all | 5 | Mostly bespoke | `modelPicker`: server-listed files with VRAM figures. Each model choice is a declared parameter. |
 | Repaint | module | ace | 3 | Mostly bespoke | `repaintRegion`: the source song, its waveform and the region are state with their own steps. |
 | Tempo, key & length (`tempo`) | module | all | 11 | Data plus parts of its own | The LCD and its rows, the rulers and every per-engine name are data. Bespoke: `keyWheel`, `tapTempo`, `capChips` (prompt chips on Stable Audio 3 and HeartMuLa). |
 | Avoid | module | ace | 1 | Shared parts only | A text area with the note look. |
 | Timbre reference (`timbre`) | module | ace | 1 | Data plus parts of its own | The drop zone is shared, and shows Mastering's reference when that pedal lends it. `timbreBlend` and `recentRefs` are its own. |
-| Adapters | module | ace, mm3, yue2, hm | 32 | Mostly bespoke | `cartridges`: the slots per engine, label art, phase windows and section masks written into the lyrics. The fader banks, rebase row, stack foot and option foot are data. |
+| Adapters | module | ace, mm3, yue2, hm | 31 | Mostly bespoke | `cartridges`: the slots per engine, label art, each slot's phase window, and section masks written into the lyrics. The fader banks, rebase row, stack foot and option foot are data. |
 | Planner | module | ace, mm3, yue2, hm | 32 | Data plus parts of its own | The terminal, its lines, flags and tokens, the XY pad and Quick's mood row are data, per engine. `planText` is its own read-out. |
 | Repetition guard (`repetition`) | Lab | ace, mm3, yue2 | 12 | Data plus parts of its own | Terminal lines; `lookback` is its own. |
 | Sampler | module | all | 56 | Data plus parts of its own | The well, the pickers, the schedule shape groups and all YuE2 plugin control groups are data. `samplerScope` is its own. |
@@ -76,8 +76,8 @@ the two waveform selections).
 
 Each is a decision, recorded here so that a comparison with the concept can tell it from a mistake.
 
-- **Cover art subject** (`pp.art.subject`) is declared in the concept and saved as song content, but no face draws it.
-  Here it is a Lab control of the Cover art unit, laid out like the unit's other settings.
+- **Cover art subject** (`pp.art.subject`) is drawn in the song info on the prompt card, as the concept has it, and also
+  laid out at Lab with the Cover art unit's other settings, because a unit's parameters are laid out by rule.
 - **YuE2's NAR plugin controls** were generated at load from a table (`YUEPLUG` in `25-module-sampler.js`). They are
   ordinary parameters here (`yn.<plugin>.<n>`), each with `when` on the solver or scheduler that brings it.
 - **The Sampler's schedule shapes** (Beta, Power, Composite) are separate parameters in the concept and here; the request
@@ -86,10 +86,13 @@ Each is a decision, recorded here so that a comparison with the concept can tell
   settings, the DRY settings, the codes strength and steps, the normalizer's Custom knob, the retake seed, the lead
   sheet's text): the concept hides the same controls in its face, and here the condition also keeps the value out of the
   request.
-- **The planner's settings travel with the song**, as the concept's rule (`isEngOwn`) has them; the three that are on
-  two engines (CFG plausibility, rescale, log-probabilities) are where that shows.
+- **Owners** follow the concept's rule (`isEngOwn`): the Planner and the Lab modules under it (Repetition guard, Plans
+  and endings, Re-planning, Throughput) and Build by section travel with the song. Two groups the concept's rule misses
+  are kept per engine as its own comment says adapter and sampler settings are: the adapter group scales (`ag.*`) and
+  YuE2's plugin controls (`yn.*`). `tools/fixtures/concept-differences.json` records it.
 - **Takes** on Stable Audio 3 and HeartMuLa read as one take (range 1 to 1), as the concept's engine limit has it, and
-  send nothing; ACE-Step allows 9 (the server's `batch.max` is 8, [08](08-open-questions.md) question 3).
+  send nothing; ACE-Step allows 8, the server's `batch.max`, where the concept allows 9 and the existing page sends 8
+  for 9 ([08](08-open-questions.md) question 3).
 - **Ranges and steps** follow the concept where it differs from the existing UI's sliders, and each such wire's note says
   so ([04](04-parameter-names.md), "Different step or range").
 - **APG on Stable Audio 3 and HeartMuLa**: the concept offers the APG pad there; no code those engines run reads the two
@@ -98,3 +101,14 @@ Each is a decision, recorded here so that a comparison with the concept can tell
   sends 0 while it is off.
 - **The planner's tier summaries** and Tempo's say what each tier adds on each engine; the concept's say ACE-Step's on
   every engine, and Tempo's put Beat I/O at Lab where its face shows it at Studio.
+- **MiniMax-Music3's renderer** offers Auto, the server's own choice when nothing is set (TensorRT when the machine has
+  it, else GGML), and starts there; the concept offers GGML and TensorRT and starts on GGML, which the server does not do.
+  The precision applies on Auto and TensorRT.
+- **The trigger word** is sent on ACE-Step and MiniMax-Music3; on YuE2 and HeartMuLa the engine adds its adapter's own
+  trigger and the existing page sends no typed one, so the definitions send none there either.
+- **Lua plugins on, the solver, schedule and guidance left alone** send Native (the engine's own loop), as the concept
+  starts them; the existing page sends ACE-Step's picks there ([08](08-open-questions.md) question 5).
+- **One format everywhere**: the concept's undo steps write a length as m:ss and the reference blend as a percent,
+  where its read-outs write 10 s and 1.00. The definitions write a value one way everywhere.
+- **The denoiser and LSS strengths** have undo names of their own ("Denoiser strength", "LSS strength"); the concept
+  names both "Latent & correction strength".

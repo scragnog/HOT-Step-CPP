@@ -20,7 +20,7 @@ export const latent = {
       type: 'text',
       label: 'Custom timesteps',
       default: '',
-      placeholder: '0.97,0.76,0.5,0.28,0.085,0',
+      placeholder: 'e.g. 0.97, 0.76, 0.5, 0.28, 0.085, 0',
       example: '0.97, 0.76, 0.5, 0.28, 0.085, 0',
       check: {
         rule: 'timesteps',
@@ -35,7 +35,7 @@ export const latent = {
       label: 'Latent shift',
       range: [-2, 2, 0.05],
       default: 0,
-      wire: { to: 'param:latentShift', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:latentShift', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'lat.rescale',
@@ -43,7 +43,7 @@ export const latent = {
       label: 'Latent rescale',
       range: [0.1, 3, 0.05],
       default: 1,
-      wire: { to: 'param:latentRescale', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:latentRescale', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     { key: 'dcw.on', type: 'boolean', label: 'DCW correction', default: false, wire: 'param:dcwEnabled' },
     {
@@ -52,10 +52,10 @@ export const latent = {
       label: 'DCW mode',
       default: 'double',
       options: [
-        { value: 'double', label: 'Both (Low + High)' },
-        { value: 'low', label: 'Low-Frequency' },
-        { value: 'high', label: 'High-Frequency' },
-        { value: 'pix', label: 'Pixel-Space (No Wavelets)' },
+        { value: 'double', label: 'Both (Low + High)', short: 'Both' },
+        { value: 'low', label: 'Low-Frequency', short: 'Low' },
+        { value: 'high', label: 'High-Frequency', short: 'High' },
+        { value: 'pix', label: 'Pixel-Space (No Wavelets)', short: 'Pixel' },
       ],
       wire: 'param:dcwMode',
     },
@@ -83,7 +83,11 @@ export const latent = {
       label: 'Low',
       range: [0, 1, 0.01],
       default: 0.2,
-      wire: 'param:dcwLowScaler',
+      /* the one knob of Low, High and Pixel mode is the scaler that mode reads (the resolver's dcwScaler) */
+      wire: [
+        { to: 'param:dcwLowScaler', when: { param: 'dcw.mode', not: 'high' } },
+        { to: 'param:dcwHighScaler', when: { param: 'dcw.mode', is: 'high' } },
+      ],
       per: [{ when: { param: 'dcw.mode', not: 'double' }, label: 'Scaler' }],
     },
     {
@@ -99,6 +103,7 @@ export const latent = {
       key: 'den.str',
       type: 'number',
       label: 'Strength',
+      undoName: 'Denoiser strength',
       range: [0.01, 1, 0.01],
       default: 0.5,
       wire: {
@@ -121,6 +126,7 @@ export const latent = {
       key: 'lss.str',
       type: 'number',
       label: 'Strength',
+      undoName: 'LSS strength',
       range: [0.01, 1, 0.01],
       default: 0.65,
       wire: {
@@ -164,7 +170,7 @@ export const latent = {
           part: 'group',
           dim: { when: { param: 'dcw.on', is: false }, says: 'DCW is off' },
           children: [
-            { part: 'pill', param: 'dcw.on', label: 'DCW' },
+            { part: 'pill', param: 'dcw.on', label: 'DCW', tip: 'DCW: wavelet correction' },
             { part: 'segmented', param: 'dcw.mode', opts: { size: 'sm' } },
             { part: 'row', children: [{ part: 'knob', param: 'dcw.low' }, { part: 'knob', param: 'dcw.high' }] },
           ],
@@ -188,7 +194,7 @@ export const latent = {
           part: 'group',
           dim: { when: { param: 'lss.on', is: false }, says: 'LSS is off' },
           children: [
-            { part: 'pill', param: 'lss.on', label: 'LSS' },
+            { part: 'pill', param: 'lss.on', label: 'LSS', tip: 'LSS: latent spectral suppressor' },
             { part: 'pill', param: 'lss.dc', label: 'DC remove' },
             {
               part: 'row',

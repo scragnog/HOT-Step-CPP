@@ -54,7 +54,7 @@ export const sampler = {
           engines: ['sa3'],
           range: [1, 10, 0.1],
           default: 1,
-          wire: { to: 'param:guidanceScale', note: 'Read only with samplerPluginsEnabled and above 1.' },
+          wire: { to: 'param:guidanceScale', differs: ['default'], note: 'Read only with samplerPluginsEnabled and above 1: the default 1 adds no guidance, where the existing page carries ACE-Step\'s 9 here.' },
           when: { param: 'samp.plugins', is: true },
         },
         {
@@ -75,7 +75,7 @@ export const sampler = {
       auto: {},
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
       engines: ['ace', 'minimax-m3', 'heartmula'],
-      wire: { to: 'param:shift', auto: null, note: 'Auto sends nothing, so the engine\'s own shift applies.' },
+      wire: { to: 'param:shift', auto: -1, differs: ['default'], note: 'Auto is -1, as the existing slider\'s Auto button sets it: the engine then uses its own shift (3.0 on turbo models, 1.0 on base ones). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).' },
       per: [
         {
           engines: ['minimax-m3'],
@@ -112,6 +112,7 @@ export const sampler = {
             include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }],
           },
           default: '',
+          wire: { to: 'param:inferMethod', differs: ['default'], note: 'Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step\'s euler here.' },
         },
         {
           engines: ['yue2'],
@@ -177,6 +178,7 @@ export const sampler = {
             include: [{ value: '', label: 'Native', tip: 'The engine\'s own guidance' }],
           },
           default: '',
+          wire: { to: 'param:guidanceMode', differs: ['default'], note: 'Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step\'s APG here.' },
         },
       ],
     },

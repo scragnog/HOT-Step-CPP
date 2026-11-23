@@ -11,7 +11,7 @@ export const repetition = {
   category: 'Engine',
   labUnder: 'planner',
   engines: ['ace', 'minimax-m3', 'yue2'],
-  owner: 'engine',
+  owner: 'song',
   stored: 'settings',
   size: { w: 2, foldAt3: true, stretch: 144 },
   params: [

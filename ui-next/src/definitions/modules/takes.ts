@@ -21,11 +21,11 @@ export const takes = {
       type: 'number',
       label: 'Takes per run',
       tip: 'Each take is a separate song from the same settings, with its own seed',
-      range: [1, 9, 1],
+      range: [1, 8, 1],
       default: 1,
       engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
-      held: { note: 'Your {value} takes return on {engine}', toast: 'Takes capped at {shown}' },
-      wire: 'param:batchSize',
+      held: { note: 'Your {value} takes return on {engine}', toast: 'Takes capped at {shown}', value: '{value} takes' },
+      wire: { to: 'param:batchSize', differs: ['range'], note: 'The server takes 8 at most (batch.max); the existing slider goes to 9 and sends 8.' },
       per: [
         {
           engines: ['minimax-m3'],
@@ -35,7 +35,7 @@ export const takes = {
         },
         {
           engines: ['yue2'],
-          wire: { to: 'ext:yue2BatchSize', note: 'Declared with a maximum of 1 in the static manifest; the engine raises it to its batch limit.' },
+          wire: { to: 'ext:yue2BatchSize', differs: ['range'], note: 'Declared with a maximum of 1 in the static manifest; the engine raises it to its batch limit.' },
           range: [1, 4, 1],
           tip: 'YuE2 calls this the batch size: songs composed side by side',
         },

@@ -11,7 +11,7 @@ export const replan = {
   category: 'Engine',
   labUnder: 'planner',
   engines: ['yue2'],
-  owner: 'engine',
+  owner: 'song',
   stored: 'settings',
   size: { w: 1 },
   params: [

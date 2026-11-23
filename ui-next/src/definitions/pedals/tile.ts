@@ -23,9 +23,9 @@ export const tile = {
       default: 'md_audio_tiled V2.1',
       options: {
         from: 'plugins.postprocess',
-        include: [{ value: 'md_audio_tiled V2.1', label: 'md_audio_tiled V2.1', lcd: 'V2.1' }],
+        include: [{ value: 'md_audio_tiled V2.1', label: 'MD Audio Tiled Decoder V2.1', lcd: 'V2.1' }],
       },
-      wire: { to: 'param:postprocessPlugin', note: 'The concept starts on V2.1, so turning the decoder on uses it; the real app starts with none chosen.' },
+      wire: { to: 'param:postprocessPlugin', differs: ['default'], note: 'The concept starts on V2.1, so turning the decoder on uses it; the real app starts with none chosen.' },
     },
   ],
   idle: [

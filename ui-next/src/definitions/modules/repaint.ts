@@ -53,6 +53,7 @@ export const repaint = {
       key: 'source',
       kind: 'record',
       noun: 'the song to repaint',
+      steps: { pick: 'Repaint {title}' },
       owner: 'song',
       stored: 'none',
       wire: { to: 'ui:repaint.source', note: 'The Repaint studio\'s source song fields (sourceSong, sourceAudioUrl).' },
@@ -61,6 +62,7 @@ export const repaint = {
       key: 'region',
       kind: 'span',
       noun: 'Repaint region',
+      steps: { move: '{noun} {from} → {to}' },
       owner: 'song',
       stored: 'none',
       wire: {

@@ -39,8 +39,12 @@ export const flow = {
       key: 'mm.rend',
       type: 'choice',
       label: 'Renderer',
-      default: 'ggml',
-      options: [{ value: 'ggml', label: 'GGML' }, { value: 'trt', label: 'TensorRT' }],
+      default: 'auto',
+      options: [
+        { value: 'auto', label: 'Auto', tip: 'TensorRT when this machine has the MM3 TensorRT pack, otherwise GGML' },
+        { value: 'ggml', label: 'GGML' },
+        { value: 'tensorrt', label: 'TensorRT' },
+      ],
       wire: {
         to: 'ext:mm3DitBackend',
         note: 'Read by backends/minimax/generate.ts but no longer declared as an extension (its control was removed).',
@@ -52,7 +56,7 @@ export const flow = {
       label: 'TensorRT precision',
       default: 'fp8',
       options: [{ value: 'fp8', label: 'FP8' }, { value: 'bf16', label: 'BF16' }],
-      when: { param: 'mm.rend', is: 'trt' },
+      when: { param: 'mm.rend', not: 'ggml' },
       wire: { to: 'ext:mm3DitPrecision', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
     },
     { key: 'mm.stream', type: 'boolean', label: 'Play while rendering', default: false, wire: 'ext:mm3Stream' },
@@ -82,7 +86,7 @@ export const flow = {
         {
           part: 'note',
           text: 'Needs the MM3 TensorRT pack. The first render at each precision builds an engine, which takes a few minutes. FP8 is about 27% faster.',
-          when: { param: 'mm.rend', is: 'trt' },
+          when: { param: 'mm.rend', is: 'tensorrt' },
         },
       ],
     },

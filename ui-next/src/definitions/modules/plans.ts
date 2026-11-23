@@ -11,7 +11,7 @@ export const plans = {
   category: 'Engine',
   labUnder: 'planner',
   engines: ['minimax-m3'],
-  owner: 'engine',
+  owner: 'song',
   stored: 'settings',
   size: { w: 1 },
   params: [

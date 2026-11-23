@@ -23,7 +23,7 @@ export const ss = {
       range: [10, 60, 1],
       unit: '%',
       default: 30,
-      wire: { to: 'param:stableStepStrength', divide: 100, note: 'Real is 0..1.' },
+      wire: { to: 'param:stableStepStrength', divide: 100, differs: ['range'], note: 'Real is 0..1, so the knob divides by 100; the existing UI steps by 5%, the concept by 1%.' },
     },
     {
       key: 'pp.ss.vox',

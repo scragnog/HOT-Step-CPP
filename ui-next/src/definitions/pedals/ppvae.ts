@@ -22,7 +22,7 @@ export const ppvae = {
       label: 'Blend',
       range: [0, 1, 0.05],
       default: 0,
-      wire: { to: 'param:ppVaeBlend', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:ppVaeBlend', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
   ],
   thumb: { file: 'pd-ppvae' },

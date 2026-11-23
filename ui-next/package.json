@@ -11,11 +11,13 @@
     "typecheck": "tsc -p tsconfig.json",
     "validate": "node tools/validate-definitions.ts",
     "request": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
-    "check": "tsc -p tsconfig.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
+    "check": "tsc -p tsconfig.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts",
     "docs": "node tools/validate-definitions.ts --docs",
     "fixtures": "node --no-warnings --import ./tools/real-app/load.mjs tools/make-fixtures.ts",
     "test": "node tools/test-validator.ts",
-    "thumb": "node tools/thumb.ts"
+    "thumb": "node tools/thumb.ts",
+    "core": "node tools/test-core.ts",
+    "concept": "node tools/concept/collect.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

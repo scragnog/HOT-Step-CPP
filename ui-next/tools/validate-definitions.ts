@@ -14,17 +14,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { DEFINITIONS } from '../src/definitions/index.ts';
+import { DEFINITIONS as LISTED } from '../src/definitions/index.ts';
 import { FACTORY_WORKFLOWS, FACTORY_REVISIONS } from '../src/definitions/factory.ts';
 import { ENGINES, ENGINE_IDS } from '../src/definitions/engines.ts';
-import { PARTS, DESK_FACTS, OPTION_SOURCES, ACTIONS, layOut, type PartSpec } from '../src/definitions/parts.ts';
+import { PARTS, CHECKS, DESK_FACTS, OPTION_SOURCES, ACTIONS, layOut, type PartSpec } from '../src/definitions/parts.ts';
 import { TRANSFORMS, type Transform } from '../src/definitions/transforms.ts';
+import { RETIRED } from '../src/definitions/retired.ts';
 import type {
-  Action, Condition, Definition, EngineId, Json, Node, NodeOverride, Option, ParamDef, Strip, Tier, Value, Wire, WireKey,
+  Action, Condition, Definition, EngineId, Json, Node, NodeOverride, Option, ParamDef, Step, Strip, Tier, Value, Wire, WireKey,
   WireMap,
 } from '../src/definitions/types.ts';
+import { stepSays, stepChanges } from '../src/derive/steps.ts';
 import {
-  type Desk, type Index, SLOT, applies, enginesOf, editsOf, holds, indexOf, isEngineLine, nodeAt, realState, resolve,
+  type Desk, type Index, SLOT, applies, cleanState, cleanValues, enginesOf, editsOf, factsOf, holds, indexOf, isEngineLine, nodeAt, realState, resolve,
   toOf, wiresOf, realDefaultsFrom,
 } from '../src/derive.ts';
 
@@ -34,9 +36,18 @@ const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 'rea
   generationDefaults: Record<string, Json>; createContent: Record<string, Json>; createContentFields: string[];
   extensions: Record<string, { key: string; type: string; default?: Json; min?: number; max?: number; step?: number; options?: Json }[]>;
   reads: Record<string, string[]>; fields: Record<string, string[]>; plugins: Record<string, string[]>; buckets: Record<string, string[]>;
-  sliders: Record<string, (number | null)[][]>;
+  sliders: Record<string, (number | null)[][]>; values: Record<string, string[]>; intent: { compose: string[] };
+  core: Record<string, { batchMax: number | null; durationMax: number | null }>;
 };
 const TIERS: Tier[] = ['quick', 'studio', 'lab'];
+/* --json <file>: a definition that arrives as JSON is checked as if it were in the index, every check included; it takes
+   the place of a listed definition with its id, or joins them */
+const jsonArg = process.argv.indexOf('--json');
+const JSON_FILE = jsonArg > 0 ? process.argv[jsonArg + 1]! : null;
+const JSON_DEF: Definition | null = JSON_FILE ? JSON.parse(fs.readFileSync(JSON_FILE, 'utf8')) : null;
+const DEFINITIONS: readonly Definition[] = JSON_DEF ? [...LISTED.filter(d => d.id !== JSON_DEF.id), JSON_DEF] : LISTED;
+
+const CHANNELS = ['param', 'ext', 'content', 'body', 'intent', 'model', 'ui'];
 const errors: string[] = [], notes: string[] = [];
 const err = (where: string, msg: string) => errors.push(`${where}: ${msg}`);
 const note = (where: string, msg: string) => notes.push(`${where}: ${msg}`);
@@ -48,7 +59,7 @@ const fileOf = (d: Definition) => `${d.kind === 'module' ? 'modules' : d.kind ==
 const listed = new Set(DEFINITIONS.map(d => `${d.kind}/${d.id}`));
 for (const [dir, kind] of [['modules', 'module'], ['pedals', 'pedal'], ['units', 'unit']] as const) {
   for (const f of fs.readdirSync(path.join(DEFDIR, dir)).filter(f => f.endsWith('.ts'))) {
-    if (!listed.has(`${kind}/${f.slice(0, -3)}`)) err(`${dir}/${f}`, 'is not listed in index.ts, or its id does not match its file name');
+    if (!listed.has(`${kind}/${f.slice(0, -3)}`) && !(JSON_DEF && JSON_DEF.id === f.slice(0, -3))) err(`${dir}/${f}`, 'is not listed in index.ts, or its id does not match its file name');
   }
 }
 for (const d of DEFINITIONS) {
@@ -93,14 +104,6 @@ function checkShapes(docs: { name: string; json: unknown; type: string }[]): voi
   }
 }
 const TYPE = { module: 'ModuleDef', pedal: 'PedalDef', unit: 'UnitDef' } as const;
-const jsonArg = process.argv.indexOf('--json');
-if (jsonArg > 0) {
-  const file = process.argv[jsonArg + 1]!, json = JSON.parse(fs.readFileSync(file, 'utf8'));
-  checkShapes([{ name: file, json, type: TYPE[json.kind as keyof typeof TYPE] ?? 'ModuleDef' }]);
-  errors.forEach(e => console.log('  ' + e));
-  console.log(errors.length ? `\n${errors.length} errors.` : 'OK: the shape is the format\'s.');
-  process.exit(errors.length ? 1 : 0);
-}
 checkShapes([
   ...DEFINITIONS.map(d => ({ name: fileOf(d), json: JSON.parse(J(d)), type: TYPE[d.kind] })),
   ...FACTORY_WORKFLOWS.map(w => ({ name: `factory.ts › workflow "${w.name}"`, json: JSON.parse(J(w)), type: 'Workflow' })),
@@ -366,15 +369,18 @@ for (const [k] of whenDeps) {
 }
 
 /* ---- wires ---- */
+/** A check the wire waives by name (`differs`), which it must explain in its note. A note alone waives nothing. */
+function waived(w: WireKey | WireMap, what: NonNullable<WireMap['differs']>[number]): boolean { return typeof w === 'object' && (w.differs || []).includes(what); }
 function checkWire(w: Wire, p: ParamDef, d: Definition, e: EngineId, at: string): void {
   if (Array.isArray(w)) { if (!w.length) err(at, 'wire is an empty list'); w.forEach(x => checkWire(x, p, d, e, at)); return; }
   if (typeof w === 'object' && 'none' in w) { if (!w.none.trim()) err(at, 'wire says nothing about the real application: say what the real app does instead'); return; }
   const m: WireMap = typeof w === 'string' ? { to: w } : w;
   const ch = m.to.slice(0, m.to.indexOf(':')), name = m.to.slice(m.to.indexOf(':') + 1), root = name.split(/[.[]/)[0]!;
-  if (!['param', 'ext', 'content', 'body', 'model', 'ui'].includes(ch) || !name) { err(at, `wire "${m.to}" has no channel: write param:, ext:, content:, body:, model: or ui: before the name`); return; }
+  if (!CHANNELS.includes(ch) || !name) { err(at, `wire "${m.to}" has no channel: write ${CHANNELS.map(c => c + ':').join(', ')} before the name`); return; }
+  if (ch === 'intent' && !(name.startsWith('compose.') && FIX.intent.compose.includes(name.slice(8))) && name !== 'captionSource') err(at, `wire ${m.to} is not a part of the Create intent: intent:compose.<${FIX.intent.compose.join('|')}> or intent:captionSource`);
   const f = resolve(p, e);
   if (ch === 'param' && !(root in FIX.generationDefaults)) err(at, `wire param:${root} is not a GENERATION_DEFAULTS field${suggest(root, Object.keys(FIX.generationDefaults))}`);
-  else if (ch === 'param' && !(FIX.fields[e] ?? []).includes(root) && !m.note) err(at, `wire param:${root}: nothing the ${e} engine runs reads that field, so the control would change nothing there: give ${e} its own field in a per line, take ${e} off the parameter, or say in the wire's note why it is sent`);
+  else if (ch === 'param' && !(FIX.fields[e] ?? []).includes(root) && !waived(m, 'unread')) err(at, `wire param:${root}: nothing the ${e} engine runs reads that field, so the control would change nothing there: give ${e} its own field in a per line, take ${e} off the parameter, or add 'unread' to the wire's differs and say why in its note`);
   if (ch === 'content' && !FIX.createContentFields.includes(root)) err(at, `wire content:${root} is not a CreateContent field${suggest(root, FIX.createContentFields)}`);
   if (ch === 'model') { const [eng, bucket] = name.split('.') as [string, string]; if (eng !== e) err(at, `wire ${m.to} names engine ${eng} on ${e}`); else if (!(FIX.buckets[e] ?? []).includes(bucket)) err(at, `wire ${m.to}: ${e} has no model bucket "${bucket}" (${(FIX.buckets[e] ?? []).join(', ')})`); }
   if (ch === 'ext') {
@@ -387,24 +393,48 @@ function checkWire(w: Wire, p: ParamDef, d: Definition, e: EngineId, at: string)
       const kind = x.type === 'toggle' ? 'boolean' : x.type === 'select' ? 'choice' : x.type === 'text' ? 'text' : 'number';
       const sent = m.via === 'text' ? 'text' : m.map ? null : p.type;
       if (sent && sent !== kind && !(sent === 'choice' && kind === 'text')) err(at, `wire ext:${name} is a ${x.type} on the server, and this is a ${p.type}${m.via ? ` sent through ${m.via}` : ''}`);
-      if (p.type === 'number' && !m.via && f.range && !m.note) {
+      if (p.type === 'number' && !m.via && f.range && !waived(m, 'range')) {
         const k = m.divide ? 1 / m.divide : m.scale ?? 1;
         const mine = [f.range[0] * k, f.range[1] * k, f.range[2] * k];
         const real = [x.min, x.max, x.step];
-        if (real.some((r, i) => typeof r === 'number' && !sameNum(r, mine[i]!))) err(at, `range ${J(f.range)} differs from the server's ${J(real)} for ext:${name}: follow it, or say why in the wire's note`);
+        if (real.some((r, i) => typeof r === 'number' && !sameNum(r, mine[i]!))) err(at, `range ${J(f.range)} differs from the server's ${J(real)} for ext:${name}: follow it, or add 'range' to the wire's differs and say why in its note`);
       }
-      if (p.type === 'choice' && Array.isArray(f.options) && Array.isArray(x.options) && !m.note) {
+      if (p.type === 'choice' && Array.isArray(f.options) && Array.isArray(x.options) && !waived(m, 'options')) {
         const real = (x.options as { value: string }[]).map(o => o.value), mine = f.options.map(o => o.value);
         const missing = mine.filter(v => !real.includes(v as string));
         if (missing.length) err(at, `options ${J(missing)} are not among the server's for ext:${name} (${J(real)})`);
       }
     }
   }
-  if (ch === 'param' && e === 'ace' && p.type === 'number' && !m.via && f.range && !m.note && !name.includes('[') && !name.includes('.')) {
+  if (ch === 'param' && e === 'ace' && p.type === 'number' && !m.via && f.range && !waived(m, 'range') && !name.includes('[') && !name.includes('.')) {
     const sl = FIX.sliders[name];
     if (sl) {
       const k = m.divide ? 1 / m.divide : m.scale ?? 1, mine = f.range.map(v => +(v * k).toFixed(6));
-      if (!sl.some(r => r[0] === mine[0] && r[1] === mine[1] && (r[2] === null || r[2] === mine[2]))) err(at, `range ${J(f.range)} differs from the existing UI's slider for ${name} (${sl.map(r => J(r)).join(' or ')}): follow it, or say why in the wire's note`);
+      if (!sl.some(r => r[0] === mine[0] && r[1] === mine[1] && (r[2] === null || r[2] === mine[2]))) err(at, `range ${J(f.range)} differs from the existing UI's slider for ${name} (${sl.map(r => J(r)).join(' or ')}): follow it, or add 'range' to the wire's differs and say why in its note`);
+    }
+  }
+  /* the values a field takes, where the real app spells them (tools/fixtures/real-app.json values) */
+  const takes = (ch === 'param' || ch === 'ext') && !name.includes('.') && !name.includes('[') ? FIX.values[name] : undefined;
+  if (takes && p.type === 'choice' && Array.isArray(f.options) && !m.via && !waived(m, 'options')) {
+    for (const o of f.options) {
+      const sent = m.map ? (String(o.value) in m.map ? m.map[String(o.value)] : undefined) : o.value;
+      if (sent !== undefined && !takes.includes(String(sent))) err(at, `option ${J(o.value)} sends ${J(sent)} to ${m.to}, which takes ${takes.map(x => J(x)).join(', ')}`);
+    }
+  }
+  /* the type of a param: field is the type of its real default */
+  if (ch === 'param' && !m.via && !m.map && !name.includes('.') && !name.includes('[') && root in FIX.generationDefaults) {
+    const real = FIX.generationDefaults[root], want = typeof real === 'boolean' ? 'boolean' : typeof real === 'number' ? 'number' : typeof real === 'string' ? 'string' : null;
+    const mine = p.type === 'boolean' ? 'boolean' : p.type === 'number' ? 'number' : p.type === 'text' ? 'string' : typeof f.default;
+    if (want && mine !== want && !('auto' in m)) err(at, `sends a ${p.type} to ${m.to}, whose real value is a ${want} (${J(real)})`);
+  }
+  if (m.via && (m.map || m.invert || m.scale !== undefined || m.divide !== undefined)) err(at, 'wire.via does the whole change: map, invert, scale and divide beside it are not applied');
+  if (m.map && Array.isArray(f.options)) {
+    /* an option the map leaves out sends nothing through it, which is right only when another writer of the field
+       applies while that option is chosen (the normalizer's Custom knob) */
+    const writers = [...ix.params.values()].filter(({ p: q }) => q.key !== p.key && has(q.key, e) && wiresOf(resolve(q, e).wire).some(w => toOf(w) === m.to));
+    for (const o of f.options.filter(x => !(String(x.value) in m.map!))) {
+      const desk = deskWith(e, { [p.key]: o.value }, {}, {}, new Set(itemIds));
+      if (!writers.some(({ p: q }) => applies(ix, q.key, desk))) err(at, `wire.map has no value for option ${J(o.value)}, and nothing else writes ${m.to} while it is chosen, so choosing it sends nothing: map it, or give the field another writer for it`);
     }
   }
   if (m.invert && p.type !== 'boolean') err(at, 'wire.invert is for a switch');
@@ -424,6 +454,17 @@ function checkWire(w: Wire, p: ParamDef, d: Definition, e: EngineId, at: string)
   if (hasAuto && !('auto' in m)) err(at, 'is automatic, and its wire does not say what auto sends: give the wire `auto` (null sends nothing, so the engine\'s own default applies)');
   if (!hasAuto && 'auto' in m) err(at, 'wire.auto says what auto sends, and the parameter has no auto');
   if (m.when) checkCond(m.when, { where: `${at} wire.when`, engines: [e], own: d });
+  if ('auto' in m && m.auto !== null && ch === 'param' && root in FIX.generationDefaults && typeof m.auto !== typeof FIX.generationDefaults[root]) err(at, `wire.auto sends ${J(m.auto)} to ${m.to}, whose real value is a ${typeof FIX.generationDefaults[root]}`);
+  if ('auto' in m && m.auto !== null && ch === 'content' && root in FIX.createContent && typeof m.auto !== typeof FIX.createContent[root]) err(at, `wire.auto sends ${J(m.auto)} to ${m.to}, whose real value is a ${typeof FIX.createContent[root]}`);
+  if (f.when && !m.via && !m.when && !waived(m, 'default') && !name.includes('.') && !name.includes('[')) {
+    /* the default a condition hides is still the one sent when it applies: it must be the real one */
+    const real = ch === 'param' ? FIX.generationDefaults[root] : ch === 'ext' ? declared(e, name)?.default : undefined;
+    let sent: Json | undefined = f.default;
+    if (m.map) sent = String(f.default) in m.map ? m.map[String(f.default)] : undefined;
+    if (m.invert && typeof sent === 'boolean') sent = !sent;
+    if (typeof sent === 'number') { if (m.scale) sent = +(sent * m.scale).toFixed(10); if (m.divide) sent = +(sent / m.divide).toFixed(10); }
+    if (real !== undefined && sent !== undefined && !(typeof real === 'string' && real.startsWith('<')) && J(real) !== J(sent)) err(at, `its default sends ${J(sent)} to ${m.to} whenever it applies, where the real app's default is ${J(real)}: use the real default, or add 'default' to the wire's differs and say why in its note`);
+  }
   if ('else' in m && !m.when) err(at, 'wire.else without wire.when');
 }
 function suggest(name: string, list: string[]): string {
@@ -448,16 +489,23 @@ function stateWires(s: NonNullable<Definition['state']>[number]): { engines: rea
 
 /* ================================================================ 5. state */
 
+/** A definition's named steps: words, and the parameters each may also change, which must exist and be on its engines. */
+function checkSteps(steps: { [k: string]: Step } | undefined, where: string, d: Definition): void {
+  for (const [step, s] of Object.entries(steps || {})) {
+    checkText(stepSays(s), `${where} steps.${step}`);
+    for (const k of stepChanges(s)) { const hit = ix.params.get(k); if (!hit) err(`${where} steps.${step}`, `changes "${k}", which no definition has`); else if (!hit.d.engines.some(e => d.engines.includes(e))) err(`${where} steps.${step}`, `changes "${k}", which none of ${d.engines.join(', ')} has`); }
+  }
+}
+
 for (const { s, d } of ix.states.values()) {
   const where = `${fileOf(d)} › ${s.key}`;
   checkText(s.noun, `${where} noun`);
-  for (const [step, text] of Object.entries(s.steps || {})) checkText(text, `${where} steps.${step}`);
-  if (s.steps?.load && !s.steps.load.includes('{file}')) err(where, 'its load step does not say the {file}');
+  checkSteps(s.steps, where, d);
   if (s.owner === 'engine' && s.stored === 'content') err(where, 'is kept per engine and saved as song content; one of the two is wrong');
   for (const { engines, wire } of stateWires(s)) for (const e of engines.filter(x => d.engines.includes(x))) {
     for (const w of wiresOf(wire)) {
       const to = toOf(w), ch = to.split(':')[0]!, root = to.slice(to.indexOf(':') + 1).split(/[.[]/)[0]!;
-      if (!['param', 'ext', 'content', 'body', 'model', 'ui'].includes(ch)) err(where, `wire "${to}" has no channel`);
+      if (!CHANNELS.includes(ch)) err(where, `wire "${to}" has no channel`);
       if (ch === 'param' && !(root in FIX.generationDefaults)) err(where, `wire ${to} is not a GENERATION_DEFAULTS field`);
       if (ch === 'content' && !FIX.createContentFields.includes(root)) err(where, `wire ${to} is not a CreateContent field`);
       if (ch === 'ext' && !declared(e, root) && !(FIX.reads[e] ?? []).includes(root)) err(where, `wire ${to} is neither declared nor read by the ${e} backend`);
@@ -548,7 +596,20 @@ function checkBinding(n: Node, spec: PartSpec, d: Definition, e: EngineId, t: Ti
     if (!ok) err(at, `part "${n.part}" cannot edit a ${type} ("${k}"); it edits ${spec.edits?.join(', ') ?? 'nothing'}`);
     if (hit.d === d) cover(d, e, k);
   }
-  for (const k of n.reads || []) if (!ix.params.has(k)) err(at, `reads "${k}", which no definition has`);
+  for (const k of n.reads || []) if (!ix.params.has(k) && !ix.states.has(k) && !(k in DESK_FACTS)) err(at, `reads "${k}", which is no parameter, state or desk fact`);
+  if (Array.isArray(spec.reads)) {
+    const sig = spec.reads as readonly string[], got = n.reads || [];
+    const kind = (k: string) => (ix.params.has(k) ? ix.params.get(k)!.p.type : ix.states.has(k) ? 'state' : 'fact');
+    if (got.length < sig.length || sig.some((t, i) => kind(got[i]!) !== t)) err(at, `part "${n.part}" draws from ${sig.join(', ')}, in that order, and its node reads ${got.length ? got.map(k => `${k} (${kind(k)})`).join(', ') : 'nothing'}`);
+  }
+  /* the named steps a bespoke part takes are declared by its state or its parameter */
+  if (spec.steps) {
+    const declared = new Set<string>();
+    for (const k of n.state || []) { const s = ix.states.get(k)?.s; if (!s) continue; Object.keys(s.steps || {}).forEach(x => declared.add(x)); if (s.kind === 'file') ['load', 'clear'].forEach(x => declared.add(x)); }
+    for (const k of editsOf(n)) Object.keys(ix.params.get(k)?.p.steps || {}).forEach(x => declared.add(x));
+    const missing = spec.steps.filter(x => !declared.has(x));
+    if (missing.length) err(at, `part "${n.part}" takes the steps ${missing.join(', ')}, which neither its state nor its parameters name in \`steps\``);
+  }
   for (const k of n.state || []) {
     const hit = ix.states.get(k);
     if (!hit) { err(at, `names state "${k}", which no definition declares`); continue; }
@@ -560,6 +621,11 @@ function checkBinding(n: Node, spec: PartSpec, d: Definition, e: EngineId, t: Ti
   if (spec.state && !n.state?.length && spec.kind !== 'bespoke') err(at, `part "${n.part}" needs \`state\`: the ${spec.state.join(' or ')} it holds`);
   checkText(n.label, `${at} label`); checkText(n.tip, `${at} tip`); checkText(n.text, `${at} text`);
   if (n.dim) checkText(n.dim.says, `${at} dim says`);
+  for (const t of [n.label, n.tip, n.text, n.dim?.says]) for (const m of (t || '').matchAll(/\{value:([\w.-]+)\}/g)) if (ix.params.has(m[1]!) && !has(m[1]!, e)) err(at, `says {value:${m[1]}}, which ${e} does not have, so the sentence has a hole there: show the node only where it is, or say it another way`);
+  /* a control edits its own definition's values; only a bespoke part may edit another's (B24) */
+  if (n.part === 'choiceRow') for (const k of editsOf(n)) { const hit = ix.params.get(k); if (hit && hit.d !== d) err(at, `a Quick row sets "${k}", which is ${fileOf(hit.d)}'s: a tile's plain choices set its own values, so its Also set line and the row agree`); }
+  /* a tier action rings what that tier shows (B15) */
+  for (const a of n.actions || []) if (a.do === 'tier') for (const k of a.ring || []) if (ix.params.has(k) && !tierEdits(ix.params.get(k)!.d, e, a.tier).has(k)) err(`${at} action "${a.label}"`, `goes to ${a.tier} to ring "${k}", which ${a.tier} does not show on ${e}`);
   (n.actions || []).forEach((a, i) => checkAction(a, `${at} action ${i + 1}`, e, n));
   const o = (n.opts || {}) as Record<string, Json>;
   if (n.part === 'dice' && typeof o.offWhen === 'string') { const s = ix.params.get(o.offWhen); if (!s || s.p.type !== 'boolean') err(at, `opts.offWhen names "${o.offWhen}", which is not a switch`); }
@@ -741,16 +807,71 @@ for (const e of ENGINE_IDS) {
     const real = FIX.generationDefaults[field];
     if (J(real) === J(v)) continue;
     const who = rs.from[`param:${field}`] ?? Object.entries(rs.from).filter(([to]) => to.startsWith(`param:${field}.`) || to.startsWith(`param:${field}[`)).flatMap(([, k]) => k);
-    const noted = who.some(k => { const hit = ix.params.get(k); return hit && wiresOf(resolve(hit.p, e).wire).some(w => typeof w === 'object' && !!w.note); });
-    if (!noted) err(`${who.map(k => keyOwners.get(k.split('+')[0]!) + ' › ' + k).join(', ')} [${e}]`, `sends ${field} ${J(v)} at its default, where the real app's default is ${J(real)}: use the real default, or say why in the wire's note`);
+    const noted = who.some(k => { const hit = ix.params.get(k.split('+')[0]!); return hit && wiresOf(resolve(hit.p, e).wire).some(w => waived(w, 'default')); });
+    if (!noted) err(`${who.map(k => keyOwners.get(k.split('+')[0]!) + ' › ' + k).join(', ')} [${e}]`, `sends ${field} ${J(v)} at its default, where the real app's default is ${J(real)}: use the real default, or add 'default' to the wire's differs and say why in its note`);
   }
   for (const [field, v] of Object.entries(rs.backendParams)) {
     const x = declared(e, field); if (!x || x.default === undefined || typeof x.default === 'string' && x.default.startsWith('<')) continue;
     if (J(x.default) === J(v)) continue;
     const who = rs.from[`ext:${field}`] ?? [];
-    const noted = who.some(k => { const hit = ix.params.get(k); return hit && wiresOf(resolve(hit.p, e).wire).some(w => typeof w === 'object' && !!w.note); });
-    if (!noted) err(`${who.map(k => keyOwners.get(k) + ' › ' + k).join(', ')} [${e}]`, `sends ext:${field} ${J(v)} at its default, where the server declares ${J(x.default)}: use the server's default, or say why in the wire's note`);
+    const noted = who.some(k => { const hit = ix.params.get(k); return hit && wiresOf(resolve(hit.p, e).wire).some(w => waived(w, 'default')); });
+    if (!noted) err(`${who.map(k => keyOwners.get(k) + ' › ' + k).join(', ')} [${e}]`, `sends ext:${field} ${J(v)} at its default, where the server declares ${J(x.default)}: use the server's default, or add 'default' to the wire's differs and say why in its note`);
   }
+}
+
+/* ================================================================ 7b. what a definition says to a person */
+
+/** The keys some node of a definition edits at a tier on an engine, wherever its conditions put it. */
+function tierEdits(d: Definition, e: EngineId, t: Tier): Set<string> {
+  const out = new Set<string>();
+  if (d.kind !== 'module') { d.params.forEach(p => out.add(p.key)); return out; }
+  if (d.labUnder && t !== 'lab') return out;
+  const walk = (n: Node) => {
+    if (n.tiers && !n.tiers.includes(t)) return; if (n.engines && !n.engines.includes(e)) return;
+    editsOf(n).forEach(k => out.add(k));
+    for (const l of (n.per || []) as NodeOverride[]) if ((!l.engines || l.engines.includes(e)) && (!l.tiers || l.tiers.includes(t))) editsOf(l).forEach(k => out.add(k));
+    (n.children || []).forEach(walk);
+  };
+  d.face.forEach(walk);
+  return out;
+}
+for (const d of DEFINITIONS) {
+  const at = fileOf(d);
+  for (const e of d.engines) {
+    /* two controls of one definition with one name, on one engine (B07) */
+    const seen = new Map<string, string>();
+    for (const p of d.params) { if (!has(p.key, e) || (d.kind !== 'module' && p.key === d.on)) continue; const l = (resolve(p, e).undoName ?? resolve(p, e).label).toLowerCase(); if (seen.has(l)) err(`${at} › ${p.key} [${e}]`, `is labelled "${resolve(p, e).label}", as "${seen.get(l)}" is: no one can tell them apart, and undo names them alike`); seen.set(l, p.key); }
+    /* what Quick or Studio edits, Lab edits too: Lab is every parameter (B09) */
+    if (d.kind === 'module' && !d.labUnder) { const lab = tierEdits(d, e, 'lab'); for (const t of ['quick', 'studio'] as Tier[]) for (const k of tierEdits(d, e, t)) if (ix.params.get(k)?.d === d && has(k, e) && !lab.has(k)) err(`${at} › ${k} [${e}]`, `is edited at ${t} and not at Lab, which shows every parameter: show its control at Lab too`); }
+    /* the same control twice at one tier (B21) */
+    if (d.kind === 'module') for (const t of (d.labUnder ? ['lab'] : ['quick', 'studio', 'lab']) as Tier[]) {
+      const count = new Map<string, number>();
+      const walk = (n: Node) => { if (n.tiers && !n.tiers.includes(t)) return; if (n.engines && !n.engines.includes(e)) return; if (n.param && !n.when && !(n.per || []).length) { const id = `${n.part}|${n.param}`; count.set(id, (count.get(id) ?? 0) + 1); } (n.children || []).forEach(walk); };
+      d.face.forEach(walk);
+      for (const [id, c] of count) if (c > 1) err(`${at} [${e}, ${t}]`, `draws ${id.replace('|', ' for ')} ${c} times`);
+    }
+  }
+  /* a text default or example that fails its own check (B10) */
+  for (const p of d.params) for (const e of enginesOf(p, d)) { const f = resolve(p, e); if (f.check) for (const [what, v] of [['default', f.default], ['example', f.example]] as const) if (typeof v === 'string' && v !== '' && !CHECKS[f.check.rule].test(v)) err(`${at} › ${p.key} [${e}]`, `its ${what} ${J(v)} fails its own check (${f.check.rule})`); if (f.maxLength !== undefined && typeof f.default === 'string' && f.default.length > f.maxLength) err(`${at} › ${p.key}`, `its default is longer than its maxLength ${f.maxLength}`); }
+  /* a line that replaces the parameter's condition keeps what the base tested (B23) */
+  for (const p of d.params) if (p.when) for (const l of (p.per || []).filter(isEngineLine)) if (l.when) { const lost = names(p.when).filter(k => !names(l.when!).includes(k)); if (lost.length) err(`${at} › ${p.key} [${l.engines.join(', ')}]`, `its engine line's \`when\` replaces the parameter's, which tests ${lost.join(', ')}; the line no longer does: repeat what still holds there`); }
+  /* a pedal shows something at Studio (B17); a side unit shows something at every tier (B27) */
+  if (d.kind === 'pedal' && !d.main && !(d.face || []).some(n => n.tiers?.includes('studio'))) err(at, 'has no main knob and no Studio node, so it shows nothing at Studio but its name: give it a main knob or a Studio node');
+  if (d.kind === 'unit' && !d.face.length) err(at, 'has an empty face, so it shows nothing outside Lab: give it the object it shows');
+  /* two options that claim one former value: an old record could become either */
+  for (const p of d.params) for (const e of enginesOf(p, d)) { const o = resolve(p, e).options; if (!Array.isArray(o)) continue; const was = o.flatMap(x => x.was || []); if (new Set(was).size !== was.length) err(`${at} › ${p.key}`, 'two options list one value in `was`: an old record could become either'); }
+}
+/* a range's two ends: the lower stays below, so their defaults do, and neither stays below the other (B12, B13) */
+for (const { p, d } of ix.params.values()) {
+  if (!p.staysBelow) continue;
+  const q = ix.params.get(p.staysBelow); if (!q) continue;
+  if (q.p.staysBelow === p.key) err(`${fileOf(d)} › ${p.key}`, `stays below "${q.p.key}", which stays below it: one of them is the lower end`);
+  for (const e of enginesOf(p, d)) { const a = resolve(p, e).default, b = resolve(q.p, e).default; if (typeof a === 'number' && typeof b === 'number' && !(a < b)) err(`${fileOf(d)} › ${p.key} [${e}]`, `stays below "${q.p.key}", and its default ${a} is not below that one's ${b}: put staysBelow on the lower end`); }
+}
+/* pedals read as a sequence of colours: each one's hue at least 15 degrees from its neighbours' in the chain (B11) */
+{
+  const chain = DEFINITIONS.filter((x): x is Extract<Definition, { kind: 'pedal' }> => x.kind === 'pedal' && x.on !== null).sort((a, b) => a.at - b.at);
+  for (let i = 1; i < chain.length; i++) { const a = chain[i - 1]!, b = chain[i]!, dh = Math.min(Math.abs(a.hue - b.hue), 360 - Math.abs(a.hue - b.hue)); if (dh < 15) err(fileOf(b), `its hue ${b.hue} is ${dh} degrees from ${a.id}'s ${a.hue}, its neighbour in the chain: pick one at least 15 degrees away`); }
 }
 
 /* ================================================================ 8. factory workflows and revisions */
@@ -775,7 +896,11 @@ for (const r of FACTORY_REVISIONS) {
     if (hit.p.type === 'boolean' && typeof v !== 'boolean') err(at, `sets the switch ${k} to ${J(v)}`);
     if (hit.p.type === 'choice' && allowed && !allowed.includes(v as string)) err(at, `sets ${k} to ${J(v)}, which is not one of its values on ${r.engine}`);
   }
-  for (const [k, s] of Object.entries(r.state || {})) { const hit = ix.states.get(k); if (!hit) err(at, `holds state "${k}", which no definition declares`); else if (hit.s.stored !== 'settings') err(at, `holds state "${k}", which a revision does not keep`); void s; }
+  for (const [k, s] of Object.entries(r.state || {})) { const hit = ix.states.get(k); if (!hit) err(at, `holds state "${k}", which no definition declares`); else if (hit.s.stored !== 'settings') err(at, `holds state "${k}", which a revision does not keep`); else if (J(cleanState(hit.s, s)) !== J(s)) err(at, `holds ${k} ${J(s)}, which is not a ${hit.s.kind}: loading it would drop it`); }
+  const c = cleanValues(ix, r.vals, r.auto);
+  for (const [k, v] of Object.entries(r.vals)) if (ix.params.has(k) && J(c.vals[k]) !== J(v)) err(at, `sets ${k} to ${J(v)}, which loading cleans to ${J(c.vals[k])}: write what it means`);
+  const rd: Desk = { engine: r.engine, tier: 'lab', vals: c.vals, auto: c.auto, state: (r.state || {}) as Record<string, Json>, facts: {}, on: new Set(itemIds) };
+  for (const k of Object.keys(r.vals)) if (ix.params.has(k) && has(k, r.engine) && !applies(ix, k, { ...rd, facts: factsOf(ix, rd) })) err(at, `sets ${k}, which does not apply in this revision (its condition does not hold), so it does nothing`);
   for (const k of Object.keys(r.auto || {})) { const hit = ix.params.get(k); if (!hit || !resolve(hit.p, r.engine).auto) err(at, `sets the auto switch of "${k}", which has none on ${r.engine}`); }
 }
 
@@ -809,7 +934,7 @@ const counts = [
 
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 const inventory = ['| Part | Kind | Edits | State | Reads | What it is for | Options | States | Styles (concept src/css) | Used by |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-  ...(Object.entries(PARTS) as [string, PartSpec][]).map(([name, p]) => `| \`${name}\` | ${p.kind} | ${(p.edits || []).join(', ')} | ${(p.state || []).join(', ')} | ${p.reads ? 'yes' : ''} | ${cell(p.doc + (p.responsible ? ` **Responsible for:** ${p.responsible}` : ''))} | ${cell(Object.entries(p.opts || {}).map(([k, o]) => `\`${k}\` (${Array.isArray(o.type) ? o.type.join(' \\| ') : o.type}): ${o.doc}`).join('<br>'))} | ${cell((p.states || []).join('; '))} | ${p.css.join(', ')} | ${[...(partUse.get(name) || [])].join(', ')} |`)].join('\n');
+  ...(Object.entries(PARTS) as [string, PartSpec][]).map(([name, p]) => `| \`${name}\` | ${p.kind} | ${(p.edits || []).join(', ')} | ${(p.state || []).join(', ')} | ${Array.isArray(p.reads) ? p.reads.join(', ') : p.reads ? 'any' : ''} | ${cell(p.doc + (p.responsible ? ` **Responsible for:** ${p.responsible}` : ''))} | ${cell(Object.entries(p.opts || {}).map(([k, o]) => `\`${k}\` (${Array.isArray(o.type) ? o.type.join(' \\| ') : o.type}): ${o.doc}`).join('<br>'))} | ${cell((p.states || []).join('; '))} | ${p.css.join(', ')} | ${[...(partUse.get(name) || [])].join(', ')} |`)].join('\n');
 const SHORT: Record<string, string> = { ace: 'ace', 'minimax-m3': 'mm3', yue2: 'yue2', sa3: 'sa3', heartmula: 'hm' };
 const say = (w: Wire): string => {
   if (Array.isArray(w)) return w.map(say).join(' + ');
@@ -824,6 +949,32 @@ const namesTable = DEFINITIONS.filter(d => d.params.length).map(d => [`### ${d.n
     return `| \`${p.key}\` | ${p.type} | ${engs.length === ENGINES.length ? 'all' : engs.map(e => SHORT[e]).join(', ')} | ${cell(real)} |`; })].join('\n')).join('\n\n');
 const noneTable = ['| Key | Engines | What the real app does instead |', '| --- | --- | --- |', ...noneKeys.map(k => { const ps = pairs.filter(x => x.p.key === k && isNone(x.w)); return `| \`${k}\` | ${ps.map(x => SHORT[x.e]).join(', ')} | ${cell((ps[0]!.w as { none: string }).none)} |`; })].join('\n');
 const GENERATED: Record<string, string> = { counts, inventory, names: namesTable, none: noneTable };
+
+/* ================================================================ 11. what saved data may hold: every key, state and id shipped */
+
+const SHIPPED_FILE = path.join(ROOT, 'tools', 'fixtures', 'shipped.json');
+type Shipped = { keys: Record<string, string>; states: Record<string, string>; ids: Record<string, string> };
+const shipped: Shipped = fs.existsSync(SHIPPED_FILE) ? JSON.parse(fs.readFileSync(SHIPPED_FILE, 'utf8')) : { keys: {}, states: {}, ids: {} };
+/* what saved data depends on: where a value is kept and what saves it */
+const now: Shipped = {
+  keys: Object.fromEntries([...ix.params.values()].map(({ p, d }) => [p.key, `${d.id} ${p.owner ?? d.owner} ${p.stored ?? d.stored}`])),
+  states: Object.fromEntries([...ix.states.values()].map(({ s, d }) => [s.key, `${d.id} ${s.owner} ${s.stored}`])),
+  ids: Object.fromEntries(DEFINITIONS.map(d => [d.id, d.kind])),
+};
+for (const [what, former, retired] of [['keys', ix.former, RETIRED.keys], ['states', ix.formerStates, RETIRED.states], ['ids', ix.formerIds, RETIRED.ids]] as const) {
+  for (const [k, was] of Object.entries(shipped[what])) {
+    if (k in now[what]) { if (now[what][k] !== was && !process.argv.includes('--docs')) err(`tools/fixtures/shipped.json › ${k}`, `was shipped as "${was}" and is now "${now[what][k]}": saved records keep it where it was kept then; if that is meant, run \`npm run docs\` to record it`); continue; }
+    if (former.has(k) || retired.includes(k)) continue;
+    err(`tools/fixtures/shipped.json › ${k}`, `saved data may hold ${what === 'ids' ? 'the id' : what === 'states' ? 'the state' : 'the key'} "${k}", which no definition has any more: list it in \`was\` where it went, or in src/definitions/retired.ts if it is gone`);
+  }
+  for (const k of retired) if (k in now[what]) err('src/definitions/retired.ts', `retires "${k}", which a definition still has`);
+}
+if (process.argv.includes('--docs')) {
+  const merged: Shipped = { keys: { ...shipped.keys, ...now.keys }, states: { ...shipped.states, ...now.states }, ids: { ...shipped.ids, ...now.ids } };
+  /* a key no definition has stays listed: its going is said by `was` or retired.ts, never by forgetting it */
+  const sort = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
+  fs.writeFileSync(SHIPPED_FILE, JSON.stringify({ note: 'Every parameter key, state key and definition id the definitions ship with, and where each value is kept (definition, owner, stored). Written by npm run docs; the validator checks the definitions against it (docs/07).', keys: sort(merged.keys), states: sort(merged.states), ids: sort(merged.ids) }, null, 1).replace(/\n/g, '\r\n') + '\r\n');
+}
 
 const DOCS = path.join(ROOT, 'docs');
 const stale: string[] = [];

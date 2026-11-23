@@ -89,9 +89,11 @@ export type Condition =
  *  content  a field of CreateContent (ui/src/components/create/createContent.ts), the Create form's content
  *  body     a top-level request field set after the resolver (HeartMuLa's frozen model choices)
  *  model    engine state chosen through POST /api/backends/models, never part of the request
+ *  intent   a part of the Create intent beside its params (server/src/contracts/resolution.ts): `compose`, the
+ *           caption steps the server runs, and `captionSource`
  *  ui       form state the browser keeps and uses itself; never sent
- *  A name may be a path into its field: `param:adapterGroupScales.self_attn`, `param:adapterStack[0].scale`. */
-export type Channel = 'param' | 'ext' | 'content' | 'body' | 'model' | 'ui';
+ *  A name may be a path into its field: `param:adapterGroupScales.self_attn`, `intent:compose.loraTrigger`. */
+export type Channel = 'param' | 'ext' | 'content' | 'body' | 'intent' | 'model' | 'ui';
 export type WireKey = `${Channel}:${string}`;
 
 /** A wire that does more than copy the value (docs/05, "What is sent"). */
@@ -113,8 +115,14 @@ export interface WireMap {
   /** Sent only while this holds; otherwise `else` is sent, or nothing (the denoiser's strength while it is off). */
   when?: Condition;
   else?: Json;
-  /** Anything a reader needs to know: a field read but not declared, a doubt. Not used by any code. */
+  /** The checks of the real app this wire deliberately differs from, each explained in `note`: its range or step
+   *  (`range`), its options (`options`), its default (`default`), or a field the engine does not read (`unread`).
+   *  The request comparison still runs over the whole value space (docs/07). */
+  differs?: ('range' | 'options' | 'default' | 'unread')[];
+  /** What a reader needs to know: why it differs, a field read but not declared. A note waives no check. */
   note?: Text;
+  /** Names the real field had before, for reading back a profile or a song saved under one (fromReal). */
+  was?: WireKey[];
 }
 
 /** A single wire, several (one control to several fields), or none: no counterpart in the real application, and
@@ -151,6 +159,8 @@ export interface ParamFace {
   auto?: Auto | false;
   options?: Option[] | OptionsFrom;
   placeholder?: Text;
+  /** The longest text it takes, in characters (the trigger word 24, a title 80). */
+  maxLength?: number;
   /** Text "Insert example" puts in the field. */
   example?: string;
   check?: Check;
@@ -162,8 +172,10 @@ export interface ParamFace {
 
 /** One line of a parameter's per-engine table: these engines take these fields instead of the base ones. */
 export type EngineOverride = { engines: EngineId[] } & Partial<ParamFace>;
-/** Words that change with another setting (DCW's first knob is "Low" in Both mode, "Scaler" otherwise). */
-export type WordsOverride = { when: Condition } & Partial<Pick<ParamFace, 'label' | 'short' | 'tip' | 'auto'>>;
+/** Words that change with another setting (DCW's first knob is "Low" in Both mode, "Scaler" otherwise). A word line
+ *  changes words only: what the value is, where it goes and when it applies are the parameter's (an engine line's). */
+export type WordsOverride = { when: Condition; engines?: never } & Partial<Pick<ParamFace, 'label' | 'short' | 'tip' | 'auto'>>
+  & { [K in Exclude<keyof ParamFace, 'label' | 'short' | 'tip' | 'auto' | 'when'>]?: never };
 
 /** A song value whose limit differs per engine (length, takes): an engine that cannot take it reads it at its limit
  *  and holds the value for an engine that can. Slots: {value} the held value, {shown} the limit in force, {engine}
@@ -173,7 +185,14 @@ export interface Held {
   note: Text;
   /** Said in the engine switch's toast: "Takes capped at {shown}". */
   toast: Text;
+  /** How the held value is said in the toast's "your ... waits on <engine>" ("{value} takes"). Default "{value}". */
+  value?: Text;
 }
+
+/** A named undo step a part asks for (docs/05, "Undo step names"): its words, and the parameters the step may change
+ *  besides its own (loading a second adapter stacks them). Slots: {name} (the parameter's name), {noun}, {from}, {to},
+ *  {file}, and any the part fills ({n}, {section}, {tag}). */
+export type Step = Text | { says: Text; changes: string[] };
 
 export interface ParamDef extends ParamFace {
   key: string;
@@ -193,6 +212,8 @@ export interface ParamDef extends ParamFace {
   beside?: string;
   /** Presses within this many milliseconds are one undo step (taps on TAP). */
   run?: number;
+  /** The named steps its part takes on it, besides setting it ("Compose caption", "Add {chip} to the {name}"). */
+  steps?: { [step: string]: Step };
   /** Engine lines (each engine in at most one), then word lines that hold while their condition does. */
   per?: (EngineOverride | WordsOverride)[];
 }
@@ -207,6 +228,8 @@ export type Stored = 'settings' | 'content' | 'none';
 /** Something a module keeps that is not a setting: a file, the seed, a selection, its adapters, a list. */
 export interface StateDef {
   key: string;
+  /** Keys it was saved under before (docs/05, "Saved data"). */
+  was?: string[];
   kind: 'file' | 'seed' | 'span' | 'slots' | 'record' | 'list';
   /** How undo and toasts name it: "the timbre reference". */
   noun: Text;
@@ -215,7 +238,7 @@ export interface StateDef {
   /** Its undo steps, by the name its part uses: the part asks for a step by name and the words come from here.
    *  Slots: {file}, {from}, {to}, and any the step's caller fills ({n}, {section}). A file has `load` and `clear`
    *  without saying (docs/05, "Undo step names"). */
-  steps?: { [step: string]: Text };
+  steps?: { [step: string]: Step };
   owner: Owner;
   stored: Stored;
   wire: Wire | { engines: EngineId[]; wire: Wire }[];
@@ -329,6 +352,8 @@ export type Category = 'Compose' | 'Engine' | 'Chain' | 'Words';
 
 interface DefBase {
   id: string;
+  /** Ids it was saved under before: a workflow or desk naming one has this definition instead. */
+  was?: string[];
   name: Text;
   desc: Text;
   /** Place among its kind: Modules panel, picker and "Everything" order for modules, chain order for pedals. */
@@ -355,6 +380,9 @@ export interface ModuleDef extends DefBase {
   builtIn?: true;
   /** Brought by an action on a song (Repaint), not from the panel. Its values are not part of a Create request. */
   source?: true;
+  /** Holds the pedalboard: the pedals and side units on the board are drawn in its tile and answer to it (the
+   *  Pedalboard). */
+  board?: true;
   /** What each tier adds, for the picker's description: [Quick, Studio, Lab]. */
   tierSummary?: [Text, Text, Text];
   size: Size;

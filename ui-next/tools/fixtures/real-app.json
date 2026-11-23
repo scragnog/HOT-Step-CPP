@@ -2991,5 +2991,84 @@
    "scalar_decoder",
    "lmAdapter"
   ]
+ },
+ "values": {
+  "adapterMode": [
+   "merge",
+   "runtime",
+   "runtime_lowrank"
+  ],
+  "adapterStackMode": [
+   "blend",
+   "sum"
+  ],
+  "dcwMode": [
+   "double",
+   "high",
+   "low",
+   "pix"
+  ],
+  "lmCodesMode": [
+   "ratio",
+   "steps"
+  ],
+  "lmRepMode": [
+   "dry",
+   "frequency",
+   "presence"
+  ],
+  "mm3DitBackend": [
+   "auto",
+   "ggml",
+   "tensorrt"
+  ],
+  "mm3DitPrecision": [
+   "bf16",
+   "fp8"
+  ],
+  "qualityEvalTarget": [
+   "both",
+   "mastered",
+   "unmastered"
+  ],
+  "stableStepBackend": [
+   "auto",
+   "gguf"
+  ],
+  "stableStepBlendMode": [
+   "crossover",
+   "mix",
+   "off"
+  ]
+ },
+ "core": {
+  "ace": {
+   "batchMax": 8,
+   "durationMax": 600
+  },
+  "minimax-m3": {
+   "batchMax": 1,
+   "durationMax": 300
+  },
+  "yue2": {
+   "batchMax": null,
+   "durationMax": 900
+  },
+  "sa3": {
+   "batchMax": 1,
+   "durationMax": 600
+  },
+  "heartmula": {
+   "batchMax": 1,
+   "durationMax": 240
+  }
+ },
+ "intent": {
+  "compose": [
+   "autoExpand",
+   "loraTrigger",
+   "beatIntro",
+   "introBars"
+  ]
  }
 }

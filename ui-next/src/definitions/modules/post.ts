@@ -9,6 +9,7 @@ export const post = {
   desc: 'The post-processing chain: pedals in their chain order, and side units beside it.',
   at: 220,
   category: 'Chain',
+  board: true,
   engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
   owner: 'song',
   stored: 'settings',

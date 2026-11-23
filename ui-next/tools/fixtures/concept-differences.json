@@ -1,0 +1,130 @@
+{
+ "note": "Where the core and the concept page disagree on purpose (tools/test-core.ts). Each entry names the derivation, a pattern the disagreement's description matches, and why the page is not followed. An entry nothing matches any more fails the test.",
+ "differences": [
+  {
+   "derivation": "undo step names",
+   "match": "tempo\\.dur",
+   "why": "The page's steps write a length as m:ss (0:10) while its ruler and read-out write 10 s. The definitions write a value one way everywhere: m:ss from a minute (docs/05, How a number is written)."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"timbre\\.str\"",
+   "why": "The page's steps say the reference blend as a percent its knob does not show (1.00 on the knob, 100% in the step). The definitions write it one way everywhere."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "Renderer GGML",
+   "why": "The definitions add Auto, the renderer the server uses when nothing is chosen (TensorRT when the machine has it, else GGML); the concept starts on GGML, which the server does not do (DG-02.1, docs 03)."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"takes\\.n\":(9|2)",
+   "why": "A number of takes the engine cannot run: the server's batch.max is 8 on ACE-Step, 4 on MiniMax-Music3 and YuE2, 1 on Stable Audio 3 and HeartMuLa. The definitions' range stops there (DG-02.5); the collector tried the concept control's widest range."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"rp\\.lyrics\"",
+   "why": "The page says \"Puts back the repaint lyrics as it was\": its plural rule knows only \"the lyrics\". The definitions say \"as they were\" for any undo name that is plural."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"yn\\.",
+   "why": "The page lists YuE2's plugin controls under no module (they are generated, not in the Sampler's keys), so it names them without the Sampler's name and keeps them for the song. The definitions put them in the Sampler, as the concept's own rule for sampler settings says (13-engine-state.js: a plugin's settings never follow you to another engine)."
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"(den|lss)\\.str\"",
+   "why": "The page names the denoiser's and LSS's strength alike (\"Latent & correction strength\"), so two different undo steps read the same (DG-04.2). Each has its own undo name here."
+  },
+  {
+   "derivation": "also set",
+   "match": "Retake seed|Slot [23]|Final normalizer custom|StableStep fixed seed",
+   "why": "A condition the concept writes in its face is the parameter's own condition here (docs 03): the retake seed applies with a retake variance, a slot's strength while its slot holds an adapter, the normalizer's Custom knob on Custom, the fixed seed while the seed is not followed. A value that does not apply is not changed, so the line does not list it; the page lists it."
+  },
+  {
+   "derivation": "also set",
+   "match": "yue2 studio tempo",
+   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan (hiddenChanged) lists the longest length as hidden at Studio while the ruler is drawn there."
+  },
+  {
+   "derivation": "also set",
+   "match": "yue2 quick build .*→ studio",
+   "why": "Page fault: the link is chosen by finding the key's name in the Studio face's text, where Build by section names the takes and section mode without drawing them; Studio does not show them, so the definitions send the link to Lab."
+  },
+  {
+   "derivation": "also set",
+   "match": "quick post .*→ lab \\| core .*→ studio",
+   "why": "The page looks for a pedal's settings in the Pedalboard's own Studio face, which holds no pedals, so it always sends the link to Lab. At Studio every pedal shows its main knob and switch, so when those are all that is hidden the definitions send it to Studio."
+  },
+  {
+   "derivation": "also set",
+   "match": "(sa3|heartmula) (quick|studio) takes",
+   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range on an engine that takes one."
+  },
+  {
+   "derivation": "engine switch",
+   "match": "ag\\.|yn\\.",
+   "why": "Owner: the page keeps the adapter group scales (ag.*) and YuE2's plugin controls (yn.*) for the song, because its rule misses them (it matches ad.* and the Sampler's listed keys). Its own comment says adapter and sampler settings are the engine's; the definitions keep them per engine (DG-23)."
+  },
+  {
+   "derivation": "engine switch toast",
+   "match": "^count only:",
+   "why": "The toast counts the changed settings the engine left keeps. A value whose condition does not hold is not changed here (conditions the concept writes in faces are parameter conditions, docs 03), so the count can be smaller than the page's."
+  },
+  {
+   "derivation": "engine switch",
+   "match": "takes\\.n",
+   "why": "A number of takes the engine cannot run (see the undo entry)."
+  },
+  {
+   "derivation": "revision",
+   "match": "s[012]: page|lyrics\\.(text|instr): page|avoid\\.text: page",
+   "why": "The page stores a value for an engine whose control it does not limit (no `only`): adapter strengths on Stable Audio 3, lyrics on Stable Audio 3, the avoid list on HeartMuLa. The definitions keep a value only on the engines that have it, so a revision for those engines does not hold it."
+  },
+  {
+   "derivation": "cleaning",
+   "match": "\"samp\\.steps\":12\\.5|\"pp\\.ss\\.steps\":3\\.3|\"yc\\.topk\":3\\.3",
+   "why": "A number whose step is whole on every engine is a whole number (DG-08): the page keeps 12.5 steps and the server would be sent it; the definitions round it."
+  },
+  {
+   "derivation": "cleaning",
+   "match": "\"samp\\.cs\":0\\.9",
+   "why": "The interval's two ends arrive crossed; the page keeps them crossed and the scope draws an empty interval. The definitions put them in order (docs/05, Cleaning)."
+  },
+  {
+   "derivation": "cleaning",
+   "match": "\"takes\\.n\":9",
+   "why": "The server takes 8 at most on ACE-Step (DG-02.5)."
+  },
+  {
+   "derivation": "engine switch toast",
+   "match": "takes wait",
+   "why": "A number of takes the engine cannot run (see the undo entry): the collector set the concept control's widest range, which the definitions clamp, so what is held and where it waits differs."
+  },
+  {
+   "derivation": "tier contents",
+   "match": "quick adapters loaded: only the page \\[\"ad.adv\"\\]",
+   "why": "At Quick the page's note \"N adapters, stacked\" carries the Stack control's key, so the page counts Stack as shown there. The definitions show that note as a read-out: Stack is set at Studio, and a changed Stack is in Quick's Also set line."
+  },
+  {
+   "derivation": "tier contents",
+   "match": "lab adapters loaded: only the page \\[\\], only the definitions \\[(\"ad.planner\",)?\"lyrics.text\"\\]",
+   "why": "The cartridges edit the lyrics through their section masks, and the planner adapter's cartridge at Lab; the page's mask chips and the planner's add button carry no control key. Neither is Adapters' own parameter's line, so Also set is the same."
+  },
+  {
+   "derivation": "tier contents",
+   "match": "lab flow( loaded)?: only the page \\[\\], only the definitions \\[\"mm.prec\"\\]",
+   "why": "The renderer starts on Auto here (DG-02.1), under which TensorRT may run, so its precision applies; the concept starts on GGML and hides it."
+  },
+  {
+   "derivation": "tier contents",
+   "match": "yue2 (studio|lab) tempo( loaded)?: only the page \\[\\], only the definitions \\[\"tempo.max\"\\]",
+   "why": "Page fault: its ruler carries data-ruler and no data-ctl, so the page's own scan does not see the longest-length ruler it draws at Studio and Lab."
+  },
+  {
+   "derivation": "tier contents",
+   "match": "(sa3|heartmula) (studio|lab) tempo( loaded)?: only the page \\[\\], only the definitions \\[\"prompt.text\"\\]",
+   "why": "The tempo and key chips add and take out items of the prompt; the page's chips carry no control key. prompt.text is the Prompt's parameter, so Tempo's Also set line is the same."
+  }
+ ]
+}

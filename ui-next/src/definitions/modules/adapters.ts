@@ -49,7 +49,7 @@ export const adapters = {
       engines: ['ace', 'yue2'],
       wire: { none: 'Every engine says its own: see its line.' },
       per: [
-        { engines: ['ace'], range: [0, 4, 0.05], wire: 'param:adapterStack[1].scale' },
+        { engines: ['ace'], range: [0, 4, 0.05], wire: 'param:adapterStack[1].scale', when: { param: 'ad.adv', is: 'advanced' } },
         { engines: ['yue2'], wire: 'model:yue2.nar.scales.global' },
       ],
     },
@@ -61,6 +61,8 @@ export const adapters = {
       range: [0, 4, 0.05],
       default: 1,
       engines: ['ace'],
+      /* the third slot is used while adapters are stacked (Single uses the first) */
+      when: { param: 'ad.adv', is: 'advanced' },
       wire: 'param:adapterStack[2].scale',
     },
     {
@@ -267,7 +269,7 @@ export const adapters = {
         ],
       },
       engines: ['ace'],
-      wire: { to: 'param:adapterStackBudget', note: 'The existing UI\'s slider goes to 4; the concept stops at 2.' },
+      wire: { to: 'param:adapterStackBudget', differs: ['range'], note: 'The existing UI\'s slider goes to 4; the concept stops at 2.' },
     },
     {
       key: 'ad.rq',
@@ -378,33 +380,15 @@ export const adapters = {
       engines: ['minimax-m3'],
       wire: { to: 'ext:mm3LmMergeGpu', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
     },
-    {
-      key: 'ad.trigger',
-      type: 'text',
-      label: 'Trigger word',
-      default: '',
-      placeholder: 'trigger word',
-      when: { any: [{ state: 'adapters', atLeast: 1 }, { param: 'ad.planner', not: '' }] },
-      engines: ['ace', 'minimax-m3', 'yue2', 'heartmula'],
-      owner: 'song',
-      stored: 'content',
-      wire: { to: 'content:loraTrigger', note: 'composeCaption puts it at the start of the caption.' },
-      per: [
-        {
-          engines: ['yue2'],
-          wire: {
-            none: 'YuE2 composes its adapter\'s own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there.',
-          },
-        },
-      ],
-    },
   ],
   state: [
     {
       key: 'slots',
       kind: 'slots',
       noun: 'the adapters',
-      steps: { load: 'Load {file}', remove: 'Remove {file}' },
+      /* a second adapter loaded while Stack is Single stacks them; removing one moves the later strengths up and
+         renumbers the lyric directives (concept 25-module-adapters.js) */
+      steps: { load: { says: 'Load {file}', changes: ['ad.adv'] }, remove: { says: 'Remove {file}', changes: ['s0', 's1', 's2', 'lyrics.text'] } },
       owner: 'engine',
       stored: 'settings',
       wire: [
@@ -429,7 +413,10 @@ export const adapters = {
         },
         {
           engines: ['yue2'],
-          wire: { to: 'model:yue2.ar', note: 'AR and NAR slots, engine state (POST /api/backends/models).' },
+          wire: [
+            { to: 'model:yue2.ar', note: 'AR and NAR slots, engine state (POST /api/backends/models).' },
+            { to: 'intent:captionSource', via: 'yue2CaptionSource' },
+          ],
         },
         {
           engines: ['heartmula'],
@@ -490,7 +477,7 @@ export const adapters = {
       state: ['slots'],
       opts: { flat: true },
       per: [
-        { tiers: ['studio', 'lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner'], opts: {} },
+        { tiers: ['studio'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc'], opts: {} },
         { tiers: ['lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner', 'lyrics.text'], opts: {} },
       ],
     },
@@ -517,12 +504,13 @@ export const adapters = {
       opts: { title: 'Group scales', note: 'Scales every DiT adapter by layer group. A channel at 0 is skipped.' },
       engines: ['ace'],
       children: [
-        { part: 'fader', param: 'ag.self' },
-        { part: 'fader', param: 'ag.cross' },
+        /* the tape under each fader says it short (concept BANK_SHORT) */
+        { part: 'fader', param: 'ag.self', label: 'Self' },
+        { part: 'fader', param: 'ag.cross', label: 'Cross' },
         { part: 'fader', param: 'ag.mlp' },
         { part: 'fader', param: 'ag.cond' },
-        { part: 'fader', param: 'ag.time' },
-        { part: 'fader', param: 'ag.proj' },
+        { part: 'fader', param: 'ag.time', label: 'Time' },
+        { part: 'fader', param: 'ag.proj', label: 'Proj' },
       ],
       tiers: ['lab'],
     },
@@ -557,15 +545,20 @@ export const adapters = {
     {
       part: 'foot',
       children: [
-        { part: 'segmented', param: 'ad.mode', engines: ['ace', 'minimax-m3'] },
-        { part: 'segmented', param: 'ad.adv', engines: ['ace'] },
-        { part: 'segmented', param: 'ad.rq' },
-        { part: 'segmented', param: 'ad.mq' },
-        { part: 'textField', param: 'ad.trigger', opts: { look: 'lcd' }, tiers: ['lab'] },
-        { part: 'ledButton', param: 'ad.trigcap', tiers: ['lab'] },
-        { part: 'ledButton', param: 'ad.gpu', tiers: ['lab'] },
-        { part: 'ledButton', param: 'ad.dora', tiers: ['lab'] },
-        { part: 'ledButton', param: 'ad.ref', tiers: ['lab'] },
+        { part: 'labelled', label: 'Stack', engines: ['ace'], children: [{ part: 'segmented', param: 'ad.adv' }] },
+        {
+          part: 'labelled',
+          label: 'Apply as',
+          engines: ['ace', 'minimax-m3'],
+          children: [{ part: 'segmented', param: 'ad.mode' }],
+          dim: { when: { state: 'runtimeForced', set: true }, says: 'Runtime is used while section directives or phase windows are set. Merge returns after' },
+        },
+        { part: 'labelled', label: 'Precision', tip: 'Full, Q8 (half the VRAM) or Q4 (a quarter)', children: [{ part: 'segmented', param: 'ad.rq' }] },
+        { part: 'labelled', label: 'Precision', tip: 'HQ, or Low (a quarter of the VRAM)', children: [{ part: 'segmented', param: 'ad.mq' }] },
+        { part: 'pill', param: 'ad.dora', label: 'DoRA magnitudes', tiers: ['lab'] },
+        { part: 'pill', param: 'ad.ref', tiers: ['lab'] },
+        { part: 'pill', param: 'ad.trigcap' },
+        { part: 'pill', param: 'ad.gpu' },
       ],
       tiers: ['studio', 'lab'],
     },

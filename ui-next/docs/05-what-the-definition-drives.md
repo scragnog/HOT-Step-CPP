@@ -1,301 +1,255 @@
 # What the definition drives
 
-Everything on this page is derived from the definitions by code that has no branch for any module. Most of it is
-written once in `src/derive.ts`, which the validator and the tools already call and the page will call; the rest is
-described here for the page to implement the same way. If a module needs one of these to behave differently, the
-difference belongs in its definition (a field) or in its bespoke part, never in this code. The behaviour is the
-concept's, cited by file (`C:\Users\sneth\misc\HOT-Step-UI\src\js`).
+Everything on this page is derived from the definitions by code that has no branch for any one module: pure functions
+in `src/derive/`, which take definitions and a desk and return values. The validator and the tools call them, and the
+page will be a view over them. If a module needs one of these to behave differently, the difference belongs in its
+definition (a field) or in its bespoke part, never in this code. The behaviour is the concept's
+(`C:\Users\sneth\misc\HOT-Step-UI\src\js`, cited by file), and `tools/test-core.ts` checks it against what the concept
+page does ([07](07-checking.md)).
+
+| File | What it derives |
+| --- | --- |
+| `derive/core.ts` | A parameter on an engine, conditions, the desk facts, values in force, the changed marker, how a number is written, words that name values, which nodes show and what they edit, a tile's strip |
+| `derive/values.ts` | Cleaning a value, a record's values and its state; whole numbers; a range's two ends; setting a value from a control |
+| `derive/steps.ts` | Undo step names |
+| `derive/engine.ts` | An engine switch: what is put aside, what comes back, what is held, and the toast |
+| `derive/tiers.ts` | Each tile's "Also set" line and where its link goes; a control's tip |
+| `derive/request.ts` | The desk in real names, the Create intent, and reading real fields back |
+| `derive/records.ts` | What a revision, a draft, a workflow and the desk autosave hold; loading them; older shapes |
+| `derive/parts.ts` | What a part is given at run time ([01](01-parts-inventory.md)) |
+| `derive/strings.ts` | The translation key of every string |
 
 ## The desk
 
-What everything below reads (`Desk` in `derive.ts`): the engine in use `E`, the tier, the stored values (parameter key to
-value), the auto switches (parameter key to on or off; absent is on), the module state, the desk facts (`DESK_FACTS`) and
-what is on the desk.
+What everything reads (`Desk` in `derive/core.ts`): the engine in use, the tier, the stored values (parameter key to
+value), the auto switches (key to on or off; absent is on), the module state, the desk facts, what is on the desk, the
+models the server has selected (`selection`) and the server's lists with their words (`lists`). The desk facts named in
+`parts.ts` `DESK_FACTS` are worked out by `factsOf()` from each fact's rule; the two without one (the plugin host's
+count, another engine's adapters) the page is told.
 
 ## A parameter on an engine
 
 ```
-resolve(p, E)  = the base fields, then the engine line that names E (shallow, per field)      derive.ts resolve
-wordsOf(p, E)  = resolve(p, E), then every word line whose condition holds                     derive.ts wordsOf
+resolve(p, E)  = the base fields, then the engine line that names E (shallow, per field)
+wordsOf(p, E)  = resolve(p, E), then the label, short, tip and auto words of every word line whose condition holds
 has(p, E)      = E is in the parameter's engines and in its definition's
-applies(p, E)  = has(p, E) and its `when` holds                                                derive.ts applies
+applies(p, E)  = has(p, E) and its `when` holds
 ```
 
-`applies` is the concept's `ok(k)`. A condition on a parameter the engine does not have is false.
+`applies` is the concept's `ok(k)`. A condition on a parameter the engine does not have is false. A word line changes
+words only; the type check refuses any other field in one.
 
 ## Values: one rule for every path
 
-A stored value is in the parameter's own units, and it is kept in the parameter's own domain: the union over all its
-engines. Which engine is in use matters only when the value is read or sent. The concept works this way
-(`cleanVals`, `10-working-state.js`, and `enterEngine`, `13-engine-state.js`), and the walks listed at the end of this
-section were run on the concept's page to confirm it.
+A stored value is in the parameter's own units, kept in the parameter's domain: the union over all its engines. Which
+engine is in use matters only when the value is read or sent.
 
-**Cleaning a stored value** happens on every path that brings values in from outside the desk's own memory: a reload,
-another tab's desk, undo of a structural step (a module added or removed, a revision loaded), importing a revision,
-workflow or draft file, and loading a factory record. It is the same function on every path:
+**Cleaning** (`cleanValue`, `cleanValues`, `cleanStates`) runs on every path that brings values in from outside the
+desk's memory: a reload, another tab's desk, an import, a restore, an engine's stash, a factory record (the validator
+runs it on them).
 
 | Type | Kept as | Not kept |
 | --- | --- | --- |
-| number | A finite number, clamped to the union of its engines' ranges (lowest minimum to highest maximum). Never rounded to a step | Anything else |
+| number | A finite number, clamped to the union of its engines' ranges. A whole number (its step is whole on every engine) is rounded; any other number is never rounded | Anything else |
 | boolean | `true` or `false` | Anything else |
-| choice | One of the union of its engines' fixed options, or of `include`; for a server-listed choice, any value, until a list has loaded that lacks it | A value no list has |
-| text | A string, cut to 20,000 characters, that passes its `check` if it has one | Anything else |
+| choice | One of the union of its engines' fixed options; for a server-listed choice, any value of its default's type, until a list has loaded that lacks it | Anything else |
+| text | A string, cut to its `maxLength` (else 20,000 characters), that passes its `check` on every engine that checks it | Anything else |
 | auto switch | `true` or `false`, for a parameter with `auto` on some engine | Anything else |
 
-A key that is no parameter's is read as the parameter that lists it in `was`; an option value likewise. Anything not kept
-is counted, and an import says so in its toast ("2 settings could not be used").
+A range's two ends (`staysBelow`) that arrive crossed are put in order. A key that is no parameter's is read as the one
+that lists it in `was`, an option value likewise, a state key and a definition id too. A key in `retired.ts` is dropped
+without a word; anything else not kept is counted, and the toast says so ("2 settings could not be used").
 
-**Setting a value** from a control cleans it against the engine in use: a typed number out of range is clamped and said
-once ("Steps: 1 to 64. Set to 64."). Rounding to the step happens only here, where the control's own keys and drags make
-steps. Nothing else rounds what the user set.
+State is kept by its kind: a file is a string; a seed a whole number from 0 to 4294967295 or null; a span
+`{ start, end }` with start below end; the adapter slots up to three `{ file, type, ph? }`, `ph` being the active phase
+`[from %, to %]`; a list an array; a record an object.
 
-**Reading a value** on engine `E` (`valueOf` in `derive.ts`) gives the stored value when `E` can take it, else the
-nearest `E` can take for a number (its limit), else the default. Reading never writes. So a value only one engine can take
-waits, unchanged, for an engine that can.
+**Setting a value** from a control (`setValue`) cleans it against the engine in use: a number is clamped to that
+engine's range and put on its step grid, a range's end stops a step from the other end, and a typed number out of range
+is said once ("Steps: 1 to 64. Set to 64.").
 
-**An engine switch** from `A` to `B` is one undo step (`enterEngine`):
-
-1. Every stored value whose parameter is `owner: 'engine'` is put aside for `A`, with `A`'s engine-owned state; what was
-   put aside for `B` comes back. An engine reached for the first time starts on its own defaults.
-2. Song values stay where they are, whether `B` has them or not.
-3. A `held` parameter, not on auto, whose stored value is outside `B`'s range reads at `B`'s limit, and the desk records
-   where the value was last in use: `A` if `A` has the parameter, else where it was recorded before (300 s set on
-   ACE-Step, through MiniMax-Music3, which has no length, to HeartMuLa: "returns on ACE-Step 1.5"). Its control says the
-   held note, and the switch's toast the held toast. Changing it on `B` stores the new value and ends the hold; an engine
-   that can take it reads it again, and the hold ends.
-4. The toast says what `A` keeps, what came back, and what is held.
-
-The desk autosave keeps the records of where held values came from, and a reload checks them (a number, a known engine)
-as it checks values.
-
-**Undo** of a value step puts the value back; undo of a structural step restores the desk as it was, cleaned as above.
-
-The walks on the concept page, with what it did and what these rules give:
-
-| Walk | Concept | Here |
-| --- | --- | --- |
-| BPM 82 set on ACE-Step, switch to Stable Audio 3 (no BPM), reload, back | 82 kept throughout | Same: kept in its domain, absent on Stable Audio 3 |
-| 33 s set on Stable Audio 3 (step 1), switch to ACE-Step (step 5), reload, back | 33 throughout | Same: never rounded |
-| 300 s on ACE-Step, to HeartMuLa (up to 240), to MiniMax-Music3, back to HeartMuLa, reload | Held, "returns on ACE-Step 1.5" throughout | Same: the hold's origin is where the value was last in use |
-| 300 s on auto, to HeartMuLa | Not held | Same: auto is never held |
-| 9 takes on ACE-Step, to Stable Audio 3 | "Your 9 takes return on ACE-Step 1.5" | Same |
-| A saved desk with length 9999, steps 12.5, StableStep 99 %, key "H major" | 600, 12.5, 60, key dropped | Same |
+**Reading a value** on engine `E` (`valueOf`) gives the stored value when `E` can take it, else the nearest `E` can
+take for a number (its limit), else the default. Reading never writes.
 
 ## The changed marker
 
 ```
-changed(p, E) = applies(p, E) and (auto ? not on auto : stored and valueOf(p, E) differs from the default)   derive.ts changed
+changed(p, E) = applies(p, E) and (auto ? not on auto : stored and valueOf(p, E) differs from the default)
 ```
 
-Numbers compare after cleaning, so 9 and 9.0 are equal. Every control part is wrapped by one component that adds the
-marker after the control's words, or after its box when it has none; a part never draws the marker itself. For an XY pad
-each axis carries its own parameter's marker. The marker is drawn at every tier.
+A value that does not apply is never changed, so a value kept for a condition that does not hold is not marked, counted
+or listed. The marker is drawn after a control's words by the wrapper every control has.
 
 ## How a number is written
 
-`formatValue` in `derive.ts`, the concept's `fmt` (`03-controls.js`):
+`formatValue`, the concept's `fmt` (`03-controls.js`):
 
-1. A `format.words` entry for the exact value wins ("off", "whole history"); a switch is "on" or "off" unless words say
-   otherwise; a choice is its option's label.
-2. A `format.template` fills `{v}` with the number and `{s}` with the number divided by `perSecond`, as seconds.
-3. Seconds (`unit: 's'`, and `{s}`) read as m:ss from a minute ("5:00", "1:20"); below a minute with one decimal under 10
-   s when the step is below 1, else none ("9.5 s", "13 s", "10 s").
-4. Otherwise two decimals when the step is below 0.1, one when below 1, none from 1 (`format.decimals` overrides),
-   a true minus sign, then the unit after a space, or right after the number for `%`.
+1. A `format.words` entry for the exact value wins; a switch is "on" or "off"; a choice is its option's label, a
+   server-listed one its name from the server's list.
+2. A `format.template` fills `{v}` with the number and `{s}` with the number over `perSecond`, as seconds.
+3. Seconds (`unit: 's'`) read as m:ss from a minute ("5:00"); below a minute with one decimal under 10 s when the step is
+   below 1, else none ("9.5 s", "13 s").
+4. Otherwise two decimals when the step is below 0.1, one below 1, none from 1 (`format.decimals` overrides), a true
+   minus sign, then the unit after a space, or right after the number for `%`.
 
-The same function writes the read-out, the tip, the undo step, the held note and the "Also set" line, so they never
-disagree.
-
-## Words that name values
-
-`fill` in `derive.ts` fills the slots of any text ([02](02-definition-format.md), "Words that name values"): `{engine}`
-with the engine's name, `{value:<key>}` with the parameter's value as above, `{count:<name>}` with a state's or desk
-fact's count, `{file:<state>.<n>|<words>}` with a loaded file's name or the words, `{say:<fact>}` with a fact's words,
-and, in a parameter's own words, `{min}`, `{max}` and `{default}`. So "MiniMax-Music3 uses its own guidance", "up to
-4:00" and "tape-lofi-v2 strength" are one string each, true on every engine and in every state.
+The same function writes the read-out, the tip, the undo step, the held note and the "Also set" line.
 
 ## Undo step names
 
-Every change is one undo step, named from the definition (`14-value-steps.js`). Each derived name is one whole sentence
-with named slots, so a translation can put the slots where its language wants them:
+Every change is one undo step, named by `stepWords(before, after)` from the desk before and after it (the concept's
+`vsWords`, `14-value-steps.js`). Each name has the label the Undo button shows and what its toasts and preview say.
 
-| Step | Sentence | Slots |
+| Change | Label | Undo says, Redo says, Undo will put back |
 | --- | --- | --- |
-| A value | `{name} {from} → {to}` ("Guidance 9.0 → 20.0", "Chain on → bypassed") | `name`: the parameter's `undoName`, else its `label` (word lines applied), filled; `from`, `to`: the values as written everywhere |
-| A value whose name is shared | `{owner} {name} {from} → {to}` ("Repetition guard mode presence → DRY") | `owner`: the definition's name. Used when another parameter on the engine in use has the same label |
-| A pedal's or unit's switch | `{owner} {from} → {to}` ("StableStep off → on") | Decided by the key: the parameter is the definition's `on`, not by its words |
-| Text | `Edit {name}` ("Edit the lyrics") | One step per visit to the field |
-| A Quick row | `{row}: {from} → {to}` ("Quality: Standard → High") | The row's label and the choices' words |
-| An XY pad | One step naming both values | |
-| State | The StateDef's step ("Load {file} as the timbre reference", "Keep take {n} for {section}", "Seed random → 1834920213") | Its slots; a file has `load` and `clear` |
+| A named step a part takes | The step's words, its slots filled | Puts back what it changed |
+| The seed, or only its lock | `Seed {from} → {to}`, the number while kept, else "random" | `Seed back to {from}`, `Seed {to}`, `Puts the seed back to {from}` |
+| One text | `Edit {the name}` | `Puts back {the name} as it was` (as they were, for a plural undo name) |
+| One value from a Quick row | `{row}: {from} → {to}`, in the row's words | `{row} back to {from}`, `{row}: {to}` |
+| One value | `{name} {from} → {to}`, "auto" for auto | `{name} back to {from}`, `{name} {to}` |
+| Two numbers together (an XY pad) | `{a} {from} → {to}, {b} {from} → {to}`, the owner said once; `Reset {a} and {b}` when both go back | `{a} and {b} put back` |
+| Anything else | `Change {what}` | `Puts back {what}` |
 
-A drag, a held key or a run of scroll steps on one control is one step. Presses on one control within its `run`
-milliseconds are one step (taps on TAP). A part never names a step: it asks for a state's step by name, and a value's
-step is made by `set`.
+`{name}` is the parameter's `undoName` if it has one; a pedal's or unit's switch labelled On is the pedal or unit; any
+other is its label, with its definition's name on the engine in use first when another parameter has the same label
+("Repetition guard mode"). A drag, a held key or a run of scroll steps on one control is one step, as is a run of
+presses within the parameter's `run`, and everything a part sets inside one `batch`. A part never names a step: it
+asks for one of its definition's named steps ([02](02-definition-format.md), "Named steps"), or sets values, and the
+core names what changed.
+
+## Engine switches
+
+`switchEngine(desk, book, to)` (the concept's `enterEngine` and `engineNews`, `13-engine-state.js`), one undo step:
+
+1. Every value and state whose owner is `engine` is put aside for the engine left (`book.stash`); what was put aside for
+   the new one comes back. An engine reached for the first time starts on its defaults.
+2. Song values stay, whether the new engine has them or not.
+3. A `held` parameter, not on auto, whose value is outside the new engine's range reads at its limit and is held, with
+   the engine it was last in use on; it comes back on an engine that can take it, unless it was changed meanwhile.
+4. A source module (Repaint) the new engine does not have leaves the desk.
+5. The toast says, in this order: what is capped and where the values wait, what the engine left keeps (its models by
+   name, its adapters, a count of its changed settings), and that the new engine's own settings are back.
+
+`heldNote()` gives the held parameter's note while the value is held.
 
 ## What is sent
 
-The request is derived from the definitions alone, in three steps, two of which are the real application's own code:
+The page submits the Create intent to `/api/resolve/preview`, as the existing Create page does; the server's
+`resolveCreateIntent()` composes the caption and finishes the request. `createIntent()` builds it in three steps, two
+of which are the real application's own code, handed in (`RealApp`):
 
-1. **The desk in real names** (`realState` in `derive.ts`): for every definition on the desk on the engine in use, every
-   parameter that applies, through its wires. The result is four bags: `params` (`GENERATION_DEFAULTS` fields),
-   `backendParams` (extension knobs), `content` (`CreateContent` fields) and `body` (fields set after the rest).
-2. **The real application's resolver**: `resolveGenerationParams()` (`server/src/services/generation/defaults.ts`) turns
-   `params` and `backendParams` into the engine fields, with every conditional emission rule (`cfgCutoffRatio` only below
-   1, the StableStep fields only while it is on, the scaler routing of DCW). `createContentParams()`
-   (`ui/src/components/create/createContent.ts`) turns `content` into the content fields, with the caption's trigger word
-   and Beat I/O words. The rebuild imports both rather than restating their rules, as the existing UI already imports
-   `GENERATION_DEFAULTS`.
-3. **The request**: those, then `body`, then `backendOverride` on an engine marked `jobOverride` in `engines.ts`, then the
-   app's own settings that every Create request carries (`source`, `coResident`, `cacheLmCodes` and the `parallel*`
-   switches, from the Settings panel, not the desk).
+1. **The desk in real names** (`realState`): every definition on the desk on the engine in use, every parameter that
+   applies, through its wires, into five bags: `params` (`GENERATION_DEFAULTS` fields), `backendParams` (extension
+   knobs), `content` (`CreateContent` fields), `body` (fields set after the rest) and `intent` (the intent's `compose`
+   and `captionSource`).
+2. **The real application's code**: `resolveGenerationParams()` turns `params` and `backendParams` into the engine
+   fields; `createContentParams()` turns `content` into the content fields.
+3. **The intent**: `{ kind: 'create', params, compose, captionSource }`, the params being those, then `body`, the raw
+   caption and lyrics, `backendOverride` on an engine marked `jobOverride`, and the app's own settings that every
+   Create request carries.
 
 The rules of step 1:
 
-- A definition not on the desk sends nothing; its values are kept and apply again when it is added back. Built-in modules
-  are always on the desk; a Lab module on the desk applies at every tier. A source module (Repaint) is never part of a
-  Create request.
-- A parameter that does not apply on the engine sends nothing.
-- A value is sent unless it is untouched (not in the stored values or auto switches) and equals the field's real default:
-  `GENERATION_DEFAULTS` for `param:`, the backend's declared default for `ext:`. A field whose real default is unknown,
-  one a backend reads without declaring it, is sent once touched, and its wire's note says so. A `body:` field is always
-  sent. So an untouched desk sends what the existing UI sends, and a definition whose default differs from the real one
-  still gets its default applied: the validator requires a note on every such wire.
-- A wire changes the value on the way in this order: `when` (else `else`, or nothing), auto (`auto`, null for nothing),
-  `via` (a named transform), `map` (an option the map leaves out sends nothing through it), `invert`, `scale`, `divide`.
-  A path writes into its field, starting from the field's real default (`adapterGroupScales.self_attn`); an entry of a
-  list is written only when something sent the list (a slot's strength with no adapter loaded sends nothing).
-- A packing transform runs once for its field, with the values of everything it `packs`: the schedule and its shape
-  become `'beta:0.60:0.70'`; the recording and its span become `yue2Continuation`.
-- State is sent through its wire when it holds something; through a transform even when empty, so the transform says
-  what empty is (no adapter is `''`).
+- A module not on the desk sends nothing; its values are kept. A pedal or side unit not on the board is off: its switch
+  sends its off value and nothing else of it is sent (Lyric timestamps taken off the board sends `skipLrc: true`).
+  Built-in modules are always on the desk; a source module is never part of a Create request.
+- A parameter that does not apply sends nothing.
+- A value is sent unless it is untouched and equals the field's real default (`GENERATION_DEFAULTS` for `param:`, the
+  backend's declared default for `ext:`). A field whose real default is unknown is sent once touched; a `body:` and an
+  `intent:` field always.
+- A model choice left at "" (the engine's default) is sent as the model the server has selected for its bucket
+  (`desk.selection`), so a queued job keeps the models it was queued with.
+- A wire changes the value in this order: `when` (else `else`, or nothing), auto (`auto`, null for nothing), then either
+  `via` (a named transform, which does the whole change) or `map` (an option the map leaves out sends nothing through
+  it), `invert`, `scale`, `divide`. A path writes into its field, starting from the field's real default; an entry of a
+  list is written only when something sent the list.
+- A packing transform runs once for its field, with the values of everything it `packs`.
+- State is sent through its wire when it holds something, and through a transform even when empty.
 
-The named transforms (`transforms.ts`) are the cases fields cannot say: `int` (a seed typed as text, sent as a number),
-`text` (YuE2's composer CFG, a number sent as text), `scheduler` and `continuation` (packing), `firstPath` and
-`stackPaths` (the adapter slots as Simple mode's single adapter and Advanced mode's stack). Each also reads the real
-value back, for loading a saved profile or a song's settings ([08](08-open-questions.md) question 4).
+The named transforms (`transforms.ts`): `int`, `text`, `scheduler`, `firstPath`, `stackPaths` (the adapters as the
+stack, each with its phase window), `continuation`, `mm3CaptionSource` and `yue2CaptionSource`. Each also reads the
+real value back. `fromReal()` reads a set of real fields back into desk values, through each wire backwards and under a
+field's former names (`was` on the wire), for loading a saved profile or a song's settings.
 
-`tools/compare-request.ts` builds the request this way for every engine at default values and compares it field by field
-with what the existing frontend sends at its defaults (`getGlobalParams()` and `createContentParams()`, joined as
-`App.tsx` joins them). The one difference is on HeartMuLa: the existing UI freezes the scalar decoder the server has
-selected into the request, and no definition carries it ([08](08-open-questions.md) question 9). `npm run check` fails on
-any difference that `tools/fixtures/request-differences.json` does not list with its reason.
+`tools/compare-request.ts` proves this over the value space against the existing Create page ([07](07-checking.md)).
 
 ## Saved data
 
 | Record | Holds | From the definition |
 | --- | --- | --- |
-| Revision | One engine's settings: every parameter on that engine with `stored: 'settings'`, its auto switch, and state with `stored: 'settings'` (the adapter slots) | `stored`, `engines` |
-| Revision "with content" | The above plus every parameter with `stored: 'content'` on that engine (lyrics, tempo, song info, the prompt) | `stored` |
-| Draft | `stored: 'content'` only | `stored` |
-| Workflow | The desk: modules, pedals and units in their order, and its tier. No values | `id`s |
-| Desk autosave | Everything, `stored: 'none'` included: values, auto switches, state, what each engine keeps aside, held values | |
+| Revision (`revisionOf`) | One engine's settings: every parameter on that engine with `stored: 'settings'`, its value in force (defaults included) and its auto switch, and the state with `stored: 'settings'` | `stored`, `engines` |
+| Revision "with content" | The above and every `stored: 'content'` parameter on that engine | `stored` |
+| Draft (`draftOf`) | The `stored: 'content'` values set | `stored` |
+| Workflow (`workflowOf`) | The desk: modules (never a source module), pedals and units, its tier. No values | `id`s |
+| Desk autosave (`savedDeskOf`) | Everything, the engines' stashes and the held values included | |
 
-A revision the user saves holds every value it covers, the defaults included, so a default changed in a later definition
-does not change what a saved revision sounds like. A factory revision (`factory.ts`) lists only what it sets, because it
-ships with the definitions it was written for. Loading a revision first resets every parameter a revision keeps for its
-engine, then applies its values cleaned as above, so what a revision holds is decided by `stored` alone, whether or not
-its module is on the desk.
+Loading a revision (`loadRevision`) first resets every parameter a revision keeps for its engine, then applies its
+values cleaned as above, so what a revision holds is decided by `stored` alone. A factory revision lists only what it
+sets.
 
-Every record carries `v: 1`. A record with another `v` is kept aside unread and said once, as the concept does with a
-desk it cannot read (`deskUnreadable`); a later shape adds its migration beside the reader.
+Every record carries `v`, the version of its shape. `migrate()` reads a record of an older shape by running each step
+from its version up to the current one; version 0 is the concept's own saved shape, so its exported workflows and
+revisions load. A record of a newer or unknown shape is kept aside unread. A rename is not a migration step: `was` reads
+the old name in every version. `tools/fixtures/shipped.json` lists every key, state and id the definitions have shipped
+with, and where each value is kept; the validator fails when one of them is neither in a definition (under its name or
+in a `was`) nor retired in `src/definitions/retired.ts`, or when where it is kept changed without `npm run docs`
+recording it. So removing, renaming or moving anything saved data holds is a decision written down.
 
 ## What each tier says about what is set
 
-**The tile's "Also set" line.** For a module at a tier below Lab:
+**The tile's "Also set" line** (`alsoSet`, the concept's `paintAlso`, `30-tile.js`). For a module at a tier below Lab:
 
 ```
-editsAt(def, tier, E) = the parameters edited by nodes of def's face shown at tier on E, that apply   derive.ts editsAt
-hidden = def's parameters with changed(p, E) and not in editsAt
+editsAt(def, tier, E) = the parameters edited by nodes of def's face shown at tier on E, that apply; none while the tile is a strip
+hidden = def's changed parameters not in editsAt
 ```
 
-Only `param` and `params` count, never `reads`: the Sampler's scope reads the CFG interval at Studio and edits it only at
-Lab, so a changed interval is on the Studio tile's foot. For the Pedalboard, its parameters plus those of every pedal and
-unit on the board, where a pedal at Studio edits its `main` knob and switch. If `hidden` is not empty the tile ends with
-"Also set: {items}." Each item is `{name} {value}`, the name being the parameter's `short` or its `label`, prefixed with
-the pedal's name when it is a pedal's; a switch is its name, or "{name} off". The link goes to the lowest tier at which
-the first of them is edited, and rings them there.
+For the module that holds the board (`board`) the parameters are its own and those of every pedal and unit on the board, where a
+pedal edits its switch at Quick, its switch and main knob at Studio, everything at Lab. If `hidden` is not empty the
+tile ends with "Also set: {items}." Each item is the parameter's `short` when it has more than two letters, else its
+label without a parenthesis, after the pedal's name for a pedal's; a switch is its name, or "{name} off"; anything else
+"{name} {value}". From Quick the link goes to Studio when Studio edits every one of them, else to Lab; from Studio to
+Lab.
 
-**Lab modules on a lower tier.** A note above the desk names the Lab modules on the desk that hold changed values.
+**Quick's plain words.** A choice row checks the choice whose values are all in force, or none, and its label then says
+the value (`between`).
 
-**Quick's plain words.** A choice row checks the choice whose values are all in force, or none, with the marker and the
-value in its label (`between`). The row's words and the detailed values never disagree because the row has no value of
-its own.
-
-**The picker.** `tierSummary` says what each tier adds; `name`, `desc` and `tierSummary` are read per engine.
-
-## Tips
-
-A control's tip is built from the definition: its full label (the `label` even where the face prints `short` or the
-node's own `label`), its `tip`, then how to work the part, said once a session (the part's own sentence, such as the
-knob's "Drag up or down (hold Shift for fine steps), scroll, or use the arrow keys. Double-click to reset."). A value in a
-tip is written as above. An option's `tip` is its tooltip in a dropdown or chip row.
+**Tips.** `tipOf(node)` is the node's or its parameter's tip, then its part's `howTo`.
 
 ## Strings and translation
 
-A definition holds English. The real app uses i18next with flat dotted keys in `ui/src/i18n/locales/en.json` and
-`t('key', 'English default')`. Keys are derived from where a string sits, so a definition never names one:
+`stringsOf(definition)` gives every string with its key. A key is made from where the string sits and what it is bound
+to, never from its place in a list, so reordering lines, options, choices, nodes or strips keeps every translation, and
+no two strings share a key (`tools/test-core.ts` checks both).
 
 | String | Key |
 | --- | --- |
-| A definition's `name`, `quickName`, `desc`, `short` | `create.<id>.name`, `.quickName`, `.desc`, `.short` |
-| `tierSummary` | `create.<id>.tier.quick`, `.studio`, `.lab` |
-| A parameter's `label`, `short`, `undoName`, `tip`, `placeholder` | `create.<id>.p.<key>.label`, ... (dots in the key written as `-`: `create.sampler.p.samp-steps.label`; a key has no `-` of its own, so two keys never share one) |
-| An option's words | `create.<id>.p.<key>.o.<value>.label`, ..., the value written as letters and digits joined by `-`, and `""` as `none` |
-| A line's words | the same key with `@<engines>` or `@<n>` (the line's place): `create.sampler.p.samp-steps.label@minimax-m3` |
-| Words in a node, a strip, an idle reason, a check message, a held note, format words and templates | `create.<id>.t.<slug>`, the slug being the English lower-cased to letters and digits joined by `-`, cut to 48 characters, with a 4-character hash when two strings share a slug |
+| A definition's words | `create.<id>.name`, `.desc`, `.quickName`, `.short`, `.tier.quick` ...; an engine line's `@<engines>` |
+| A parameter's words | `create.<id>.p.<key>.label` ... (dots in the key as `-`), its held words, its named steps (`.step.<name>`) |
+| An option's words | `create.<id>.p.<key>.o.<value>.label`: letters and digits kept, any other character as its hex code between two `_` (`F_23__20_major` for F# major), "" as `_` |
+| A parameter line's words | the same key with `@<engines>` for an engine line, `@when-<hash of its condition>` for a word line |
+| A node's words | `create.<id>.n.<part>.<what it binds>`, or its words when it binds nothing; siblings of one kind and binding add a hash of themselves; a node line adds `@<hash of its engines, tiers and condition>` |
+| A strip or idle reason | `create.<id>.strip.<hash of its condition>` |
 
-Slots stay in the translated text as they are (`{engine}`, `{value:samp.guide}`), and the derived sentences of the undo
-steps and the "Also set" line are keyed once each in the shell, with their slots, so no string is ever made by joining
-two translated pieces. Node words are keyed by their text, so reordering a face keeps its translations and changing the
-English makes a new key; the extraction that writes the keys into `en.json` also lists the keys no definition makes any
-more, for removal. The app looks a string up with the English as the default, so a missing translation shows English.
-
-Words that are not in definitions (engine names, "Also set", "Edit in Lab", toasts) belong to the shell and are keyed by
-hand, as now.
+A key that follows words (an unbound note) changes when the English does; the extraction that writes `en.json` lists
+the keys no definition makes any more. Slots stay in the translated text (`{engine}`, `{value:samp.guide}`). The
+derived sentences of undo steps, toasts and the "Also set" line are the shell's, keyed once each with their slots.
 
 ## The thumbnail
 
-The Modules panel and the picker draw `thumb.file` (or the file its `per` line gives for the engine) from
-`src/definitions/thumbs/`. For a module the file is the whole drawing on the 176 x 112 canvas. For a pedal the frame is
-drawn from the definition (1U or 2U from the number of its numbers, the face gradient from `hue`, four screws, the name
-bar sized from `name`, the LED and foot switch, or the "Always on" plate when `on` is null) and the file's middle drawn
-inside it; in the panel the pedal is mounted on a piece of board with a cable each side. A side unit is the rack strip
-with the file as its object. Every class in a drawing is prefixed `t-` on the way in (`thSvg`, `24-thumbnails.js`), and
-gradient ids are made unique per drawing.
+The Modules panel and the picker draw `thumb.file` (or its engine line's) from `src/definitions/thumbs/`. A module's file
+is the whole drawing on the 176 x 112 canvas. A pedal's frame is drawn from the definition (1U or 2U from the number of
+its numbers, the face from `hue`, the name bar, the LED and switch, or "Always on" when `on` is null), with the file's
+middle inside. A side unit is the rack strip with the file as its object.
 
 ## Pedals and side units
 
-Laid out from their parameters as [01-parts-inventory.md](01-parts-inventory.md) describes, by `layOut()` in `parts.ts`:
-the definition supplies the order (its `params`), the switch (`on`), the Studio knob (`main`), what stands beside a
-switch (`beside`) and the extra nodes (`face`); the blanking plate's words come from the hidden knobs' conditions. The
-count on the board ("10 pedals · 9 on · 1 needs setting up") reads `on` and `idle`.
+Laid out from their parameters by `layOut()` in `parts.ts` ([01](01-parts-inventory.md)).
 
 ## Automated tests
 
-The concept's behaviour suite (`tools/behaviour/run.mjs`) drives the page through hand-written scenarios. With
-definitions, most of those scenarios can be generated. A generic walker, for each engine, for each definition on it:
-
-1. Puts it on the desk (a pedal or unit on the board), at each tier.
-2. For each parameter in `editsAt` at that tier, finds its control by `data-ctl="<key>"` (the wrapper adds it to every
-   control part) and changes it the way its part's `drive` says (`parts.ts`): `keys` (focus, press End, or Home at the
-   maximum), `click`, `choose` (the next option or choice), `type` (a valid string: the `example`, or "x", then leave the
-   field), `file` (drop a test file).
-3. Checks, from the definition alone:
-   - the stored value changed and is valid (cleaning leaves it unchanged);
-   - the control carries the changed marker;
-   - Undo's label equals the derived step name, and Undo puts back the default and removes the marker; Redo restores it;
-   - a reload restores it;
-   - saving a revision and loading it on a cleared desk restores it when `stored` is `settings`, and not otherwise;
-   - switching to another engine and back restores it when `owner` is `engine`; when `owner` is `song`, the value is
-     still in force on the other engine if that engine has the parameter;
-   - one tier down, if it is not in `editsAt` there, the tile's "Also set" line names it with its value;
-   - the request (step 1 of "What is sent") carries the new value through the parameter's wire.
-4. For each parameter with `when`, sets the condition false and checks the control is hidden (or its room kept on a
-   pedal), the value kept, not marked changed and not sent.
-5. For each `choiceRow`, presses each choice and checks the detailed values; sets a value between choices at Lab and
-   checks Quick's row checks none and its label contains the `between` text.
-6. For each `held` parameter, the walks of "Values: one rule for every path".
-
-Bespoke parts are covered by this walk for everything that is the parameter's (marker, undo, saving, request); what they
-do beyond that keeps hand-written scenarios, which is where the suite's remaining effort belongs.
+`tools/test-core.ts` runs the derivations on the states the concept page was put in and compares what they return with
+what the page did ([07](07-checking.md)). The generic walker of the rebuilt page will, for each engine and definition
+on it, put it on the desk at each tier, operate each parameter in `editsAt` the way its part's `drive` says, and check
+from the definition alone: the stored value is valid, the marker is drawn, Undo's label is `stepWords`'s, a reload and a
+saved revision restore it as `stored` says, an engine switch does what `switchEngine` says, the tier below lists it as
+`alsoSet` says, and `createIntent` carries it.

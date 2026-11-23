@@ -19,6 +19,8 @@ export const art = {
       key: 'pp.art.subject',
       type: 'text',
       label: 'Cover art subject',
+      placeholder: 'overrides what the cover shows',
+      maxLength: 120,
       tip: 'What the cover shows. Leave it empty to draw from the song\'s caption.',
       default: '',
       stored: 'content',

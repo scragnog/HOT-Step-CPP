@@ -164,7 +164,7 @@ export const tempo = {
       label: 'Beat intro and outro (DJ bars)',
       default: false,
       engines: ['ace', 'minimax-m3', 'sa3'],
-      wire: 'content:beatIntro',
+      wire: 'intent:compose.beatIntro',
     },
     {
       key: 'tempo.beatbars',
@@ -173,7 +173,7 @@ export const tempo = {
       default: 2,
       options: [{ value: 1, label: '1' }, { value: 2, label: '2' }, { value: 4, label: '4' }, { value: 8, label: '8' }],
       engines: ['ace', 'minimax-m3', 'sa3'],
-      wire: 'content:introBars',
+      wire: 'intent:compose.introBars',
     },
     {
       key: 'tempo.trim',

@@ -22,7 +22,7 @@ export const lift = {
       label: 'Denoise',
       range: [0, 1, 0.05],
       default: 0.3,
-      wire: { to: 'param:slDenoiseStrength', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:slDenoiseStrength', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'pp.lift.floor',
@@ -40,7 +40,7 @@ export const lift = {
       short: 'Attack',
       range: [0, 1, 0.05],
       default: 0,
-      wire: { to: 'param:slTransientBoost', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:slTransientBoost', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'pp.lift.shim',

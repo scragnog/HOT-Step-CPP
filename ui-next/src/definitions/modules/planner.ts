@@ -82,7 +82,7 @@ export const planner = {
       range: [0, 2, 0.05],
       default: 0.8,
       engines: ['ace'],
-      wire: { to: 'param:lmTemperature', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
+      wire: { to: 'param:lmTemperature', differs: ['range'], note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'lm.cfg',
@@ -137,7 +137,7 @@ export const planner = {
       range: [0, 1, 0.01],
       default: 0,
       engines: ['ace', 'yue2'],
-      wire: { to: 'param:lmCfgRescale', note: 'The existing UI steps by 0.05; the concept by 0.01.' },
+      wire: { to: 'param:lmCfgRescale', differs: ['range'], note: 'The existing UI steps by 0.05; the concept by 0.01.' },
       per: [{ engines: ['yue2'], wire: 'ext:yue2CfgRescale', range: [0, 1, 0.05] }],
     },
     {
@@ -176,7 +176,7 @@ export const planner = {
       default: 6,
       when: { param: 'lm.codesmode', is: 'steps' },
       engines: ['ace'],
-      wire: { to: 'param:lmCodesSteps', note: 'The existing UI\'s slider stops at the step count in force; the concept at 300.' },
+      wire: { to: 'param:lmCodesSteps', differs: ['range'], note: 'The existing UI\'s slider stops at the step count in force; the concept at 300.' },
     },
     {
       key: 'lm.neg',

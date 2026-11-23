@@ -7,10 +7,15 @@
 // engine (docs/05, "Saved data").
 
 import type { Revision, Workflow } from './types.ts';
+import { DEFINITIONS } from './index.ts';
 
-/* The order of "Everything" composes at every desk width on every engine (the concept chose it with a search). */
-const EVERYTHING = ['guidance', 'flow', 'perf', 'tempo', 'sampler', 'latent', 'repetition', 'planner', 'plans', 'seed', 'timbre', 'avoid', 'takes', 'score', 'replan', 'cont', 'adhere', 'adapters', 'yuebatch', 'build', 'post'];
-const BOARD = ['tile', 'refiner', 'ss', 'ppvae', 'lift', 'nat', 'gain', 'vst', 'master', 'norm', 'lrc', 'fa', 'wh', 'art', 'q'];
+/* "Everything" is every desk module and every pedal and unit, so a new one is in it by itself (concept 32-workflows.js:
+   EVERY_ORDER, then the rest). The modules start in the order that composes at every desk width on every engine (the
+   concept chose it with a search); a module not in that order follows; the board is in chain and board order. */
+const ORDER = ['guidance', 'flow', 'perf', 'tempo', 'sampler', 'latent', 'repetition', 'planner', 'plans', 'seed', 'timbre', 'avoid', 'takes', 'score', 'replan', 'cont', 'adhere', 'adapters', 'yuebatch', 'build', 'post'];
+const desk = DEFINITIONS.filter(d => d.kind === 'module' && !d.builtIn && !d.source).map(d => d.id);
+const EVERYTHING = [...new Set([...ORDER.filter(id => desk.includes(id)), ...desk])];
+const BOARD = DEFINITIONS.filter(d => d.kind !== 'module').sort((a, b) => (a.kind === b.kind ? a.at - b.at : a.kind === 'pedal' ? -1 : 1)).map(d => d.id);
 
 export const FACTORY_WORKFLOWS: Workflow[] = [
   { v: 1, name: 'Start fresh', tier: 'quick', modules: [], board: [], note: 'Just the prompt and lyrics' },

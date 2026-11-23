@@ -37,8 +37,9 @@ export interface PartSpec {
   edits?: readonly (ValueType | 'pair')[];
   /** The kinds of state its node's `state` may name. */
   state?: readonly StateDef['kind'][];
-  /** It shows values it does not edit, listed in its node's `reads`. */
-  reads?: true;
+  /** It shows values it does not edit, listed in its node's `reads`: any (true), or exactly these first, in order, for a
+   *  part whose drawing or formula uses each (a parameter of that type, or 'state'). */
+  reads?: true | readonly (ValueType | 'state')[];
   /** How the generated tests operate it. Every part that edits has one. */
   drive?: Drive;
   /** What it is for, in one or two sentences. */
@@ -49,12 +50,18 @@ export interface PartSpec {
   css: readonly string[];
   /** For a bespoke part: exactly what it is responsible for, and what it leaves to the generic machinery. */
   responsible?: string;
+  /** How a hand or a key works it, said at the end of its tip ("Drag up or down ..."). */
+  howTo?: string;
+  /** For a bespoke part: the named steps it takes, which its node's state or first parameter must declare. A file's
+   *  `load` and `clear` are declared without saying. */
+  steps?: readonly string[];
 }
 
 export const PARTS = {
   // ---------------------------------------------------------------- controls
   knob: {
     kind: 'control', edits: ['number'], drive: 'keys', css: ['15-knob.css', '27-pedals.css'],
+    howTo: 'Drag up or down (hold Shift for fine steps), scroll, or use the arrow keys. Double-click to reset.',
     doc: 'A rotary knob with a detent tick at the default, its label under it and a read-out that can be clicked to type a value. The rack face of every number in Lab.',
     states: ['turning', 'resetting', 'auto (drawn at the auto value in the auto colour, with an auto pill)', 'typing'],
     opts: { small: { type: 'boolean', doc: 'The small knob (rack rows).' } },
@@ -160,6 +167,7 @@ export const PARTS = {
   },
   token: {
     kind: 'control', edits: ['number'], drive: 'keys', css: ['15-numbox.css', '25-module-planner.css'],
+    howTo: 'Drag sideways, use the arrow keys, or press Enter to type',
     doc: 'A scrub token: a number in running text or a terminal line, dragged sideways, stepped with the arrows, typed on Enter. In a terminal line its label is its flag.',
     states: ['clash (another setting makes it skip)'],
   },
@@ -301,7 +309,7 @@ export const PARTS = {
     doc: 'A side unit\'s round score badge.',
   },
   dice: {
-    kind: 'readout', reads: true, css: ['25-module-replan.css'],
+    kind: 'readout', reads: ['number'], css: ['25-module-replan.css'],
     doc: 'A row of numbered dice, one per allowed attempt (the first of `reads`), filled as attempts are used.',
     opts: { offWhen: { type: 'param', doc: 'A switch that, while off, draws the dice off.' } },
   },
@@ -315,19 +323,19 @@ export const PARTS = {
     },
   },
   beatPulse: {
-    kind: 'readout', reads: true, css: ['25-module-tempo.css'],
+    kind: 'readout', reads: ['number'], css: ['25-module-tempo.css'],
     doc: 'Lamps that pulse on the beat at the BPM it reads, one per beat of the bar.',
   },
   flowWindows: {
-    kind: 'readout', reads: true, css: ['25-module-flow.css'],
+    kind: 'readout', reads: ['number'], css: ['25-module-flow.css'],
     doc: 'MiniMax-Music3\'s flow windows drawn at the hop it reads, and the count of windows a 3:00 song needs.',
   },
   speedGauge: {
-    kind: 'readout', reads: true, css: ['25-module-perf.css'],
+    kind: 'readout', reads: ['number', 'number', 'number'], css: ['25-module-perf.css'],
     doc: 'An LCD that estimates how much faster the trades it reads make a run.',
   },
   adhereCurve: {
-    kind: 'readout', reads: true, css: ['25-module-adhere.css'],
+    kind: 'readout', reads: ['number', 'number', 'choice', 'number', 'number', 'number', 'number', 'number', 'number'], css: ['25-module-adhere.css'],
     doc: 'Plan strength across the run, from noise to clean, with the Plan CFG band and the CADS ramp, from the values it reads.',
   },
   planText: {
@@ -335,7 +343,7 @@ export const PARTS = {
     doc: 'The plan the planner will start from, as terminal text: caption, tempo, key, form, and whose each value is. On MiniMax-Music3 its first line also says whether a saved plan is replayed or the plan cache is on.',
   },
   lrcPreview: {
-    kind: 'readout', reads: true, css: ['28-side-units.css'],
+    kind: 'readout', reads: ['text'], css: ['28-side-units.css'],
     doc: 'Two timed lyric lines, the first named after the first section of the lyrics it reads.',
   },
   coverSwatch: {
@@ -344,7 +352,7 @@ export const PARTS = {
   },
   // ---------------------------------------------------------------- bespoke
   samplerScope: {
-    kind: 'bespoke', edits: ['number'], reads: true, drive: 'keys', css: ['25-module-sampler.css'],
+    kind: 'bespoke', edits: ['number'], reads: ['number', 'number', 'choice'], drive: 'keys', css: ['25-module-sampler.css'],
     doc: 'The Sampler\'s scope: the noise schedule drawn from the values it reads, the guidance band, and at Lab the CFG interval\'s two handles.',
     opts: { interval: { type: 'boolean', doc: 'Draw the CFG interval\'s two handles; they edit the node\'s two params.' } },
     responsible: 'Drawing sigma(t) from its reads (steps, shift, schedule and the shape parameters, or the custom timesteps when Latent & correction sets them); the guidance band from the CFG interval and the hatched CFG cutoff; the two interval handles, which set its two params a step apart; the one-line read-out. Defaults, undo, changed markers and saving of every value are generic.',
@@ -360,7 +368,7 @@ export const PARTS = {
     responsible: 'Timing the taps and setting its param (clamped to its range); the run of taps is one undo step through the parameter\'s `run`.',
   },
   capChips: {
-    kind: 'bespoke', edits: ['text'], reads: true, drive: 'click', css: ['25-module-tempo.css'],
+    kind: 'bespoke', edits: ['text'], reads: ['number', 'choice'], steps: ['addChip', 'removeChip'], drive: 'click', css: ['25-module-tempo.css'],
     doc: 'On engines where tempo and key go in the prompt: chips that add or take out "120 BPM" or "D major" as items of the prompt text it edits, two exclusive groups.',
     responsible: 'Reading which chips are pressed from the text, replacing an item of the same group, never touching words inside a sentence, and offering the tempo and key it reads first. Each press is one step of the text it edits.',
   },
@@ -370,12 +378,12 @@ export const PARTS = {
     responsible: 'Drawing as many reels as its param\'s maximum, the hover preview, the reel spin, and the VRAM cost line from the loaded models. The LCD reads the value as its format writes it, then the node\'s label.',
   },
   splitFlap: {
-    kind: 'bespoke', edits: ['boolean'], state: ['seed'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['seed'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one. Roll once and Random each time.',
     responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 4294967295), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
   },
   savedSeeds: {
-    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The saved seeds list: search, star, name, describe, tag, load, delete, random from saved.',
     responsible: 'The list (its `list` state) and its search; loading a saved seed sets the seed and its lock in the seed state\'s `set` step; every list action is the list state\'s step of that name.',
   },
@@ -385,48 +393,48 @@ export const PARTS = {
     responsible: 'Drawing the circles at its param and dragging sideways.',
   },
   recentRefs: {
-    kind: 'bespoke', state: ['list', 'file'], drive: 'click', css: ['25-module-timbre.css'],
+    kind: 'bespoke', state: ['list', 'file'], steps: ['load'], drive: 'click', css: ['25-module-timbre.css'],
     doc: 'The two latest references as chips, and the rest in a popover.',
     responsible: 'Showing its `list` state and loading one into its `file` state (that state\'s `load` step).',
   },
   latentCurve: {
-    kind: 'bespoke', reads: true, css: ['25-module-latent.css'],
+    kind: 'bespoke', reads: ['number', 'number'], css: ['25-module-latent.css'],
     doc: 'The latent distribution before (grey) and after (green) the shift and rescale it reads, with the XY pad that sets them laid over it as its child.',
     responsible: 'Drawing the two curves and hosting its child. It edits nothing; the pad is the generic xyPad part.',
   },
   abcFoot: {
-    kind: 'bespoke', reads: true, css: ['25-module-score.css'],
+    kind: 'bespoke', reads: ['text', 'choice'], css: ['25-module-score.css'],
     doc: 'The lead sheet\'s foot: whether the text it reads is ABC, how many lines, and its actions as they apply (Insert example, Preview this score or Plan and preview a score, the way back when the planner writes nothing).',
     responsible: 'Recognising ABC (a K: line and bars) and counting lines, and choosing which of its node\'s actions apply. It edits nothing itself.',
   },
   cartridges: {
-    kind: 'bespoke', edits: ['number', 'choice', 'text'], state: ['slots'], drive: 'keys', css: ['25-module-adapters.css'],
+    kind: 'bespoke', edits: ['number', 'choice', 'text'], state: ['slots'], steps: ['load', 'remove'], drive: 'keys', css: ['25-module-adapters.css'],
     opts: { flat: { type: 'boolean', doc: 'Quick\'s flat cartridge: the first adapter lying flat, its art beside its name.' } },
     doc: 'Adapter cartridges: each loaded adapter as a cassette with label art, its strength fader, its kind\'s housing, and in a stack its effective share, active phase and per-section mask.',
-    responsible: 'Showing its slots state and adding and removing cartridges (the state\'s `load` and `remove` steps), the label art, and drawing its params with the fader part. Phase windows and section masks are written into the lyrics text it edits.',
+    responsible: 'Showing its slots state and adding and removing cartridges (the state\'s `load` and `remove` steps: loading a second adapter while Stack is Single sets Stack, removing one moves the later strengths up and renumbers the lyric directives), each slot\'s active phase (kept in its slot), the label art, and drawing its params with the fader part. Section masks are written into the lyrics text it edits.',
   },
   buildBoard: {
-    kind: 'bespoke', state: ['record'], reads: true, css: ['25-module-build.css'],
+    kind: 'bespoke', state: ['record'], reads: ['text', 'choice'], steps: ['plan', 'replan', 'relyric', 'keep', 'unkeep', 'discard', 'render', 'reset'], css: ['25-module-build.css'],
     doc: 'Build by section: the planned sections as columns, takes under each, keep one, render the song.',
     responsible: 'Showing its record state (planned score, takes per section, keeps, the render) and its drift against the lyrics it reads, and talking to the build session API. Every change is the record state\'s step of that name.',
   },
   recordingSpan: {
-    kind: 'bespoke', state: ['span'], reads: true, css: ['25-module-cont.css'],
+    kind: 'bespoke', state: ['span'], reads: ['state'], steps: ['move'], css: ['25-module-cont.css'],
     doc: 'A recording\'s waveform with up to 30 seconds selected: drag inside to move, an edge to resize, outside to draw a new one.',
     responsible: 'Its span state and its keyboard contract (arrows move, Shift resizes, Page moves by its length), and the ruler under it. A move is the span\'s step.',
   },
   repaintRegion: {
-    kind: 'bespoke', state: ['record', 'span'], css: ['25-module-repaint.css'],
+    kind: 'bespoke', state: ['record', 'span'], steps: ['pick', 'move'], css: ['25-module-repaint.css'],
     doc: 'The source song\'s waveform with the region to regenerate.',
     responsible: 'Its source record and region span, drawing the waveform, and the region\'s handles and keys. A move is the span\'s step, in the song\'s times.',
   },
   lyricSheet: {
-    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], reads: true, drive: 'type', css: ['25-module-lyrics.css'],
+    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], reads: ['boolean', 'number'], drive: 'type', css: ['25-module-lyrics.css'],
     doc: 'The ruled lyric paper with its section tabs, the language stamp, the structure strip under it and the line count.',
     responsible: 'Inserting section tags at line boundaries, the structure strip (sections as coloured segments that jump to their line), the line count and its time estimate, and wildcard expansion. Every value it edits is one of its params.',
   },
   promptBox: {
-    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], drive: 'type', css: ['22-prompt.css'],
+    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], state: ['list', 'file'], steps: ['write', 'compose', 'copy', 'addTag', 'removeTag', 'expand', 'toLyrics', 'tempo', 'plain', 'preset', 'load', 'clear'], drive: 'type', css: ['22-prompt.css'],
     doc: 'The main text box (description, caption, prompt or tags) with its tools and the song info.',
     responsible: 'The box, its rotating placeholder, Write it for me and Compose caption, and the caption source. Every value it edits is one of its params.',
   },
@@ -448,9 +456,11 @@ export type OptsOf<P extends PartName> = SpecOf<P> extends { opts: infer O }
 export type NodeOf<P extends PartName> = { part: P; opts?: OptsOf<P> };
 
 /* ---------------------------------------------------------------- what a part is given
-   A part's component receives these and nothing else, so a part cannot write a value it is not bound to, keep its
-   own copy of one, decide a default, or name an undo step: the only way to change a value is its `set`, and a state's
-   steps are named by its StateDef. */
+   A part's component receives PartProps and nothing else (src/derive/parts.ts bindPart builds them). The only way it
+   changes the desk is a setter here, and there is one for exactly what its node binds: `param` and `params`, the
+   state in its node's `state`, and the parameters a named step it takes lists in `changes`. It never names an undo
+   step: a setter's change is named by the core from the definition (src/derive/steps.ts), or the part asks for one of
+   its definition's named steps by its name. Several setters inside one `batch` are one step (an XY pad's drag). */
 
 /** A parameter as the part sees it on the engine in use: its resolved face, its value, and how to change it. */
 export interface BoundParam {
@@ -462,19 +472,36 @@ export interface BoundParam {
   changed: boolean;
   /** On auto, for a parameter with auto. */
   auto: boolean;
-  /** Cleans the value and sets it, one undo step named from the parameter (a drag or a run is one). */
-  set(value: Value): void;
+  /** Its `when` holds. */
+  applies: boolean;
+  /** Sets it (cleaned, on the engine's step grid, a pair's end kept from the other), one undo step. With `step`, the
+   *  step is the parameter's named step of that name, its slots filled from `slots`, and `also` may set the parameters
+   *  that step lists in `changes`. */
+  set(value: Value, step?: string, slots?: { [slot: string]: string | number }, also?: { [param: string]: Value }): void;
   setAuto(on: boolean): void;
   reset(): void;
 }
 
 /** A state the node binds. `apply` takes the name of one of its StateDef's steps; the step's words come from the
- *  definition. Bound params may change in the same step (Roll once sets the seed and its lock). */
+ *  definition. `also` may set the node's own parameters and those the step lists in `changes` (Roll once sets the
+ *  seed and its lock; loading a second adapter stacks them). A state another definition lends (a drop zone's
+ *  `from`) can be read and not applied. */
 export interface BoundState {
   key: string;
   kind: StateDef['kind'];
   value: Json;
   apply(step: string, next: Json, also?: { [param: string]: Value }, slots?: { [slot: string]: string | number }): void;
+}
+
+/** What a node reads: a parameter (its value, text, auto switch, whether it applies and whether its definition is on
+ *  the desk: the lyric sheet's time estimate at the tempo in force), a state's value, or a desk fact. */
+export interface ReadValue {
+  key: string;
+  value: Value | Json;
+  text: string;
+  auto: boolean;
+  applies: boolean;
+  onDesk: boolean;
 }
 
 /** What a part's component receives. */
@@ -486,8 +513,10 @@ export interface PartProps {
   params: Readonly<Record<string, BoundParam>>;
   /** The state its node names. */
   state: Readonly<Record<string, BoundState>>;
-  /** What its node reads: value and text, no setter. */
-  reads: Readonly<Record<string, { value: Value | Json; text: string }>>;
+  /** What its node reads, with no setter. */
+  reads: Readonly<Record<string, ReadValue>>;
+  /** Runs `fn`, whose sets are one undo step. */
+  batch(fn: () => void): void;
   /** Its node's actions, ready to run. */
   run(action: number): void;
   /** Its children, drawn. */
@@ -508,13 +537,18 @@ export const UNITS = {
 } as const;
 export type UnitName = keyof typeof UNITS;
 
-/** The text checks a parameter may name, with what they accept. */
+/** The text checks a parameter may name: what each accepts, in words and as the test the page, the cleaner and the
+ *  validator all run. */
+const seedText = (s: string) => /^\d{1,10}$/.test(s.trim()) && Number(s.trim()) <= 4294967295;
 export const CHECKS = {
-  seed: 'A whole number from 0 to 4294967295.',
-  seedOrMinusOne: 'A whole number from 0 to 4294967295, or -1.',
-  seedOrEmpty: 'A whole number from 0 to 4294967295, or empty.',
-  timesteps: 'Numbers from 0 to 1, comma-separated, at least two, each smaller than the last.',
-} as const;
+  seed: { doc: 'A whole number from 0 to 4294967295.', test: seedText },
+  seedOrMinusOne: { doc: 'A whole number from 0 to 4294967295, or -1.', test: (s: string) => s.trim() === '-1' || seedText(s) },
+  seedOrEmpty: { doc: 'A whole number from 0 to 4294967295, or empty.', test: (s: string) => s.trim() === '' || seedText(s) },
+  timesteps: {
+    doc: 'Numbers from 0 to 1, comma-separated, at least two, each smaller than the last.',
+    test: (s: string) => { const v = s.split(',').map(x => x.trim()).filter(Boolean).map(Number); return v.length >= 2 && v.every((x, i) => Number.isFinite(x) && x >= 0 && x <= 1 && (i === 0 || x < v[i - 1]!)); },
+  },
+} as const satisfies Record<string, { doc: string; test(text: string): boolean }>;
 export type CheckName = keyof typeof CHECKS;
 
 /** Where a server-listed choice's options come from, and which fixture list the validator checks its values
@@ -534,16 +568,36 @@ export const OPTION_SOURCES = {
 } as const;
 export type OptionSourceName = keyof typeof OPTION_SOURCES;
 
-/** Desk facts a condition may name besides the definitions' own state keys: facts the page works out. */
+/** What a desk fact is worked out from: the values in force, the state, what is on the desk, and the engine. */
+export interface FactInput {
+  value(key: string): Value | undefined;
+  state: { readonly [key: string]: Json };
+  on: ReadonlySet<string>;
+  engine: EngineId;
+}
+const lines = (t: unknown) => String(t ?? '').split('\n');
+const DIRECTIVE = /^\s*\[[^\]]+\]\s*\{[^}]*#\d+\s*=/;
+const slotsOf = (f: FactInput) => (Array.isArray(f.state.slots) ? f.state.slots : []) as { ph?: number[] }[];
+const stackOn = (f: FactInput) => f.engine === 'ace' && f.value('ad.adv') === 'advanced' && slotsOf(f).length >= 2;
+const directives = (f: FactInput) => stackOn(f) && lines(f.value('lyrics.text')).some(l => DIRECTIVE.test(l));
+
+/** Desk facts a condition may name besides the definitions' own state keys: facts the page works out, each with the
+ *  rule it is worked out by (`of`), or none when the page is told it (the plugin host, another engine's stash). */
 export const DESK_FACTS = {
-  adapters: 'How many adapters are loaded on this engine (atLeast).',
-  adaptersAway: 'The other engines that keep adapters for when you switch back, as words (" · ACE-Step 1.5 keeps its adapter for when you switch back"), or nothing.',
-  runtimeForced: 'Adapters are forced to runtime mode: timestep windows, or section directives with a stack of two or more.',
-  sectionDirectives: 'The lyrics carry per-section adapter directives.',
-  sectionTags: 'How many section tags ([Verse], [Chorus]) the lyrics hold (atLeast).',
-  customTimesteps: 'Latent & correction is on the desk with two or more valid custom timesteps, which replace Steps and Schedule.',
-  vstPlugins: 'How many VST3 plugins are in the chain (atLeast).',
-} as const;
+  adapters: { doc: 'How many adapters are loaded on this engine (atLeast).', of: (f: FactInput) => slotsOf(f).length },
+  adaptersAway: { doc: 'The other engines that keep adapters for when you switch back, as words (" · ACE-Step 1.5 keeps its adapter for when you switch back"), or nothing. From the engines\' stashes.' },
+  runtimeForced: {
+    doc: 'Adapters are forced to runtime mode: section directives or a phase window, with a stack of two or more.',
+    of: (f: FactInput) => directives(f) || (stackOn(f) && slotsOf(f).some(s => !!s.ph && (s.ph[0]! > 0 || s.ph[1]! < 100))),
+  },
+  sectionDirectives: { doc: 'The lyrics carry per-section adapter directives, with a stack of two or more.', of: directives },
+  sectionTags: { doc: 'How many section tags ([Verse], [Chorus]) the lyrics hold (atLeast).', of: (f: FactInput) => lines(f.value('lyrics.text')).filter(l => /^\s*\[[^\]]+\]/.test(l)).length },
+  customTimesteps: {
+    doc: 'Latent & correction is on the desk with two or more valid custom timesteps, which replace Steps and Schedule.',
+    of: (f: FactInput) => f.on.has('latent') && CHECKS.timesteps.test(String(f.value('lat.ts') ?? '')),
+  },
+  vstPlugins: { doc: 'How many VST3 plugins are in the chain (atLeast). Told by the plugin host.' },
+} as const satisfies Record<string, { doc: string; of?: (f: FactInput) => number | boolean }>;
 export type DeskFactName = keyof typeof DESK_FACTS;
 
 /** Named actions a node may run that are not changes of a value: each opens something or talks to the server. */

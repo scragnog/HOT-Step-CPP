@@ -15,7 +15,17 @@ export const lyrics = {
   stored: 'content',
   size: { w: 2, quickW: 4, stretch: 0 },
   params: [
-    { key: 'lyrics.text', type: 'text', label: 'Lyrics', default: '', wire: 'content:lyrics' },
+    {
+      key: 'lyrics.text',
+      type: 'text',
+      label: 'Lyrics',
+      undoName: 'the lyrics',
+      placeholder: 'Or leave this empty and the planner writes them.',
+      default: '',
+      engines: ['ace', 'minimax-m3', 'yue2', 'heartmula'],
+      wire: 'content:lyrics',
+      per: [{ engines: ['heartmula'], placeholder: 'Leave this empty for an instrumental.' }],
+    },
     { key: 'lyrics.instr', type: 'boolean', label: 'Instrumental', default: false, wire: 'content:instrumental' },
     {
       key: 'lyrics.lang',
@@ -63,7 +73,7 @@ export const lyrics = {
       part: 'lyricSheet',
       param: 'lyrics.text',
       params: ['lyrics.lang'],
-      reads: ['lyrics.instr'],
+      reads: ['lyrics.instr', 'tempo.bpm'],
       per: [{ tiers: ['lab'], params: ['lyrics.lang', 'wild.auto'] }],
     },
     {

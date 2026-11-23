@@ -19,7 +19,7 @@ const TMP = path.join(os.tmpdir(), 'ui-next-mutations');
 const D = 'src/definitions/';
 const PARAMS = '  params: [\n';
 type Edit = [file: string, old: string, now: string];
-interface Mutation { id: string; says: string; edits: Edit[]; gone?: string }
+interface Mutation { id: string; says: string; edits: Edit[]; gone?: string; request?: true; core?: true }
 
 const M: Mutation[] = [
   { id: 'M01', says: 'a parameter added without `engines` beside its neighbours, drawn on YuE2 only', edits: [
@@ -95,6 +95,47 @@ const M: Mutation[] = [
   { id: 'M44', says: 'a transform name that does not exist', edits: [['modules/sampler.ts', "to: 'param:retakeSeed', via: 'int'", "to: 'param:retakeSeed', via: 'integer'"]] },
   { id: 'M45', says: 'a default that differs from the real app\'s, with no word why', edits: [['pedals/gain.ts', '      default: 0,', '      default: 3,']] },
   { id: 'M46', says: 'a factory revision setting a value its engine cannot take', edits: [['factory.ts', "vals: { 'takes.n': 4, 'samp.retake': 0.3 }", "vals: { 'takes.n': 12, 'samp.retake': 0.3 }"]] },
+  /* the second review's (definitions-review2, work/mutate.mjs), rewritten for the files as they are now; `request` runs
+     the request comparison too, `core` the derivation tests */
+  { id: 'B01', says: 'a word line that changes range, default, unit and wire', edits: [['pedals/gain.ts', "      default: 0,\n", "      default: 0,\n      per: [{ when: { param: 'pp.on', is: false }, range: [0, 100, 1], default: 50, unit: '%', wire: 'param:lufsCeilingDb' }],\n"]] },
+  { id: 'B02', says: 'a conditional parameter whose default is not the real one (crossover 300 Hz; real 250)', edits: [['pedals/ss.ts', '      default: 250,', '      default: 300,']] },
+  { id: 'B03', says: 'the scale dropped from a wire, its note kept (StableStep strength sent as 30, not 0.30)', request: true, edits: [['pedals/ss.ts', "wire: { to: 'param:stableStepStrength', divide: 100, differs: ['range'],", "wire: { to: 'param:stableStepStrength', differs: ['range'],"]] },
+  { id: 'B04', says: 'invert dropped from a switch whose wire has a note (Lyric timestamps)', request: true, edits: [['units/lrc.ts', "wire: { to: 'param:skipLrc', invert: true, note: 'skipLrc is the opposite.' },", "wire: { to: 'param:skipLrc', note: 'skipLrc is the opposite.' },"]] },
+  { id: 'B05', says: 'a switch wired to a numeric field', edits: [['units/q.ts', "wire: 'param:qualityEvalEnabled' }", "wire: 'param:storkSubsteps' }"]] },
+  { id: 'B06', says: 'an option value the server does not take (qualityEvalTarget "raw")', edits: [['units/q.ts', "{ value: 'unmastered', label: 'Unmastered' },", "{ value: 'raw', label: 'Unmastered' },"], ['units/q.ts', "default: 'unmastered',", "default: 'raw',"]] },
+  { id: 'B07', says: 'two knobs with one label on one pedal', edits: [['pedals/ss.ts', "      label: 'Width',", "      label: 'Crossover',"]] },
+  { id: 'B08', says: 'an option added to a mapped choice, the map forgotten', edits: [['pedals/norm.ts', "        { value: 'custom', label: 'Custom', lcd: 'CUSTOM', detail: 'set your own' },", "        { value: 'vinyl', label: 'Vinyl · -18', lcd: '-18 LUFS', detail: 'Vinyl' },\n        { value: 'custom', label: 'Custom', lcd: 'CUSTOM', detail: 'set your own' },"]] },
+  { id: 'B09', says: 'a control shown at Studio only: nothing edits it at Lab', edits: [['modules/tempo.ts', "{ part: 'lcdButton', param: 'tempo.trim', label: 'AUTO-TRIM', tiers: ['lab'] },", "{ part: 'lcdButton', param: 'tempo.trim', label: 'AUTO-TRIM', tiers: ['studio'] },"]] },
+  { id: 'B10', says: 'a text default that fails its own check', edits: [['pedals/ss.ts', "      default: '4242',", "      default: 'forty-two',"]] },
+  { id: 'B11', says: 'a pedal in its neighbour\'s hue', edits: [['pedals/ppvae.ts', '  hue: 175,', '  hue: 140,']] },
+  { id: 'B12', says: 'staysBelow put on the upper end', edits: [['modules/sampler.ts', "      staysBelow: 'samp.ce',\n", ''], ['modules/sampler.ts', "      engines: ['ace'],\n      wire: 'param:cfgIntervalEnd',", "      engines: ['ace'],\n      staysBelow: 'samp.cs',\n      wire: 'param:cfgIntervalEnd',"]] },
+  { id: 'B13', says: 'two parameters that each stay below the other', edits: [['modules/sampler.ts', "      engines: ['ace'],\n      wire: 'param:cfgIntervalEnd',", "      engines: ['ace'],\n      staysBelow: 'samp.cs',\n      wire: 'param:cfgIntervalEnd',"]] },
+  { id: 'B14', says: 'a factory revision with a step-off whole number, a parameter that does not apply and a malformed slot', edits: [['factory.ts', "vals: { 'samp.steps': 8, 'perf.cache': 0.3 }", "vals: { 'samp.steps': 8.5, 'perf.cache': 0.3, 'pp.ss.xhz': 61.3 }, state: { slots: 'tape-lofi-v2' }"]] },
+  { id: 'B15', says: 'a "Show in Lab" action that goes to a tier where the control is not shown', edits: [['modules/sampler.ts', "actions: [{ do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show in Lab' }],", "actions: [{ do: 'tier', tier: 'studio', ring: ['lat.ts'], label: 'Show in Lab' }],"]] },
+  { id: 'B16', says: 'words that name a value the engine does not have (a YuE2 note saying the APG momentum)', edits: [['modules/sampler.ts', "text: 'YuE2 guides inside its composer. The Planner holds its CFG.',", "text: 'YuE2 guides inside its composer at {value:apg.mom}. The Planner holds its CFG.',"]] },
+  { id: 'B17', says: 'a pedal with no main knob and no Studio node', edits: [['pedals/ppvae.ts', "main: 'pp.ppvae.blend',", 'main: null,']] },
+  { id: 'B18', says: 'a module whose owner is flipped (the Planner kept per engine): saved data keeps it where it was kept', edits: [['modules/planner.ts', "  owner: 'song',\n  stored: 'settings',", "  owner: 'engine',\n  stored: 'settings',"]] },
+  { id: 'B19', says: 'song content left as a setting (the lyrics saved in revisions)', core: true, edits: [['modules/lyrics.ts', "  owner: 'song',\n  stored: 'content',", "  owner: 'song',\n  stored: 'settings',"]] },
+  { id: 'B20', says: 'a read-out whose reads lost two of the three values its formula uses', edits: [['modules/perf.ts', "{ part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },", "{ part: 'speedGauge', reads: ['perf.cfgcut'] },"]] },
+  { id: 'B21', says: 'the same control twice in one face', edits: [['modules/perf.ts', "    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },", "    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },\n    { part: 'knob', param: 'perf.lmcut', label: 'LM cut again' },"]] },
+  { id: 'B22', says: 'wire.auto of the wrong kind (BPM on auto sends the text "auto")', edits: [['modules/tempo.ts', "        auto: 0,\n        note: 'Auto is 0.", "        auto: 'auto',\n        note: 'Auto is 0."]] },
+  { id: 'B23', says: 'an engine line whose `when` drops the parameter\'s own condition', edits: [['modules/sampler.ts', "          label: 'Schedule shift',", "          label: 'Schedule shift',\n          when: { engine: ['minimax-m3'] },"]] },
+  { id: 'B24', says: 'a Quick row in one module bound to another module\'s parameter', edits: [['modules/avoid.ts', '  face: [', "  face: [{ part: 'choiceRow', param: 'samp.steps', label: 'Quality', choices: [['Draft', 8], ['Standard', 12]], tiers: ['quick'] }, "]] },
+  { id: 'B25', says: 'a held note that does not say the limit in force (no {shown})', gone: 'cannot be caught: a held note may rightly not say the limit (the takes note, "Your {value} takes return on {engine}", is the concept\'s)', edits: [['modules/tempo.ts', "held: { note: 'Capped at {shown} here · your {value} returns on {engine}', toast: 'Length capped at {shown}' },", "held: { note: 'Your {value} returns on {engine}', toast: 'Length capped' },"]] },
+  { id: 'B26', says: 'a transform beside scale (via does the whole change)', edits: [['pedals/ss.ts', "wire: { to: 'param:stableStepSeed', via: 'int' },", "wire: { to: 'param:stableStepSeed', via: 'int', scale: 1000 },"]] },
+  { id: 'B27', says: 'a side unit with an empty face', edits: [['units/q.ts', "    { part: 'unitBadge', tip: 'The score each song gets, as its badge in the Library', text: '8.4' },\n", '']] },
+  { id: 'B28', says: 'the key wheel bound to the time signature', edits: [['modules/tempo.ts', "part: 'keyWheel', param: 'tempo.key'", "part: 'keyWheel', param: 'tempo.sig'"]] },
+  { id: 'B29', says: 'a strip action "Turn it on" that sets the value to off', gone: 'cannot be caught: whether words fit an action is a reading', edits: [['modules/build.ts', "actions: [{ do: 'set', param: 'lm.cotmode', value: 'full', label: 'Turn it on' }],", "actions: [{ do: 'set', param: 'lm.cotmode', value: 'off', label: 'Turn it on' }],"]] },
+  { id: 'B30', says: 'an engine line whose label was copied from another engine (HeartMuLa steps called "ODE steps")', gone: 'cannot be caught: a label that is wrong for its engine is a reading', edits: [['modules/sampler.ts', "          label: 'Codec steps',", "          label: 'ODE steps',"]] },
+  /* from the second review's trials */
+  { id: 'T01', says: 'two options that claim one former value', edits: [['pedals/ss.ts', "{ value: 'crossover', label: 'Crossover', detail:", "{ value: 'crossover', label: 'Crossover', was: ['xo'], detail:"], ['pedals/ss.ts', "{ value: 'mix', label: 'Mix', detail:", "{ value: 'mix', label: 'Mix', was: ['xo'], detail:"]] },
+  { id: 'T02', says: 'the five sends the second review found, put back: TensorRT as "trt", the High DCW knob to the low scaler, a phase window dropped, a HeartMuLa trigger, 9 takes', request: true, edits: [
+    ['modules/flow.ts', "{ value: 'tensorrt', label: 'TensorRT' },", "{ value: 'trt', label: 'TensorRT' },"],
+    ['modules/flow.ts', "when: { param: 'mm.rend', is: 'tensorrt' },", "when: { param: 'mm.rend', is: 'trt' },"]] },
+  { id: 'T03', says: 'the High DCW knob wired to the low scaler', request: true, edits: [['modules/latent.ts', "        { to: 'param:dcwHighScaler', when: { param: 'dcw.mode', is: 'high' } },\n", ''], ['modules/latent.ts', "        { to: 'param:dcwLowScaler', when: { param: 'dcw.mode', not: 'high' } },", "        { to: 'param:dcwLowScaler' },"]] },
+  { id: 'T04', says: 'a stacked adapter\'s phase window dropped on the way out', request: true, edits: [['transforms.ts', "return { path: s.file, scale: 1, ...(ph && (ph[0]! > 0 || ph[1]! < 100) ? { stepStart: +(1 - ph[1]! / 100).toFixed(4), stepEnd: +(1 - ph[0]! / 100).toFixed(4) } : {}) };", "void ph; return { path: s.file, scale: 1 };"]] },
+  { id: 'T05', says: 'a typed trigger word sent on HeartMuLa', request: true, edits: [['modules/prompt.ts', "            none: 'HeartMuLa adds its adapter\\'s own trigger (withHeartmulaTrigger); the existing Create page sends no typed trigger word there.',\n          },", "            none: 'x',\n          },"], ['modules/prompt.ts', "          wire: {\n            none: 'x',\n          },", "          wire: 'intent:compose.loraTrigger',"]] },
+  { id: 'T06', says: 'nine takes on ACE-Step, where the server runs eight', request: true, edits: [['modules/takes.ts', '      range: [1, 8, 1],', '      range: [1, 9, 1],']] },
 ];
 
 /* ---------------------------------------------------------------- the runner */
@@ -105,7 +146,7 @@ function fresh(): void {
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(TMP, 'node_modules'), 'junction');
 }
 function run(cmd: string, args: string[]): { ok: boolean; out: string } {
-  try { return { ok: true, out: execFileSync(cmd, args, { cwd: TMP, encoding: 'utf8', stdio: 'pipe', shell: process.platform === 'win32' }) }; }
+  try { return { ok: true, out: execFileSync(cmd, args, { cwd: TMP, encoding: 'utf8', stdio: 'pipe', shell: process.platform === 'win32', env: { ...process.env, HOTSTEP_APP: path.resolve(ROOT, '..') } }) }; }
   catch (e) { const x = e as { stdout?: string; stderr?: string }; return { ok: false, out: `${x.stdout ?? ''}${x.stderr ?? ''}` }; }
 }
 const only = process.argv.slice(2);
@@ -122,13 +163,16 @@ for (const m of M.filter(x => !only.length || only.includes(x.id))) {
     fs.writeFileSync(p, text.replace(old, now));
   }
   const t = run('node', [tsc, '-p', 'tsconfig.json']), v = run('node', ['tools/validate-definitions.ts']);
+  const r = m.request ? run('node', ['--no-warnings', '--import', './tools/real-app/load.mjs', 'tools/compare-request.ts', '--quick']) : { ok: true, out: '' };
+  const c = m.core ? run('node', ['tools/test-core.ts']) : { ok: true, out: '' };
   const tErr = t.out.split('\n').filter(l => l.includes('error TS')).map(l => l.replace(/^.*?error /, 'type: '));
   const vErr = v.out.includes('errors (') ? v.out.slice(v.out.indexOf('errors (')).split('\n').slice(1).map(l => l.trim()).filter(Boolean) : [];
-  const caught = !t.ok || !v.ok;
+  const caught = !t.ok || !v.ok || !r.ok || !c.ok;
+  const rErr = [...r.out.split('\n').filter(l => /new:|tools\/existing-ui/.test(l)), ...c.out.split('\n').filter(l => / [1-9]\d* differ($|;)/.test(l))].map(l => l.trim());
   const verdict = m.gone ? (caught ? 'CAUGHT (expected to pass now)' : 'passes, as it should: ' + m.gone) : caught ? 'CAUGHT' : 'NOT CAUGHT';
   if (m.gone ? false : !caught) bad++;
   console.log(`${m.id} ${m.says}\n   -> ${verdict}`);
-  [...tErr.slice(0, 2), ...vErr.slice(0, 3)].forEach(l => console.log('      ' + l.slice(0, 220)));
+  [...tErr.slice(0, 2), ...vErr.slice(0, 3), ...rErr.slice(0, 2)].forEach(l => console.log('      ' + l.slice(0, 220)));
 }
 fs.rmSync(TMP, { recursive: true, force: true });
 console.log(bad ? `\n${bad} not caught.` : '\nEvery mistake caught.');

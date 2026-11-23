@@ -1,12 +1,175 @@
 {
- "note": "Differences between the request the definitions build and the one the existing UI sends, at defaults. Each says why it is accepted. tools/compare-request.ts checks this list.",
+ "note": "Differences between the request the definitions build and the one the existing Create page sends for the same intent, over the value space (tools/compare-request.ts). Each entry is a class: engines, fields and the kind of difference, with why it is accepted. An entry no state matches any more fails the comparison.",
  "differences": [
   {
-   "engine": "heartmula",
-   "field": "heartmulaScalarDecoderModel",
-   "existing": "",
-   "kind": "only the existing UI sends it",
+   "engines": [
+    "ace",
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "fields": [
+    "inferMethod",
+    "scheduler",
+    "guidanceMode"
+   ],
+   "kind": "value differs",
+   "why": "With Lua plugins on and the solver, schedule and guidance left alone, the definitions send Native (\"\", the engine's own loop), as the concept starts them. The existing page sends the shared pickers' ACE-Step values (euler, linear, APG), which moves the render onto those plugins (backends/minimax/generate.ts mapMinimaxSamplerPlugins)."
+  },
+  {
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "fields": [
+    "apgMomentum",
+    "apgNormThreshold"
+   ],
+   "kind": "only the existing page sends it",
+   "why": "Follows from the line above: the existing page's guidance is APG there, so the resolver adds APG's two settings; the definitions' Native guidance has none."
+  },
+  {
+   "engines": [
+    "sa3"
+   ],
+   "fields": [
+    "guidanceScale"
+   ],
+   "kind": "value differs",
+   "why": "Stable Audio 3 reads guidanceScale only with Lua plugins on. The concept's default there is 1 (no extra guidance); the existing page carries ACE-Step's 9 into it."
+  },
+  {
+   "engines": [
+    "ace"
+   ],
+   "fields": [
+    "shift"
+   ],
+   "kind": "value differs",
+   "why": "The concept starts Shift on Auto, which is -1 (the existing slider's own Auto): the engine uses its own shift, 3.0 on turbo models and 1.0 on base ones. The existing page starts at 3.0. Docs 08, question 10."
+  },
+  {
+   "engines": [
+    "yue2"
+   ],
+   "fields": [
+    "compose.autoExpand"
+   ],
+   "kind": "value differs",
+   "why": "The concept offers \"Expand wildcards at Generate\" on YuE2 and the server honours it there (resolveCreateIntent); the existing page hides the switch on YuE2 and sends it off. Docs 08, question 10."
+  },
+  {
+   "engines": [
+    "heartmula"
+   ],
+   "fields": [
+    "heartmulaScalarDecoderModel"
+   ],
+   "kind": "only the existing page sends it",
    "why": "The concept's engine panel has no scalar decoder row on HeartMuLa, so no parameter carries the server's choice; the job then uses the scalar decoder selected when it runs, not when it was queued. Docs 08, question 9."
+  },
+  {
+   "engines": [
+    "heartmula"
+   ],
+   "fields": [
+    "heartmulaAdapter"
+   ],
+   "kind": "only the existing page sends it",
+   "why": "With Adapters off the desk nothing of it is sent, so a HeartMuLa job uses the adapter the engine has selected when it runs; the existing page freezes the selection into the job when it is queued. The two differ only if the selection changes while the job waits."
+  },
+  {
+   "engines": [
+    "ace",
+    "minimax-m3"
+   ],
+   "fields": [
+    "caption",
+    "compose.loraTrigger"
+   ],
+   "kind": "existing sends a value that does not apply",
+   "why": "The concept shows the trigger word only while an adapter is loaded, so a word typed for an adapter that is gone is not sent. The existing page puts a typed trigger word at the start of the caption with or without an adapter."
+  },
+  {
+   "engines": [
+    "yue2"
+   ],
+   "fields": [
+    "yue2Abc"
+   ],
+   "kind": "existing sends a value that does not apply",
+   "why": "The lead sheet applies while the Planner writes a score (Chain of Thought not off), as the concept has it; with the Planner writing nothing the concept shows the strip that says it needs a score. The existing page sends a typed lead sheet in every planner mode."
+  },
+  {
+   "engines": [
+    "minimax-m3"
+   ],
+   "fields": [
+    "mm3FlowShift"
+   ],
+   "kind": "existing sends a value that does not apply",
+   "why": "The concept shows the schedule shift only with Lua plugins on. The server also reads it, with plugins off, for low-step compensation under 30 steps (mapMinimaxSamplerPlugins); there the definitions leave the server's automatic shift."
+  },
+  {
+   "engines": "*",
+   "fields": [
+    "apgMomentum",
+    "apgNormThreshold",
+    "inferMethod",
+    "scheduler",
+    "guidanceMode",
+    "guidanceScale",
+    "retakeSeed",
+    "adapterStackBudget",
+    "adapterStackMode",
+    "adapterSectionAlignAt",
+    "adapterMergeLowVram",
+    "mm3LmMergeGpu",
+    "mm3DitPrecision",
+    "mm3HiddensName",
+    "mm3BaseHandoff",
+    "mm3KvQ8",
+    "heartmulaFlowShift",
+    "sa3LufsTarget",
+    "yue2WassTau",
+    "yue2WassSpectral",
+    "yue2WassRmsWeight",
+    "yue2WassRmsTarget",
+    "yue2WassGate",
+    "yue2WassIterations",
+    "yue2WassProject",
+    "yue2WassLatentRms",
+    "yue2EqGroup",
+    "yue2EqGain",
+    "yue2EqT1",
+    "yue2EqT2",
+    "yue2EqGains",
+    "yue2EqSection",
+    "yue2LieAmount",
+    "yue2LieCurve",
+    "yue2LieT1",
+    "yue2LieT2",
+    "yue2LieSections",
+    "yue2OdDrive",
+    "yue2OdShape",
+    "yue2OdBase",
+    "yue2OdPeriod",
+    "yue2HtKinetic",
+    "yue2HtDamping",
+    "yue2HtCritical",
+    "yue2HtIntensity",
+    "yue2HtWell",
+    "yue2HtFloor",
+    "yue2HtSnr",
+    "yue2HtPoly",
+    "yue2HtBlend",
+    "yue2HtSmooth",
+    "yue2HtDense",
+    "yue2HtShift"
+   ],
+   "kind": "existing sends a value that does not apply",
+   "why": "Each is a setting the concept hides while its condition does not hold (the guidance, solver, plugin, renderer, mode or switch that reads it is not selected, or Lua plugins are off), so the definitions keep the value and send nothing. The existing page keeps sending what was set, and the engine does not read it in that state."
   }
  ]
 }

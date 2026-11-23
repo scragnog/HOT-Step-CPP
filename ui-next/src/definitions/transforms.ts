@@ -59,9 +59,44 @@ export const TRANSFORMS = {
     read: real => (typeof real === 'string' && real ? [{ file: real }] : undefined),
   },
   stackPaths: {
-    doc: 'The loaded adapters as the stack\'s entries, each with its file as `path`; their strengths are the slots\' own parameters.',
-    send: v => (Array.isArray(v) && v.length ? v.map(x => ({ path: (x as { file: Json }).file, scale: 1 })) : undefined),
-    read: real => (Array.isArray(real) ? real.map(x => ({ file: (x as { path: Json }).path })) : undefined),
+    doc: 'The loaded adapters as the stack\'s entries, each with its file as `path` and its active phase as its timestep window (a slot\'s `ph`, from % to % of the run, is stepStart 1 - to and stepEnd 1 - from; the whole run is none); their strengths are the slots\' own parameters.',
+    send: v => (Array.isArray(v) && v.length ? v.map(x => {
+      const s = x as { file: Json; ph?: number[] }, ph = s.ph;
+      return { path: s.file, scale: 1, ...(ph && (ph[0]! > 0 || ph[1]! < 100) ? { stepStart: +(1 - ph[1]! / 100).toFixed(4), stepEnd: +(1 - ph[0]! / 100).toFixed(4) } : {}) };
+    }) : undefined),
+    read: real => (Array.isArray(real) ? real.map(x => {
+      const r = x as { path: Json; stepStart?: number; stepEnd?: number };
+      return { file: r.path, ...(r.stepStart !== undefined || r.stepEnd !== undefined ? { ph: [Math.round((1 - (r.stepEnd ?? 1)) * 100), Math.round((1 - (r.stepStart ?? 0)) * 100)] } : {}) };
+    }) : undefined),
+  },
+  mm3CaptionSource: {
+    doc: 'MiniMax-Music3' + "'" + 's caption source, while tracks were handed over: { engine, customCaption, selection: { mode, selectedTitle }, tracks } (server/src/contracts/resolution.ts).',
+    packs: ['cap.src', 'prompt.text', 'capTracks'],
+    send: v => {
+      const o = v as { [key: string]: Json | undefined }, tracks = Array.isArray(o.capTracks) ? o.capTracks as { title?: string; bpm?: number; caption?: string }[] : [];
+      if (!tracks.length) return undefined;
+      const src = typeof o['cap.src'] === 'string' ? o['cap.src'] : 'custom', track = src !== 'custom' && src !== 'auto';
+      return { engine: 'minimax-m3', customCaption: String(o['prompt.text'] ?? ''), selection: track ? { mode: 'track', selectedTitle: src } : { mode: src },
+        tracks: tracks.map(t => ({ title: t.title ?? '', ...(typeof t.bpm === 'number' ? { bpm: t.bpm } : {}), caption: t.caption ?? '' })) };
+    },
+    read: real => {
+      const r = real as { selection?: { mode?: string; selectedTitle?: string }; customCaption?: string } | null;
+      return r ? { 'cap.src': r.selection?.mode === 'track' ? r.selection.selectedTitle ?? 'custom' : r.selection?.mode ?? 'custom', 'prompt.text': r.customCaption ?? '' } : undefined;
+    },
+  },
+  yue2CaptionSource: {
+    doc: 'YuE2' + "'" + 's caption source, while its dataset has tracks: { engine, datasetId, adapterInForce, selection: { mode, selectedName } } (server/src/contracts/resolution.ts).',
+    packs: ['cap.src', 'cap.ds', 'capTracks', 'slots'],
+    send: v => {
+      const o = v as { [key: string]: Json | undefined }, tracks = Array.isArray(o.capTracks) ? o.capTracks : [];
+      if (!tracks.length) return undefined;
+      const src = typeof o['cap.src'] === 'string' ? o['cap.src'] : 'custom', track = src !== 'custom' && src !== 'auto';
+      return { engine: 'yue2', datasetId: String(o['cap.ds'] ?? ''), adapterInForce: Array.isArray(o.slots) && o.slots.length > 0, selection: track ? { mode: 'track', selectedName: src } : { mode: src } };
+    },
+    read: real => {
+      const r = real as { datasetId?: string; selection?: { mode?: string; selectedName?: string } } | null;
+      return r ? { 'cap.src': r.selection?.mode === 'track' ? r.selection.selectedName ?? 'custom' : r.selection?.mode ?? 'custom', 'cap.ds': r.datasetId ?? '' } : undefined;
+    },
   },
   continuation: {
     doc: 'The recording and the part of it to continue from, as YuE2\'s yue2Continuation: { sourceAudioUrl, start, end }.',

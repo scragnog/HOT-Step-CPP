@@ -15,7 +15,7 @@ same kind of defect where two statements drifted apart.
 
 A definition states each fact once. Defaults, clamping, undo names, the changed marker, what a revision stores, engine
 ownership, the "Also set" line and the request are all derived from it by code that knows nothing about any one module
-(`src/derive.ts`, described in [05](05-what-the-definition-drives.md)).
+(`src/derive/`, described in [05](05-what-the-definition-drives.md)), and tested against the concept page.
 
 ## Choices
 
@@ -74,6 +74,7 @@ drawn from the definition. `node tools/thumb.ts <pedal>` draws a new pedal's mid
 | --- | --- | --- |
 | `kind` | `'module'`, `'pedal'` or `'unit'` | |
 | `id` | Unique across all definitions; also its file name | `'tempo'` |
+| `was` | Ids it was saved under before, so a saved workflow or desk naming one has it | `was: ['ss']` |
 | `name`, `desc` | Its name and one-line description, in English | `'Tempo, key & length'` |
 | `at` | Its place: Modules panel and picker order for modules, chain order for pedals, board order for units. Neighbours are 10 apart; pick a number between | `at: 20` |
 | `engines` | Engine ids (`engines.ts`) that have it | `['ace', 'minimax-m3', 'yue2']` |
@@ -87,6 +88,7 @@ drawn from the definition. `node tools/thumb.ts <pedal>` draws a new pedal's mid
 | Field | Says |
 | --- | --- |
 | `category` | `Compose`, `Engine`, `Chain` or `Words`: its group in the panel and the picker |
+| `board` | Holds the pedalboard: the pedals and side units on the board are drawn in its tile and answer to its "Also set" line (the Pedalboard) |
 | `labUnder` | A Lab module: shown only at Lab, under this desk module. Its settings apply at every tier, and a note above the desk names them when they are hidden |
 | `builtIn` | Part of the page, not added from the panel (the prompt, the lyric sheet, the models) |
 | `source` | Brought by an action on a song (Repaint); its values are not part of a Create request |
@@ -135,24 +137,25 @@ Its width (1U or 2U) follows from the number of its numbers; there is no field f
 | Field | Says |
 | --- | --- |
 | `key` | Unique across every definition; letters and digits in dot-separated parts |
-| `type` | `number`, `boolean`, `choice` or `text` |
+| `type` | `number`, `boolean`, `choice` or `text`. A number whose step is whole on every engine is a whole number: cleaned, set and sent whole |
 | `label`, `short`, `undoName`, `tip` | Its words: printed label; where room is short; its name in undo when the label is ambiguous; its tooltip |
 | `range` | `[min, max, step]`, for numbers |
 | `unit`, `format` | How the number is written (below); `unit` is one of `UNITS` in `parts.ts` |
 | `default` | Its default, inside its range, on its step grid, and among its options |
 | `auto` | A number that can be left to the engine; `says` is what auto stands for. `false` in a line turns it off on those engines. A choice says "Auto" with an option instead |
 | `options` | A list of `{ value, label, short?, tip?, lcd?, detail?, was? }`, or `{ from, bucket?, include?, only? }` when the server owns the list |
-| `placeholder`, `example`, `check` | For text: the empty hint, what Insert example puts in, and a check from `CHECKS` with its message |
+| `placeholder`, `example`, `check`, `maxLength` | For text: the empty hint, what Insert example puts in, a check from `CHECKS` with its message, and the longest text it takes |
 | `when` | It applies only while this holds; otherwise hidden (a pedal keeps its room), unchanged, not sent |
 | `engines` | Narrows the definition's engines; required beside engine lines |
 | `owner`, `stored` | Override the definition's |
 | `held` | A song number whose limit differs per engine: the words of its note and toast (below) |
+| `steps` | The named undo steps its part takes on it besides setting it (below, "Named steps") |
 | `staysBelow` | Stays a step below that parameter, which stays a step above this one: a range's two ends never cross. The two share a range |
 | `beside` | On a pedal, stands beside this switch, shown while the switch is off |
 | `run` | Presses within this many milliseconds are one undo step (taps on TAP) |
 | `was` | Keys it was saved under before (below, "Saved data") |
 | `wire` | Where the value goes in the real application (below) |
-| `per` | Engine lines (`{ engines, ...fields }`, each engine in one line at most), then word lines (`{ when, label?, short?, tip?, auto? }`) |
+| `per` | Engine lines (`{ engines, ...fields }`, each engine in one line at most), then word lines (`{ when, label?, short?, tip?, auto? }`). A word line changes words only; the type check refuses any other field in one |
 
 From `modules/sampler.ts`, one control that differs on every engine:
 
@@ -196,7 +199,24 @@ held: { note: 'Capped at {shown} here · your {value} returns on {engine}', toas
 
 The note is said by the control while the value is held, the toast in the engine switch's message. `{value}` is the held
 value and `{shown}` the limit in force, both written as the parameter writes numbers; `{engine}` is the engine it
-returns on ([05](05-what-the-definition-drives.md), "Engine switches").
+returns on ([05](05-what-the-definition-drives.md), "Engine switches"). `value` says how the toast names the held value
+when it needs more than the number (`value: '{value} takes'`: "your 9 takes wait on ACE-Step 1.5").
+
+#### Named steps
+
+A bespoke part that changes a value in a way the user would name (Compose caption, Add 120 BPM to the prompt) takes one
+of the parameter's named steps; the words are the definition's, so the part never names a step itself:
+
+```ts
+steps: {
+  compose: 'Compose caption',
+  addChip: 'Add {chip} to {name}',
+  tempo: { says: 'Set the tempo to {bpm} BPM', changes: ['tempo.bpm'] },
+},
+```
+
+`{name}` is the parameter's name in undo steps; the part fills any other slot. `changes` lists the parameters the step
+may set besides this one, and nothing else may be set in it. A state's `steps` work the same way.
 
 #### Format
 
@@ -221,6 +241,7 @@ Where the value goes, by channel:
 | `ext:` | A backend's extension knob (`capabilities().extensions`), sent in `backendParams`, or a field its backend reads without declaring it |
 | `content:` | A field of `CreateContent` (`ui/src/components/create/createContent.ts`): the input of `createContentParams()` |
 | `body:` | A top-level request field set after both (HeartMuLa's frozen model choices) |
+| `intent:` | A part of the Create intent beside its params: `compose.autoExpand`, `compose.loraTrigger`, `compose.beatIntro`, `compose.introBars` (the caption steps the server runs) and `captionSource` |
 | `model:` | Engine state chosen through `POST /api/backends/models`; never part of the request |
 | `ui:` | Form state the browser keeps; never sent |
 
@@ -241,9 +262,19 @@ wire: { none: 'No chain switch in the real app: ...' }                      // n
 
 Several controls may write one field when their conditions keep them apart: the normalizer's preset maps to
 `lufsTarget` for every preset but Custom, and its Custom knob applies only on Custom. Several controls packed into one
-field name one transform, which lists them in its `packs`. A `note` says what a reader needs: why a range or default
-differs from the real app's, or that a field is read but not declared. [05](05-what-the-definition-drives.md), "What is
-sent", says how the request is built from wires.
+field name one transform, which lists them in its `packs`.
+
+A wire that deliberately differs from the real application names the check it waives in `differs` and says why in its
+`note`: `'range'` (its range or step), `'options'`, `'default'`, or `'unread'` (a field the engine does not read). A note
+alone waives nothing; it is for the reader (a field read but not declared). The request comparison runs over the whole
+value space whatever a wire waives. `was` lists the real field's former names, for reading back a profile saved under
+one:
+
+```ts
+wire: { to: 'param:stableStepStrength', divide: 100, differs: ['range'], note: 'Real is 0..1; the existing UI steps by 5%, the concept by 1%.' }
+```
+
+[05](05-what-the-definition-drives.md), "What is sent", says how the request is built from wires.
 
 ### Conditions
 
@@ -369,10 +400,12 @@ state: [
 ],
 ```
 
-`kind` is `file`, `seed`, `span`, `slots`, `record` or `list`. `noun` names it; `empty` is how an empty value reads in a
-step ("Seed random → 1834920213"). `steps` names its undo steps: the part that edits the state asks for a step by name and
-the words come from here; a file has `load` ("Load {file}") and `clear` ("Clear {noun}") without saying. `wire` is a wire,
-or a list of `{ engines, wire }` when it differs per engine.
+`kind` is `file`, `seed`, `span`, `slots`, `record` or `list`, and says what it may hold ([05](05-what-the-definition-drives.md),
+"Values"). `noun` names it; `empty` is how an empty value reads in a step ("Seed random → 1834920213"). `steps` are its
+named steps, as a parameter's: the part asks for a step by name and the words come from here; a file has `load` and
+`clear` without saying. Loading an adapter is `{ says: 'Load {file}', changes: ['ad.adv'] }`, because loading a second
+one while Stack is Single stacks them. `was` lists keys it was saved under before. `wire` is a wire, or a list of
+`{ engines, wire }` when it differs per engine.
 
 ## Saved data
 
@@ -387,16 +420,20 @@ definitions:
 | `SavedDesk` | Everything, for a reload: values, auto switches, state, the engines' put-aside values and the held values |
 
 Values are keyed by parameter key, in the definition's own units; auto switches are a map of their own. A renamed key
-keeps old records loading through `was` on the parameter, and a renamed option value through `was` on the option. No
-definition uses either yet, because nothing has been saved in this format; the first rename after the page ships would
-look like this:
+keeps old records loading through `was` on the parameter, a renamed option value through `was` on the option, a renamed
+definition or state through `was` on it, and a renamed real field through `was` on the wire. No definition uses them
+yet, because nothing has been saved in this format (the core's tests exercise them on a renamed copy); the first rename
+after the page ships would look like this:
 
 ```ts
 { key: 'pp.ss.refine', was: ['pp.ss.str'], ... }                    // the key renamed
 { value: 'ggml-medium.bin', label: 'Medium', was: ['medium'] }       // an option's value renamed
 ```
 
-[05](05-what-the-definition-drives.md), "Saved data", says how each record is read.
+Something removed on purpose is listed in `src/definitions/retired.ts`, and saved data naming it loads without it and
+without a word. `tools/fixtures/shipped.json` lists every key, state and id shipped, and the validator fails until each
+one that has gone is named in a `was` or retired. A record of an older shape is read by `migrate()`
+([05](05-what-the-definition-drives.md), "Saved data").
 
 The factory workflows and revisions (`factory.ts`, the concept's seven desks and eleven revisions) are records of these
 types, and the validator checks them as it checks a loaded file: every module and pedal exists, and every value is one

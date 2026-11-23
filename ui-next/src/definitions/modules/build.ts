@@ -10,7 +10,7 @@ export const build = {
   at: 130,
   category: 'Compose',
   engines: ['yue2'],
-  owner: 'engine',
+  owner: 'song',
   stored: 'settings',
   size: { w: 4, quickW: 4, stripKeepsWidth: true },
   tierSummary: [
@@ -41,6 +41,7 @@ export const build = {
       key: 'yue.bcond',
       type: 'number',
       label: 'Follow score',
+      tip: 'How closely each take follows the score',
       range: [0, 2, 0.05],
       default: 1,
       wire: { to: 'ui:Yue2Build.cfgScale', note: 'BuildSettings.cfgScale, "Condition strength", 0.1 to 2.' },
@@ -49,6 +50,7 @@ export const build = {
       key: 'yue.bar',
       type: 'number',
       label: 'Plan strength',
+      tip: 'How strongly the plan steers each take',
       range: [0, 2, 0.05],
       default: 1,
       wire: {
@@ -94,7 +96,8 @@ export const build = {
       actions: [{ do: 'set', param: 'lm.cotmode', value: 'full', label: 'Turn it on' }],
     },
     {
-      when: { not: { state: 'sectionTags', atLeast: 1 } },
+      /* untagged lyrics are one implicit Verse, so the board shows; only an empty sheet has nothing to build */
+      when: { param: 'lyrics.text', is: '' },
       says: 'Tag the lyrics by section to build one at a time',
       actions: [
         { do: 'tag', tag: '[Verse]', label: '+ [Verse]', tip: 'Add a [Verse] tag to the lyrics' },
@@ -107,15 +110,9 @@ export const build = {
     {
       part: 'foot',
       children: [
-        { part: 'labelled', label: 'Section mode', children: [{ part: 'segmented', param: 'yue.bmode' }] },
-        { part: 'labelled', label: 'Takes per section', children: [{ part: 'token', param: 'yue.btakes' }] },
-        {
-          part: 'labelled',
-          label: 'Follow score',
-          when: { param: 'yue.bmode', is: 'follow' },
-          children: [{ part: 'token', param: 'yue.bcond' }],
-          tiers: ['lab'],
-        },
+        { part: 'segmented', param: 'yue.bmode' },
+        { part: 'labelled', label: 'Takes', children: [{ part: 'token', param: 'yue.btakes' }] },
+        { part: 'labelled', label: 'Follow score', children: [{ part: 'token', param: 'yue.bcond' }], tiers: ['lab'] },
         { part: 'labelled', label: 'Plan strength', children: [{ part: 'token', param: 'yue.bar' }], tiers: ['lab'] },
       ],
       tiers: ['studio', 'lab'],

@@ -11,7 +11,7 @@ export const yuebatch = {
   category: 'Engine',
   labUnder: 'takes',
   engines: ['yue2'],
-  owner: 'engine',
+  owner: 'song',
   stored: 'settings',
   size: { w: 1 },
   params: [
@@ -23,7 +23,7 @@ export const yuebatch = {
       tip: 'Noise variations: the same composed song rendered from different noise',
       range: [1, 9, 1],
       default: 1,
-      wire: { to: 'ext:yue2Variations', note: 'Declared with max 1 in the static manifest; the engine raises it.' },
+      wire: { to: 'ext:yue2Variations', differs: ['range'], note: 'Declared with max 1 in the static manifest; the engine raises it.' },
     },
     {
       key: 'yue.narcache',

@@ -54,7 +54,8 @@ Meanwhile the definitions keep the concept's design and say so in the wire.
 - `pp.vst.on`: the concept's chain switch has no server counterpart. Keep it as a UI bypass that disables every plugin?
 - Build by section: the concept's takes per section and section mode do not exist in the real `Yue2Build`, and the real
   plan strength default is 0.6 where the concept says 1.
-- Takes on ACE-Step: the concept allows 9, the server's `batch.max` is 8.
+- Takes on ACE-Step: the concept allows 9, the server's `batch.max` is 8. The definitions stop at 8 (the existing page
+  sends 8 for 9). Following the concept is one number, and the server would need to take 9.
 - APG on Stable Audio 3 and HeartMuLa: the concept shows the momentum (and on Stable Audio 3 the norm threshold); nothing
   those engines run reads them. Keep the controls (and add the server side), or take those engines off the two
   parameters (two lines).
@@ -110,12 +111,37 @@ engine panel has no row for it, so no definition carries it, and the request com
 Meanwhile the job uses the scalar decoder selected when it runs. Adding a row is one parameter in `models.ts` with the
 wire `['model:heartmula.scalar_decoder', 'body:heartmulaScalarDecoderModel']`.
 
-## 10. Choices made meanwhile
+## 10. The defaults the concept and the existing page start on differently
+
+The request comparison lists each with its reason (`tools/fixtures/request-differences.json`); these need a decision:
+
+- **Shift on ACE-Step.** The concept starts on Auto, which is -1, the existing slider's own Auto: the engine then uses its
+  shift, 3.0 on turbo models and 1.0 on base ones. The existing page starts at 3.0, so on a base model the default
+  render differs. Meanwhile the definitions follow the concept. Starting at 3.0 is one line (`auto: false` on ACE-Step's
+  line, default 3).
+- **Expand wildcards on YuE2.** The concept offers it there, and the server honours it; the existing page hides it on
+  YuE2 and sends it off. Meanwhile the definitions send it. Following the existing page is one line (YuE2 off the
+  parameter's engines).
+- **Lua plugins on MiniMax-Music3, Stable Audio 3 and HeartMuLa**, solver, schedule and guidance untouched: the concept
+  starts on Native (the engine's own loop), the existing page on ACE-Step's euler, linear and APG. Meanwhile Native.
+- **Guidance on Stable Audio 3 with Lua plugins on**: the concept's 1, the existing page's 9 carried from ACE-Step.
+- **MiniMax-Music3's renderer**: the definitions add Auto and start on it, as the server does when nothing is chosen; the
+  concept starts on GGML.
+
+## 11. Choices made meanwhile
 
 These are the rebuild's to decide rather than the concept's, so they were decided, in the way that is cheapest to undo:
 
-- **A definition not on the desk sends nothing** (its values are kept). The alternative, sending what a removed module
-  last held, is one condition in `realState`.
+- **A module not on the desk sends nothing** (its values are kept), so the engine's defaults apply. **A pedal or side
+  unit not on the board is off**: its switch sends its off value. For every pedal and unit but one the off value is the
+  real default, so nothing changes; for Lyric timestamps, which is on by default, it means a desk without the unit asks
+  for no timestamps (`skipLrc: true`), where the existing page makes them unless told not to. The alternative for the
+  board is one branch in `realState`.
+- **A number whose step is whole is stored whole.** A saved 12.5 steps loads as 13. The alternative, an explicit field
+  for whole numbers, is one field.
+- **A range's two ends that arrive crossed are swapped.** The concept keeps them crossed.
+- **Text that fails its check is not kept when a record loads**, as the concept does; while it is typed the field keeps
+  it and says what is in force.
 - **A saved revision holds every value it covers, defaults included**; factory revisions list only what they set. The
   alternative, saving only changed values as the concept does, is one filter where a revision is written.
 - **Untouched values equal to the real default are not sent**, so an untouched desk sends what the existing UI sends.

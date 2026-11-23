@@ -14,7 +14,8 @@ from the definitions by `npm run docs`, and the validator fails when they are ou
 | `content:` | `CreateContent` in `ui/src/components/create/createContent.ts` (caption, lyrics, bpm, keyScale, duration...) | The input of `createContentParams()` |
 | `body:` | Fields the existing UI sets on the request itself (HeartMuLa's frozen model choices) | Top-level request fields |
 | `model:` | `GET/POST /api/backends/models` buckets per backend (ACE-Step's `ditModel` and friends are `param:`) | Engine state, not part of the request |
-| `ui:` | Form state the browser keeps (`hs-*` keys), such as the auto-expand switch or the caption source | Not sent |
+| `intent:` | The Create intent's `compose` (auto-expand, trigger word, Beat I/O) and `captionSource` (`server/src/contracts/resolution.ts`) | Beside the intent's params; the server runs the caption steps |
+| `ui:` | Form state the browser keeps (`hs-*` keys), such as the LUFS preset or vocal gender | Not sent |
 
 The engine ids in definitions are the server's: `ace`, `minimax-m3`, `yue2`, `sa3`, `heartmula` (`engines.ts`). The
 concept's `mm3`, `yue` and `hm` are not used.
@@ -29,8 +30,8 @@ UI's slider for each `GENERATION_DEFAULTS` field. The validator checks every wir
 
 <!-- generated: counts (npm run docs) -->
 - 40 definitions: 25 modules, 10 pedals, 5 side units, on 5 engines.
-- 284 parameters; 515 parameter-engine pairs. Of those, 501 say where the value goes (content 50, ui 18, model 19, body 4, param 281, ext 138): 444 as a plain name, 40 through wire fields (invert, scale, divide, map, auto, when, several fields), 17 through a named transform. 14 pairs, on 9 parameters, have no counterpart in the real app.
-- 11 state entries; 73 parts in the inventory, 73 used; 6 transforms; 7 factory workflows and 11 factory revisions.
+- 284 parameters; 515 parameter-engine pairs. Of those, 500 say where the value goes (content 41, intent 16, ui 11, model 19, body 4, param 281, ext 138): 438 as a plain name, 41 through wire fields (invert, scale, divide, map, auto, when, several fields), 21 through a named transform. 15 pairs, on 9 parameters, have no counterpart in the real app.
+- 13 state entries; 73 parts in the inventory, 73 used; 8 transforms; 7 factory workflows and 11 factory revisions.
 <!-- end generated -->
 
 ## The concept has it, the real app does not
@@ -38,9 +39,9 @@ UI's slider for each `GENERATION_DEFAULTS` field. The validator checks every wir
 <!-- generated: none (npm run docs) -->
 | Key | Engines | What the real app does instead |
 | --- | --- | --- |
+| `ad.trigger` | yue2, hm | YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); the server drops a typed trigger word there. |
 | `cap.ds` | mm3 | MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown. |
 | `s0` | yue2 | On YuE2 the AR slot's strength is its two dials, Plan and Compose (ad.arp, ad.arc). |
-| `ad.trigger` | yue2 | YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there. |
 | `den.on` | ace | No switch in the real app: the denoiser runs while denoiseStrength is above 0. This switch gates den.str's wire. |
 | `lss.on` | ace | No switch in the real app: LSS runs while lssStrength is above 0. This switch gates lss.str's wire. |
 | `yue.btakes` | yue2 | The real Build by section (Yue2Build) has no takes-per-section setting; takes come one at a time from the build session. |
@@ -75,9 +76,10 @@ These have a real counterpart that differs in a way the request handles. Each is
 - **Read but not declared**: MiniMax-Music3's adapter (`mm3LmAdapter`), its mode, scales and merge switch, the trigger
   switch, the renderer and its TensorRT precision; YuE2's lead sheet (`yue2Abc`). A compact intent's `backendParams`
   cannot carry these ([08](08-open-questions.md) question 1).
-- **Not sent, by design** (`ui:`): vocal gender (Compose caption writes it), the LUFS preset, the caption source and
-  dataset, the auto-expand switch, and Build by section's condition and plan strengths (`Yue2Build` settings; the real
-  plan strength default is 0.6, the concept's 1).
+- **Not sent, by design** (`ui:`): vocal gender (Compose caption writes it), the LUFS preset, and Build by section's
+  condition and plan strengths (`Yue2Build` settings; the real plan strength default is 0.6, the concept's 1).
+- **In the intent** (`intent:`): Expand wildcards, the trigger word and Beat I/O are the intent's `compose`; the caption
+  source and dataset its `captionSource`, through the `mm3CaptionSource` and `yue2CaptionSource` transforms.
 - **Read nowhere on some engines**: the APG momentum on Stable Audio 3 and HeartMuLa, and the APG norm threshold on
   Stable Audio 3; the concept shows them, nothing those engines run reads them.
 - **Stood back, not hidden**: MiniMax-Music3's manifest hides the repetition mode and window while the penalty is 1,
@@ -100,7 +102,7 @@ independent planner seed; the concept has only "LM seed follows"), `storkSubstep
 From the backends' extensions (6, all YuE2): `yue2PlanMaxTokens`, `yue2SemMinTokens`, `yue2EndThreshold`,
 `yue2EndBias`, `yue2EndBiasFrom`, `yue2EndBiasRamp`.
 
-From the Create form (1): `sourceLatentUrl`.
+The Create form's `sourceLatentUrl` is the concept's Import latent: the Prompt's `latent` state.
 
 From the model buckets (3): MiniMax-Music3's `cond` and `voc`, HeartMuLa's `scalar_decoder`. The existing UI sends
 HeartMuLa's scalar decoder with the request ([08](08-open-questions.md) question 9).
@@ -121,13 +123,14 @@ A real name is shown once when it is the same on every engine the parameter is o
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `prompt.text` | text | all | `content:caption` |
-| `wild.auto` | boolean | ace, mm3, yue2, sa3 | `ui:hs-main-auto-expand`. Read by the Create intent's compose step (compose.autoExpand), not a request field. |
+| `prompt.text` | text | all | ace: `content:caption`<br>mm3: `content:caption` + `intent:captionSource` (via mm3CaptionSource)<br>yue2: `content:caption`<br>sa3: `content:caption`<br>hm: `content:caption` |
+| `wild.auto` | boolean | ace, mm3, yue2, sa3 | `intent:compose.autoExpand` |
 | `song.artist` | text | all | `content:artist` |
 | `song.title` | text | all | `content:title` |
 | `song.subject` | text | all | `content:subject` |
-| `cap.src` | choice | mm3, yue2 | mm3: `ui:mm3CaptionSources.mode`. The Send-to-Create handoff in localStorage; values custom, auto, track:<title>.<br>yue2: `ui:yue2CaptionSelection.mode`. CreatePanel state; values custom, auto, track. |
-| `cap.ds` | choice | mm3, yue2 | mm3: none: MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown.<br>yue2: `ui:hs-yue2CaptionDataset` |
+| `ad.trigger` | text | ace, mm3, yue2, hm | ace: `intent:compose.loraTrigger`. The server puts it at the start of the caption (composeCreateCaption).<br>mm3: `intent:compose.loraTrigger`. The server puts it at the start of the caption (composeCreateCaption).<br>yue2: none: YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); the server drops a typed trigger word there.<br>hm: none: HeartMuLa adds its adapter's own trigger (withHeartmulaTrigger); the existing Create page sends no typed trigger word there. |
+| `cap.src` | choice | mm3, yue2 | mm3: `intent:captionSource` (via mm3CaptionSource)<br>yue2: `intent:captionSource` (via yue2CaptionSource) |
+| `cap.ds` | choice | mm3, yue2 | mm3: none: MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown.<br>yue2: `intent:captionSource` (via yue2CaptionSource) |
 
 ### Lyrics (`lyrics`, module)
 
@@ -166,8 +169,8 @@ A real name is shown once when it is the same on every engine the parameter is o
 | `tempo.dur` | number | ace, sa3, hm | `content:duration` (auto: -1). Auto is -1. Stable Audio 3 renders 30 s for -1. |
 | `tempo.max` | number | yue2 | `ext:yue2MaxMinutes` (÷ 60). Real is minutes, step 0.5. |
 | `tempo.incap` | boolean | yue2 | `ext:yue2CaptionBpmKey` |
-| `tempo.beatio` | boolean | ace, mm3, sa3 | `content:beatIntro` |
-| `tempo.beatbars` | choice | ace, mm3, sa3 | `content:introBars` |
+| `tempo.beatio` | boolean | ace, mm3, sa3 | `intent:compose.beatIntro` |
+| `tempo.beatbars` | choice | ace, mm3, sa3 | `intent:compose.introBars` |
 | `tempo.trim` | boolean | ace | `param:autoTrimEnabled` |
 | `tempo.trimbuf` | number | ace | `param:durationBuffer` |
 | `tempo.trimfade` | number | ace | `param:autoTrimFadeMs` (× 1000). Real is milliseconds. |
@@ -219,7 +222,6 @@ A real name is shown once when it is the same on every engine the parameter is o
 | `ad.arc` | number | yue2 | `model:yue2.ar.scales.global`. The AR slot's composer strength (engine state). |
 | `ad.trigcap` | boolean | mm3 | `ext:mm3LmAdapterTrigger`. Read with !== false by backends/minimax/generate.ts: on puts the adapter's own trigger into the caption. Not declared as an extension. |
 | `ad.gpu` | boolean | mm3 | `ext:mm3LmMergeGpu`. Read by backends/minimax/generate.ts; not declared as an extension. |
-| `ad.trigger` | text | ace, mm3, yue2, hm | ace: `content:loraTrigger`. composeCaption puts it at the start of the caption.<br>mm3: `content:loraTrigger`. composeCaption puts it at the start of the caption.<br>yue2: none: YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there.<br>hm: `content:loraTrigger`. composeCaption puts it at the start of the caption. |
 
 ### Planner (`planner`, module)
 
@@ -280,11 +282,11 @@ A real name is shown once when it is the same on every engine the parameter is o
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `samp.steps` | number | all | ace: `param:inferenceSteps`<br>mm3: `ext:mm3Steps`<br>yue2: `ext:yue2OdeSteps`<br>sa3: `ext:sa3Steps`<br>hm: `ext:heartmulaCodecSteps` |
-| `samp.cfg` | number | ace, mm3, sa3, hm | ace: `param:guidanceScale`<br>mm3: `ext:mm3CfgFlow`<br>sa3: `param:guidanceScale`. Read only with samplerPluginsEnabled and above 1.<br>hm: `ext:heartmulaCodecGuidance` |
-| `samp.shift` | number | ace, mm3, hm | ace: `param:shift` (auto: null). Auto sends nothing, so the engine's own shift applies.<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
-| `samp.solver` | choice | all | ace: `param:inferMethod`<br>mm3: `param:inferMethod`<br>yue2: `ext:yue2NarSolver`<br>sa3: `param:inferMethod`<br>hm: `param:inferMethod` |
+| `samp.cfg` | number | ace, mm3, sa3, hm | ace: `param:guidanceScale`<br>mm3: `ext:mm3CfgFlow`<br>sa3: `param:guidanceScale`. Read only with samplerPluginsEnabled and above 1: the default 1 adds no guidance, where the existing page carries ACE-Step's 9 here.<br>hm: `ext:heartmulaCodecGuidance` |
+| `samp.shift` | number | ace, mm3, hm | ace: `param:shift` (auto: -1). Auto is -1, as the existing slider's Auto button sets it: the engine then uses its own shift (3.0 on turbo models, 1.0 on base ones). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
+| `samp.solver` | choice | all | ace: `param:inferMethod`<br>mm3: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here.<br>yue2: `ext:yue2NarSolver`<br>sa3: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here.<br>hm: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here. |
 | `samp.sched` | choice | all | ace: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>mm3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>yue2: `ext:yue2NarScheduler`<br>sa3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>hm: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70". |
-| `samp.guide` | choice | ace, mm3, sa3, hm | `param:guidanceMode` |
+| `samp.guide` | choice | ace, mm3, sa3, hm | ace: `param:guidanceMode`<br>mm3: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here.<br>sa3: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here.<br>hm: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here. |
 | `samp.plugins` | boolean | mm3, sa3, hm | `ext:samplerPluginsEnabled` |
 | `sa3.sampler` | choice | sa3 | `ext:sa3Sampler` |
 | `samp.cs` | number | ace | `param:cfgIntervalStart` |
@@ -362,7 +364,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 | `dcw.mode` | choice | ace | `param:dcwMode` |
 | `den.on` | boolean | ace | none: No switch in the real app: the denoiser runs while denoiseStrength is above 0. This switch gates den.str's wire. |
 | `lss.on` | boolean | ace | none: No switch in the real app: LSS runs while lssStrength is above 0. This switch gates lss.str's wire. |
-| `dcw.low` | number | ace | `param:dcwLowScaler` |
+| `dcw.low` | number | ace | `param:dcwLowScaler` (while {"param":"dcw.mode","not":"high"}) + `param:dcwHighScaler` (while {"param":"dcw.mode","is":"high"}) |
 | `dcw.high` | number | ace | `param:dcwHighScaler` |
 | `den.str` | number | ace | `param:denoiseStrength` (while {"param":"den.on","is":true}, else 0). The denoiser runs while denoiseStrength is above 0, so its switch off sends 0. |
 | `den.smooth` | number | ace | `param:denoiseSmoothing` |
@@ -459,7 +461,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `takes.n` | number | all | ace: `param:batchSize`<br>mm3: `ext:mm3Takes`<br>yue2: `ext:yue2BatchSize`. Declared with a maximum of 1 in the static manifest; the engine raises it to its batch limit.<br>sa3: none: One song per run.<br>hm: none: One song per run. |
+| `takes.n` | number | all | ace: `param:batchSize`. The server takes 8 at most (batch.max); the existing slider goes to 9 and sends 8.<br>mm3: `ext:mm3Takes`<br>yue2: `ext:yue2BatchSize`. Declared with a maximum of 1 in the static manifest; the engine raises it to its batch limit.<br>sa3: none: One song per run.<br>hm: none: One song per run. |
 
 ### Pedalboard (`post`, module)
 
@@ -489,7 +491,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.ss.on` | boolean | ace, mm3, yue2, hm | `param:stableStepOn` |
-| `pp.ss.str` | number | ace, mm3, yue2, hm | `param:stableStepStrength` (÷ 100). Real is 0..1. |
+| `pp.ss.str` | number | ace, mm3, yue2, hm | `param:stableStepStrength` (÷ 100). Real is 0..1, so the knob divides by 100; the existing UI steps by 5%, the concept by 1%. |
 | `pp.ss.vox` | number | ace, mm3, yue2, hm | `param:stableStepVocalTrimDb` |
 | `pp.ss.steps` | number | ace, mm3, yue2, hm | `param:stableStepSteps` |
 | `pp.ss.dyn` | boolean | ace, mm3, yue2, hm | `param:stableStepPreserveDynamics` |

@@ -1,121 +1,137 @@
 # Checking that the format is sound
 
-Four checks, run from `ui-next`. They need Node 22.18 or later (the tools run the TypeScript sources directly) and
+The checks, run from `ui-next`. They need Node 22.18 or later (the tools run the TypeScript sources directly) and
 `npm install` once (TypeScript is the only dependency).
 
 ```
-npm run check      the type check, the validator and the request comparison; all must pass
-npm test           the validator's own test (a few minutes)
-npm run docs       rewrites the generated parts of these pages
+npm run check      the type check, the validator, the request comparison and the core's tests; all must pass
+npm test           the validator's own test: planted mistakes it must catch (about ten minutes)
+npm run docs       rewrites the generated parts of these pages and the list of shipped keys
 npm run fixtures   reads what the real application declares into tools/fixtures/real-app.json
+npm run concept    collects what the concept page does into tools/fixtures/concept.json (needs Playwright)
 ```
 
 ## The type check
 
 `tsconfig.json` checks `src` and `tools` with `strict` and `exactOptionalPropertyTypes`. Every definition file ends in
 `satisfies ModuleDef` (or `PedalDef`, `UnitDef`), so a misspelt field, a part not in the inventory, an option a part does
-not take or of the wrong type, an engine, unit, check, option source, action or transform that is not listed, or a value
-of the wrong type fails here, once, at the line in the definition.
+not take, an engine, unit, check, option source, action or transform that is not listed, a value of the wrong type, or
+a word line that changes anything but words fails here, at the line in the definition.
 
 ## The validator
 
-`tools/validate-definitions.ts` loads every definition and checks it twice: first its JSON form against `types.ts` with
-the TypeScript compiler (so a definition that arrives as JSON, or that skipped its `satisfies`, gets the same check), then
-what the types cannot see. Each message names the file, the parameter or node, the engine and tier, and what to change.
+`tools/validate-definitions.ts` loads every definition, checks its JSON form against `types.ts` with the TypeScript
+compiler, then what the types cannot see. Each message names the file, the parameter or node, the engine and tier, and
+what to change. `--json <file>` runs every check on a definition that arrives as JSON, as if it were in the index (it
+takes the place of the listed definition with its id).
 
-What it checks, in the order it runs:
+What it checks:
 
 - every definition file is listed in `index.ts`, and every definition is plain JSON data of the format's shape;
-- ids unique across all definitions; parameter and state keys unique, in letters and digits; no two of a kind at one
-  `at`; former keys (`was`) not in use;
-- every condition: real parameters, state, desk facts, modules and engines; values among the parameter's options (the
-  server's list, from the fixture, for a server-listed choice) or inside its range; a condition that can never hold, or
-  two parameters whose `when` depend on each other in a circle;
-- every parameter on every engine it is on: numbers have a range, a positive step and a default inside it and on its
-  step grid (off the grid only where the server declares it so); choices a non-empty option list without repeated values
-  or labels and a default among them; formats and words that fit the value; auto only on numbers; engine lines that name
-  engines the parameter is on, once each, with the parameter's `engines` beside them; `held` only where a song number's
-  range differs per engine, and required there; `staysBelow` joining two numbers with one range; kept per engine and
-  saved as content refused;
-- every wire: a channel; a `param:` field that `GENERATION_DEFAULTS` has and the engine's code reads; an `ext:` key the
-  engine's backend declares, or reads with a note saying so; a `content:` field `CreateContent` has; a `model:` bucket
-  the engine has; a range or options that differ from the server's or the existing UI's slider only with a note;
-  `invert`, `scale`, `divide`, `map`, `via`, `auto` and `when` used where they fit; and a transform that packs a
-  parameter named by that parameter's wire;
-- every state: its words, its wire;
-- every face node, on every engine and tier it can be shown at, with each of its lines: a part from the inventory; edits
-  only through `param`/`params` of the types its part edits, reads only through `reads`, state only of the kinds it holds
-  and only its own definition's; a control bound to something; bindings some engine it is shown on has; tiers inside its
-  parent's; conditions and dims that can hold; actions on real things with values that fit (an example that exists, a set
-  value inside the range); Quick choices on every engine the row is shown on, on the range and step grid, distinct, one of
-  them the default; words whose slots name real things;
-- every strip and idle reason: a condition that can hold, words, actions that fit;
-- every pedal's switch and main knob its own and never hidden by `when`; every pedal face node tiered;
-- every definition on each of its engines has something there, and a module a tile that is not empty;
-- every module parameter is edited by a control of its own module on every engine it is on, at some tier;
-- every thumbnail file exists and draws something;
-- on every engine, no two parameters write one real field at the same time (their conditions are evaluated over every
-  combination of the values they test);
-- on every engine, the request at defaults: every value sent that differs from the real app's default has a note saying
-  why;
-- the factory workflows and revisions: modules and pedals that exist, values their engine can take, only what a revision
-  keeps;
+- ids, parameter keys and state keys unique; former keys (`was`) not in use; two of a kind not at one `at`;
+- every condition: real names, values the parameter can hold, a condition that can hold, no circles;
+- every parameter on every engine: a range with a positive step and a default on its grid, options without repeats,
+  formats and words that fit, a text default and example that pass the parameter's own check, a range's two ends with
+  the lower end's default below the upper's and neither below the other, `held` exactly where a song number's range
+  differs per engine, an engine line whose `when` keeps the names the parameter's own condition tests, two options
+  never claiming one former value;
+- every wire: a channel; a `param:` field that `GENERATION_DEFAULTS` has, of the type of its real default, and that the
+  engine's code reads; an `ext:` key the backend declares, or reads with a note; a `content:` or `intent:` field the
+  real app has; an option value the real field takes, where the real app spells its values (`values` in the fixture,
+  read from `generationControls.ts`, `ui/src/types.ts` and the guards a backend throws from); a range, options or a
+  default that differ from the server's or the existing UI's only with `differs` naming the check and a note saying why
+  (a note alone waives nothing); a default that is the real one whether or not the parameter applies; `wire.auto` of
+  the field's type; `via` alone (a transform does the whole change); a mapped choice whose every option is mapped, or
+  written by another parameter while it is chosen;
+- every state: its words, its named steps and what they may change, its wire;
+- every face node, on every engine and tier it can show at: a part from the inventory, bindings of the types its part
+  edits, `reads` that are parameters, state or desk facts and that match the part's `reads` signature, the named steps
+  its part takes declared by its state or parameter, tiers inside its parent's, conditions and dims that can hold,
+  actions on real things (a tier action rings what that tier shows), Quick choices on every engine the row shows on and
+  setting the row's own definition's values, words whose `{value:...}` the engine has, the same control not twice at
+  one tier;
+- every strip and idle reason; every pedal's switch and main knob, a Studio face for a pedal without a main knob, a
+  face for every side unit, each pedal's hue at least 15 degrees from its neighbours' in the chain;
+- two parameters of one definition with one name; what Quick or Studio edits, Lab edits;
+- every module parameter edited by a control on every engine it is on; every thumbnail file exists and draws;
+- on every engine, no two parameters write one real field at once, and at defaults every value sent that differs from
+  the real default is waived with `differs: ['default']`;
+- the factory records as a loaded file is read: values that cleaning keeps unchanged, parameters that apply, state of
+  its kind;
+- `tools/fixtures/shipped.json`: every key, state and id ever shipped is still a definition's, or named in a `was`, or
+  retired in `src/definitions/retired.ts`, and is kept where it was (owner and stored) unless `npm run docs` recorded
+  the change;
 - the generated parts of these pages are up to date.
 
-Things that are worth a look but not wrong are notes, printed with `--notes`: a part, an option, an action, a desk fact or
-a transform no definition uses, a thumbnail file no definition draws, a default off the step grid that the server
-declares that way. Nothing in the inventory has to be used: replacing a part, or removing the last parameter that used a
-field of the format, is ordinary maintenance.
-
-Output on the definitions as committed:
-
-```
-> node tools/validate-definitions.ts
-(the counts, as in 00-index.md, "In numbers")
-
-1 notes (--notes prints them).
-
-OK: no errors.
-```
-
-The note is MiniMax-Music3's repetition window: it runs from 25 in steps of 25 with a default of 320, in the server's
-manifest and in the concept alike.
+Notes, printed with `--notes`, are worth a look and not wrong: a part, option, action, desk fact or transform no
+definition uses, a thumbnail file no definition draws, a default off the step grid that the server declares that way.
 
 ## The request comparison
 
-`tools/compare-request.ts` builds the Create request from the definitions on every engine at default values and
-compares it field by field with what the existing frontend sends at its defaults ([05](05-what-the-definition-drives.md),
-"What is sent"). It runs the existing code itself (`getGlobalParams()`, `createContentParams()`,
-`resolveGenerationParams()`) through `tools/real-app/`, which lets those files load in Node without the frontend's
-dependencies installed. It fails on a difference `tools/fixtures/request-differences.json` does not list with its reason,
-or on a listed one that has gone. `--print` prints every difference.
+`tools/compare-request.ts` builds the Create request from the definitions and the one the existing Create page sends
+for the same intent, over the value space of every engine, and compares them field by field: the resolved request, and
+the intent's `compose` and `captionSource`. Both sides end in the server's own `resolveCreateIntent()`, with the tracks a
+caption source picks from.
+
+The definitions' side is `createIntent()` ([05](05-what-the-definition-drives.md), "What is sent"). The existing side
+runs the existing code (`getGlobalParams()`, `createContentParams()`, `resolveGenerationParams()`) through
+`tools/real-app/`, which lets those files load in Node without the frontend's dependencies; `tools/real-app/app.ts`
+restates the two things the existing page does in React components (CreatePanel's compose block, App's merge) and fails
+when the lines it restates change. The stand-in server reports real HeartMuLa model names. How the existing page holds
+each intent is `tools/existing-ui.ts`, written from the existing UI's controls: a parameter whose wire is a plain name
+is held as the wire says, and every other one has a line there, so a wire and its holding are two statements of one
+fact. The holdings are set through the store's own setters.
+
+The states, per engine: every parameter at its minimum, its maximum and a step off its default, each option, each
+switch both ways, auto on and off, text set and empty, each with its condition made to hold; with each condition one of
+its wires or holdings sends under, alone and with every switch of its definition on; every parameter with a condition
+set while the condition does not hold; every module, pedal and unit taken off the desk with its values changed; adapter
+slots in Simple and Advanced with a phase window; a kept seed; every file and span; the caption source with its tracks;
+and 300 random combinations from a fixed seed.
+
+A difference is a defect in a definition, fixed there, or a class listed in `tools/fixtures/request-differences.json`
+(engines, fields and the kind of difference) with why it is accepted. A difference is classed "existing sends a value
+that does not apply" when it goes away once the existing side holds only the values that apply. A listed class that no
+longer occurs fails the run. `--print` prints every class, `--show <engine> <words>` both sides of one state, `--quick`
+leaves out the random states.
 
 ```
 > npm run request
-request at defaults, 5 engines: 1 differences from the existing UI, 1 accepted in tools/fixtures/request-differences.json.
+request over the value space, 5 engines:
+  ace: 794 states, ... fields compared, ... differences
+  ...
 ```
 
-The one is HeartMuLa's scalar decoder ([08](08-open-questions.md) question 9).
+## The core's tests
+
+`tools/test-core.ts` runs the derivations on the states the concept page was put in and compares what they return with
+what the page did (`tools/fixtures/concept.json`, written by `npm run concept`, which runs the page's own functions in
+Chromium): undo step names, what each tile shows at each tier, the "Also set" line and its link, engine switches and
+their toasts, what a revision stores, and what cleaning keeps. A value the definitions cannot say (a server-listed choice
+whose names the server gives) is left out of a case. A disagreement is a defect, fixed, or listed in
+`tools/fixtures/concept-differences.json` with the reason the page is not followed (its own fault, or a decision of the
+rebuild).
+
+It also checks, without the page: the parts' contract (`bindPart` gives setters for exactly what a node binds, names
+every step, refuses a value or step the definition does not give it, and makes a pad's drag one step), the translation
+keys (none shared, none moved by reordering every list), reading the real fields back from what each value sends, and
+saved records of older shapes (the concept's own revision, a desk under former ids and keys, a newer shape kept aside).
 
 ## The validator's own test
 
 `tools/test-validator.ts` makes one plausible mistake at a time on a fresh copy of `ui-next` and runs the type check and
-the validator on it. The list holds the 40 mistakes of the format's review, rewritten for this format, and those found
-since. Every one must be caught; three are no longer mistakes in this format (an auto switch's key can no longer collide
-with a parameter's, a terminal flag is its control's label, and a pedal's width is worked out), and those must pass. Add a
-mistake to the list when one gets through.
-
-```
-> npm test
-...
-Every mistake caught.
-```
+the validator on it, and for a mistake marked so the request comparison or the core's tests. It holds the 40 mistakes
+of the format's first review, those found since, and the 30 of the second review with the five wrong sends it found.
+Every one must be caught, except those this format made impossible or that no check can see without someone reading
+them (a label wrong for its engine, a strip action whose words do not fit what it sets); those must pass, and the list
+says why. Add a mistake when one gets through.
 
 ## The fixtures
 
-`tools/fixtures/real-app.json` is what the real application declares, read from its source by `tools/make-fixtures.ts`:
-`GENERATION_DEFAULTS`, the Create form's content and its fields, each backend's extensions, the backend-prefixed fields
-each backend reads, the `GENERATION_DEFAULTS` fields each engine's code reads (directly, or through a field the resolver
-makes from them), the plugin ids (the engine's registries and the Lua plugins), the model buckets, and the existing UI's
-slider for each field. Run `npm run fixtures` after the server, the engine's registries or the Lua plugins change, and
-commit the result; the validator then shows what the change means for the definitions.
+`tools/fixtures/real-app.json` is what the real application declares, read from its source by `tools/make-fixtures.ts`
+(from the repository `ui-next` sits in, or `HOTSTEP_APP`): `GENERATION_DEFAULTS`, the Create form's content and fields,
+each backend's extensions, the fields each backend reads, the plugin ids, the model buckets, the existing UI's sliders,
+the values a field takes, each backend's batch and length limits, and the Create intent's compose fields. Run
+`npm run fixtures` after the server changes and commit the result. `concept.json` is the concept page's behaviour;
+`shipped.json` the keys saved data may hold; `request-differences.json` and `concept-differences.json` the accepted
+differences.
