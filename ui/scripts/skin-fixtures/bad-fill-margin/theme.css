@@ -1,0 +1,2 @@
+html[data-skin="bad-fill-margin"] { --k-on-tint: 6 18 30; --grad-tint: linear-gradient(#7c7c7c,#7c7c7c); }
+html[data-skin="bad-fill-margin"]:not(.dark) { --k-on-tint: 6 18 30; --grad-tint: linear-gradient(#7c7c7c,#7c7c7c); }

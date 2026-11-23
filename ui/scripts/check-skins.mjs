@@ -147,6 +147,8 @@ function gradientStops(val) {
 // Blends sampled per segment. The contrast ratio is smooth in the blend position, so 512 samples
 // find the minimum to within about 1e-4 of the true value.
 const BLEND_STEPS = 512;
+// Gradient fills are gated at 4.6:1, not 4.5: a 0.1 margin on top of the dense sampling, as Lead ruled (the bound is closed).
+const FILL_FLOOR = 4.6;
 
 // Colours the gradient paints: each stop, plus evenly spaced blends between neighbouring stops
 // (browsers blend in sRGB), so a fill that dips below the contrast floor between two passing stops is caught.
@@ -187,10 +189,10 @@ function checkContrast(sets, def, errors, label) {
       const key = `${fg} ${bgName}`;
       if (!a || !b) { worst.set(key, { fg, bgName, r: -1 }); continue; }
       const r = contrast(a, b);
-      if (r < 4.5 && !(worst.get(key)?.r <= r)) worst.set(key, { fg, bgName, r });
+      if (r < FILL_FLOOR && !(worst.get(key)?.r <= r)) worst.set(key, { fg, bgName, r });
     }
     for (const { fg, bgName, r } of worst.values()) {
-      errors.push(r < 0 ? `${label}${mode}: ${fg} or ${bgName} is not a readable colour` : `${label}${mode}: ${fg} on ${bgName} is ${r.toFixed(2)}:1, needs 4.5:1`);
+      errors.push(r < 0 ? `${label}${mode}: ${fg} or ${bgName} is not a readable colour` : `${label}${mode}: ${fg} on ${bgName} is ${r.toFixed(2)}:1, needs ${FILL_FLOOR}:1 on gradient fills`);
     }
     for (const [fg, bg] of pairs) {
       const a = triplet(v[fg] ?? ''), b = triplet(v[bg] ?? '');
