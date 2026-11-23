@@ -5,8 +5,9 @@
 
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { engineName } from '../../definitions/engines.ts';
+import { offerLab, sayParked } from '../features/adding.ts';
 import type { Definition } from '../../definitions/types.ts';
-import { cardGroups, cardModel, categoryWord, defName, groupOf, tileName, usedHere, type CardModel } from '../../derive.ts';
+import { cardGroups, cardModel, categoryWord, defName, groupOf, tileName, type CardModel } from '../../derive.ts';
 import { OFFERED } from '../model/index.ts';
 import { useModel } from '../render/useModel.ts';
 import { Slot } from '../register/Slot.tsx';
@@ -14,7 +15,6 @@ import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
 import { thumbOf } from '../thumbs/index.ts';
-import { setTierFromView } from './tier.ts';
 import { itemId } from './panelState.ts';
 import { closeDrawer } from './drawers.ts';
 import { useEdgeFade } from './edgeFade.ts';
@@ -60,18 +60,18 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
   const first = groups[0]?.[1][0], stop = rove && OFFERED.some(d => itemId(d) === rove) ? rove : first ? itemId(first) : null;
   /* adding from the panel keeps focus on the card and says what arrived (F-25); a module the engine does not use waits
      parked, and its toast carries Undo */
-  const add = (d: Definition) => {
+  const add = (d: Definition, card: HTMLElement) => {
     const s = useDesk.getState(), r = s.add(d.id), name = tileName(d, s.desk);
-    if (r === 'lab') { s.showToast({ text: ui('labOffer.toast', { name }), action: { label: ui('labOffer.go'), run: () => { setTierFromView('lab'); useDesk.getState().add(d.id); } } }); return; }
+    /* a Lab module outside Lab offers Lab in the popover by its card (package 8) */
+    if (r === 'lab') { offerLab(d.id, card); return; }
     if (r !== 'added') return;
     /* adding from a drawer closes it (31-side-panels.js) */
     closeDrawer(false);
-    const after = useDesk.getState(), entry = after.undo[after.undo.length - 1];
-    after.say(ui('added', { name }));
-    if (!usedHere(d, after.desk.engine) && entry) after.showToast({ text: ui('added.notUsed', { name, engine: engineName(after.desk.engine) }), action: { label: ui('undo'), run: () => useDesk.getState().runUndo(entry) } });
+    useDesk.getState().say(ui('added', { name }));
+    sayParked(d.id);
   };
   const keys = (e: KeyboardEvent<HTMLDivElement>, d: Definition) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) add(d); return; }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) add(d, e.currentTarget); return; }
     const cs = [...list.current!.querySelectorAll<HTMLElement>('.bcard')], cur = e.currentTarget;
     const dir = ({ ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] } as Record<string, [number, number]>)[e.key];
     let to: HTMLElement | null = null;
@@ -85,7 +85,7 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
     const c: CardModel = byId.get(d.id)!, id = itemId(d), engineWords = engineName(engine);
     return (
       <div key={id} className={`bcard ${c.on ? 'in' : ''} ${c.locked ? 'locked' : ''} ${c.notHere ? 'no' : ''} ${c.rank === 3 ? 'weak' : ''}`} {...(c.locked ? {} : { draggable: true, 'data-drag': id })} data-additem={id} role="button" tabIndex={id === stop ? 0 : -1}
-        title={say(c.tip)} aria-label={say(c.tip)} onClick={() => add(d)} onKeyDown={e => keys(e, d)} onFocus={() => setRove(id)}>
+        title={say(c.tip)} aria-label={say(c.tip)} onClick={e => add(d, e.currentTarget)} onKeyDown={e => keys(e, d)} onFocus={() => setRove(id)}>
         <span className="bthumb" aria-hidden="true" dangerouslySetInnerHTML={{ __html: thumbOf(d, engine, c.thumbName) }} />
         <b>{say(c.name)}</b>
         {c.on || c.locked || c.notHere || c.lab ? <span className="ctags">

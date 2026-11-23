@@ -19,3 +19,5 @@ export * from './derive/view.ts';
 export * from './derive/desk.ts';
 export * from './derive/models.ts';
 export * from './derive/controls.ts';
+export * from './derive/picker.ts';
+export * from './derive/tips.ts';
