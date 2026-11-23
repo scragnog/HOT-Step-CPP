@@ -17,12 +17,12 @@ const desk = () => useDesk.getState().desk;
 
 /** What running an action did, applied: a change is committed, a tier is gone to and rung, a module is added, a
  *  named action is run by the feature that builds it. */
-export function dispatch(d: Definition, a: Action, node?: Node, from?: string): void {
+export function dispatch(d: Definition, a: Action, node?: Node, from?: string, arg?: string): void {
   const did = runAction(ix, d, a, desk(), node);
   if ('change' in did) useDesk.getState().commit(did.change, from);
   else if ('go' in did) setTierFromView(did.go, { ring: did.ring });
   else if ('add' in did) useDesk.getState().add(did.add);
-  else runNamed(did.call);
+  else runNamed(did.call, arg);
 }
 
 /** Runs action i of the strip a module's tile shows now (its definition's strip that holds). */
@@ -56,7 +56,7 @@ function actionsOf(def: Definition, node: Node, key: string) {
     along: (k: string, f: number, span: number, px: number) => param(k)?.along(f, span, px),
     check: (k: string, t: string) => checkText(ix, k, desk(), t),
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
-    run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
+    run: (i: number, arg?: string) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from, arg); },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
     gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
   };

@@ -148,6 +148,26 @@ export const prompt = {
          unit is on the board and on (concept html/create/20-centre.html, 33-prompt.js) */
       params: ['song.artist', 'song.title', 'song.subject', 'cap.src', 'cap.ds', 'wild.auto', 'ad.trigger', 'pp.art.subject'],
       state: ['capTracks', 'latent'],
+      /* the card's tools, each a named action the prompt feature runs (src/app/features/prompt-tools.ts) */
+      actions: [
+        { do: 'bespoke', name: 'promptWrite', label: 'Write it for me' },
+        { do: 'bespoke', name: 'composeCaption', label: 'Compose caption', tip: "Turn your words into MiniMax-Music3's Structured Caption, using your BPM, key and vocals" },
+        { do: 'bespoke', name: 'expandWildcards', label: 'Expand {a|b} choices', tip: 'Replace each {a|b|c} with one of its choices' },
+        { do: 'bespoke', name: 'moveToLyrics', label: 'Move them to the lyrics sheet' },
+        { do: 'bespoke', name: 'tempoFromPrompt', label: 'Set the tempo field' },
+        { do: 'bespoke', name: 'plainCaption', label: 'Use it as plain words' },
+        { do: 'bespoke', name: 'editCaptionCopy', label: 'Edit a copy' },
+        { do: 'bespoke', name: 'datasetTag', label: 'Tags' },
+        { do: 'bespoke', name: 'chooseDataset', label: 'From' },
+        {
+          do: 'bespoke',
+          name: 'importLatent',
+          label: 'Import latent',
+          tip: 'Continue from a saved .latent (or .hslat) file. Fills BPM, key, lyrics and caption from its metadata.',
+        },
+        { do: 'bespoke', name: 'clearLatent', label: 'Stop using this latent' },
+        { do: 'bespoke', name: 'promptLocked', label: 'Why the caption is locked' },
+      ],
     },
   ],
 } satisfies ModuleDef;

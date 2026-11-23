@@ -82,7 +82,7 @@ export interface Desk {
   selection?: { [bucket: string]: string };
   /** The lists the server gives for server-listed choices (parts.ts OPTION_SOURCES), with their words, so a value
    *  from one is written by its name ("DPM++ 3M" for dpm3m). */
-  lists?: { [source: string]: { value: string | number; label: string }[] };
+  lists?: { [source: string]: { value: string | number; label: string; data?: Json }[] };
 }
 
 export const has = (ix: Index, key: string, e: EngineId): boolean => {

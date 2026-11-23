@@ -22,6 +22,7 @@ import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
 import { controlModel, type ControlModel } from './controls.ts';
+import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
 
 /* ---------------------------------------------------------------- a part's model */
 
@@ -91,11 +92,16 @@ export interface PartModel {
   words: Record<string, Slot>;
   params: ParamModel[];
   reads: ReadModel[];
-  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string }[];
+  /** Its actions' words; a named action (parts.ts ACTIONS) says its name, so a part can run the one it means. */
+  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string; name?: string }[];
   /** A Quick choice row: its label, the choice checked (null: the values match none) and what the row says. */
   row?: { label: Slot; checked: number | null; says: Slot; choices: Slot[]; sets: Slot[] };
   /** A meter: its scale. */
   meter?: MeterScale;
+  /** The lyric sheet's sections, line count, tabs and stamp; the prompt card's suggestions, caption source and tools
+   *  (src/derive/fields.ts). */
+  sheet?: SheetModel;
+  prompt?: PromptModel;
   /** An LCD's lines, each with the case it is printed in. */
   lines?: { text: Slot; upper: boolean }[];
   /** What a shared control draws beyond its parameters (src/derive/controls.ts): a box's text, a ruler, a fader, a
@@ -153,7 +159,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   const m: PartModel = {
     part: node.part, tier: desk.tier, engine: desk.engine, surface, opts, words, params,
     reads: (node.reads ?? []).map(k => readModel(ix, k, desk)),
-    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: a.ring.join(' ') } : {}) } : {}) })) : [],
+    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: a.ring.join(' ') } : {}) } : {}), ...(a.do === 'bespoke' ? { name: a.name } : {}) })) : [],
     dim: key ? dimOf(ix, node, desk, key) : null,
     small: !!cell?.small || opts.small === true,
     ...(label !== undefined ? { label } : {}), ...(cell?.aria ?? label) !== undefined ? { aria: (cell?.aria ?? label)! } : {}, ...(title !== undefined ? { title } : {}),
@@ -171,6 +177,9 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   }
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
+  /* the lyric sheet and the prompt card (src/derive/fields.ts) */
+  if (node.part === 'lyricSheet') { const s = sheetModel(ix, node, desk); if (s) m.sheet = s; }
+  if (node.part === 'promptBox' && node.param) m.prompt = promptModel(ix, node.param, desk);
   return m;
 }
 

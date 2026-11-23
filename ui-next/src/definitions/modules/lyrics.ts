@@ -70,14 +70,17 @@ export const lyrics = {
   ],
   face: [
     {
+      /* the sheet holds its foot (Instrumental, the vocal gender), where it puts its line count below Lab
+         (25-module-lyrics.js lyricsInner); it reads Instrumental, the BPM field and the box its estimate falls back on */
       part: 'lyricSheet',
       param: 'lyrics.text',
       params: ['lyrics.lang'],
-      reads: ['lyrics.instr', 'tempo.bpm'],
+      reads: ['lyrics.instr', 'tempo.bpm', 'prompt.text'],
       per: [{ tiers: ['lab'], params: ['lyrics.lang', 'wild.auto'] }],
-    },
-    {
-      part: 'foot',
+      actions: [
+        { do: 'bespoke', name: 'insertSectionTag', label: 'Insert a section tag' },
+        { do: 'bespoke', name: 'expandWildcards', label: 'Expand {a|b} now', tip: 'Replace each {a|b|c} with one of its choices' },
+      ],
       children: [
         { part: 'pill', param: 'lyrics.instr', label: 'Instrumental' },
         {

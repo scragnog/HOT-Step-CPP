@@ -172,7 +172,7 @@ The "Used by" column is filled in from the definitions.
 | `termBar` | container |  |  |  | The terminal's top bar: its power switch and flags. |  |  | 25-module-planner.css | planner |
 | `termLine` | container |  |  |  | A command line: "$ <command>" then its children, each control after its label printed as a flag (--temp). Wrapped lines hang under the first flag. | `command` (text): The command word after $. |  | 25-module-planner.css | planner, repetition |
 | `group` | container |  |  |  | A rack group: a boxed set of controls with a header that may carry its power switch; a group switched off stands back. | `title` (text): Its caps heading when it has no power switch. |  | 25-module-adhere.css, 25-module-latent.css | sampler, latent, adhere |
-| `foot` | container |  |  |  | A tile's foot row: small labelled controls and a note, kept to the bottom of the tile. |  |  | 20-tile.css | lyrics, adapters, sampler, build, flow |
+| `foot` | container |  |  |  | A tile's foot row: small labelled controls and a note, kept to the bottom of the tile. |  |  | 20-tile.css | adapters, sampler, build, flow |
 | `labelled` | container |  |  |  | A caps label beside one small control (the foot-ctl and lcdsel pairing). |  |  | 15-controls.css | lyrics, tempo, adapters, sampler, latent, score, build, flow, plans, replan, adhere, vst |
 | `deck` | container |  |  |  | A two-column grid of labels and controls, so a choice never moves the rows under it (Plans & endings). |  |  | 25-module-plans.css | plans |
 | `pair` | container |  |  |  | Two tokens as a range: from → to, under one label. |  |  | 25-module-adhere.css | adhere |

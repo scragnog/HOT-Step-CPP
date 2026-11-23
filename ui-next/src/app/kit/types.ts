@@ -39,8 +39,8 @@ export interface PartView extends Omit<PartModel, 'params'> {
   params: ParamView[];
   /** A Quick choice row: choose choice i (every value it sets, one step named by the row). */
   choose(i: number): void;
-  /** Runs the node's action i (actions[i]). */
-  run(i: number): void;
+  /** Runs the node's action i (actions[i]); a named action may be given what the user chose (a tag, a file's name). */
+  run(i: number, arg?: string): void;
   /** Runs fn; every set inside it is one undo step. */
   batch(fn: () => void): void;
   gesture: Gesture;

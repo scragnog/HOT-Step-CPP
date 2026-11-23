@@ -628,6 +628,18 @@ export const ACTIONS = {
   loadPlannerAdapter: 'Opens the planner LM adapter list (ACE-Step).',
   composeCaption: 'Runs Compose caption, which writes BPM, key and vocal details into the caption.',
   scorePreview: 'Opens the score preview for the lead sheet, or plans one first.',
+  promptWrite: 'Write it for me: fills an empty box and empty lyrics (simulated), or asks before replacing the lyrics.',
+  expandWildcards: 'Replaces each {a|b|c} wildcard in the box or the lyrics (its argument) with one of its choices.',
+  moveToLyrics: 'Moves what looks like lyrics from the box to the lyric sheet.',
+  tempoFromPrompt: 'Sets the tempo field to the BPM the box names, bringing the module that has it.',
+  plainCaption: 'Turns a Structured Caption into plain words on an engine that reads plain words.',
+  editCaptionCopy: "Makes the caption a dataset supplies the box's own text, and the source Custom.",
+  datasetTag: "Adds the dataset tag it is given to the box's items, or takes it out.",
+  chooseDataset: 'Chooses the caption dataset it is given; a source track it does not hold goes back to Custom.',
+  importLatent: 'Continues from the latent file it is given, with its tempo, key, lyrics and caption.',
+  clearLatent: 'Stops using the latent.',
+  promptLocked: 'Says why a caption a dataset supplies cannot be typed over.',
+  insertSectionTag: 'Inserts the section tag it is given into the lyrics at a line boundary.',
 } as const;
 export type ActionName = keyof typeof ACTIONS;
 
