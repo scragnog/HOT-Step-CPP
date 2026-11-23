@@ -1096,6 +1096,13 @@ if(BUILD_TESTING)
     link_ggml_backends(yue2-recompose-test)
     add_test(NAME yue2-recompose COMMAND yue2-recompose-test)
 
+    # A semantic draw outside the codec range ends the stream (#367). No GPU, no models.
+    add_executable(yue2-semantic-draw-test tools/yue2-semantic-draw-test.cpp)
+    target_include_directories(yue2-semantic-draw-test PRIVATE src)
+    target_link_libraries(yue2-semantic-draw-test PRIVATE yyjson luajit)
+    link_ggml_backends(yue2-semantic-draw-test)
+    add_test(NAME yue2-semantic-draw COMMAND yue2-semantic-draw-test)
+
     # plan_continue: request parse, section stop rule, tokenizer prefix
     # property. No GPU, no model; the tokenizer part needs YUE2_TOKENIZER_DIR
     # (the yue2/tokenizer folder) and skips (77) without it.

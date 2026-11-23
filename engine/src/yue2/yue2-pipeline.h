@@ -243,6 +243,16 @@ static constexpr int64_t YUE2_SEM_HEAD_LO  = std::min<int64_t>(YUE2_MUSIC_END, Y
 static constexpr int64_t YUE2_SEM_HEAD_N   = std::max<int64_t>(YUE2_MUSIC_END + 1, YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE) -
                                              YUE2_SEM_HEAD_LO;                                       // 32769
 
+// A semantic draw (row index `rel`, -1 = threshold end) as a token id. Any id
+// outside the codec range ends the stream. That covers a drawn MUSIC_END and
+// the sampler's fallback for a row with no survivors, which is index 0: on the
+// windowed head that is MUSIC_END, on a full head (ConvRot, imatrix; base 0)
+// it is text token 0 and must not become a codec id.
+static inline int64_t yue2_semantic_draw_id(int64_t rel, int64_t base) {
+    const int64_t id = base + rel;
+    return rel < 0 || id < YUE2_CODEC_OFFSET || id >= YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE ? YUE2_MUSIC_END : id;
+}
+
 // The checkpoint's per-stage sampler defaults with the request's overrides
 // (the LM tab) laid over them. Fields the request left at -1 keep the GGUF
 // value, so an untouched tab reproduces the locked defaults exactly.
@@ -1121,7 +1131,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             const float   threshold = step >= (int64_t) sp.min_tokens ? req.end_threshold : 0.0f;
             const int64_t rel = yue2_sample_row(row, W, sp, YUE2_MUSIC_END, legal_lo, legal_hi, history[(size_t) b], step,
                                                 legacy_off, base, sg.rng, &surv_ids, &surv_vals, threshold);
-            const int64_t tok_id = rel < 0 ? YUE2_MUSIC_END : base + rel;
+            const int64_t tok_id = yue2_semantic_draw_id(rel, base);
             if (trace) {
                 if (FILE * tf = fopen(end_trace_path, "a")) {
                     if (step == 0) {

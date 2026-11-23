@@ -93,7 +93,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 `-DBUILD_TESTING=ON` adds CTest targets the default build leaves out: `test-monitor-chain`,
 the DoRA fixtures (`dora-common-test`, `dora-runtime-test`, `mm3-dit-dora-test`,
 `sa3-dora-load-test`, `yue2-aitk-dora-test`), the SA3 training gates (`sa3-train-grad-test`
-and an `ace-train sa3-train-check` run) and `yue2-recompose-test`. The two SA3 training
+and an `ace-train sa3-train-check` run), `yue2-recompose-test` and `yue2-semantic-draw-test`. The two SA3 training
 gates exit 77, which CTest counts as skipped, when their fixtures or the base DiT are absent.
 
 `fattn-train-test --backend cpu\|cuda\|vulkan\|metal` (default `cpu`, both arms on CPU) resolves
@@ -932,6 +932,17 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> stitch; a track that peaks past full scale is scaled to -0.3 dBFS (yue2_peak_scale)
   -> 16-bit WAV (yue2-pipeline.h, yue2-job.h)
 ```
+
+Each AR stage samples from a window of lm_head rows: the plan from ids 0 to 151848, the
+semantic stage from `MUSIC_END` (151852) through the 32768 codec ids. The window's first id
+is the sampler's base: a drawn row index plus the base is the token id. A ConvRot head,
+and any head under imatrix collection, is never sliced, so its logits cover the whole
+vocabulary from id 0 and its base must be 0. `yue2_ar_set_head()` (`yue2-lm-graph.h`) is the
+only place a stage sets its window, and it enforces that. Before it did (GH #367), ConvRot
+drew codec ids from text-token logits and every semantic draw ran to its cap. A semantic
+draw outside the codec range, which includes the sampler's index-0 fallback for a row with
+no survivors on a full head, ends the stream as `MUSIC_END` (`yue2_semantic_draw_id`,
+checked by `yue2-semantic-draw-test`).
 
 `codec_ids` on a `/yue2/synth` request supplies the composer's codec stream (raw ids,
 0..32767), which is prefilled instead of sampled. With `continue_codec_ids: true` the
