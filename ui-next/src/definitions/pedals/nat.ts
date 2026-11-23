@@ -12,7 +12,6 @@ export const nat = {
   hue: 38,
   on: 'pp.nat.on',
   main: 'pp.nat.amt',
-  thumbWidth: 2,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -23,7 +22,7 @@ export const nat = {
       label: 'Amount',
       range: [0, 1, 0.05],
       default: 0.5,
-      wire: 'param:naturalizeAmount',
+      wire: { to: 'param:naturalizeAmount', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'pp.nat.vr',

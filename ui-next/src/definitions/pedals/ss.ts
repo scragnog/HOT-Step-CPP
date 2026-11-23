@@ -12,7 +12,6 @@ export const ss = {
   hue: 275,
   on: 'pp.ss.on',
   main: 'pp.ss.str',
-  thumbWidth: 2,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -24,7 +23,7 @@ export const ss = {
       range: [10, 60, 1],
       unit: '%',
       default: 30,
-      wire: { to: 'param:stableStepStrength', scale: 0.01, note: 'Real is 0..1.' },
+      wire: { to: 'param:stableStepStrength', divide: 100, note: 'Real is 0..1.' },
     },
     {
       key: 'pp.ss.vox',
@@ -50,13 +49,7 @@ export const ss = {
       default: true,
       wire: 'param:stableStepPreserveDynamics',
     },
-    {
-      key: 'pp.ss.ppv',
-      type: 'boolean',
-      label: 'PP-VAE vocals',
-      default: false,
-      wire: 'param:stableStepVocalPpVae',
-    },
+    { key: 'pp.ss.ppv', type: 'boolean', label: 'PP-VAE vocals', default: false, wire: 'param:stableStepVocalPpVae' },
     {
       key: 'pp.ss.blend',
       type: 'choice',
@@ -115,13 +108,8 @@ export const ss = {
       check: { rule: 'seed', message: 'The fixed seed is a whole number from 0 to 4294967295.' },
       when: { param: 'pp.ss.seedf', is: false },
       beside: 'pp.ss.seedf',
-      wire: { to: 'param:stableStepSeed', note: 'A number in the real app.' },
+      wire: { to: 'param:stableStepSeed', via: 'int' },
     },
-  ],
-  blank: [
-    { when: { param: 'pp.ss.blend', is: 'off' }, says: 'with Source blend: Crossover or Mix' },
-    { when: { param: 'pp.ss.blend', is: 'crossover' }, says: 'with Source blend: Mix' },
-    { when: { param: 'pp.ss.blend', is: 'mix' }, says: 'with Source blend: Crossover' },
   ],
   thumb: { file: 'pd-ss' },
 } satisfies PedalDef;

@@ -13,7 +13,11 @@ export const sampler = {
   owner: 'engine',
   stored: 'settings',
   size: { w: 2, quickW: 2, grow: true, fold: true, stretch: 144 },
-  tierSummary: ['Steps and guidance on a scope', '+ shift, retake, solver, schedule, guidance', '+ CFG interval, plugin toggle'],
+  tierSummary: [
+    'Steps and guidance on a scope',
+    '+ shift, retake, solver, schedule, guidance',
+    '+ CFG interval, plugin toggle',
+  ],
   params: [
     {
       key: 'samp.steps',
@@ -21,13 +25,20 @@ export const sampler = {
       label: 'Steps',
       range: [1, 300, 1],
       default: 12,
+      engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
       wire: 'param:inferenceSteps',
-      per: {
-        'minimax-m3': { label: 'Flow steps', range: [2, 60, 1], default: 20, wire: 'ext:mm3Steps' },
-        yue2: { label: 'ODE steps', range: [8, 64, 1], default: 32, wire: 'ext:yue2OdeSteps' },
-        sa3: { range: [1, 64, 1], default: 8, wire: 'ext:sa3Steps' },
-        heartmula: { label: 'Codec steps', range: [1, 100, 1], default: 10, wire: 'ext:heartmulaCodecSteps' },
-      },
+      per: [
+        { engines: ['minimax-m3'], label: 'Flow steps', range: [2, 60, 1], default: 20, wire: 'ext:mm3Steps' },
+        { engines: ['yue2'], label: 'ODE steps', range: [8, 64, 1], default: 32, wire: 'ext:yue2OdeSteps' },
+        { engines: ['sa3'], range: [1, 64, 1], default: 8, wire: 'ext:sa3Steps' },
+        {
+          engines: ['heartmula'],
+          label: 'Codec steps',
+          range: [1, 100, 1],
+          default: 10,
+          wire: 'ext:heartmulaCodecSteps',
+        },
+      ],
     },
     {
       key: 'samp.cfg',
@@ -37,16 +48,23 @@ export const sampler = {
       default: 9,
       engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],
       wire: 'param:guidanceScale',
-      per: {
-        'minimax-m3': { label: 'Flow guidance', range: [1, 5, 0.1], default: 1.7, wire: 'ext:mm3CfgFlow' },
-        sa3: {
+      per: [
+        { engines: ['minimax-m3'], label: 'Flow guidance', range: [1, 5, 0.1], default: 1.7, wire: 'ext:mm3CfgFlow' },
+        {
+          engines: ['sa3'],
           range: [1, 10, 0.1],
           default: 1,
           wire: { to: 'param:guidanceScale', note: 'Read only with samplerPluginsEnabled and above 1.' },
           when: { param: 'samp.plugins', is: true },
         },
-        heartmula: { label: 'Codec guidance', range: [1, 10, 0.05], default: 1.25, wire: 'ext:heartmulaCodecGuidance' },
-      },
+        {
+          engines: ['heartmula'],
+          label: 'Codec guidance',
+          range: [1, 10, 0.05],
+          default: 1.25,
+          wire: 'ext:heartmulaCodecGuidance',
+        },
+      ],
     },
     {
       key: 'samp.shift',
@@ -57,11 +75,25 @@ export const sampler = {
       auto: {},
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
       engines: ['ace', 'minimax-m3', 'heartmula'],
-      wire: 'param:shift',
-      per: {
-        'minimax-m3': { label: 'Schedule shift', range: [0.5, 20, 0.05], default: 1, auto: false, wire: 'ext:mm3FlowShift' },
-        heartmula: { label: 'Flow shift', range: [0.1, 10, 0.05], default: 1, auto: false, wire: 'ext:heartmulaFlowShift' },
-      },
+      wire: { to: 'param:shift', auto: null, note: 'Auto sends nothing, so the engine\'s own shift applies.' },
+      per: [
+        {
+          engines: ['minimax-m3'],
+          label: 'Schedule shift',
+          range: [0.5, 20, 0.05],
+          default: 1,
+          auto: false,
+          wire: 'ext:mm3FlowShift',
+        },
+        {
+          engines: ['heartmula'],
+          label: 'Flow shift',
+          range: [0.1, 10, 0.05],
+          default: 1,
+          auto: false,
+          wire: 'ext:heartmulaFlowShift',
+        },
+      ],
     },
     {
       key: 'samp.solver',
@@ -70,13 +102,19 @@ export const sampler = {
       default: 'euler',
       options: { from: 'plugins.solver' },
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
+      engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
       wire: 'param:inferMethod',
-      per: {
-        'minimax-m3': {
-          options: { from: 'plugins.solver', include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }] },
+      per: [
+        {
+          engines: ['minimax-m3', 'sa3', 'heartmula'],
+          options: {
+            from: 'plugins.solver',
+            include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }],
+          },
           default: '',
         },
-        yue2: {
+        {
+          engines: ['yue2'],
           options: [
             { value: 'stock', label: 'Midpoint' },
             { value: 'wasserstein', label: 'Wasserstein Flow (exp.)' },
@@ -87,15 +125,7 @@ export const sampler = {
           default: 'stock',
           wire: 'ext:yue2NarSolver',
         },
-        sa3: {
-          options: { from: 'plugins.solver', include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }] },
-          default: '',
-        },
-        heartmula: {
-          options: { from: 'plugins.solver', include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }] },
-          default: '',
-        },
-      },
+      ],
     },
     {
       key: 'samp.sched',
@@ -104,16 +134,19 @@ export const sampler = {
       default: 'linear',
       options: { from: 'plugins.scheduler' },
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
-      wire: 'param:scheduler',
-      per: {
-        'minimax-m3': {
+      engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
+      wire: { to: 'param:scheduler', via: 'scheduler', note: 'The schedule and its shape, packed: "beta:0.50:0.70".' },
+      per: [
+        {
+          engines: ['minimax-m3', 'sa3', 'heartmula'],
           options: {
             from: 'plugins.scheduler',
             include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }],
           },
           default: '',
         },
-        yue2: {
+        {
+          engines: ['yue2'],
           options: [
             { value: 'stock', label: 'Uniform' },
             { value: 'ht_v3', label: 'HT V3 (exp.)' },
@@ -124,21 +157,7 @@ export const sampler = {
           default: 'stock',
           wire: 'ext:yue2NarScheduler',
         },
-        sa3: {
-          options: {
-            from: 'plugins.scheduler',
-            include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }],
-          },
-          default: '',
-        },
-        heartmula: {
-          options: {
-            from: 'plugins.scheduler',
-            include: [{ value: '', label: 'Native', tip: 'The engine\'s own sampling' }],
-          },
-          default: '',
-        },
-      },
+      ],
     },
     {
       key: 'samp.guide',
@@ -150,29 +169,16 @@ export const sampler = {
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
       engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],
       wire: 'param:guidanceMode',
-      per: {
-        'minimax-m3': {
+      per: [
+        {
+          engines: ['minimax-m3', 'sa3', 'heartmula'],
           options: {
             from: 'plugins.guidance',
             include: [{ value: '', label: 'Native', tip: 'The engine\'s own guidance' }],
           },
           default: '',
         },
-        sa3: {
-          options: {
-            from: 'plugins.guidance',
-            include: [{ value: '', label: 'Native', tip: 'The engine\'s own guidance' }],
-          },
-          default: '',
-        },
-        heartmula: {
-          options: {
-            from: 'plugins.guidance',
-            include: [{ value: '', label: 'Native', tip: 'The engine\'s own guidance' }],
-          },
-          default: '',
-        },
-      },
+      ],
     },
     {
       key: 'samp.plugins',
@@ -203,7 +209,7 @@ export const sampler = {
       range: [0, 1, 0.01],
       default: 0,
       engines: ['ace'],
-      below: 'samp.ce',
+      staysBelow: 'samp.ce',
       wire: 'param:cfgIntervalStart',
     },
     {
@@ -213,7 +219,6 @@ export const sampler = {
       range: [0, 1, 0.01],
       default: 1,
       engines: ['ace'],
-      above: 'samp.cs',
       wire: 'param:cfgIntervalEnd',
     },
     {
@@ -237,10 +242,7 @@ export const sampler = {
       },
       when: { param: 'samp.retake', above: 0 },
       engines: ['ace'],
-      wire: {
-        to: 'param:retakeSeed',
-        note: 'A number in the real app (-1 is a fresh one each run); the concept keeps it as text.',
-      },
+      wire: { to: 'param:retakeSeed', via: 'int', note: '-1 is a fresh one each run.' },
     },
     {
       key: 'sa3.lufs',
@@ -269,7 +271,7 @@ export const sampler = {
       default: 0.5,
       when: { param: 'samp.sched', is: 'beta' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string: "beta:<alpha>:<beta>".' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.beta',
@@ -279,7 +281,7 @@ export const sampler = {
       default: 0.7,
       when: { param: 'samp.sched', is: 'beta' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string: "beta:<alpha>:<beta>".' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.exp',
@@ -289,30 +291,33 @@ export const sampler = {
       default: 2,
       when: { param: 'samp.sched', is: 'power' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string: "power:<exponent>".' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.a',
       type: 'choice',
       label: 'Stage A',
       default: 'bong_tangent',
-      options: { from: 'plugins.scheduler' },
+      options: {
+        from: 'plugins.scheduler',
+        only: ['bong_tangent', 'linear', 'cosine', 'ddim_uniform', 'sgm_uniform', 'linear_quadratic'],
+      },
       when: { param: 'samp.sched', is: 'composite' },
       engines: ['ace'],
-      wire: {
-        to: 'param:scheduler',
-        note: 'Packed into the scheduler string: "composite:<a>+<b>:<crossover>:<split>"; stage names are plugin ids (bong_tangent, linear).',
-      },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.b',
       type: 'choice',
       label: 'Stage B',
       default: 'linear',
-      options: { from: 'plugins.scheduler' },
+      options: {
+        from: 'plugins.scheduler',
+        only: ['bong_tangent', 'linear', 'cosine', 'ddim_uniform', 'sgm_uniform', 'linear_quadratic'],
+      },
       when: { param: 'samp.sched', is: 'composite' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string (see sch.a).' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.x',
@@ -322,7 +327,7 @@ export const sampler = {
       default: 0.5,
       when: { param: 'samp.sched', is: 'composite' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string (see sch.a).' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'sch.split',
@@ -332,7 +337,7 @@ export const sampler = {
       default: 0.5,
       when: { param: 'samp.sched', is: 'composite' },
       engines: ['ace'],
-      wire: { to: 'param:scheduler', note: 'Packed into the scheduler string (see sch.a).' },
+      wire: { to: 'param:scheduler', via: 'scheduler' },
     },
     {
       key: 'yn.wassersteinflow.0',
@@ -698,35 +703,35 @@ export const sampler = {
       part: 'choiceRow',
       param: 'samp.steps',
       label: 'Quality',
-      choices: {
-        ace: [['Draft', 8], ['Standard', 12], ['High', 30]],
-        'minimax-m3': [['Draft', 10], ['Standard', 20], ['High', 40]],
-        yue2: [['Draft', 16], ['Standard', 32], ['High', 64]],
-        sa3: [['Draft', 4], ['Standard', 8], ['High', 16]],
-        heartmula: [['Draft', 6], ['Standard', 10], ['High', 20]],
-      },
       between: '{v} steps',
       when: { not: { state: 'customTimesteps', set: true } },
+      per: [
+        { engines: ['ace'], choices: [['Draft', 8], ['Standard', 12], ['High', 30]] },
+        { engines: ['minimax-m3'], choices: [['Draft', 10], ['Standard', 20], ['High', 40]] },
+        { engines: ['yue2'], choices: [['Draft', 16], ['Standard', 32], ['High', 64]] },
+        { engines: ['sa3'], choices: [['Draft', 4], ['Standard', 8], ['High', 16]] },
+        { engines: ['heartmula'], choices: [['Draft', 6], ['Standard', 10], ['High', 20]] },
+      ],
       tiers: ['quick'],
     },
     {
       part: 'note',
       text: 'Custom timesteps from Latent & correction set the steps',
       when: { state: 'customTimesteps', set: true },
-      action: { do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show in Lab' },
+      actions: [{ do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show in Lab' }],
       tiers: ['quick'],
     },
     {
       part: 'choiceRow',
       param: 'samp.cfg',
       label: 'Follow the prompt',
-      choices: {
-        ace: [['Loose', 5], ['Balanced', 9], ['Strict', 13]],
-        'minimax-m3': [['Loose', 1.3], ['Balanced', 1.7], ['Strict', 2.5]],
-        heartmula: [['Loose', 1], ['Balanced', 1.25], ['Strict', 2]],
-      },
       between: 'guidance {v}',
       engines: ['ace', 'minimax-m3', 'heartmula'],
+      per: [
+        { engines: ['ace'], choices: [['Loose', 5], ['Balanced', 9], ['Strict', 13]] },
+        { engines: ['minimax-m3'], choices: [['Loose', 1.3], ['Balanced', 1.7], ['Strict', 2.5]] },
+        { engines: ['heartmula'], choices: [['Loose', 1], ['Balanced', 1.25], ['Strict', 2]] },
+      ],
       tiers: ['quick'],
     },
     {
@@ -745,32 +750,25 @@ export const sampler = {
     },
     {
       part: 'samplerScope',
-      params: ['samp.steps', 'samp.shift', 'samp.sched', 'samp.cs', 'samp.ce'],
+      reads: ['samp.steps', 'samp.shift', 'samp.sched', 'samp.cs', 'samp.ce'],
       children: [
         {
           part: 'powerButton',
           param: 'samp.plugins',
           label: 'Lua plugins (experimental)',
-          opts: { look: 'scope' },
           tip: 'Solvers, schedules and guidance modes from Lua plugins, in place of native sampling. They were tuned for ACE-Step.',
+          opts: { look: 'scope' },
         },
       ],
-      tiers: ['studio'],
-    },
-    {
-      part: 'samplerScope',
-      params: ['samp.steps', 'samp.shift', 'samp.sched', 'samp.cs', 'samp.ce'],
-      opts: { interval: true },
-      children: [
+      per: [
         {
-          part: 'powerButton',
-          param: 'samp.plugins',
-          label: 'Lua plugins (experimental)',
-          opts: { look: 'scope' },
-          tip: 'Solvers, schedules and guidance modes from Lua plugins, in place of native sampling. They were tuned for ACE-Step.',
+          tiers: ['lab'],
+          params: ['samp.cs', 'samp.ce'],
+          reads: ['samp.steps', 'samp.shift', 'samp.sched'],
+          opts: { interval: true },
         },
       ],
-      tiers: ['lab'],
+      tiers: ['studio', 'lab'],
     },
     {
       part: 'well',
@@ -811,8 +809,8 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Beta (Custom)' },
-      when: { param: 'samp.sched', is: 'beta' },
       engines: ['ace'],
+      when: { param: 'samp.sched', is: 'beta' },
       children: [
         { part: 'knob', param: 'sch.alpha', label: 'α' },
         { part: 'knob', param: 'sch.beta', label: 'β' },
@@ -823,8 +821,8 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Power' },
-      when: { param: 'samp.sched', is: 'power' },
       engines: ['ace'],
+      when: { param: 'samp.sched', is: 'power' },
       children: [
         { part: 'knob', param: 'sch.exp' },
         { part: 'note', text: 'Above 1 front-loads the steps; below 1 back-loads them.' },
@@ -834,8 +832,8 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Composite' },
-      when: { param: 'samp.sched', is: 'composite' },
       engines: ['ace'],
+      when: { param: 'samp.sched', is: 'composite' },
       children: [
         { part: 'labelled', label: 'A', children: [{ part: 'pick', param: 'sch.a', opts: { variant: 'lcd' } }] },
         { part: 'labelled', label: 'B', children: [{ part: 'pick', param: 'sch.b', opts: { variant: 'lcd' } }] },
@@ -851,9 +849,9 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Wasserstein Flow controls' },
-      when: { param: 'samp.solver', is: 'wasserstein' },
       engines: ['yue2'],
-      action: { do: 'bespoke', name: 'resetPluginControls', label: 'Reset' },
+      when: { param: 'samp.solver', is: 'wasserstein' },
+      actions: [{ do: 'reset', label: 'Reset' }],
       children: [
         { part: 'labelled', children: [{ part: 'token', param: 'yn.wassersteinflow.0' }] },
         { part: 'labelled', children: [{ part: 'token', param: 'yn.wassersteinflow.1' }] },
@@ -869,9 +867,9 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Latent Channel EQ controls' },
-      when: { param: 'samp.solver', is: 'latent_eq' },
       engines: ['yue2'],
-      action: { do: 'bespoke', name: 'resetPluginControls', label: 'Reset' },
+      when: { param: 'samp.solver', is: 'latent_eq' },
+      actions: [{ do: 'reset', label: 'Reset' }],
       children: [
         { part: 'labelled', children: [{ part: 'token', param: 'yn.latentchanneleq.0' }] },
         { part: 'labelled', children: [{ part: 'token', param: 'yn.latentchanneleq.1' }] },
@@ -885,9 +883,9 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Timestep Lie controls' },
-      when: { param: 'samp.solver', is: 'tlie' },
       engines: ['yue2'],
-      action: { do: 'bespoke', name: 'resetPluginControls', label: 'Reset' },
+      when: { param: 'samp.solver', is: 'tlie' },
+      actions: [{ do: 'reset', label: 'Reset' }],
       children: [
         { part: 'labelled', children: [{ part: 'token', param: 'yn.timesteplie.0' }] },
         { part: 'labelled', children: [{ part: 'pick', param: 'yn.timesteplie.1', opts: { variant: 'lcd' } }] },
@@ -900,9 +898,9 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'Plan Overdrive controls' },
-      when: { param: 'samp.sched', is: 'plan_overdrive' },
       engines: ['yue2'],
-      action: { do: 'bespoke', name: 'resetPluginControls', label: 'Reset' },
+      when: { param: 'samp.sched', is: 'plan_overdrive' },
+      actions: [{ do: 'reset', label: 'Reset' }],
       children: [
         { part: 'labelled', children: [{ part: 'token', param: 'yn.planoverdrive.0' }] },
         { part: 'labelled', children: [{ part: 'pick', param: 'yn.planoverdrive.1', opts: { variant: 'lcd' } }] },
@@ -914,9 +912,9 @@ export const sampler = {
     {
       part: 'group',
       opts: { title: 'HT V3 controls' },
-      when: { param: 'samp.sched', is: 'ht_v3' },
       engines: ['yue2'],
-      action: { do: 'bespoke', name: 'resetPluginControls', label: 'Reset' },
+      when: { param: 'samp.sched', is: 'ht_v3' },
+      actions: [{ do: 'reset', label: 'Reset' }],
       children: [
         { part: 'labelled', children: [{ part: 'token', param: 'yn.htv3.0' }] },
         { part: 'labelled', children: [{ part: 'token', param: 'yn.htv3.1' }] },

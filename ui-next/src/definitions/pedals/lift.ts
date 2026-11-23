@@ -12,7 +12,6 @@ export const lift = {
   hue: 140,
   on: 'pp.lift.on',
   main: 'pp.lift.den',
-  thumbWidth: 2,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -23,7 +22,7 @@ export const lift = {
       label: 'Denoise',
       range: [0, 1, 0.05],
       default: 0.3,
-      wire: 'param:slDenoiseStrength',
+      wire: { to: 'param:slDenoiseStrength', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'pp.lift.floor',
@@ -33,14 +32,7 @@ export const lift = {
       default: 0.1,
       wire: 'param:slNoiseFloor',
     },
-    {
-      key: 'pp.lift.hf',
-      type: 'number',
-      label: 'HF ext',
-      range: [0, 0.5, 0.01],
-      default: 0,
-      wire: 'param:slHfMix',
-    },
+    { key: 'pp.lift.hf', type: 'number', label: 'HF ext', range: [0, 0.5, 0.01], default: 0, wire: 'param:slHfMix' },
     {
       key: 'pp.lift.tr',
       type: 'number',
@@ -48,7 +40,7 @@ export const lift = {
       short: 'Attack',
       range: [0, 1, 0.05],
       default: 0,
-      wire: 'param:slTransientBoost',
+      wire: { to: 'param:slTransientBoost', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'pp.lift.shim',

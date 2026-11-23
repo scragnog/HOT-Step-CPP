@@ -1,18 +1,20 @@
 // The definition format: what a module, pedal or side unit of the Create desk is, as plain data.
 //
-// Every definition file exports one object that satisfies ModuleDef, PedalDef or UnitDef. The objects hold
-// data only: no functions, no class instances, nothing JSON cannot carry. tools/validate-definitions.ts checks
-// that each one survives a JSON round trip unchanged, and what the type system cannot check besides.
+// Every definition file exports one object that satisfies ModuleDef, PedalDef or UnitDef. The objects hold data
+// only: no functions, no class instances, nothing JSON cannot carry. tools/validate-definitions.ts checks each one
+// in its JSON form against these types, and then what the types cannot check.
 //
-// The parts a definition may name (PartName) are the inventory in parts.ts. Adding a part there makes it
-// available to every definition; nothing else needs to change.
+// The lists a definition may draw from (parts, units, text checks, option sources, desk facts, named actions,
+// wire transforms) are the inventory in parts.ts and transforms.ts, and the engines are engines.ts. Adding an entry
+// there makes it available to every definition; nothing here changes.
 //
 // docs/02-definition-format.md explains each field with an example from a real definition.
 
-import type { PartName } from './parts.ts';
+import type { OptsOf, PartName, UnitName, CheckName, OptionSourceName, ActionName } from './parts.ts';
+import type { TransformName } from './transforms.ts';
+import type { EngineId } from './engines.ts';
 
-/** The five engines, by the ids the server uses for them (GET /api/capabilities). */
-export type EngineId = 'ace' | 'minimax-m3' | 'yue2' | 'sa3' | 'heartmula';
+export type { EngineId };
 
 export type Tier = 'quick' | 'studio' | 'lab';
 
@@ -21,21 +23,16 @@ export type Json = string | number | boolean | null | Json[] | { [key: string]: 
 /** A value a parameter can hold. */
 export type Value = string | number | boolean;
 
-/** A value for some engines, keyed by engine id. An engine left out takes the base value. */
-export type PerEngine<T> = { [E in EngineId]?: T };
-
-/** English source text. Its translation key is derived from where it sits (docs/05-what-the-definition-drives.md,
- *  "Strings and translation"), so a definition never names a translation key itself. */
+/** English source text. It may name values to fill in (docs/05, "Words that name values"): {engine}, {value:<key>},
+ *  {count:<state or fact>}, {file:<state>|<words when empty>}, and in a parameter's own words {min}, {max} and
+ *  {default}. Its translation key is derived from where it sits, so a definition never names a key. */
 export type Text = string;
 
 /** What a parameter holds. A choice is one of its options' values. */
 export type ValueType = 'number' | 'boolean' | 'choice' | 'text';
 
-/** Units a number is shown in. 's' reads as m:ss from a minute up. */
-export type Unit = 's' | 'ms' | 'Hz' | 'dB' | 'dBFS' | 'LUFS' | '%';
-
-/** How a number is written wherever it is shown: read-outs, tips, undo steps, "Also set" lines.
- *  Without one, a number shows as many decimals as its step needs, then its unit. */
+/** How a number is written wherever it is shown: read-outs, tips, undo steps, "Also set" lines, held notes.
+ *  Without one: docs/05 "How a number is written". */
 export interface Format {
   /** Fixed decimals, when the step's own would be too few (YuE2 penalties step by 0.005). */
   decimals?: number;
@@ -45,8 +42,6 @@ export interface Format {
   perSecond?: number;
   /** Exact values said as words instead: 0 is "whole history", Top-P 0 is "off", false is "bypassed". */
   words?: { value: Value; text: Text }[];
-  /** 0..1 written as a percentage. */
-  percent?: true;
 }
 
 /** One option of a choice. `value` is what is stored and sent; the rest is how it reads. */
@@ -56,26 +51,29 @@ export interface Option {
   /** On a chip selector or a segmented row where the label does not fit. */
   short?: Text;
   tip?: Text;
-  /** What an LCD picker prints for it ("-14 LUFS", "TILED V2.1"). Default: the label in capitals. */
+  /** What an LCD picker prints for it ("-14 LUFS", "V2.1"). Default: the label in capitals. */
   lcd?: Text;
   /** The LCD's small second line for it ("refine only"). */
   detail?: Text;
+  /** Values this option was saved under before, read as this one when saved data is loaded (docs/05, "Saved
+   *  data"). */
+  was?: (string | number)[];
 }
 
 /** Where a choice's options come from when the server owns the list. */
-export type OptionSource =
-  | 'plugins.solver' | 'plugins.scheduler' | 'plugins.guidance' | 'plugins.postprocess'
-  | 'models' | 'languages' | 'adapters.lm' | 'mm3.planks' | 'mm3.hiddens' | 'caption.sources' | 'caption.datasets';
-
 export interface OptionsFrom {
-  from: OptionSource;
+  from: OptionSourceName;
   /** For 'models': the backend's bucket (GET /api/backends/models buckets). */
   bucket?: string;
-  /** Options shown before the server's list ("Native": the engine's own sampling). */
+  /** Options the definition knows, merged with the server's list by value: words given here win, and a value the
+   *  server does not list ("Native": the engine's own sampling) is offered first. */
   include?: Option[];
+  /** Only these of the server's values (a composite schedule's stages). */
+  only?: string[];
 }
 
-/** A condition on parameters, desk state or the engine. Every referenced parameter must exist. */
+/** A condition on parameters, desk state or the engine. A condition on a parameter the engine does not have is
+ *  false. */
 export type Condition =
   | { param: string; is?: Value | Value[]; not?: Value | Value[]; above?: number; below?: number; auto?: boolean }
   | { state: string; set?: boolean; atLeast?: number }
@@ -85,41 +83,53 @@ export type Condition =
   | { any: Condition[] }
   | { not: Condition };
 
-/** Where the real application keeps a value. The channel says how it travels:
- *  param    a field of the Create request body, held in ui/src/stores/globalParamsStore.ts (GENERATION_DEFAULTS)
- *  ext      a backend-declared extension knob, sent in backendParams (GET /api/capabilities extensions)
- *  content  a per-song field of the Create form (ui/src/components/create/createContent.ts)
- *  model    engine state chosen through POST /api/backends/models, not part of the request
- *  ui       form state the browser keeps and uses itself; never sent as such
- *  plugin   a Lua plugin's declared parameter, sent in pluginParams as "<plugin>:<key>" */
-export type Channel = 'param' | 'ext' | 'content' | 'model' | 'ui' | 'plugin';
+/** Where a value goes in the request, or in the engine's state. The channel says which:
+ *  param    a field of GENERATION_DEFAULTS (server/src/contracts/generationControls.ts), the resolver's input
+ *  ext      a backend's extension knob (capabilities().extensions), sent in backendParams
+ *  content  a field of CreateContent (ui/src/components/create/createContent.ts), the Create form's content
+ *  body     a top-level request field set after the resolver (HeartMuLa's frozen model choices)
+ *  model    engine state chosen through POST /api/backends/models, never part of the request
+ *  ui       form state the browser keeps and uses itself; never sent
+ *  A name may be a path into its field: `param:adapterGroupScales.self_attn`, `param:adapterStack[0].scale`. */
+export type Channel = 'param' | 'ext' | 'content' | 'body' | 'model' | 'ui';
 export type WireKey = `${Channel}:${string}`;
 
-export type WireRef =
-  | WireKey
-  | {
-    to: WireKey;
-    /** The real field means the opposite (lm.on is skipLm). */
-    invert?: true;
-    /** Multiply by this on the way out (seconds to milliseconds: 1000). */
-    scale?: number;
-    /** Sent while the parameter is on auto (bpm 0, duration -1, keyScale ''). */
-    auto?: Json;
-    /** Anything the mapping cannot say in fields: packing, a missing declaration, a doubt. */
-    note: Text;
-  }
-  /** No counterpart in the real application. The text says what the real app does instead. */
-  | { none: Text };
+/** A wire that does more than copy the value (docs/05, "What is sent"). */
+export interface WireMap {
+  to: WireKey;
+  /** A switch whose real field means the opposite (lm.on is skipLm). */
+  invert?: true;
+  /** Multiply on the way out (seconds to milliseconds: 1000). */
+  scale?: number;
+  /** Divide on the way out (seconds to minutes: 60; percent to 0..1: 100). */
+  divide?: number;
+  /** A choice's value to the real value (Simple is false). An option the map leaves out sends nothing here. */
+  map?: { [value: string]: Json };
+  /** A named transform (transforms.ts) for what fields cannot say: several parameters packed into one string, text
+   *  sent as a number. Every parameter of a packing transform names it. */
+  via?: TransformName;
+  /** Sent while the parameter is on auto. null: nothing is sent, so the engine's own default applies. */
+  auto?: Json;
+  /** Sent only while this holds; otherwise `else` is sent, or nothing (the denoiser's strength while it is off). */
+  when?: Condition;
+  else?: Json;
+  /** Anything a reader needs to know: a field read but not declared, a doubt. Not used by any code. */
+  note?: Text;
+}
 
-/** A parameter that can be left to the engine. Its auto switch is stored beside it as `<key>.auto`. */
+/** A single wire, several (one control to several fields), or none: no counterpart in the real application, and
+ *  the text says what the real app does instead. */
+export type Wire = WireKey | WireMap | Wire[] | { none: Text };
+
+/** A parameter that can be left to the engine, beside a number. Its switch is stored in the desk's auto map. */
 export interface Auto {
   /** What auto stands for, said with it: "auto (1.00)". Default: the default value as an estimate, "≈ 3.0". */
   says?: Text;
 }
 
-/** A text check the inventory knows (parts.ts VALIDATORS), with the message shown when it fails. */
+/** A text check from the inventory (parts.ts CHECKS), with the message shown when it fails. */
 export interface Check {
-  rule: 'seed' | 'seedOrMinusOne' | 'seedOrEmpty' | 'timesteps';
+  rule: CheckName;
   message: Text;
   /** A field that holds something composed keeps what was typed while it is invalid, and says what is in force. */
   keepInvalid?: Text;
@@ -135,7 +145,7 @@ export interface ParamFace {
   tip?: Text;
   /** [min, max, step]. */
   range?: [number, number, number];
-  unit?: Unit;
+  unit?: UnitName;
   format?: Format;
   default: Value;
   auto?: Auto | false;
@@ -147,31 +157,44 @@ export interface ParamFace {
   /** The parameter applies only when this holds. Otherwise its control is hidden (a pedal keeps its room), its value
    *  is kept, it never shows as changed, and it is not sent. */
   when?: Condition;
-  /** A label that depends on another setting (DCW's first knob is "Low" in Both mode, "Scaler" otherwise). */
-  labelWhen?: { when: Condition; label: Text }[];
-  wire: WireRef;
+  wire: Wire;
+}
+
+/** One line of a parameter's per-engine table: these engines take these fields instead of the base ones. */
+export type EngineOverride = { engines: EngineId[] } & Partial<ParamFace>;
+/** Words that change with another setting (DCW's first knob is "Low" in Both mode, "Scaler" otherwise). */
+export type WordsOverride = { when: Condition } & Partial<Pick<ParamFace, 'label' | 'short' | 'tip' | 'auto'>>;
+
+/** A song value whose limit differs per engine (length, takes): an engine that cannot take it reads it at its limit
+ *  and holds the value for an engine that can. Slots: {value} the held value, {shown} the limit in force, {engine}
+ *  the engine it returns on. */
+export interface Held {
+  /** Said by the control while the value is held: "Your {value} return on {engine}". */
+  note: Text;
+  /** Said in the engine switch's toast: "Takes capped at {shown}". */
+  toast: Text;
 }
 
 export interface ParamDef extends ParamFace {
   key: string;
   type: ValueType;
-  /** Which engines have it. Default: the definition's engines. */
+  /** Keys this parameter was saved under before, read as this one when saved data is loaded. */
+  was?: string[];
+  /** Which engines have it. Default: the definition's. Required when `per` gives engine lines. */
   engines?: EngineId[];
   /** Who keeps it across an engine switch. Default: the definition's. */
   owner?: Owner;
   /** What saves it. Default: the definition's. */
   stored?: Stored;
-  /** A song value whose limit differs per engine (length, takes): an engine that cannot take it reads it at its
-   *  limit and holds the value for an engine that can. */
-  held?: true;
-  /** Stays a step below (or above) another parameter: a range's two ends never cross. */
-  below?: string;
-  above?: string;
+  held?: Held;
+  /** Stays a step below this parameter, which stays a step above it: a range's two ends never cross. */
+  staysBelow?: string;
   /** On a pedal, stands beside this switch and shows while it is off (Fixed seed beside Follow the seed). */
   beside?: string;
   /** Presses within this many milliseconds are one undo step (taps on TAP). */
   run?: number;
-  per?: PerEngine<Partial<ParamFace>>;
+  /** Engine lines (each engine in at most one), then word lines that hold while their condition does. */
+  per?: (EngineOverride | WordsOverride)[];
 }
 
 /** engine: kept per engine, put aside on a switch and brought back on return.
@@ -181,66 +204,98 @@ export type Owner = 'engine' | 'song';
  *  none: saved with the desk only (a repaint region's settings belong to the song being repainted). */
 export type Stored = 'settings' | 'content' | 'none';
 
-/** Something a module keeps that is not a setting: a file, a seed, a selection, its adapters. */
+/** Something a module keeps that is not a setting: a file, the seed, a selection, its adapters, a list. */
 export interface StateDef {
   key: string;
-  kind: 'file' | 'seed' | 'span' | 'slots' | 'record';
+  kind: 'file' | 'seed' | 'span' | 'slots' | 'record' | 'list';
   /** How undo and toasts name it: "the timbre reference". */
   noun: Text;
-  /** The undo step for loading a file: "Load {file} as the timbre reference". */
-  load?: Text;
+  /** How an empty value reads in a step ("random" for the seed). */
+  empty?: Text;
+  /** Its undo steps, by the name its part uses: the part asks for a step by name and the words come from here.
+   *  Slots: {file}, {from}, {to}, and any the step's caller fills ({n}, {section}). A file has `load` and `clear`
+   *  without saying (docs/05, "Undo step names"). */
+  steps?: { [step: string]: Text };
   owner: Owner;
   stored: Stored;
-  wire: WireRef | PerEngine<WireRef>;
+  wire: Wire | { engines: EngineId[]; wire: Wire }[];
 }
 
 /** A button a face offers. */
 export type Action =
   | { do: 'set'; param: string; value: Value; label: Text; tip?: Text }
   | { do: 'auto'; param: string; label: Text }
+  /** Go to a tier and ring these controls there: parameter keys, or a state key for its drop zone. */
   | { do: 'tier'; tier: Tier; ring?: string[]; label: Text }
   | { do: 'example'; param: string; label: Text }
   | { do: 'add'; item: string; label: Text }
-  | { do: 'bespoke'; name: string; label: Text; tip?: Text };
+  /** Reset every parameter the node's children edit (a plugin's control group). */
+  | { do: 'reset'; label: Text }
+  /** Add a section tag to the lyrics. */
+  | { do: 'tag'; tag: string; label: Text; tip?: Text }
+  /** A named action from the inventory (parts.ts ACTIONS). */
+  | { do: 'bespoke'; name: ActionName; label: Text; tip?: Text };
 
-/** A Quick choice: the plain word, and the detailed value it sets. */
-export type Choice = [Text, Value];
+/** A Quick choice: the plain word, and the detailed value it sets, or several values at once. */
+export type Choice = [Text, Value | { [key: string]: Value }];
 
-/** One element of a face: a part from the inventory, bound to what it shows or edits. */
-export interface Node {
-  part: PartName;
-  /** Shown only at these tiers. Without it, at every tier the definition shows at. */
-  tiers?: Tier[];
-  /** The parameter it edits or shows. */
-  param?: string;
-  /** Parts bound to several: an XY pad's x and y, a terminal line's tokens. */
-  params?: string[];
+/** What a node may change per engine, tier or state, shallow like a parameter's lines. */
+export type NodeOverride = { engines?: EngineId[]; tiers?: Tier[]; when?: Condition } & Partial<NodeFields>;
+
+/** The fields every node may carry, whatever its part. */
+export interface NodeFields {
+  /** The parameter it edits. Only a control or bespoke part edits. */
+  param: string;
+  /** Parts that edit several: an XY pad's x and y, a bespoke part's values. */
+  params: string[];
+  /** What a read-out or a bespoke drawing shows without editing it. */
+  reads: string[];
+  /** State it edits: a drop zone's file, the seed. */
+  state: string[];
   /** Its words where they are not the parameter's label. */
-  label?: Text;
-  tip?: Text;
-  /** Static words: a note, a hint, a strip's reason. */
-  text?: Text;
-  /** Options the part takes, as listed for it in the inventory. */
-  opts?: { [key: string]: Json };
-  children?: Node[];
+  label: Text;
+  tip: Text;
+  /** Static words: a note, a hint. */
+  text: Text;
+  /** Stands back at 45% while this holds, says why, and stays operable. */
+  dim: { when: Condition; says: Text };
+  /** A Quick choice row's plain choices. */
+  choices: Choice[];
+  /** How a choice row names a value between its choices: "{v} steps". */
+  between: Text;
+  /** Buttons or links it offers. */
+  actions: Action[];
+}
+
+interface NodeBase extends Partial<NodeFields> {
+  /** Shown only at these tiers. Without it, at every tier its parent shows at. */
+  tiers?: Tier[];
   /** Shown only while this holds. */
   when?: Condition;
   /** Shown only on these engines. */
   engines?: EngineId[];
-  /** Stands back at 45% while this holds, says why, and stays operable. */
-  dim?: { when: Condition; says: Text };
-  /** A Quick choice row: the plain choices, per engine when they differ. */
-  choices?: Choice[] | PerEngine<Choice[]>;
-  /** How a choice row names a value between its choices: "{v} steps". */
-  between?: Text;
-  action?: Action;
+  children?: Node[];
 }
 
-/** The one-line strip a tile becomes when it has nothing to show. The first that holds wins. */
+type NodeFor<P extends PartName> = NodeBase & {
+  part: P;
+  /** The part's options, as the inventory lists them for it. */
+  opts?: OptsOf<P>;
+  /** Lines that change its fields on some engines, tiers or states. Later lines win. */
+  per?: (NodeOverride & { opts?: OptsOf<P> })[];
+};
+
+/** One element of a face: a part from the inventory, bound to what it shows or edits, with that part's options. */
+export type Node = { [P in PartName]: NodeFor<P> }[PartName];
+
+/** The one-line strip a tile becomes when it has nothing to show, a pedal's idle reason, or (Strip without
+ *  actions) words. The first that holds wins. */
 export interface Strip {
   when: Condition;
   says: Text;
-  action?: Action;
+  actions?: Action[];
+  /** Only at these tiers. */
+  tiers?: Tier[];
 }
 
 /** How a tile asks for room. The packer decides; these are hints. */
@@ -261,13 +316,13 @@ export interface Size {
   stripKeepsWidth?: true;
 }
 
-/** A thumbnail is a drawing in the thumbnail kit's classes (src/css/30-thumbnails.css in the concept), kept as
- *  an SVG fragment in thumbs/. A pedal's or side unit's file holds only its middle: the frame is drawn from the
- *  definition (name, hue, foot switch, width). */
+/** A thumbnail is a drawing in the thumbnail kit's classes (src/css/30-thumbnails.css in the concept), kept as an
+ *  SVG fragment in thumbs/. A pedal's or side unit's file holds only its middle: the frame is drawn from the
+ *  definition. `node tools/thumb.ts <pedal>` draws a pedal's middle from its parameters. */
 export interface Thumb {
   file: string;
   /** A different drawing on some engines. */
-  per?: PerEngine<string>;
+  per?: { engines: EngineId[]; file: string }[];
 }
 
 export type Category = 'Compose' | 'Engine' | 'Chain' | 'Words';
@@ -288,6 +343,9 @@ interface DefBase {
   thumb?: Thumb;
 }
 
+/** What a module may change per engine. */
+export type ModuleOverride = { engines: EngineId[] } & Partial<Pick<ModuleDef, 'name' | 'quickName' | 'desc' | 'tierSummary'>> & { size?: Partial<Size> };
+
 export interface ModuleDef extends DefBase {
   kind: 'module';
   category: Category;
@@ -295,12 +353,12 @@ export interface ModuleDef extends DefBase {
   labUnder?: string;
   /** Built into the page, not added from the Modules panel (the prompt, the lyric sheet, the models). */
   builtIn?: true;
-  /** Brought by an action on a song (Repaint), not from the panel. */
+  /** Brought by an action on a song (Repaint), not from the panel. Its values are not part of a Create request. */
   source?: true;
   /** What each tier adds, for the picker's description: [Quick, Studio, Lab]. */
   tierSummary?: [Text, Text, Text];
   size: Size;
-  per?: PerEngine<{ name?: Text; quickName?: Text; desc?: Text; size?: Partial<Size> }>;
+  per?: ModuleOverride[];
   /** Its name at Quick when Quick shows less of it ("Tempo"). */
   quickName?: Text;
   /** What the tile shows, one list for every tier: a node with `tiers` appears only at those tiers. A Lab-only
@@ -315,19 +373,15 @@ export interface PedalDef extends DefBase {
   short?: Text;
   /** The pedal's face colour, a hue in degrees (the --h of the concept's pedals). */
   hue: number;
-  /** Its foot switch. null: always on (Pre-VST gain). */
+  /** Its foot switch. null: always on (Pre-VST gain), drawn with the neutral face. */
   on: string | null;
   /** The one knob it shows at Studio. null: it shows its Studio face nodes instead. */
   main: string | null;
-  /** Its thumbnail's width in pedal units. */
-  thumbWidth: 1 | 2;
   /** What it shows beyond what is laid out from its parameters: at Studio, in place of a main knob; at Lab, after
    *  its knobs and selectors and before its switches. Tier each node. */
   face?: Node[];
   /** Engaged with nothing to run: an amber LED and the reason. The first that holds wins. */
   idle?: Strip[];
-  /** What the blanking plate over kept-empty knob cells says: which setting fills them. */
-  blank?: Strip[];
 }
 
 export interface UnitDef extends DefBase {
@@ -343,3 +397,60 @@ export interface UnitDef extends DefBase {
 }
 
 export type Definition = ModuleDef | PedalDef | UnitDef;
+
+/* ---------------------------------------------------------------- saved data
+   Every record the page saves carries `v`, the version of its shape. Values are keyed by parameter key, in the
+   definition's own units; auto switches are a map of their own. docs/05, "Saved data", says how each is read. */
+
+export const SAVED_VERSION = 1;
+
+/** A parameter's values: key to value, and key to "on auto". */
+export interface SavedValues {
+  vals: { [key: string]: Value };
+  auto?: { [key: string]: boolean };
+}
+
+/** A workflow: the desk's layout. No values. */
+export interface Workflow {
+  v: 1;
+  name: string;
+  tier: Tier;
+  modules: string[];
+  /** Pedals and side units, in their order. */
+  board: string[];
+  note?: string;
+}
+
+/** A revision: one engine's settings, saved under a workflow. */
+export interface Revision extends SavedValues {
+  v: 1;
+  workflow: string;
+  name: string;
+  engine: EngineId;
+  /** State saved in a revision (stored: 'settings'): the adapter slots. */
+  state?: { [key: string]: Json };
+  /** Saved "with content": the content values and the prompt's text are in `vals` too. */
+  withContent?: true;
+  note?: string;
+}
+
+/** A draft: one song's content for one engine. */
+export interface Draft extends SavedValues {
+  v: 1;
+  name: string;
+  engine: EngineId;
+}
+
+/** The desk autosave: everything, so a reload or another tab finds the desk as it was. */
+export interface SavedDesk extends SavedValues {
+  v: 1;
+  engine: EngineId;
+  tier: Tier;
+  modules: string[];
+  board: string[];
+  state: { [key: string]: Json };
+  /** Engine-owned values put aside for the engines not in use. */
+  stash: { [engine: string]: SavedValues & { state?: { [key: string]: Json } } };
+  /** Held values, by parameter key. */
+  hold: { [key: string]: { value: number; shown: number; from: EngineId } };
+}

@@ -25,7 +25,7 @@ export const repaint = {
         { value: 'balanced', label: 'Balanced' },
         { value: 'aggressive', label: 'Aggressive' },
       ],
-      wire: 'content:repaintMode',
+      wire: { to: 'ui:repaint.mode', note: 'A field of the Repaint studio (studioWorkflows), not of the Create form.' },
     },
     {
       key: 'rp.xfade',
@@ -34,7 +34,10 @@ export const repaint = {
       range: [0, 30, 1],
       format: { template: '{v} fr ({s})', perSecond: 25 },
       default: 10,
-      wire: 'content:crossfadeFrames',
+      wire: {
+        to: 'ui:repaint.crossfadeFrames',
+        note: 'A field of the Repaint studio (studioWorkflows), not of the Create form.',
+      },
     },
     {
       key: 'rp.lyrics',
@@ -42,7 +45,7 @@ export const repaint = {
       label: 'Lyrics',
       undoName: 'the repaint lyrics',
       default: '',
-      wire: { to: 'content:lyrics', note: 'The Repaint studio\'s own lyrics field (studioWorkflows repaint fields).' },
+      wire: { to: 'ui:repaint.lyrics', note: 'The Repaint studio\'s own lyrics field (studioWorkflows).' },
     },
   ],
   state: [
@@ -52,7 +55,7 @@ export const repaint = {
       noun: 'the song to repaint',
       owner: 'song',
       stored: 'none',
-      wire: { to: 'content:sourceSong', note: 'The Repaint studio\'s source song fields (sourceSong, sourceAudioUrl).' },
+      wire: { to: 'ui:repaint.source', note: 'The Repaint studio\'s source song fields (sourceSong, sourceAudioUrl).' },
     },
     {
       key: 'region',
@@ -61,7 +64,7 @@ export const repaint = {
       owner: 'song',
       stored: 'none',
       wire: {
-        to: 'content:regionStart',
+        to: 'ui:repaint.region',
         note: 'regionStart and regionEnd, in seconds in the real app; a fraction of the song in the concept.',
       },
     },
@@ -69,6 +72,7 @@ export const repaint = {
   face: [
     {
       part: 'repaintRegion',
+      state: ['source', 'region'],
       children: [
         { part: 'segmented', param: 'rp.mode', tiers: ['lab'] },
         { part: 'knob', param: 'rp.xfade', label: 'Crossfade', opts: { small: true }, tiers: ['lab'] },
@@ -82,8 +86,8 @@ export const repaint = {
     {
       part: 'textArea',
       param: 'rp.lyrics',
-      opts: { look: 'paper' },
       tip: 'Lyrics for the repaint. They replace the whole track\'s lyrics.',
+      opts: { look: 'paper' },
       tiers: ['lab'],
     },
     { part: 'note', text: 'An empty prompt reuses the song\'s style' },

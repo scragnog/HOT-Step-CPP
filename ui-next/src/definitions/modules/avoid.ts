@@ -24,6 +24,8 @@ export const avoid = {
       wire: { to: 'content:negativePrompt', note: 'Sent as negative_prompt, only when not empty.' },
     },
   ],
-  face: [{ part: 'textArea', param: 'avoid.text', opts: { look: 'note' } }],
+  face: [
+    { part: 'textArea', param: 'avoid.text', opts: { look: 'note' } },
+  ],
   thumb: { file: 'avoid' },
 } satisfies ModuleDef;

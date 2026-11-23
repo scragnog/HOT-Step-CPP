@@ -24,6 +24,8 @@ export const post = {
       wire: 'param:postProcessingEnabled',
     },
   ],
-  face: [{ part: 'powerButton', param: 'pp.on', label: 'Chain' }],
+  face: [
+    { part: 'powerButton', param: 'pp.on', label: 'Chain' },
+  ],
   thumb: { file: 'post' },
 } satisfies ModuleDef;

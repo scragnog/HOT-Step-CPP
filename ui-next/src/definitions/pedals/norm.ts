@@ -12,7 +12,6 @@ export const norm = {
   hue: 352,
   on: 'pp.norm.on',
   main: 'pp.norm.ceil',
-  thumbWidth: 1,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -29,7 +28,14 @@ export const norm = {
         { value: 'club', label: 'Club / DJ · -8', lcd: '-8 LUFS', detail: 'Club / DJ' },
         { value: 'custom', label: 'Custom', lcd: 'CUSTOM', detail: 'set your own' },
       ],
-      wire: { to: 'ui:lufsPreset', note: 'Form state; the wire carries lufsTarget from the preset.' },
+      wire: [
+        { to: 'ui:hs-lufsPreset', note: 'Form state: the real app keeps the preset to show it and sends only the target.' },
+        {
+          to: 'param:lufsTarget',
+          map: { spotify: -14, apple: -16, ebu: -23, club: -8 },
+          note: 'Custom sends the Custom knob\'s value instead.',
+        },
+      ],
     },
     {
       key: 'pp.norm.custom',
@@ -51,6 +57,5 @@ export const norm = {
       wire: 'param:lufsCeilingDb',
     },
   ],
-  blank: [{ when: { param: 'pp.norm.target', not: 'custom' }, says: 'with Target: Custom' }],
   thumb: { file: 'pd-norm' },
 } satisfies PedalDef;

@@ -26,16 +26,17 @@ export const lyrics = {
       options: { from: 'languages' },
       engines: ['ace', 'minimax-m3'],
       wire: 'content:vocalLanguage',
-      per: {
-        'minimax-m3': {
+      per: [
+        {
+          engines: ['minimax-m3'],
           label: 'Lyrics language',
           tip: 'MiniMax-Music3 has no language input; it follows the characters of the lyrics. Compose caption writes the language into Vocal Details.',
           wire: {
-            to: 'ui:hs-vocalLanguage',
-            note: 'Sent on every engine and read only by ACE-Step; Compose caption writes it into Vocal Details on MiniMax-Music3.',
+            to: 'content:vocalLanguage',
+            note: 'createContentParams sends it on every engine; only ACE-Step reads it. Compose caption writes it into Vocal Details on MiniMax-Music3.',
           },
         },
-      },
+      ],
     },
     {
       key: 'lyrics.gender',
@@ -50,14 +51,21 @@ export const lyrics = {
         { value: 'duet', label: 'Duet' },
       ],
       engines: ['minimax-m3'],
+      stored: 'settings',
       wire: {
         to: 'ui:hs-vocalGender',
-        note: 'Deliberately not sent: it reaches the model only through Compose caption writing it into Vocal Details (createContent.ts). Real values are "", male, female, duet.',
+        note: 'Not sent: it reaches the model only through Compose caption writing it into Vocal Details (createContent.ts).',
       },
     },
   ],
   face: [
-    { part: 'lyricSheet', param: 'lyrics.text', params: ['lyrics.lang', 'lyrics.instr', 'wild.auto'] },
+    {
+      part: 'lyricSheet',
+      param: 'lyrics.text',
+      params: ['lyrics.lang'],
+      reads: ['lyrics.instr'],
+      per: [{ tiers: ['lab'], params: ['lyrics.lang', 'wild.auto'] }],
+    },
     {
       part: 'foot',
       children: [

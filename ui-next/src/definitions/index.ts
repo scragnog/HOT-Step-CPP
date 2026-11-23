@@ -1,4 +1,5 @@
 // Every definition, in one list. Adding a definition file means adding its line here; the validator fails until you do.
+// Each file checks itself with `satisfies`, so this list adds no second report of the same mistake.
 
 import type { Definition } from './types.ts';
 import { prompt } from './modules/prompt.ts';
@@ -42,7 +43,7 @@ import { wh } from './units/wh.ts';
 import { art } from './units/art.ts';
 import { q } from './units/q.ts';
 
-export const DEFINITIONS: Definition[] = [
+export const DEFINITIONS = [
   prompt,
   lyrics,
   models,
@@ -83,4 +84,4 @@ export const DEFINITIONS: Definition[] = [
   wh,
   art,
   q,
-];
+] as readonly Definition[];

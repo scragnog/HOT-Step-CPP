@@ -33,13 +33,7 @@ export const flow = {
       default: 1,
       wire: 'ext:mm3FlowUncondInterval',
     },
-    {
-      key: 'mm.lowstep',
-      type: 'boolean',
-      label: 'Low-step compensation',
-      default: true,
-      wire: 'ext:mm3AutoLowStep',
-    },
+    { key: 'mm.lowstep', type: 'boolean', label: 'Low-step compensation', default: true, wire: 'ext:mm3AutoLowStep' },
     { key: 'mm.fused', type: 'boolean', label: 'Fused depth decoder', default: true, wire: 'ext:mm3DepthFused' },
     {
       key: 'mm.rend',
@@ -64,10 +58,13 @@ export const flow = {
     { key: 'mm.stream', type: 'boolean', label: 'Play while rendering', default: false, wire: 'ext:mm3Stream' },
   ],
   face: [
-    { part: 'flowWindows', params: ['mm.hop'] },
+    { part: 'flowWindows', reads: ['mm.hop'] },
     {
       part: 'row',
-      children: [{ part: 'knob', param: 'mm.hop', label: 'Hop' }, { part: 'knob', param: 'mm.dcache', label: 'Δ cache' }],
+      children: [
+        { part: 'knob', param: 'mm.hop', label: 'Hop' },
+        { part: 'knob', param: 'mm.dcache', label: 'Δ cache' },
+      ],
     },
     {
       part: 'rack',

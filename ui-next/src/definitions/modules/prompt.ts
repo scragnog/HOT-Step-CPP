@@ -14,15 +14,24 @@ export const prompt = {
   owner: 'song',
   stored: 'content',
   size: { w: 4, quickW: 4 },
-  per: { 'minimax-m3': { name: 'Caption' }, sa3: { name: 'Prompt' }, heartmula: { name: 'Tags' } },
+  per: [
+    { engines: ['minimax-m3'], name: 'Caption' },
+    { engines: ['sa3'], name: 'Prompt' },
+    { engines: ['heartmula'], name: 'Tags' },
+  ],
   params: [
     {
       key: 'prompt.text',
       type: 'text',
       label: 'Describe the song',
       default: '',
+      engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
       wire: 'content:caption',
-      per: { 'minimax-m3': { label: 'Caption' }, sa3: { label: 'Prompt' }, heartmula: { label: 'Tags' } },
+      per: [
+        { engines: ['minimax-m3'], label: 'Caption' },
+        { engines: ['sa3'], label: 'Prompt' },
+        { engines: ['heartmula'], label: 'Tags' },
+      ],
     },
     {
       key: 'wild.auto',
@@ -32,7 +41,10 @@ export const prompt = {
       default: false,
       engines: ['ace', 'minimax-m3', 'yue2', 'sa3'],
       stored: 'settings',
-      wire: 'ui:hs-main-auto-expand',
+      wire: {
+        to: 'ui:hs-main-auto-expand',
+        note: 'Read by the Create intent\'s compose step (compose.autoExpand), not a request field.',
+      },
     },
     { key: 'song.artist', type: 'text', label: 'Artist', default: '', wire: 'content:artist' },
     { key: 'song.title', type: 'text', label: 'Title', default: '', wire: 'content:title' },
@@ -51,12 +63,13 @@ export const prompt = {
         to: 'ui:mm3CaptionSources.mode',
         note: 'The Send-to-Create handoff in localStorage; values custom, auto, track:<title>.',
       },
-      per: {
-        yue2: {
+      per: [
+        {
+          engines: ['yue2'],
           label: 'Description source',
           wire: { to: 'ui:yue2CaptionSelection.mode', note: 'CreatePanel state; values custom, auto, track.' },
         },
-      },
+      ],
     },
     {
       key: 'cap.ds',
@@ -65,8 +78,10 @@ export const prompt = {
       default: '',
       options: { from: 'caption.datasets', include: [{ value: '', label: 'The adapter\'s dataset' }] },
       engines: ['minimax-m3', 'yue2'],
-      wire: { none: 'MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown.' },
-      per: { yue2: { wire: 'ui:hs-yue2CaptionDataset' } },
+      wire: {
+        none: 'MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown.',
+      },
+      per: [{ engines: ['yue2'], wire: 'ui:hs-yue2CaptionDataset' }],
     },
   ],
   face: [

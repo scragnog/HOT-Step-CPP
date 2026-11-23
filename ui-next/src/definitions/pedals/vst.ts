@@ -12,7 +12,6 @@ export const vst = {
   hue: 225,
   on: 'pp.vst.on',
   main: null,
-  thumbWidth: 1,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -26,16 +25,25 @@ export const vst = {
       },
     },
   ],
-  idle: [{ when: { not: { state: 'vstPlugins', atLeast: 1 } }, says: 'No plugins to run' }],
-  face: [
-    { part: 'lcdValue', label: 'plugins', text: '0', tiers: ['studio'] },
+  idle: [
+    { when: { not: { state: 'vstPlugins', atLeast: 1 } }, tiers: ['lab'], says: 'No plugins to run' },
     {
-      part: 'labelled',
-      label: 'Chain',
-      children: [{ part: 'unitLcd', opts: { lines: ['"NO PLUGINS"'] } }],
-      tiers: ['lab'],
+      when: { not: { state: 'vstPlugins', atLeast: 1 } },
+      tiers: ['quick', 'studio'],
+      says: 'No plugins to run. Add them in Lab',
+      actions: [{ do: 'tier', tier: 'lab', label: 'Add them in Lab' }],
     },
-    { part: 'button', action: { do: 'bespoke', name: 'vstHost', label: '+ Add' }, tiers: ['lab'] },
+  ],
+  face: [
+    {
+      part: 'lcdValue',
+      label: 'plugins',
+      text: '{count:vstPlugins}',
+      per: [{ when: { param: 'pp.vst.on', is: true }, actions: [{ do: 'tier', tier: 'lab', label: 'add in Lab' }] }],
+      tiers: ['studio'],
+    },
+    { part: 'labelled', label: 'Chain', children: [{ part: 'unitLcd', text: 'NO PLUGINS' }], tiers: ['lab'] },
+    { part: 'button', actions: [{ do: 'bespoke', name: 'vstHost', label: '+ Add' }], tiers: ['lab'] },
   ],
   thumb: { file: 'pd-vst' },
 } satisfies PedalDef;

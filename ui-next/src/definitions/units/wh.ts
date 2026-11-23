@@ -14,13 +14,7 @@ export const wh = {
   owner: 'song',
   stored: 'settings',
   params: [
-    {
-      key: 'pp.wh.on',
-      type: 'boolean',
-      label: 'Whisper lyrics',
-      default: false,
-      wire: 'param:whisperLyricsEnabled',
-    },
+    { key: 'pp.wh.on', type: 'boolean', label: 'Whisper lyrics', default: false, wire: 'param:whisperLyricsEnabled' },
     {
       key: 'pp.wh.model',
       type: 'choice',
@@ -28,10 +22,10 @@ export const wh = {
       default: '',
       options: [
         { value: '', label: 'Auto-detect', lcd: 'AUTO', detail: 'picks the installed one' },
-        { value: 'large-v3-turbo', label: 'Large v3 Turbo', detail: '▮▮▮▯' },
-        { value: 'large-v3', label: 'Large v3', detail: '▮▮▮▮' },
-        { value: 'medium', label: 'Medium', detail: '▮▮▯▯' },
-        { value: 'base', label: 'Base', detail: '▮▯▯▯' },
+        { value: 'ggml-large-v3-turbo.bin', label: 'Large v3 Turbo', detail: '▮▮▮▯' },
+        { value: 'ggml-large-v3.bin', label: 'Large v3', detail: '▮▮▮▮' },
+        { value: 'ggml-medium.bin', label: 'Medium', detail: '▮▮▯▯' },
+        { value: 'ggml-base.bin', label: 'Base', detail: '▮▯▯▯' },
       ],
       wire: 'param:whisperModel',
     },
@@ -60,6 +54,8 @@ export const wh = {
       wire: 'param:whisperLanguage',
     },
   ],
-  face: [{ part: 'unitLcd', opts: { lines: ['pp.wh.model', 'pp.wh.lang'], prefix: 'WHISPER ', notAtLab: true } }],
+  face: [
+    { part: 'unitLcd', reads: ['pp.wh.model', 'pp.wh.lang'], opts: { prefix: 'WHISPER ', notAtLab: true } },
+  ],
   thumb: { file: 'ex-wh' },
 } satisfies UnitDef;

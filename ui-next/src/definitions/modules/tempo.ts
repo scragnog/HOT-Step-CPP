@@ -14,30 +14,38 @@ export const tempo = {
   owner: 'song',
   stored: 'content',
   size: { w: 2, quickW: 2, fold: true, stretch: 144 },
-  per: {
-    'minimax-m3': {
+  per: [
+    {
+      engines: ['minimax-m3'],
       name: 'Tempo & key',
       quickName: 'Tempo',
       desc: 'BPM with tap tempo, key on a circle of fifths, and Beat I/O.',
+      tierSummary: ['BPM with tap tempo', '+ key wheel and Beat I/O', 'Same as Studio'],
     },
-    yue2: {
+    {
+      engines: ['yue2'],
       quickName: 'Tempo',
       desc: 'BPM with tap tempo, key on a circle of fifths, and the longest the song may run.',
+      tierSummary: ['BPM with tap tempo', '+ key wheel and the longest it may run', 'Same as Studio'],
     },
-    sa3: {
+    {
+      engines: ['sa3'],
       name: 'Length',
       quickName: 'Length',
       desc: 'How long the song runs, on a timeline, with Beat I/O. Tempo and key go in your prompt.',
       size: { grow: true },
+      tierSummary: ['Length on a timeline', '+ Beat I/O and tempo and key chips for the prompt', 'Same as Studio'],
     },
-    heartmula: {
+    {
+      engines: ['heartmula'],
       name: 'Length',
       quickName: 'Length',
       desc: 'The longest the song may run. Tempo and key go in your tags.',
       size: { grow: true },
+      tierSummary: ['The longest it may run', '+ tempo and key chips for the tags', 'Same as Studio'],
     },
-  },
-  tierSummary: ['BPM with tap tempo, and length', '+ key wheel and time signature', '+ Beat I/O and auto-trim'],
+  ],
+  tierSummary: ['BPM with tap tempo, and length', '+ key wheel, time signature and Beat I/O', '+ auto-trim'],
   params: [
     {
       key: 'tempo.bpm',
@@ -46,21 +54,13 @@ export const tempo = {
       range: [1, 240, 1],
       default: 120,
       auto: {},
-      engines: ['ace', 'minimax-m3', 'yue2'],
       run: 2500,
-      wire: { to: 'content:bpm', auto: 0, note: 'Auto is 0.' },
-      per: {
-        'minimax-m3': {
-          wire: {
-            to: 'ui:hs-bpm',
-            auto: 0,
-            note: 'Sent on every engine, read by MiniMax-Music3 only through Compose caption.',
-          },
-        },
-        yue2: {
-          wire: { to: 'content:bpm', auto: 0, note: 'Composed into the caption tail unless yue2CaptionBpmKey is false.' },
-        },
+      wire: {
+        to: 'content:bpm',
+        auto: 0,
+        note: 'Auto is 0. createContentParams sends it on every engine: MiniMax-Music3 reads it only through Compose caption, YuE2 composes it into the caption tail unless yue2CaptionBpmKey is false.',
       },
+      engines: ['ace', 'minimax-m3', 'yue2'],
     },
     {
       key: 'tempo.key',
@@ -96,10 +96,9 @@ export const tempo = {
       ],
       engines: ['ace', 'minimax-m3', 'yue2'],
       run: 600,
-      wire: { to: 'content:keyScale', auto: '', note: 'Auto is "". Real values are "C major" style.' },
-      per: {
-        'minimax-m3': { wire: { to: 'ui:hs-keyScale', auto: '', note: 'Read only by Compose caption.' } },
-        yue2: { wire: { to: 'content:keyScale', auto: '', note: 'Composed into the caption tail.' } },
+      wire: {
+        to: 'content:keyScale',
+        note: 'Auto is the option "". Real values are "C major" style. Sent on every engine, as tempo.bpm.',
       },
     },
     {
@@ -115,7 +114,7 @@ export const tempo = {
         { value: '2/4', label: '2/4', detail: '2 beats a bar' },
       ],
       engines: ['ace'],
-      wire: { to: 'content:timeSignature', auto: '', note: 'Only the numerator reaches the engine.' },
+      wire: { to: 'content:timeSignature', note: 'Auto is the option "". Only the numerator reaches the engine.' },
     },
     {
       key: 'tempo.dur',
@@ -126,12 +125,18 @@ export const tempo = {
       default: 180,
       auto: {},
       engines: ['ace', 'sa3', 'heartmula'],
-      held: true,
-      wire: { to: 'content:duration', auto: -1, note: 'Auto is -1. SA3 renders 30 s for -1.' },
-      per: {
-        sa3: { range: [1, 600, 1], default: 30, auto: { says: '30 s, exact' } },
-        heartmula: { label: 'Longest it may run', range: [1, 240, 1], default: 120, auto: { says: 'up to 4:00' } },
-      },
+      held: { note: 'Capped at {shown} here · your {value} returns on {engine}', toast: 'Length capped at {shown}' },
+      wire: { to: 'content:duration', auto: -1, note: 'Auto is -1. Stable Audio 3 renders 30 s for -1.' },
+      per: [
+        { engines: ['sa3'], range: [1, 600, 1], default: 30, auto: { says: '{default}, exact' } },
+        {
+          engines: ['heartmula'],
+          label: 'Longest it may run',
+          range: [1, 240, 1],
+          default: 120,
+          auto: { says: 'up to {max}' },
+        },
+      ],
     },
     {
       key: 'tempo.max',
@@ -141,7 +146,8 @@ export const tempo = {
       unit: 's',
       default: 360,
       engines: ['yue2'],
-      wire: { to: 'ext:yue2MaxMinutes', scale: 0.016666666666666666, note: 'Real is minutes, step 0.5.' },
+      stored: 'settings',
+      wire: { to: 'ext:yue2MaxMinutes', divide: 60, note: 'Real is minutes, step 0.5.' },
     },
     {
       key: 'tempo.incap',
@@ -209,8 +215,8 @@ export const tempo = {
           part: 'lcdRow',
           engines: ['ace', 'minimax-m3', 'yue2'],
           children: [
-            { part: 'lcdNumber', param: 'tempo.bpm', opts: { tap: true } },
-            { part: 'beatPulse' },
+            { part: 'lcdNumber', param: 'tempo.bpm' },
+            { part: 'beatPulse', reads: ['tempo.bpm'] },
             { part: 'tapTempo', param: 'tempo.bpm' },
           ],
         },
@@ -218,7 +224,7 @@ export const tempo = {
           part: 'lcdRow',
           engines: ['ace', 'minimax-m3', 'yue2'],
           children: [
-            { part: 'lcdValue', param: 'tempo.key', label: 'KEY' },
+            { part: 'lcdValue', reads: ['tempo.key'], label: 'KEY' },
             {
               part: 'labelled',
               label: 'SIG',
@@ -227,10 +233,10 @@ export const tempo = {
             },
             {
               part: 'note',
+              tip: 'Compose caption writes BPM and key into the Structured Caption; nothing is added until you press it',
               text: 'COMPOSE CAPTION USES THIS',
               engines: ['minimax-m3'],
               when: { any: [{ param: 'tempo.bpm', auto: false }, { param: 'tempo.key', not: '' }] },
-              tip: 'Compose caption writes BPM and key into the Structured Caption; nothing is added until you press it',
             },
           ],
           tiers: ['studio', 'lab'],
@@ -281,15 +287,10 @@ export const tempo = {
       part: 'note',
       text: 'MiniMax-Music3 reads tempo from the caption.',
       engines: ['minimax-m3'],
-      action: { do: 'bespoke', name: 'composeCaption', label: 'Compose caption' },
+      actions: [{ do: 'bespoke', name: 'composeCaption', label: 'Compose caption' }],
       tiers: ['quick'],
     },
-    {
-      part: 'note',
-      text: 'The planner ends the song (max 5:00)',
-      engines: ['minimax-m3'],
-      tiers: ['studio', 'lab'],
-    },
+    { part: 'note', text: 'The planner ends the song (max 5:00)', engines: ['minimax-m3'], tiers: ['studio', 'lab'] },
     {
       part: 'note',
       text: 'Tempo and key come from your prompt. The length is exact.',
@@ -306,11 +307,21 @@ export const tempo = {
     {
       part: 'ruler',
       param: 'tempo.max',
-      opts: { scaleMax: 900 },
       tip: 'The composer ends the song; it never runs past this',
+      opts: { scaleMax: 900 },
       tiers: ['studio', 'lab'],
     },
-    { part: 'capChips', engines: ['sa3', 'heartmula'], label: 'Add to the prompt', tiers: ['studio', 'lab'] },
+    {
+      part: 'capChips',
+      label: 'Add to the prompt',
+      engines: ['sa3', 'heartmula'],
+      tiers: ['studio', 'lab'],
+      param: 'prompt.text',
+      reads: ['tempo.bpm', 'tempo.key'],
+    },
   ],
-  thumb: { file: 'tempo', per: { sa3: 'tempo.sa3', heartmula: 'tempo.sa3', 'minimax-m3': 'tempo.minimax-m3' } },
+  thumb: {
+    file: 'tempo',
+    per: [{ engines: ['sa3', 'heartmula'], file: 'tempo.sa3' }, { engines: ['minimax-m3'], file: 'tempo.minimax-m3' }],
+  },
 } satisfies ModuleDef;

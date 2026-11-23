@@ -12,7 +12,6 @@ export const master = {
   hue: 320,
   on: 'pp.master.on',
   main: null,
-  thumbWidth: 1,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -31,26 +30,45 @@ export const master = {
       key: 'masterRef',
       kind: 'file',
       noun: 'the mastering reference',
-      load: 'Load {file} as the mastering reference',
+      steps: { load: 'Load {file} as the mastering reference' },
       owner: 'song',
-      stored: 'content',
+      stored: 'none',
       wire: 'param:masteringReference',
     },
   ],
   idle: [
+    { when: { state: 'masterRef', set: false }, tiers: ['lab'], says: 'Needs a reference track' },
     {
       when: { state: 'masterRef', set: false },
-      says: 'Needs a reference track',
-      action: { do: 'tier', tier: 'lab', label: 'Set it in Lab' },
+      tiers: ['quick', 'studio'],
+      says: 'Needs a reference track. Set it in Lab',
+      actions: [{ do: 'tier', tier: 'lab', ring: ['masterRef'], label: 'Set it in Lab' }],
     },
   ],
   face: [
-    { part: 'lcdValue', label: 'reference', text: 'REF', tiers: ['studio'] },
-    { part: 'vuMeter', tiers: ['lab'] },
+    {
+      part: 'lcdValue',
+      label: 'reference',
+      text: 'REF',
+      per: [
+        {
+          when: { state: 'masterRef', set: false },
+          label: 'no reference',
+          text: '—',
+        },
+        {
+          when: { all: [{ state: 'masterRef', set: false }, { param: 'pp.master.on', is: true }] },
+          actions: [{ do: 'tier', tier: 'lab', ring: ['masterRef'], label: 'set in Lab' }],
+        },
+      ],
+      tiers: ['studio'],
+    },
+    { part: 'meter', opts: { min: -20, max: 3, red: 0 }, tiers: ['lab'] },
     {
       part: 'dropZone',
-      opts: { look: 'slot', state: 'masterRef', empty: 'Insert a track' },
+      state: ['masterRef'],
       label: 'Reference',
+      opts: { look: 'slot', empty: 'Insert a track' },
       tiers: ['lab'],
     },
     {
@@ -69,9 +87,13 @@ export const master = {
       part: 'note',
       text: 'Timbre reference is not on the desk',
       when: {
-        all: [{ param: 'pp.master.timbre', is: true }, { state: 'masterRef', set: true }, { not: { onDesk: 'timbre' } }],
+        all: [
+          { param: 'pp.master.timbre', is: true },
+          { state: 'masterRef', set: true },
+          { not: { onDesk: 'timbre' } },
+        ],
       },
-      action: { do: 'add', item: 'timbre', label: 'Add it' },
+      actions: [{ do: 'add', item: 'timbre', label: 'Add it' }],
       tiers: ['lab'],
     },
   ],

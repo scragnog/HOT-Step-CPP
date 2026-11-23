@@ -1,0 +1,12 @@
+{
+ "note": "Differences between the request the definitions build and the one the existing UI sends, at defaults. Each says why it is accepted. tools/compare-request.ts checks this list.",
+ "differences": [
+  {
+   "engine": "heartmula",
+   "field": "heartmulaScalarDecoderModel",
+   "existing": "",
+   "kind": "only the existing UI sends it",
+   "why": "The concept's engine panel has no scalar decoder row on HeartMuLa, so no parameter carries the server's choice; the job then uses the scalar decoder selected when it runs, not when it was queued. Docs 08, question 9."
+  }
+ ]
+}

@@ -46,7 +46,7 @@ export const perf = {
       params: ['perf.cfgcut', 'perf.cache'],
       opts: { look: 'heat', xl: 'CFG cutoff', yl: 'step cache', corners: ['fastest', '', '', 'most faithful'] },
     },
-    { part: 'speedGauge', params: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
+    { part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
     { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },
   ],
   thumb: { file: 'perf' },

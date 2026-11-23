@@ -24,8 +24,8 @@ export const fa = {
   face: [
     {
       part: 'unitStatus',
-      text: 'After the render · needs MMS',
       tip: 'Aligns lyric timestamps after the render. Needs the MMS aligner model.',
+      text: 'After the render · needs MMS',
     },
   ],
   thumb: { file: 'ex-fa' },

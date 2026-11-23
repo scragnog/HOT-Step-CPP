@@ -1,34 +1,51 @@
-// The parts inventory: every part a definition may name in a face, and what each one takes.
+// The parts inventory: every part a definition may name in a face, what each one edits, reads and takes, and the
+// other lists a definition draws from (units, text checks, option sources, desk facts, named actions).
 //
 // A part is one of four kinds:
 //   control    edits a parameter (or two): its value contract, changed marker, tip and undo come from the parameter
 //   container  holds other nodes and gives them the design language's housing (a rack, a well, an LCD, a terminal)
 //   readout    shows something, edits nothing
-//   bespoke    a part written for one module because what it draws or does cannot be said as data; it still binds
-//              to declared parameters, so defaults, undo, saving and the changed marker keep working
+//   bespoke    a part written for one module because what it draws or does cannot be said as data. It edits only
+//              what its node binds (param, params, state), reads only what its node lists in `reads`, and names no
+//              undo step of its own: PartProps below is all it is given.
 //
-// `binds` lists the value types it can edit or show ('pair' takes two numbers in `params`, 'state' a module's
-// StateDef, 'none' binds nothing). `opts` lists the options a node may pass, each with what it does; the validator
-// refuses an option not listed. `css` names the concept's stylesheets (C:\Users\sneth\misc\HOT-Step-UI\src\css at the
-// tag vanilla-reference) that hold its look; the first is its own file. Every part also takes 35-changed.css (the
-// changed dot), 35-states.css (focus ring, hover, press) and 35-labels.css (the caps label) where it has a label.
+// `edits` lists the value types a node's `param`/`params` may have ('pair' is two numbers in `params`), `state` the
+// kinds of state its node's `state` may name, `reads` whether it takes a `reads` list, `drive` how the generated
+// tests operate it (docs/05, "Automated tests"). `opts` lists the options a node may pass, each with its type and
+// what it does: the type check refuses an option a part does not list or of the wrong type. `css` names the
+// concept's stylesheets (C:\Users\sneth\misc\HOT-Step-UI\src\css) that hold its look; the first is its own file.
+// Every part also takes 35-changed.css, 35-states.css and 35-labels.css where it has a label.
 //
-// To add a part: add an entry here, write its React component under the name, and give it its stylesheet. Every
-// definition can then name it. docs/06-how-to.md has the steps.
+// To add a part: add an entry here, write its React component under the name (it receives PartProps), and give it
+// its stylesheet. Every definition can then name it. docs/06-how-to.md has the steps.
 
-import type { ValueType } from './types.ts';
+import type { StateDef, ValueType, Tier, EngineId, Json, Value, Node, ParamFace } from './types.ts';
 
 export type PartKind = 'control' | 'container' | 'readout' | 'bespoke';
-export type Binds = ValueType | 'pair' | 'state' | 'none';
+export type Drive = 'keys' | 'click' | 'choose' | 'type' | 'file';
+
+/** An option a node may pass to its part: its type, and what it does. */
+export interface OptSpec {
+  /** boolean, number, text, texts (a list of words), param (a parameter key), or a list of the words it may be. */
+  type: 'boolean' | 'number' | 'text' | 'texts' | 'param' | readonly string[];
+  doc: string;
+}
 
 export interface PartSpec {
   kind: PartKind;
-  binds: readonly Binds[];
+  /** What its node's `param`/`params` may edit. */
+  edits?: readonly (ValueType | 'pair')[];
+  /** The kinds of state its node's `state` may name. */
+  state?: readonly StateDef['kind'][];
+  /** It shows values it does not edit, listed in its node's `reads`. */
+  reads?: true;
+  /** How the generated tests operate it. Every part that edits has one. */
+  drive?: Drive;
   /** What it is for, in one or two sentences. */
   doc: string;
   /** The states it draws beyond the shared ones (changed, focus, hover, dim, hidden). */
   states?: readonly string[];
-  opts?: { readonly [name: string]: string };
+  opts?: { readonly [name: string]: OptSpec };
   css: readonly string[];
   /** For a bespoke part: exactly what it is responsible for, and what it leaves to the generic machinery. */
   responsible?: string;
@@ -37,379 +54,525 @@ export interface PartSpec {
 export const PARTS = {
   // ---------------------------------------------------------------- controls
   knob: {
-    kind: 'control', binds: ['number'], css: ['15-knob.css', '27-pedals.css'],
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-knob.css', '27-pedals.css'],
     doc: 'A rotary knob with a detent tick at the default, its label under it and a read-out that can be clicked to type a value. The rack face of every number in Lab.',
     states: ['turning', 'resetting', 'auto (drawn at the auto value in the auto colour, with an auto pill)', 'typing'],
-    opts: { small: 'The small knob (pedals, rack rows).', unitBelow: 'On a pedal, the unit on its own line under the number (dBFS, LUFS).' },
+    opts: { small: { type: 'boolean', doc: 'The small knob (rack rows).' } },
   },
   fader: {
-    kind: 'control', binds: ['number'], css: ['15-fader.css', '25-module-adapters.css'],
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-fader.css', '25-module-adapters.css'],
     doc: 'A vertical fader with a cap, tick marks and a unity line at 1.00. Used in fader banks (adapter group scales, depth thirds) and cartridges.',
     states: ['sliding', 'stops (travel beyond max shown as a stop)'],
-    opts: { travel: 'The value the top of the slot stands for, when the slot runs past the maximum (Plan: max 1, travel 2).' },
+    opts: { travel: { type: 'number', doc: 'The value the top of the slot stands for, when the slot runs past the maximum (Plan: max 1, travel 2).' } },
   },
   ruler: {
-    kind: 'control', binds: ['number'], css: ['15-ruler.css'],
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-ruler.css'],
     doc: 'A length on a minutes timeline, dragged along; labels on round steps. The length of a song.',
     states: ['auto (shows the estimate, or "up to" where the model ends the song)', 'sliding', 'at-start/at-end caption'],
-    opts: { scaleMax: 'The seconds the timeline spans. Default: the parameter maximum.', markers: 'Draw Beat I/O and trim markers from the Tempo parameters. Never drawn at Quick.' },
+    opts: {
+      scaleMax: { type: 'number', doc: 'The seconds the timeline spans. Default: the parameter maximum.' },
+      markers: { type: 'boolean', doc: 'Draw Beat I/O and trim markers from the Tempo parameters. Never drawn at Quick.' },
+    },
   },
   xyPad: {
-    kind: 'control', binds: ['pair'], css: ['15-xy-pad.css'],
-    doc: 'Two settings that belong together on one plane: a puck with a trail, a grid, axis read-outs that each carry their own changed marker, corner words outside the pad.',
+    kind: 'control', edits: ['pair'], drive: 'keys', css: ['15-xy-pad.css'],
+    doc: 'Two settings that belong together on one plane: a puck with a trail, a grid, axis read-outs that each carry their own changed marker, corner words outside the pad. An axis whose parameter is absent on the engine leaves a one-axis slider.',
     states: ['grab', 'release', 'nudge', 'y-off (the Y minimum drawn as an off rail)'],
-    opts: { xl: 'The X axis words.', yl: 'The Y axis words.', corners: 'Four corner words: top left, top right, bottom left, bottom right.', yOff: 'Words on the rail when the Y minimum means off.', look: 'apg | heat | overlay | term: the plot colouring.' },
+    opts: {
+      xl: { type: 'text', doc: 'The X axis words.' },
+      yl: { type: 'text', doc: 'The Y axis words.' },
+      corners: { type: 'texts', doc: 'Four corner words: top left, top right, bottom left, bottom right.' },
+      yOff: { type: 'text', doc: 'Words on the rail when the Y minimum means off.' },
+      look: { type: ['apg', 'heat', 'overlay', 'term'], doc: 'The plot colouring.' },
+    },
   },
   numberBox: {
-    kind: 'control', binds: ['number'], css: ['15-numbox.css'],
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-numbox.css'],
     doc: 'A typed number box that can also be dragged up and down. Steps in the Sampler well.',
     states: ['editing', 'overridden (a value another module replaces)', 'empty means auto'],
-    opts: { seconds: 'Show an estimate of seconds under it (Steps: "≈ 1.3 s").' },
+    opts: { seconds: { type: 'boolean', doc: 'Show an estimate of seconds under it (Steps: "≈ 1.3 s").' } },
   },
   lcdNumber: {
-    kind: 'control', binds: ['number'], css: ['25-module-tempo.css', '15-lcd.css'],
-    doc: 'A big seven-segment number on an LCD that can be typed or dragged, with its unit beside it. BPM.',
-    opts: { tap: 'Offer TAP (tap tempo, bespoke behaviour of the Tempo tile) and AUTO beside it.' },
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['25-module-tempo.css', '15-lcd.css'],
+    doc: 'A big seven-segment number on an LCD that can be typed or dragged, with its unit beside it, and AUTO beside it when the parameter has auto. BPM.',
   },
   pick: {
-    kind: 'control', binds: ['choice'], css: ['15-pick.css', '30-dropdown.css'],
+    kind: 'control', edits: ['choice'], drive: 'choose', css: ['15-pick.css', '30-dropdown.css'],
     doc: 'The button that shows a choice and opens its dropdown. The variant sets where it lives.',
     states: ['open', 'overridden'],
-    opts: { variant: 'plugin: a periodic-table tile and the kind above the value (solver, schedule, guidance); lcd: an LCD with previous and next arrows; chip: a pill with its label; model: name, quant badge, size and a memory bar; stamp: an ink stamp (the lyric language).' },
+    opts: { variant: { type: ['plugin', 'lcd', 'chip', 'model', 'stamp'], doc: 'plugin: a periodic-table tile and the kind above the value (solver, schedule, guidance); lcd: an LCD with previous and next arrows; chip: a pill with its label; model: name, quant badge, size and a memory bar; stamp: an ink stamp (the lyric language).' } },
   },
   chips: {
-    kind: 'control', binds: ['choice'], css: ['15-controls.css'],
-    doc: 'A chip selector: up to four options as lit chips under a caps label. Lab rack face of a short choice.',
+    kind: 'control', edits: ['choice'], drive: 'choose', css: ['15-controls.css'],
+    doc: 'A chip selector: up to four options as lit chips under a caps label. A side unit\'s short choice at Lab.',
   },
   segmented: {
-    kind: 'control', binds: ['choice'], css: ['15-controls.css'],
+    kind: 'control', edits: ['choice'], drive: 'choose', css: ['15-controls.css'],
     doc: 'A segmented choice: a row of joined buttons, one pressed.',
-    opts: { size: 'sm: the compact row inside a rack group.' },
+    opts: { size: { type: ['sm'], doc: 'sm: the compact row inside a rack group.' } },
   },
   termChips: {
-    kind: 'control', binds: ['choice'], css: ['25-module-planner.css'],
-    doc: 'A choice written as terminal chips after a flag (--mode Presence Frequency DRY).',
+    kind: 'control', edits: ['choice'], drive: 'choose', css: ['25-module-planner.css'],
+    doc: 'A choice written as terminal chips after its flag (--mode Presence Frequency DRY).',
   },
   lcdChips: {
-    kind: 'control', binds: ['choice'], css: ['25-module-tempo.css'],
+    kind: 'control', edits: ['choice'], drive: 'choose', css: ['25-module-tempo.css'],
     doc: 'Numbered chips on an LCD with a word after them (1 2 4 8 BARS).',
-    opts: { word: 'The word printed after the chips.' },
+    opts: { word: { type: 'text', doc: 'The word printed after the chips.' } },
   },
   ledButton: {
-    kind: 'control', binds: ['boolean'], css: ['15-controls.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['15-controls.css'],
     doc: 'An LED switch: a rack button with a lamp that lights when on. Lab rack face of a boolean.',
   },
   pill: {
-    kind: 'control', binds: ['boolean'], css: ['15-controls.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['15-controls.css'],
     doc: 'A pill toggle with a lamp, used inside a module look (Instrumental, Level match, a rack group power switch).',
   },
   flag: {
-    kind: 'control', binds: ['boolean'], css: ['25-module-planner.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['25-module-planner.css'],
     doc: 'A terminal flag with a check box: [x] --cot.',
   },
   lcdButton: {
-    kind: 'control', binds: ['boolean'], css: ['25-module-tempo.css', '15-lcd.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['25-module-tempo.css', '15-lcd.css'],
     doc: 'A lit word on an LCD that switches (BEAT I/O, AUTO-TRIM).',
   },
   recButton: {
-    kind: 'control', binds: ['boolean'], css: ['25-module-plans.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['25-module-plans.css'],
     doc: 'A record button (● SAVE NEXT) that arms the next run to save something.',
     states: ['is-off (stands back: nothing new to save)'],
   },
   powerButton: {
-    kind: 'control', binds: ['boolean'], css: ['25-module-planner.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['25-module-planner.css'],
     doc: 'A terminal power switch with its word (● planner) and the scope switch (● Lua plugins): the switch a whole instrument hangs on.',
-    opts: { look: 'term: the terminal bar; scope: on a scope read-out.' },
+    opts: { look: { type: ['term', 'scope'], doc: 'term: the terminal bar; scope: on a scope read-out.' } },
   },
   lockButton: {
-    kind: 'control', binds: ['boolean'], css: ['15-controls.css', '25-module-seed.css'],
+    kind: 'control', edits: ['boolean'], drive: 'click', css: ['15-controls.css', '25-module-seed.css'],
     doc: 'A padlock button that keeps a value (Keep this seed).',
   },
   powerChip: {
-    kind: 'control', binds: ['number'], css: ['15-controls.css', '25-module-adhere.css'],
+    kind: 'control', edits: ['number'], drive: 'click', css: ['15-controls.css', '25-module-adhere.css'],
     doc: 'A rack group power chip for a group switched by a number: off is one value, on sets a moderate one. Says "· off" on itself when off.',
-    opts: { off: 'The value that means off.', on: 'The value pressing it on sets.' },
+    opts: {
+      off: { type: 'number', doc: 'The value that means off.' },
+      on: { type: 'number', doc: 'The value pressing it on sets.' },
+    },
   },
   token: {
-    kind: 'control', binds: ['number'], css: ['15-numbox.css', '25-module-planner.css'],
-    doc: 'A scrub token: a number in running text or a terminal line, dragged sideways, stepped with the arrows, typed on Enter.',
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-numbox.css', '25-module-planner.css'],
+    doc: 'A scrub token: a number in running text or a terminal line, dragged sideways, stepped with the arrows, typed on Enter. In a terminal line its label is its flag.',
     states: ['clash (another setting makes it skip)'],
   },
   textField: {
-    kind: 'control', binds: ['text'], css: ['15-controls.css', '15-lcd.css'],
+    kind: 'control', edits: ['text'], drive: 'type', css: ['15-controls.css', '15-lcd.css'],
     doc: 'A one-line text field. Checked fields show their error beside them and commit on Enter or leaving.',
     states: ['bad (fails its check)', 'kept (invalid text kept, what is in force said)'],
-    opts: { look: 'plain | lcd: an LCD input | term: an inline terminal input', size: 'Width in characters.' },
+    opts: {
+      look: { type: ['plain', 'lcd', 'term'], doc: 'plain; lcd: an LCD input; term: an inline terminal input.' },
+      size: { type: 'number', doc: 'Width in characters.' },
+    },
   },
   textArea: {
-    kind: 'control', binds: ['text'], css: ['15-controls.css'],
+    kind: 'control', edits: ['text'], drive: 'type', css: ['15-controls.css'],
     doc: 'A text area. The look gives it its material.',
-    opts: { look: 'plain | note: the taped sticky note (Avoid) | staff: the ruled ABC sheet (Lead sheet) | paper: the lyric sheet | term: a quoted one-line terminal string that wraps (--neg)' },
+    opts: { look: { type: ['plain', 'note', 'staff', 'paper', 'term'], doc: 'note: the taped sticky note (Avoid); staff: the ruled ABC sheet (Lead sheet); paper: the lyric sheet; term: a quoted one-line terminal string that wraps (--neg).' } },
   },
   choiceRow: {
-    kind: 'control', binds: ['number', 'choice'], css: ['15-controls.css'],
-    doc: 'Quick\'s plain choice row: a radio group of words that each set a detailed value. A value between the choices checks none: a marker stands at its place and the label says the value.',
-    opts: { look: 'plain | mood: the coloured How adventurous row' },
+    kind: 'control', edits: ['number', 'choice'], drive: 'choose', css: ['15-controls.css'],
+    doc: 'Quick\'s plain choice row: a radio group of words that each set a detailed value, or several. A value between the choices checks none: a marker stands at its place and the label says the value.',
+    opts: { look: { type: ['plain', 'mood'], doc: 'mood: the coloured How adventurous row.' } },
   },
   lookback: {
-    kind: 'control', binds: ['number'], css: ['25-module-repetition.css'],
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['25-module-repetition.css'],
     doc: 'A look-back window drawn as a strip of codes that grows leftward into the past, with a time scale under it.',
-    opts: { unit: 'The word for what it counts (codes, frames, tokens).', perSecond: 'How many a second, for the scale and the tip.', who: 'Who checks for repeats, for the tip (the planner).' },
+    opts: {
+      unit: { type: 'text', doc: 'The word for what it counts (codes, frames, tokens).' },
+      perSecond: { type: 'number', doc: 'How many a second, for the scale and the tip.' },
+      who: { type: 'text', doc: 'Who checks for repeats, for the tip (the planner).' },
+    },
   },
   dropZone: {
-    kind: 'control', binds: ['state'], css: ['15-controls.css', '25-module-timbre.css', '27-pedals.css'],
-    doc: 'A file drop zone: a record sleeve (modules) or a slot (pedals) that takes a dropped or chosen audio file, shows its name cut to fit, and clears with ×.',
-    opts: { state: 'The StateDef key of the file it holds.', look: 'sleeve | slot', empty: 'Its words while empty.', hint: 'Its second line while empty.' },
+    kind: 'control', state: ['file'], drive: 'file', css: ['15-controls.css', '25-module-timbre.css', '27-pedals.css'],
+    doc: 'A file drop zone: a record sleeve (modules) or a slot (pedals) that takes a dropped or chosen audio file, shows its name cut to fit, and clears with ×. Its node\'s `state` is the file it holds.',
+    opts: {
+      look: { type: ['sleeve', 'slot'], doc: 'A record sleeve or a pedal slot.' },
+      empty: { type: 'text', doc: 'Its words while empty.' },
+      hint: { type: 'text', doc: 'Its second line while empty.' },
+      from: { type: 'text', doc: 'Shows a file another part lends it (its node\'s `state` is that part\'s file): the name, then these words, and it takes no file of its own.' },
+    },
   },
   // ---------------------------------------------------------------- containers
   row: {
-    kind: 'container', binds: ['none'], css: ['15-knob.css'],
+    kind: 'container', css: ['15-knob.css'],
     doc: 'A row of knobs or controls with even spacing (the .knobs row).',
   },
   rack: {
-    kind: 'container', binds: ['none'], css: ['15-controls.css'],
+    kind: 'container', css: ['15-controls.css'],
     doc: 'A rack row: LED switches and chip selectors side by side on a rack strip.',
   },
   well: {
-    kind: 'container', binds: ['none'], css: ['25-module-sampler.css'],
+    kind: 'container', css: ['25-module-sampler.css'],
     doc: 'A recessed well that holds a module\'s main controls under its instrument (the Sampler strip).',
   },
   lcd: {
-    kind: 'container', binds: ['none'], css: ['15-lcd.css', '25-module-tempo.css'],
+    kind: 'container', css: ['15-lcd.css', '25-module-tempo.css'],
     doc: 'An LCD panel. Its children are rows (lcdRow) or LCD parts.',
   },
   lcdRow: {
-    kind: 'container', binds: ['none'], css: ['25-module-tempo.css'],
+    kind: 'container', css: ['25-module-tempo.css'],
     doc: 'One row of an LCD. Ends-aligned when it holds switches at both ends.',
-    opts: { ends: 'Spread to both ends.' },
+    opts: { ends: { type: 'boolean', doc: 'Spread to both ends.' } },
   },
   terminal: {
-    kind: 'container', binds: ['none'], css: ['25-module-planner.css'],
+    kind: 'container', css: ['25-module-planner.css'],
     doc: 'A terminal: dark, monospaced, a command bar on top, lines below. The planner and the repetition guard.',
-    opts: { title: 'The tip on the whole terminal.' },
+    opts: { title: { type: 'text', doc: 'The tip on the whole terminal.' } },
   },
   termBar: {
-    kind: 'container', binds: ['none'], css: ['25-module-planner.css'],
+    kind: 'container', css: ['25-module-planner.css'],
     doc: 'The terminal\'s top bar: its power switch and flags.',
   },
   termLine: {
-    kind: 'container', binds: ['none'], css: ['25-module-planner.css'],
-    doc: 'A command line: "$ <command>" then flags, each followed by the control for its parameter in `params`, drawn by type: a number as a token, a choice as terminal chips, a boolean as a flag, text as an inline field. Children follow the flags. Wrapped lines hang under the first flag.',
-    opts: { command: 'The command word after $.', flags: 'The flag printed before each of `params`, in order (--temp, --cfg).' },
+    kind: 'container', css: ['25-module-planner.css'],
+    doc: 'A command line: "$ <command>" then its children, each control after its label printed as a flag (--temp). Wrapped lines hang under the first flag.',
+    opts: { command: { type: 'text', doc: 'The command word after $.' } },
   },
   group: {
-    kind: 'container', binds: ['none'], css: ['25-module-adhere.css', '25-module-latent.css'],
+    kind: 'container', css: ['25-module-adhere.css', '25-module-latent.css'],
     doc: 'A rack group: a boxed set of controls with a header that may carry its power switch; a group switched off stands back.',
-    opts: { title: 'Its caps heading when it has no power switch.' },
+    opts: { title: { type: 'text', doc: 'Its caps heading when it has no power switch.' } },
   },
   foot: {
-    kind: 'container', binds: ['none'], css: ['20-tile.css'],
+    kind: 'container', css: ['20-tile.css'],
     doc: 'A tile\'s foot row: small labelled controls and a note, kept to the bottom of the tile.',
   },
   labelled: {
-    kind: 'container', binds: ['none'], css: ['15-controls.css'],
+    kind: 'container', css: ['15-controls.css'],
     doc: 'A caps label beside one small control (the foot-ctl and lcdsel pairing).',
   },
   deck: {
-    kind: 'container', binds: ['none'], css: ['25-module-plans.css'],
+    kind: 'container', css: ['25-module-plans.css'],
     doc: 'A two-column grid of labels and controls, so a choice never moves the rows under it (Plans & endings).',
   },
   pair: {
-    kind: 'container', binds: ['none'], css: ['25-module-adhere.css'],
+    kind: 'container', css: ['25-module-adhere.css'],
     doc: 'Two tokens as a range: from → to, under one label.',
   },
   bank: {
-    kind: 'container', binds: ['none'], css: ['15-fader.css', '25-module-adapters.css'],
+    kind: 'container', css: ['15-fader.css', '25-module-adapters.css'],
     doc: 'A fader bank with a 2-1-0 scale and a heading, each fader labelled on tape.',
-    opts: { title: 'Its heading.', note: 'Its heading\'s tip.' },
+    opts: {
+      title: { type: 'text', doc: 'Its heading.' },
+      note: { type: 'text', doc: 'Its heading\'s tip.' },
+    },
   },
   // ---------------------------------------------------------------- read-outs
   note: {
-    kind: 'readout', binds: ['none'], css: ['01-base.css', '15-controls.css'],
-    doc: 'A quiet line of words: a hint, why something is off, what another module changes.',
-    opts: { look: 'plain | warn | cap: the caption note under an instrument | hint: Quick\'s hint' },
+    kind: 'readout', css: ['01-base.css', '15-controls.css'],
+    doc: 'A quiet line of words: a hint, why something is off, what another module changes. Its actions follow as links.',
+    opts: { look: { type: ['plain', 'warn', 'cap', 'hint'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
   },
   link: {
-    kind: 'readout', binds: ['none'], css: ['14-buttons.css'],
+    kind: 'readout', css: ['14-buttons.css'],
     doc: 'A text link that runs an action (Insert example, Show in Lab, Turn on Lua plugins).',
   },
   button: {
-    kind: 'readout', binds: ['none'], css: ['14-buttons.css'],
+    kind: 'readout', css: ['14-buttons.css'],
     doc: 'A small button that runs an action (+ Load adapter, Roll once).',
   },
   lcdValue: {
-    kind: 'readout', binds: ['choice', 'number', 'text'], css: ['25-module-tempo.css'],
-    doc: 'A value printed on an LCD under a caps word (KEY D MAJOR).',
+    kind: 'readout', reads: true, css: ['25-module-tempo.css'],
+    doc: 'A value printed on an LCD under a caps word (KEY D MAJOR): the first of `reads` written as everywhere else, or its `text`.',
   },
   unitLcd: {
-    kind: 'readout', binds: ['none', 'choice'], css: ['28-side-units.css'],
-    doc: 'A side unit\'s two-line LCD. Each line is a parameter\'s LCD text, or fixed words.',
-    opts: { lines: 'Up to two lines: a parameter key (printed as its option\'s lcd text) or words in double quotes.', prefix: 'Words before the first line (WHISPER ).', notAtLab: 'Not drawn at Lab, where the unit\'s own controls show the same values.' },
+    kind: 'readout', reads: true, css: ['28-side-units.css'],
+    doc: 'A side unit\'s two-line LCD: each of `reads` on its own line, a choice as its option\'s LCD words, or its `text` as one line.',
+    opts: {
+      prefix: { type: 'text', doc: 'Words before the first line (WHISPER ).' },
+      notAtLab: { type: 'boolean', doc: 'Not drawn at Lab, where the unit\'s own controls show the same values.' },
+    },
   },
   unitStatus: {
-    kind: 'readout', binds: ['none'], css: ['28-side-units.css'],
+    kind: 'readout', css: ['28-side-units.css'],
     doc: 'A side unit\'s status words in small caps (After the render · needs MMS).',
   },
   unitBadge: {
-    kind: 'readout', binds: ['none'], css: ['28-side-units.css'],
+    kind: 'readout', css: ['28-side-units.css'],
     doc: 'A side unit\'s round score badge.',
   },
   dice: {
-    kind: 'readout', binds: ['number'], css: ['25-module-replan.css'],
-    doc: 'A row of numbered dice, one per allowed attempt, filled as attempts are used.',
-    opts: { offWhen: 'A boolean parameter that, when false, draws the dice off.' },
+    kind: 'readout', reads: true, css: ['25-module-replan.css'],
+    doc: 'A row of numbered dice, one per allowed attempt (the first of `reads`), filled as attempts are used.',
+    opts: { offWhen: { type: 'param', doc: 'A switch that, while off, draws the dice off.' } },
+  },
+  meter: {
+    kind: 'readout', reads: true, css: ['27-pedals.css'],
+    doc: 'A printed meter with a needle: the first of `reads` on its scale, or a level the engine reports when it reads nothing (the Mastering pedal\'s VU meter).',
+    opts: {
+      min: { type: 'number', doc: 'The scale\'s left end.' },
+      max: { type: 'number', doc: 'Its right end.' },
+      red: { type: 'number', doc: 'Where the scale turns red.' },
+    },
+  },
+  beatPulse: {
+    kind: 'readout', reads: true, css: ['25-module-tempo.css'],
+    doc: 'Lamps that pulse on the beat at the BPM it reads, one per beat of the bar.',
+  },
+  flowWindows: {
+    kind: 'readout', reads: true, css: ['25-module-flow.css'],
+    doc: 'MiniMax-Music3\'s flow windows drawn at the hop it reads, and the count of windows a 3:00 song needs.',
+  },
+  speedGauge: {
+    kind: 'readout', reads: true, css: ['25-module-perf.css'],
+    doc: 'An LCD that estimates how much faster the trades it reads make a run.',
+  },
+  adhereCurve: {
+    kind: 'readout', reads: true, css: ['25-module-adhere.css'],
+    doc: 'Plan strength across the run, from noise to clean, with the Plan CFG band and the CADS ramp, from the values it reads.',
+  },
+  planText: {
+    kind: 'readout', reads: true, css: ['25-module-planner.css'],
+    doc: 'The plan the planner will start from, as terminal text: caption, tempo, key, form, and whose each value is. On MiniMax-Music3 its first line also says whether a saved plan is replayed or the plan cache is on.',
+  },
+  lrcPreview: {
+    kind: 'readout', reads: true, css: ['28-side-units.css'],
+    doc: 'Two timed lyric lines, the first named after the first section of the lyrics it reads.',
+  },
+  coverSwatch: {
+    kind: 'readout', css: ['28-side-units.css'],
+    doc: 'A swatch in the newest song\'s colour, standing for its cover art.',
   },
   // ---------------------------------------------------------------- bespoke
   samplerScope: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-sampler.css'],
-    doc: 'The Sampler\'s scope: the noise schedule drawn from the steps, shift, schedule and shape settings, with the CFG interval\'s two handles and its read-out.',
-    opts: { interval: 'Draw the CFG interval\'s two handles (Lab).' },
-    responsible: 'Drawing sigma(t) from samp.steps, samp.shift, samp.sched and the sch.* shape parameters, or from lat.ts when Latent & correction sets custom timesteps; the guidance band from samp.cs/samp.ce and the hatched CFG cutoff from perf.cfgcut; the two interval handles (they edit samp.cs and samp.ce through the value contract, a step apart); the one-line read-out (native sampling, guidance window, custom timesteps with Show). It does not own any value: defaults, undo, changed markers and saving of those parameters are generic.',
+    kind: 'bespoke', edits: ['number'], reads: true, drive: 'keys', css: ['25-module-sampler.css'],
+    doc: 'The Sampler\'s scope: the noise schedule drawn from the values it reads, the guidance band, and at Lab the CFG interval\'s two handles.',
+    opts: { interval: { type: 'boolean', doc: 'Draw the CFG interval\'s two handles; they edit the node\'s two params.' } },
+    responsible: 'Drawing sigma(t) from its reads (steps, shift, schedule and the shape parameters, or the custom timesteps when Latent & correction sets them); the guidance band from the CFG interval and the hatched CFG cutoff; the two interval handles, which set its two params a step apart; the one-line read-out. Defaults, undo, changed markers and saving of every value are generic.',
   },
   keyWheel: {
-    kind: 'bespoke', binds: ['choice'], css: ['25-module-tempo.css'],
+    kind: 'bespoke', edits: ['choice'], drive: 'choose', css: ['25-module-tempo.css'],
     doc: 'The circle of fifths: majors outside, minors inside, Auto in the middle, a radio group driven by the arrows.',
-    responsible: 'Drawing the two rings from tempo.key\'s options, spelling keys as a musician does (B♭, F♯), the arrow-key walk around and between rings, and the selection nudge. tempo.key stays an ordinary choice: undo, changed marker, "Also set" and saving are generic.',
+    responsible: 'Drawing the two rings from its param\'s options, spelling keys as a musician does (B♭, F♯), the arrow-key walk around and between rings, and the selection nudge.',
   },
   tapTempo: {
-    kind: 'bespoke', binds: ['number'], css: ['25-module-tempo.css'],
+    kind: 'bespoke', edits: ['number'], drive: 'click', css: ['25-module-tempo.css'],
     doc: 'TAP: two taps or more within 2.5 s set the BPM from their spacing.',
-    responsible: 'Timing the taps and calling set on tempo.bpm (clamped to its range); the run of taps is one undo step through the parameter\'s `run`.',
-  },
-  beatPulse: {
-    kind: 'readout', binds: ['none'], css: ['25-module-tempo.css'],
-    doc: 'Lamps that pulse on the beat at the set BPM, one per beat of the bar.',
+    responsible: 'Timing the taps and setting its param (clamped to its range); the run of taps is one undo step through the parameter\'s `run`.',
   },
   capChips: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-tempo.css'],
-    doc: 'On engines where tempo and key go in the prompt: chips that add or take out "120 BPM" or "D major" as items of the prompt, two exclusive groups.',
-    responsible: 'Reading which chips are pressed from the prompt text, replacing an item of the same group, never touching words inside a sentence, one undo step per press, and offering the user\'s own tempo and key first.',
+    kind: 'bespoke', edits: ['text'], reads: true, drive: 'click', css: ['25-module-tempo.css'],
+    doc: 'On engines where tempo and key go in the prompt: chips that add or take out "120 BPM" or "D major" as items of the prompt text it edits, two exclusive groups.',
+    responsible: 'Reading which chips are pressed from the text, replacing an item of the same group, never touching words inside a sentence, and offering the tempo and key it reads first. Each press is one step of the text it edits.',
   },
   takesReels: {
-    kind: 'bespoke', binds: ['number'], css: ['25-module-takes.css'],
+    kind: 'bespoke', edits: ['number'], drive: 'keys', css: ['25-module-takes.css'],
     doc: 'The takes count as an LCD and a set of reels, one per take the engine allows; the reels are one slider. Under it, the VRAM the count costs.',
-    responsible: 'Drawing as many reels as the engine\'s takes maximum, the hover preview, the reel spin, and the VRAM cost line from the loaded models. takes.n stays a number with a per-engine range; its label per engine and its held value are generic.',
+    responsible: 'Drawing as many reels as its param\'s maximum, the hover preview, the reel spin, and the VRAM cost line from the loaded models. The LCD reads the value as its format writes it, then the node\'s label.',
   },
   splitFlap: {
-    kind: 'bespoke', binds: ['state'], css: ['25-module-seed.css'],
-    doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one.',
-    opts: { state: 'The StateDef key of the seed.' },
-    responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 4294967295), Roll once and Random each time. The seed is the module\'s state `seed`; seed.lock is an ordinary boolean.',
+    kind: 'bespoke', edits: ['boolean'], state: ['seed'], drive: 'click', css: ['25-module-seed.css'],
+    doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one. Roll once and Random each time.',
+    responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 4294967295), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
   },
   savedSeeds: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The saved seeds list: search, star, name, describe, tag, load, delete, random from saved.',
-    responsible: 'The list and its own store (the session\'s saved seeds); every list action is its own undo step with its own name.',
+    responsible: 'The list (its `list` state) and its search; loading a saved seed sets the seed and its lock in the seed state\'s `set` step; every list action is the list state\'s step of that name.',
   },
   timbreBlend: {
-    kind: 'bespoke', binds: ['number'], css: ['25-module-timbre.css'],
+    kind: 'bespoke', edits: ['number'], drive: 'keys', css: ['25-module-timbre.css'],
     doc: 'Two overlapping circles, the reference dragged into your sound: the reference blend.',
-    responsible: 'Drawing the circles at the blend and dragging sideways. timbre.str is an ordinary number (its percent format, undo and changed marker are generic).',
+    responsible: 'Drawing the circles at its param and dragging sideways.',
   },
   recentRefs: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-timbre.css'],
+    kind: 'bespoke', state: ['list', 'file'], drive: 'click', css: ['25-module-timbre.css'],
     doc: 'The two latest references as chips, and the rest in a popover.',
-    responsible: 'The session list of recent reference files and loading one into the module\'s file state.',
-  },
-  flowWindows: {
-    kind: 'readout', binds: ['none'], css: ['25-module-flow.css'],
-    doc: 'MiniMax-Music3\'s flow windows drawn at the hop, and the count of windows a 3:00 song needs.',
-  },
-  speedGauge: {
-    kind: 'readout', binds: ['none'], css: ['25-module-perf.css'],
-    doc: 'An LCD that estimates how much faster the trades make a run.',
+    responsible: 'Showing its `list` state and loading one into its `file` state (that state\'s `load` step).',
   },
   latentCurve: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-latent.css'],
-    doc: 'The latent distribution before (grey) and after (green) shift and rescale, with the XY pad that sets them laid over it as its child.',
-    responsible: 'Drawing the two curves from lat.shift and lat.rescale and hosting its child XY pad over them. The pad is the generic xyPad part.',
-  },
-  adhereCurve: {
-    kind: 'readout', binds: ['none'], css: ['25-module-adhere.css'],
-    doc: 'Plan strength across the run, from noise to clean, with the Plan CFG band and the CADS ramp.',
-  },
-  planText: {
-    kind: 'readout', binds: ['none'], css: ['25-module-planner.css'],
-    doc: 'The plan the planner will start from, as terminal text: caption, tempo, key, form, and whose each value is. On MiniMax-Music3 its first line also says whether a saved plan is replayed or the plan cache is on (from mm.reuse, mm.plank, mm.hidpath).',
-  },
-  vuMeter: {
-    kind: 'readout', binds: ['none'], css: ['27-pedals.css'],
-    doc: 'The Mastering pedal\'s printed VU meter, -20 to +3, red from 0.',
-  },
-  lrcPreview: {
-    kind: 'readout', binds: ['none'], css: ['28-side-units.css'],
-    doc: 'Two timed lyric lines, the first named after the lyrics\' first section.',
-  },
-  coverSwatch: {
-    kind: 'readout', binds: ['none'], css: ['28-side-units.css'],
-    doc: 'A swatch in the newest song\'s colour, standing for its cover art.',
+    kind: 'bespoke', reads: true, css: ['25-module-latent.css'],
+    doc: 'The latent distribution before (grey) and after (green) the shift and rescale it reads, with the XY pad that sets them laid over it as its child.',
+    responsible: 'Drawing the two curves and hosting its child. It edits nothing; the pad is the generic xyPad part.',
   },
   abcFoot: {
-    kind: 'bespoke', binds: ['none'], css: ['25-module-score.css'],
-    doc: 'The lead sheet\'s foot: Insert example, Preview this score or Plan and preview a score, and whether the text reads as ABC.',
-    responsible: 'Recognising ABC (a K: line and bars), counting lines, opening the score preview (the score modal), and the way back when the planner is set to write nothing.',
+    kind: 'bespoke', reads: true, css: ['25-module-score.css'],
+    doc: 'The lead sheet\'s foot: whether the text it reads is ABC, how many lines, and its actions as they apply (Insert example, Preview this score or Plan and preview a score, the way back when the planner writes nothing).',
+    responsible: 'Recognising ABC (a K: line and bars) and counting lines, and choosing which of its node\'s actions apply. It edits nothing itself.',
   },
   cartridges: {
-    kind: 'bespoke', binds: ['state'], css: ['25-module-adapters.css'],
-    opts: { flat: 'Quick\'s flat cartridge: the first adapter lying flat, its art beside its name.' },
+    kind: 'bespoke', edits: ['number', 'choice', 'text'], state: ['slots'], drive: 'keys', css: ['25-module-adapters.css'],
+    opts: { flat: { type: 'boolean', doc: 'Quick\'s flat cartridge: the first adapter lying flat, its art beside its name.' } },
     doc: 'Adapter cartridges: each loaded adapter as a cassette with label art, its strength fader, its kind\'s housing, and in a stack its effective share, active phase and per-section mask.',
-    responsible: 'The slots state (which files are loaded, per engine), adding and removing cartridges, the label art, phase windows and section masks (saved in the lyrics), and naming those steps for undo. Every dial on a cartridge is a declared parameter (s0..s2, ad.arp, ad.arc) drawn with the fader part.',
+    responsible: 'Showing its slots state and adding and removing cartridges (the state\'s `load` and `remove` steps), the label art, and drawing its params with the fader part. Phase windows and section masks are written into the lyrics text it edits.',
   },
   buildBoard: {
-    kind: 'bespoke', binds: ['state'], css: ['25-module-build.css'],
+    kind: 'bespoke', state: ['record'], reads: true, css: ['25-module-build.css'],
     doc: 'Build by section: the planned sections as columns, takes under each, keep one, render the song.',
-    responsible: 'The build record (planned score, takes per section, keeps, the render), its drift against the lyrics, its own undo steps (Plan, Keep, Discard, Render, Start a new build), and talking to the build session API. Its four settings are declared parameters.',
+    responsible: 'Showing its record state (planned score, takes per section, keeps, the render) and its drift against the lyrics it reads, and talking to the build session API. Every change is the record state\'s step of that name.',
   },
   recordingSpan: {
-    kind: 'bespoke', binds: ['state'], css: ['25-module-cont.css'],
+    kind: 'bespoke', state: ['span'], reads: true, css: ['25-module-cont.css'],
     doc: 'A recording\'s waveform with up to 30 seconds selected: drag inside to move, an edge to resize, outside to draw a new one.',
-    responsible: 'The span state and its keyboard contract (arrows move, Shift resizes, Page moves by its length), the ruler under it, and the step names for it.',
+    responsible: 'Its span state and its keyboard contract (arrows move, Shift resizes, Page moves by its length), and the ruler under it. A move is the span\'s step.',
   },
   repaintRegion: {
-    kind: 'bespoke', binds: ['state'], css: ['25-module-repaint.css'],
+    kind: 'bespoke', state: ['record', 'span'], css: ['25-module-repaint.css'],
     doc: 'The source song\'s waveform with the region to regenerate.',
-    responsible: 'The source song and region state, drawing the waveform, the region\'s handles and keys, and naming its steps in the song\'s times.',
+    responsible: 'Its source record and region span, drawing the waveform, and the region\'s handles and keys. A move is the span\'s step, in the song\'s times.',
   },
   lyricSheet: {
-    kind: 'bespoke', binds: ['text'], css: ['25-module-lyrics.css'],
+    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], reads: true, drive: 'type', css: ['25-module-lyrics.css'],
     doc: 'The ruled lyric paper with its section tabs, the language stamp, the structure strip under it and the line count.',
-    responsible: 'Inserting section tags at line boundaries, the structure strip (sections as coloured segments that jump to their line), the line count and its time estimate, wildcard expansion. lyrics.text and lyrics.instr are ordinary parameters.',
+    responsible: 'Inserting section tags at line boundaries, the structure strip (sections as coloured segments that jump to their line), the line count and its time estimate, and wildcard expansion. Every value it edits is one of its params.',
   },
   promptBox: {
-    kind: 'bespoke', binds: ['text'], css: ['22-prompt.css'],
+    kind: 'bespoke', edits: ['text', 'choice', 'boolean'], drive: 'type', css: ['22-prompt.css'],
     doc: 'The main text box (description, caption, prompt or tags) with its tools and the song info.',
-    responsible: 'The box, its rotating placeholder, Write it for me and Compose caption, the caption source; its field undo is the generic text-field contract.',
+    responsible: 'The box, its rotating placeholder, Write it for me and Compose caption, and the caption source. Every value it edits is one of its params.',
   },
   modelPicker: {
-    kind: 'bespoke', binds: ['choice'], css: ['15-pick.css', '30-engine-panel.css'],
+    kind: 'bespoke', edits: ['choice'], drive: 'choose', css: ['15-pick.css', '30-engine-panel.css'],
     doc: 'The engine panel\'s model rows, with the VRAM meter they add up to.',
-    responsible: 'Listing installed models from the server, the VRAM figures, and naming model steps by role (Sound model, Planner model). Each model choice is an ordinary choice parameter.',
+    responsible: 'Listing installed models from the server and the VRAM figures. Each model choice is one of its params; its undo name is the parameter\'s.',
   },
 } as const satisfies Record<string, PartSpec>;
 
 export type PartName = keyof typeof PARTS;
 
-/** The text checks a parameter may name (types.ts Check). */
-export const VALIDATORS = {
+/* ---- a node's options, typed from the part's OptSpec, so a wrong option fails where it is typed ---- */
+type OptValue<T> = T extends 'boolean' ? boolean : T extends 'number' ? number : T extends 'text' | 'param' ? string
+  : T extends 'texts' ? string[] : T extends readonly (infer W)[] ? W : never;
+type SpecOf<P extends PartName> = (typeof PARTS)[P];
+export type OptsOf<P extends PartName> = SpecOf<P> extends { opts: infer O }
+  ? { [K in keyof O]?: O[K] extends { type: infer T } ? OptValue<T> : never } : Record<string, never>;
+export type NodeOf<P extends PartName> = { part: P; opts?: OptsOf<P> };
+
+/* ---------------------------------------------------------------- what a part is given
+   A part's component receives these and nothing else, so a part cannot write a value it is not bound to, keep its
+   own copy of one, decide a default, or name an undo step: the only way to change a value is its `set`, and a state's
+   steps are named by its StateDef. */
+
+/** A parameter as the part sees it on the engine in use: its resolved face, its value, and how to change it. */
+export interface BoundParam {
+  key: string;
+  face: ParamFace;
+  value: Value;
+  /** The value written as everywhere else. */
+  text: string;
+  changed: boolean;
+  /** On auto, for a parameter with auto. */
+  auto: boolean;
+  /** Cleans the value and sets it, one undo step named from the parameter (a drag or a run is one). */
+  set(value: Value): void;
+  setAuto(on: boolean): void;
+  reset(): void;
+}
+
+/** A state the node binds. `apply` takes the name of one of its StateDef's steps; the step's words come from the
+ *  definition. Bound params may change in the same step (Roll once sets the seed and its lock). */
+export interface BoundState {
+  key: string;
+  kind: StateDef['kind'];
+  value: Json;
+  apply(step: string, next: Json, also?: { [param: string]: Value }, slots?: { [slot: string]: string | number }): void;
+}
+
+/** What a part's component receives. */
+export interface PartProps {
+  node: Node;
+  engine: EngineId;
+  tier: Tier;
+  /** The parameters its node edits (`param`, `params`), and nothing else. */
+  params: Readonly<Record<string, BoundParam>>;
+  /** The state its node names. */
+  state: Readonly<Record<string, BoundState>>;
+  /** What its node reads: value and text, no setter. */
+  reads: Readonly<Record<string, { value: Value | Json; text: string }>>;
+  /** Its node's actions, ready to run. */
+  run(action: number): void;
+  /** Its children, drawn. */
+  children: readonly unknown[];
+}
+
+/* ---------------------------------------------------------------- the other lists */
+
+/** Units a number is shown in. Adding one here is all a new unit needs. */
+export const UNITS = {
+  s: 'seconds; reads as m:ss from a minute (docs/05, "How a number is written")',
+  ms: 'milliseconds',
+  Hz: 'hertz',
+  dB: 'decibels',
+  dBFS: 'decibels full scale; on a pedal knob, on its own line under the number',
+  LUFS: 'loudness units; on a pedal knob, on its own line under the number',
+  '%': 'percent, written right after the number',
+} as const;
+export type UnitName = keyof typeof UNITS;
+
+/** The text checks a parameter may name, with what they accept. */
+export const CHECKS = {
   seed: 'A whole number from 0 to 4294967295.',
   seedOrMinusOne: 'A whole number from 0 to 4294967295, or -1.',
   seedOrEmpty: 'A whole number from 0 to 4294967295, or empty.',
   timesteps: 'Numbers from 0 to 1, comma-separated, at least two, each smaller than the last.',
 } as const;
+export type CheckName = keyof typeof CHECKS;
 
-/** Desk state a condition may name besides the definitions' own StateDef keys: facts the page works out. */
-export const DESK_STATES = {
+/** Where a server-listed choice's options come from, and which fixture list the validator checks its values
+ *  against (tools/fixtures/real-app.json). */
+export const OPTION_SOURCES = {
+  'plugins.solver': { doc: 'GET /api/plugins solvers', fixture: 'plugins.solver' },
+  'plugins.scheduler': { doc: 'GET /api/plugins schedulers', fixture: 'plugins.scheduler' },
+  'plugins.guidance': { doc: 'GET /api/plugins guidance modes', fixture: 'plugins.guidance' },
+  'plugins.postprocess': { doc: 'GET /api/plugins post-process plugins', fixture: 'plugins.postprocess' },
+  models: { doc: 'GET /api/backends/models, one bucket', fixture: null },
+  languages: { doc: 'the vocal languages the app knows', fixture: null },
+  'adapters.lm': { doc: 'the planner LM adapters installed', fixture: null },
+  'mm3.planks': { doc: 'MiniMax-Music3\'s saved Planks', fixture: null },
+  'mm3.hiddens': { doc: 'MiniMax-Music3\'s saved full plans', fixture: null },
+  'caption.sources': { doc: 'the caption source\'s tracks', fixture: null },
+  'caption.datasets': { doc: 'the caption datasets', fixture: null },
+} as const;
+export type OptionSourceName = keyof typeof OPTION_SOURCES;
+
+/** Desk facts a condition may name besides the definitions' own state keys: facts the page works out. */
+export const DESK_FACTS = {
   adapters: 'How many adapters are loaded on this engine (atLeast).',
+  adaptersAway: 'The other engines that keep adapters for when you switch back, as words (" · ACE-Step 1.5 keeps its adapter for when you switch back"), or nothing.',
   runtimeForced: 'Adapters are forced to runtime mode: timestep windows, or section directives with a stack of two or more.',
   sectionDirectives: 'The lyrics carry per-section adapter directives.',
+  sectionTags: 'How many section tags ([Verse], [Chorus]) the lyrics hold (atLeast).',
   customTimesteps: 'Latent & correction is on the desk with two or more valid custom timesteps, which replace Steps and Schedule.',
   vstPlugins: 'How many VST3 plugins are in the chain (atLeast).',
 } as const;
+export type DeskFactName = keyof typeof DESK_FACTS;
+
+/** Named actions a node may run that are not changes of a value: each opens something or talks to the server. */
+export const ACTIONS = {
+  vstHost: 'Opens the VST3 host to add a plugin to the chain.',
+  loadAdapter: 'Opens the adapter list to load one into the next slot.',
+  loadPlannerAdapter: 'Opens the planner LM adapter list (ACE-Step).',
+  composeCaption: 'Runs Compose caption, which writes BPM, key and vocal details into the caption.',
+  scorePreview: 'Opens the score preview for the lead sheet, or plans one first.',
+} as const;
+export type ActionName = keyof typeof ACTIONS;
 
 /** The containers every definition gets without naming them: drawn by the shell from the definition itself. */
 export const SHELLS = {
-  tile: { css: ['20-tile.css', '21-desk.css'], doc: 'The tile: header with grip, group and name, its × , the body, the "Also set" foot, the unsupported note, and the one-line strip a tile becomes when it has nothing to show.' },
-  pedal: { css: ['27-pedals.css', '27-pedalboard.css'], doc: 'The pedal: face in its hue, name, LED, foot switch (or "Always on"), remove tab, jacks and cables; 1U or 2U at Lab (2U from three knobs), one size at Studio (132 x 196) and at Quick (112 wide). Its Lab body is laid out from its parameters: knobs in 64 px cells, then selectors, then the definition\'s lab nodes, then switches with what they reveal.' },
-  sideUnit: { css: ['28-side-units.css'], doc: 'The side unit: a rack strip with a name column, its object, its controls at Lab, a power button and a remove button.' },
+  tile: { css: ['20-tile.css', '21-desk.css'], doc: 'The tile: header with grip, group and name, its ×, the body, the "Also set" foot, the unsupported note, and the one-line strip a tile becomes when it has nothing to show.' },
+  pedal: { css: ['27-pedals.css', '27-pedalboard.css'], doc: 'The pedal: face in its hue (the neutral face when it has no switch), name, LED, foot switch (or "Always on"), remove tab, jacks and cables; 1U or 2U at Lab (2U from three numbers), one size at Studio (132 x 196) and at Quick (112 wide). Its Lab body is laid out from its parameters by layOut below.' },
+  sideUnit: { css: ['28-side-units.css'], doc: 'The side unit: a rack strip with a name column, its object, its controls at Lab (laid out by layOut below), a power button and a remove button.' },
   board: { css: ['27-pedalboard.css'], doc: 'The Pedalboard tile: chain switch, count, the board with cables, the side units row.' },
 } as const;
+
+/** The part a pedal's or a side unit's parameter is laid out with at Lab (docs/01, "How a pedal and a side unit are
+ *  laid out"). The shell and the validator both call this; it is the only statement of the rule. */
+export function layOut(kind: 'pedal' | 'unit', type: ValueType, optionCount: number | null): PartName {
+  if (type === 'number') return 'knob';
+  if (type === 'boolean') return 'ledButton';
+  if (type === 'text') return 'textField';
+  return kind === 'unit' && optionCount !== null && optionCount <= 4 ? 'chips' : 'pick';
+}
+
+/** A pedal is 2U at Lab, and in its thumbnail, from three numbers. */
+export const pedalUnits = (numbers: number): 1 | 2 => (numbers >= 3 ? 2 : 1);
+

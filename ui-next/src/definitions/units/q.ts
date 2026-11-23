@@ -14,13 +14,7 @@ export const q = {
   owner: 'song',
   stored: 'settings',
   params: [
-    {
-      key: 'pp.q.on',
-      type: 'boolean',
-      label: 'Quality evaluator',
-      default: false,
-      wire: 'param:qualityEvalEnabled',
-    },
+    { key: 'pp.q.on', type: 'boolean', label: 'Quality evaluator', default: false, wire: 'param:qualityEvalEnabled' },
     {
       key: 'pp.q.eval',
       type: 'choice',
@@ -34,6 +28,8 @@ export const q = {
       wire: 'param:qualityEvalTarget',
     },
   ],
-  face: [{ part: 'unitBadge', text: '8.4', tip: 'The score each song gets, as its badge in the Library' }],
+  face: [
+    { part: 'unitBadge', tip: 'The score each song gets, as its badge in the Library', text: '8.4' },
+  ],
   thumb: { file: 'ex-q' },
 } satisfies UnitDef;

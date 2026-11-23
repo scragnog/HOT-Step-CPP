@@ -13,7 +13,7 @@ export const adapters = {
   owner: 'engine',
   stored: 'settings',
   size: { w: 2, grow: true, stretch: 144 },
-  per: { heartmula: { size: { grow: false } } },
+  per: [{ engines: ['heartmula'], size: { grow: false } }],
   tierSummary: [
     'One adapter and its fader',
     '+ every slot, merge or runtime',
@@ -23,37 +23,41 @@ export const adapters = {
     {
       key: 's0',
       type: 'number',
-      label: 'Adapter 1',
-      undoName: 'Adapter 1 strength',
-      range: [0, 4, 0.05],
+      label: 'Slot 1',
+      undoName: '{file:slots.0|Adapter 1} strength',
+      range: [0, 2, 0.05],
       default: 1,
-      wire: { to: 'param:adapterStack[0].scale', note: 'adapterScale in Simple mode.' },
-      per: {
-        'minimax-m3': { range: [0, 2, 0.05], wire: 'ext:mm3LmAdapterScale' },
-        yue2: {
-          range: [0, 2, 0.05],
+      engines: ['ace', 'minimax-m3', 'yue2', 'heartmula'],
+      per: [
+        { engines: ['ace'], range: [0, 4, 0.05], wire: ['param:adapterScale', 'param:adapterStack[0].scale'] },
+        { engines: ['minimax-m3'], wire: { to: 'ext:mm3LmAdapterScale', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' } },
+        {
+          engines: ['yue2'],
           wire: { none: 'On YuE2 the AR slot\'s strength is its two dials, Plan and Compose (ad.arp, ad.arc).' },
         },
-        heartmula: { range: [0, 2, 0.05], wire: 'ext:heartmulaAdapterStrength' },
-        ace: { range: [0, 4, 0.05] },
-      },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterStrength' },
+      ],
+      wire: { none: 'Every engine says its own: see its line.' },
     },
     {
       key: 's1',
       type: 'number',
-      label: 'Adapter 2',
-      undoName: 'Adapter 2 strength',
-      range: [0, 4, 0.05],
+      label: 'Slot 2',
+      undoName: '{file:slots.1|Adapter 2} strength',
+      range: [0, 2, 0.05],
       default: 1,
       engines: ['ace', 'yue2'],
-      wire: 'param:adapterStack[1].scale',
-      per: { yue2: { range: [0, 2, 0.05], wire: 'model:yue2.nar.scales.global' }, ace: { range: [0, 4, 0.05] } },
+      wire: { none: 'Every engine says its own: see its line.' },
+      per: [
+        { engines: ['ace'], range: [0, 4, 0.05], wire: 'param:adapterStack[1].scale' },
+        { engines: ['yue2'], wire: 'model:yue2.nar.scales.global' },
+      ],
     },
     {
       key: 's2',
       type: 'number',
-      label: 'Adapter 3',
-      undoName: 'Adapter 3 strength',
+      label: 'Slot 3',
+      undoName: '{file:slots.2|Adapter 3} strength',
       range: [0, 4, 0.05],
       default: 1,
       engines: ['ace'],
@@ -71,12 +75,13 @@ export const adapters = {
       ],
       engines: ['ace', 'minimax-m3'],
       wire: { to: 'param:adapterMode', note: 'Real values merge, runtime, runtime_lowrank.' },
-      per: {
-        'minimax-m3': {
+      per: [
+        {
+          engines: ['minimax-m3'],
           options: [{ value: 'runtime', label: 'Runtime' }, { value: 'merge', label: 'Merge' }],
-          wire: 'ext:mm3LmAdapterMode',
+          wire: { to: 'ext:mm3LmAdapterMode', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
         },
-      },
+      ],
     },
     {
       key: 'ad.planner',
@@ -156,16 +161,17 @@ export const adapters = {
       range: [0, 2, 0.05],
       default: 1,
       engines: ['minimax-m3', 'yue2', 'heartmula'],
-      wire: 'ext:mm3LmAdapterScaleAttn',
-      per: {
-        yue2: {
+      wire: { to: 'ext:mm3LmAdapterScaleAttn', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
+      per: [
+        {
+          engines: ['yue2'],
           wire: {
             to: 'model:yue2.ar.scales.attn',
             note: 'Engine state; each YuE2 slot (ar, nar) has its own six dials. The concept has one bank for both.',
           },
         },
-        heartmula: { wire: 'ext:heartmulaAdapterScaleAttn' },
-      },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterScaleAttn' },
+      ],
     },
     {
       key: 'ad.mlp',
@@ -174,11 +180,11 @@ export const adapters = {
       range: [0, 2, 0.05],
       default: 1,
       engines: ['minimax-m3', 'yue2', 'heartmula'],
-      wire: 'ext:mm3LmAdapterScaleMlp',
-      per: {
-        yue2: { wire: { to: 'model:yue2.ar.scales.mlp', note: 'Per slot in the real app.' } },
-        heartmula: { wire: 'ext:heartmulaAdapterScaleMlp' },
-      },
+      wire: { to: 'ext:mm3LmAdapterScaleMlp', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
+      per: [
+        { engines: ['yue2'], wire: { to: 'model:yue2.ar.scales.mlp', note: 'Per slot in the real app.' } },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterScaleMlp' },
+      ],
     },
     {
       key: 'ad.early',
@@ -187,11 +193,11 @@ export const adapters = {
       range: [0, 2, 0.05],
       default: 1,
       engines: ['minimax-m3', 'yue2', 'heartmula'],
-      wire: 'ext:mm3LmAdapterScaleEarly',
-      per: {
-        yue2: { wire: { to: 'model:yue2.ar.scales.early', note: 'Per slot in the real app.' } },
-        heartmula: { wire: 'ext:heartmulaAdapterScaleEarly' },
-      },
+      wire: { to: 'ext:mm3LmAdapterScaleEarly', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
+      per: [
+        { engines: ['yue2'], wire: { to: 'model:yue2.ar.scales.early', note: 'Per slot in the real app.' } },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterScaleEarly' },
+      ],
     },
     {
       key: 'ad.mid',
@@ -200,11 +206,11 @@ export const adapters = {
       range: [0, 2, 0.05],
       default: 1,
       engines: ['minimax-m3', 'yue2', 'heartmula'],
-      wire: 'ext:mm3LmAdapterScaleMid',
-      per: {
-        yue2: { wire: { to: 'model:yue2.ar.scales.mid', note: 'Per slot in the real app.' } },
-        heartmula: { wire: 'ext:heartmulaAdapterScaleMid' },
-      },
+      wire: { to: 'ext:mm3LmAdapterScaleMid', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
+      per: [
+        { engines: ['yue2'], wire: { to: 'model:yue2.ar.scales.mid', note: 'Per slot in the real app.' } },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterScaleMid' },
+      ],
     },
     {
       key: 'ad.late',
@@ -213,11 +219,11 @@ export const adapters = {
       range: [0, 2, 0.05],
       default: 1,
       engines: ['minimax-m3', 'yue2', 'heartmula'],
-      wire: 'ext:mm3LmAdapterScaleLate',
-      per: {
-        yue2: { wire: { to: 'model:yue2.ar.scales.late', note: 'Per slot in the real app.' } },
-        heartmula: { wire: 'ext:heartmulaAdapterScaleLate' },
-      },
+      wire: { to: 'ext:mm3LmAdapterScaleLate', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
+      per: [
+        { engines: ['yue2'], wire: { to: 'model:yue2.ar.scales.late', note: 'Per slot in the real app.' } },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterScaleLate' },
+      ],
     },
     {
       key: 'ad.plan',
@@ -227,7 +233,7 @@ export const adapters = {
       range: [0, 1, 0.05],
       default: 1,
       engines: ['minimax-m3'],
-      wire: 'ext:mm3LmAdapterScalePlan',
+      wire: { to: 'ext:mm3LmAdapterScalePlan', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
     },
     {
       key: 'ad.adv',
@@ -236,7 +242,7 @@ export const adapters = {
       default: 'simple',
       options: [{ value: 'simple', label: 'Single' }, { value: 'advanced', label: 'Stacked' }],
       engines: ['ace'],
-      wire: { to: 'param:advancedAdapters', note: 'Simple is false, Advanced is true.' },
+      wire: { to: 'param:advancedAdapters', map: { simple: false, advanced: true } },
     },
     {
       key: 'ad.stack',
@@ -244,12 +250,7 @@ export const adapters = {
       label: 'Stack mode',
       default: 'blend',
       options: [{ value: 'blend', label: 'Blend' }, { value: 'sum', label: 'Sum' }],
-      when: {
-        all: [
-          { state: 'adapters', atLeast: 2 },
-          { any: [{ engine: ['minimax-m3', 'yue2', 'heartmula'] }, { param: 'ad.adv', is: 'advanced' }] },
-        ],
-      },
+      when: { all: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.adv', is: 'advanced' }] },
       engines: ['ace'],
       wire: 'param:adapterStackMode',
     },
@@ -261,17 +262,12 @@ export const adapters = {
       default: 0.75,
       when: {
         all: [
-          {
-            all: [
-              { state: 'adapters', atLeast: 2 },
-              { any: [{ engine: ['minimax-m3', 'yue2', 'heartmula'] }, { param: 'ad.adv', is: 'advanced' }] },
-            ],
-          },
+          { all: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.adv', is: 'advanced' }] },
           { param: 'ad.stack', is: 'blend' },
         ],
       },
       engines: ['ace'],
-      wire: 'param:adapterStackBudget',
+      wire: { to: 'param:adapterStackBudget', note: 'The existing UI\'s slider goes to 4; the concept stops at 2.' },
     },
     {
       key: 'ad.rq',
@@ -295,7 +291,7 @@ export const adapters = {
       options: [{ value: 'hq', label: 'HQ' }, { value: 'low', label: 'Low · ¼ VRAM' }],
       when: { all: [{ param: 'ad.mode', is: 'merge' }, { state: 'runtimeForced', set: false }] },
       engines: ['ace'],
-      wire: { to: 'param:adapterMergeLowVram', note: 'A boolean in the real app: HQ is false, Low is true.' },
+      wire: { to: 'param:adapterMergeLowVram', map: { hq: false, low: true } },
     },
     {
       key: 'ad.home',
@@ -315,11 +311,11 @@ export const adapters = {
       default: 0.75,
       engines: ['ace', 'yue2', 'heartmula'],
       wire: 'param:rebaseBeta',
-      per: {
-        yue2: { wire: 'model:yue2.ar.scales.rebase' },
-        heartmula: { wire: 'ext:heartmulaAdapterRebase' },
-        ace: { when: { param: 'ad.home', not: '' } },
-      },
+      per: [
+        { engines: ['ace'], when: { param: 'ad.home', not: '' } },
+        { engines: ['yue2'], wire: 'model:yue2.ar.scales.rebase' },
+        { engines: ['heartmula'], wire: 'ext:heartmulaAdapterRebase' },
+      ],
     },
     {
       key: 'ad.ref',
@@ -343,7 +339,7 @@ export const adapters = {
       key: 'ad.arp',
       type: 'number',
       label: 'Plan',
-      undoName: 'AR adapter plan',
+      undoName: '{file:slots.0|AR adapter} plan',
       range: [0, 2, 0.05],
       default: 1,
       engines: ['yue2'],
@@ -356,7 +352,7 @@ export const adapters = {
       key: 'ad.arc',
       type: 'number',
       label: 'Compose',
-      undoName: 'AR adapter compose',
+      undoName: '{file:slots.0|AR adapter} compose',
       range: [0, 2, 0.05],
       default: 1,
       engines: ['yue2'],
@@ -369,7 +365,8 @@ export const adapters = {
       default: true,
       engines: ['minimax-m3'],
       wire: {
-        none: 'No such switch found: the Create form always puts the LoRA trigger at the start of the caption when one is set (composeCaption).',
+        to: 'ext:mm3LmAdapterTrigger',
+        note: 'Read with !== false by backends/minimax/generate.ts: on puts the adapter\'s own trigger into the caption. Not declared as an extension.',
       },
     },
     {
@@ -379,7 +376,7 @@ export const adapters = {
       default: true,
       when: { param: 'ad.mode', is: 'merge' },
       engines: ['minimax-m3'],
-      wire: 'ext:mm3LmMergeGpu',
+      wire: { to: 'ext:mm3LmMergeGpu', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
     },
     {
       key: 'ad.trigger',
@@ -388,10 +385,18 @@ export const adapters = {
       default: '',
       placeholder: 'trigger word',
       when: { any: [{ state: 'adapters', atLeast: 1 }, { param: 'ad.planner', not: '' }] },
+      engines: ['ace', 'minimax-m3', 'yue2', 'heartmula'],
       owner: 'song',
       stored: 'content',
-      wire: 'content:loraTrigger',
-      per: { 'minimax-m3': { wire: 'ext:mm3LmAdapterTrigger' }, yue2: { wire: 'ext:yue2LmAdapterTrigger' } },
+      wire: { to: 'content:loraTrigger', note: 'composeCaption puts it at the start of the caption.' },
+      per: [
+        {
+          engines: ['yue2'],
+          wire: {
+            none: 'YuE2 composes its adapter\'s own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there.',
+          },
+        },
+      ],
     },
   ],
   state: [
@@ -399,31 +404,96 @@ export const adapters = {
       key: 'slots',
       kind: 'slots',
       noun: 'the adapters',
-      load: 'Load {file}',
+      steps: { load: 'Load {file}', remove: 'Remove {file}' },
       owner: 'engine',
       stored: 'settings',
-      wire: {
-        ace: { to: 'param:adapterStack', note: 'adapter/adapterScale in Simple mode.' },
-        'minimax-m3': 'ext:mm3LmAdapter',
-        yue2: { to: 'model:yue2.ar', note: 'AR and NAR slots, engine state (POST /api/backends/models).' },
-        heartmula: 'model:heartmula.lmAdapter',
-      },
+      wire: [
+        {
+          engines: ['ace'],
+          wire: [
+            { to: 'param:adapter', via: 'firstPath', note: 'Simple mode\'s single adapter.' },
+            {
+              to: 'param:adapterStack',
+              via: 'stackPaths',
+              note: 'Advanced mode\'s stack; each entry\'s strength is its slot\'s parameter.',
+            },
+          ],
+        },
+        {
+          engines: ['minimax-m3'],
+          wire: {
+            to: 'ext:mm3LmAdapter',
+            via: 'firstPath',
+            note: 'Read by backends/minimax/generate.ts; not declared as an extension.',
+          },
+        },
+        {
+          engines: ['yue2'],
+          wire: { to: 'model:yue2.ar', note: 'AR and NAR slots, engine state (POST /api/backends/models).' },
+        },
+        {
+          engines: ['heartmula'],
+          wire: [
+            { to: 'model:heartmula.lmAdapter' },
+            {
+              to: 'body:heartmulaAdapter',
+              via: 'firstPath',
+              note: 'Sent with the request so a queued job keeps its adapter.',
+            },
+          ],
+        },
+      ],
     },
   ],
   strip: [
     {
-      when: {
-        all: [
-          { not: { state: 'adapters', atLeast: 1 } },
-          { not: { all: [{ engine: ['ace'] }, { param: 'ad.planner', not: '' }] } },
-        ],
-      },
-      says: 'No adapter loaded',
-      action: { do: 'bespoke', name: 'loadAdapter', label: '+ Load adapter' },
+      when: { not: { state: 'adapters', atLeast: 1 } },
+      tiers: ['quick'],
+      says: 'No adapter loaded{say:adaptersAway}',
+      actions: [{ do: 'bespoke', name: 'loadAdapter', label: '+ Load adapter' }],
+    },
+    {
+      when: { all: [{ not: { state: 'adapters', atLeast: 1 } }, { engine: ['ace'] }] },
+      tiers: ['studio'],
+      says: 'No adapter loaded{say:adaptersAway}',
+      actions: [{ do: 'bespoke', name: 'loadAdapter', label: '+ Load adapter' }],
+    },
+    {
+      when: { all: [{ not: { state: 'adapters', atLeast: 1 } }, { engine: ['ace'] }, { param: 'ad.planner', is: '' }] },
+      tiers: ['lab'],
+      says: 'No DiT adapter loaded{say:adaptersAway}',
+      actions: [
+        { do: 'bespoke', name: 'loadAdapter', label: '+ DiT adapter' },
+        { do: 'bespoke', name: 'loadPlannerAdapter', label: '+ Planner adapter' },
+      ],
+    },
+    {
+      when: { all: [{ not: { state: 'adapters', atLeast: 1 } }, { engine: ['minimax-m3'] }] },
+      says: 'No Planner LM adapter loaded{say:adaptersAway}',
+      actions: [{ do: 'bespoke', name: 'loadAdapter', label: '+ Planner LM adapter' }],
+    },
+    {
+      when: { all: [{ not: { state: 'adapters', atLeast: 1 } }, { engine: ['yue2'] }] },
+      says: 'No AR · composer adapter loaded{say:adaptersAway}',
+      actions: [{ do: 'bespoke', name: 'loadAdapter', label: '+ AR · composer adapter' }],
+    },
+    {
+      when: { all: [{ not: { state: 'adapters', atLeast: 1 } }, { engine: ['heartmula'] }] },
+      says: 'No Global LM adapter loaded{say:adaptersAway}',
+      actions: [{ do: 'bespoke', name: 'loadAdapter', label: '+ Global LM adapter' }],
     },
   ],
   face: [
-    { part: 'cartridges', params: ['s0'], opts: { flat: true }, tiers: ['quick'] },
+    {
+      part: 'cartridges',
+      params: ['s0'],
+      state: ['slots'],
+      opts: { flat: true },
+      per: [
+        { tiers: ['studio', 'lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner'], opts: {} },
+        { tiers: ['lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner', 'lyrics.text'], opts: {} },
+      ],
+    },
     {
       part: 'choiceRow',
       param: 's0',
@@ -434,12 +504,7 @@ export const adapters = {
     },
     {
       part: 'foot',
-      when: {
-        all: [
-          { state: 'adapters', atLeast: 2 },
-          { any: [{ engine: ['minimax-m3', 'yue2', 'heartmula'] }, { param: 'ad.adv', is: 'advanced' }] },
-        ],
-      },
+      when: { all: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.adv', is: 'advanced' }] },
       children: [
         { part: 'segmented', param: 'ad.stack' },
         { part: 'labelled', label: 'Combined', children: [{ part: 'token', param: 'ad.sigma' }] },
@@ -447,7 +512,6 @@ export const adapters = {
       ],
       tiers: ['studio', 'lab'],
     },
-    { part: 'cartridges', params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner'], tiers: ['studio', 'lab'] },
     {
       part: 'bank',
       opts: { title: 'Group scales', note: 'Scales every DiT adapter by layer group. A channel at 0 is skipped.' },

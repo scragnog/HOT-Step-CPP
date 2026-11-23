@@ -12,7 +12,6 @@ export const gain = {
   hue: 210,
   on: null,
   main: 'pp.gain',
-  thumbWidth: 1,
   owner: 'song',
   stored: 'settings',
   params: [

@@ -24,6 +24,7 @@ export const guidance = {
       when: { param: 'samp.guide', is: 'apg' },
       engines: ['ace', 'sa3', 'heartmula'],
       wire: 'param:apgMomentum',
+      per: [{ engines: ['sa3', 'heartmula'], wire: { to: 'param:apgMomentum', note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
     },
     {
       key: 'apg.norm',
@@ -32,23 +33,30 @@ export const guidance = {
       range: [0, 10, 0.1],
       default: 2.5,
       when: { param: 'samp.guide', is: 'apg' },
+      engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],
       wire: 'param:apgNormThreshold',
+      per: [{ engines: ['sa3'], wire: { to: 'param:apgNormThreshold', note: 'The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).' } }],
     },
   ],
   strip: [
     {
       when: { not: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] } },
-      says: 'This engine uses its own guidance',
-      action: {
-        do: 'set',
-        param: 'samp.plugins',
-        value: true,
-        label: 'Turn on Lua plugins',
-        tip: 'Lua plugins are experimental here: they were tuned for ACE-Step',
-      },
+      says: '{engine} uses its own guidance',
+      actions: [
+        {
+          do: 'set',
+          param: 'samp.plugins',
+          value: true,
+          label: 'Turn on Lua plugins',
+          tip: 'Lua plugins are experimental on {engine}: they were tuned for ACE-Step',
+        },
+      ],
     },
-    { when: { param: 'samp.guide', is: '' }, says: 'Native guidance has no settings of its own' },
-    { when: { param: 'samp.guide', not: 'apg' }, says: 'This guidance mode has no settings of its own' },
+    {
+      when: { all: [{ engine: ['minimax-m3', 'sa3', 'heartmula'] }, { param: 'samp.guide', is: '' }] },
+      says: 'Native guidance has no settings of its own',
+    },
+    { when: { param: 'samp.guide', not: 'apg' }, says: '{value:samp.guide} has no settings of its own' },
   ],
   face: [
     {
@@ -59,9 +67,9 @@ export const guidance = {
     },
     {
       part: 'note',
+      tip: 'Stable Audio 3 has no unconditional prediction to steer against',
       text: 'Little effect on Stable Audio 3',
       engines: ['sa3'],
-      tip: 'Stable Audio 3 has no unconditional prediction to steer against',
     },
     { part: 'row', engines: ['minimax-m3'], children: [{ part: 'knob', param: 'apg.norm' }] },
     { part: 'note', text: 'Only the norm threshold applies here', engines: ['minimax-m3'] },

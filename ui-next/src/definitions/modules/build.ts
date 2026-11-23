@@ -68,17 +68,42 @@ export const build = {
         to: 'ui:hs-create-buildSessionId',
         note: 'The real build lives in a server session (yue2CoverApi build*); the browser keeps its id and plan.',
       },
+      steps: {
+        plan: 'Plan the score',
+        replan: 'Re-plan the score',
+        relyric: 'Keep building on the new lyrics',
+        keep: 'Keep take {n} for {section}',
+        unkeep: 'Stop keeping take {n} for {section}',
+        discard: 'Discard take {n}',
+        render: 'Render "{title}"',
+        reset: 'Start a new build',
+      },
     },
   ],
   strip: [
     {
       when: { param: 'lm.cotmode', is: 'off' },
-      says: 'Build by section needs a planned score',
-      action: { do: 'set', param: 'lm.cotmode', value: 'full', label: 'Write a full score' },
+      tiers: ['quick'],
+      says: 'The Planner is set to write nothing down, and this needs a score',
+      actions: [{ do: 'set', param: 'lm.cotmode', value: 'full', label: 'Write a full score' }],
+    },
+    {
+      when: { param: 'lm.cotmode', is: 'off' },
+      tiers: ['studio', 'lab'],
+      says: 'Needs a planned score, and Chain of Thought is off',
+      actions: [{ do: 'set', param: 'lm.cotmode', value: 'full', label: 'Turn it on' }],
+    },
+    {
+      when: { not: { state: 'sectionTags', atLeast: 1 } },
+      says: 'Tag the lyrics by section to build one at a time',
+      actions: [
+        { do: 'tag', tag: '[Verse]', label: '+ [Verse]', tip: 'Add a [Verse] tag to the lyrics' },
+        { do: 'tag', tag: '[Chorus]', label: '+ [Chorus]', tip: 'Add a [Chorus] tag to the lyrics' },
+      ],
     },
   ],
   face: [
-    { part: 'buildBoard' },
+    { part: 'buildBoard', state: ['build'], reads: ['lyrics.text', 'lm.cotmode'] },
     {
       part: 'foot',
       children: [
@@ -91,12 +116,7 @@ export const build = {
           children: [{ part: 'token', param: 'yue.bcond' }],
           tiers: ['lab'],
         },
-        {
-          part: 'labelled',
-          label: 'Plan strength',
-          children: [{ part: 'token', param: 'yue.bar' }],
-          tiers: ['lab'],
-        },
+        { part: 'labelled', label: 'Plan strength', children: [{ part: 'token', param: 'yue.bar' }], tiers: ['lab'] },
       ],
       tiers: ['studio', 'lab'],
     },

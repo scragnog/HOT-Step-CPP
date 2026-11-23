@@ -35,7 +35,7 @@ export const latent = {
       label: 'Latent shift',
       range: [-2, 2, 0.05],
       default: 0,
-      wire: 'param:latentShift',
+      wire: { to: 'param:latentShift', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     {
       key: 'lat.rescale',
@@ -43,7 +43,7 @@ export const latent = {
       label: 'Latent rescale',
       range: [0.1, 3, 0.05],
       default: 1,
-      wire: 'param:latentRescale',
+      wire: { to: 'param:latentRescale', note: 'The existing UI steps by 0.01; the concept by 0.05.' },
     },
     { key: 'dcw.on', type: 'boolean', label: 'DCW correction', default: false, wire: 'param:dcwEnabled' },
     {
@@ -65,7 +65,7 @@ export const latent = {
       label: 'Denoiser (spectral gate)',
       default: false,
       wire: {
-        none: 'No switch in the real app: the denoiser runs while denoiseStrength is above 0. Off has to send denoiseStrength 0.',
+        none: 'No switch in the real app: the denoiser runs while denoiseStrength is above 0. This switch gates den.str\'s wire.',
       },
     },
     {
@@ -73,7 +73,9 @@ export const latent = {
       type: 'boolean',
       label: 'LSS (latent spectral suppressor)',
       default: false,
-      wire: { none: 'No switch in the real app: LSS runs while lssStrength is above 0. Off has to send lssStrength 0.' },
+      wire: {
+        none: 'No switch in the real app: LSS runs while lssStrength is above 0. This switch gates lss.str\'s wire.',
+      },
     },
     {
       key: 'dcw.low',
@@ -81,8 +83,8 @@ export const latent = {
       label: 'Low',
       range: [0, 1, 0.01],
       default: 0.2,
-      labelWhen: [{ when: { param: 'dcw.mode', not: 'double' }, label: 'Scaler' }],
       wire: 'param:dcwLowScaler',
+      per: [{ when: { param: 'dcw.mode', not: 'double' }, label: 'Scaler' }],
     },
     {
       key: 'dcw.high',
@@ -99,7 +101,12 @@ export const latent = {
       label: 'Strength',
       range: [0.01, 1, 0.01],
       default: 0.5,
-      wire: 'param:denoiseStrength',
+      wire: {
+        to: 'param:denoiseStrength',
+        when: { param: 'den.on', is: true },
+        else: 0,
+        note: 'The denoiser runs while denoiseStrength is above 0, so its switch off sends 0.',
+      },
     },
     {
       key: 'den.smooth',
@@ -116,7 +123,12 @@ export const latent = {
       label: 'Strength',
       range: [0.01, 1, 0.01],
       default: 0.65,
-      wire: 'param:lssStrength',
+      wire: {
+        to: 'param:lssStrength',
+        when: { param: 'lss.on', is: true },
+        else: 0,
+        note: 'LSS runs while lssStrength is above 0, so its switch off sends 0.',
+      },
     },
     {
       key: 'lss.var',
@@ -131,13 +143,9 @@ export const latent = {
   face: [
     {
       part: 'latentCurve',
-      params: ['lat.shift', 'lat.rescale'],
+      reads: ['lat.shift', 'lat.rescale'],
       children: [
-        {
-          part: 'xyPad',
-          params: ['lat.shift', 'lat.rescale'],
-          opts: { look: 'overlay', xl: 'shift', yl: 'rescale' },
-        },
+        { part: 'xyPad', params: ['lat.shift', 'lat.rescale'], opts: { look: 'overlay', xl: 'shift', yl: 'rescale' } },
       ],
     },
     {
@@ -146,7 +154,7 @@ export const latent = {
       tip: 'Highest first. They replace the schedule, and the Sampler scope draws them.',
       children: [
         { part: 'textField', param: 'lat.ts', opts: { look: 'lcd' } },
-        { part: 'link', action: { do: 'example', param: 'lat.ts', label: 'Insert example' } },
+        { part: 'link', actions: [{ do: 'example', param: 'lat.ts', label: 'Insert example' }] },
       ],
     },
     {

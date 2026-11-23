@@ -12,7 +12,6 @@ export const tile = {
   hue: 160,
   on: 'pp.tile.on',
   main: null,
-  thumbWidth: 1,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -22,23 +21,30 @@ export const tile = {
       type: 'choice',
       label: 'Plugin',
       default: 'md_audio_tiled V2.1',
-      options: { from: 'plugins.postprocess' },
-      wire: 'param:postprocessPlugin',
+      options: {
+        from: 'plugins.postprocess',
+        include: [{ value: 'md_audio_tiled V2.1', label: 'md_audio_tiled V2.1', lcd: 'V2.1' }],
+      },
+      wire: { to: 'param:postprocessPlugin', note: 'The concept starts on V2.1, so turning the decoder on uses it; the real app starts with none chosen.' },
     },
   ],
   idle: [
     {
       when: { all: [{ engine: ['sa3'] }, { param: 'samp.plugins', is: false }] },
       says: 'Needs Lua plugins',
-      action: {
-        do: 'set',
-        param: 'samp.plugins',
-        value: true,
-        label: 'Turn on',
-        tip: 'Turns on the Sampler\'s Lua plugins (experimental on Stable Audio 3)',
-      },
+      actions: [
+        {
+          do: 'set',
+          param: 'samp.plugins',
+          value: true,
+          label: 'Turn on',
+          tip: 'Turns on the Sampler\'s Lua plugins (experimental on Stable Audio 3)',
+        },
+      ],
     },
   ],
-  face: [{ part: 'lcdValue', param: 'pp.tile.plugin', label: 'decoder', tiers: ['studio'] }],
+  face: [
+    { part: 'lcdValue', reads: ['pp.tile.plugin'], label: 'decoder', tiers: ['studio'] },
+  ],
   thumb: { file: 'pd-tile' },
 } satisfies PedalDef;

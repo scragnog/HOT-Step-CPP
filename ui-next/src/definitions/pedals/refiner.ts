@@ -13,7 +13,6 @@ export const refiner = {
   hue: 200,
   on: 'pp.refiner.on',
   main: 'pp.refiner.mix',
-  thumbWidth: 2,
   owner: 'song',
   stored: 'settings',
   params: [
@@ -33,7 +32,7 @@ export const refiner = {
       range: [0, 60, 1],
       unit: 's',
       default: 30,
-      wire: 'param:mm3RefinerWindowSeconds',
+      wire: { to: 'param:mm3RefinerWindowSeconds', note: 'The existing UI takes any length from 0, by 0.1; the concept 0 to 60 by 1.' },
     },
     {
       key: 'pp.refiner.ov',
@@ -42,7 +41,7 @@ export const refiner = {
       range: [0, 10, 0.5],
       unit: 's',
       default: 2,
-      wire: 'param:mm3RefinerOverlapSeconds',
+      wire: { to: 'param:mm3RefinerOverlapSeconds', note: 'The existing UI keeps it below the window; the concept 0 to 10 by 0.5.' },
     },
     {
       key: 'pp.refiner.mix',
@@ -51,7 +50,7 @@ export const refiner = {
       range: [0, 100, 1],
       unit: '%',
       default: 100,
-      wire: { to: 'param:mm3RefinerMix', scale: 0.01, note: 'Real is 0..1.' },
+      wire: { to: 'param:mm3RefinerMix', divide: 100, note: 'Real is 0..1.' },
     },
   ],
   thumb: { file: 'pd-refiner' },

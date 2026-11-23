@@ -148,13 +148,13 @@ export const repetition = {
       children: [
         {
           part: 'termLine',
-          opts: { command: 'guard', flags: ['--penalty', '--mode', '--window', '--dry-base', '--dry-min'] },
+          opts: { command: 'guard' },
           children: [
-            { part: 'token', param: 'lm.rep' },
-            { part: 'termChips', param: 'lm.repmode' },
-            { part: 'token', param: 'lm.win' },
-            { part: 'token', param: 'lm.drybase' },
-            { part: 'token', param: 'lm.drymin' },
+            { part: 'token', param: 'lm.rep', label: '--penalty' },
+            { part: 'termChips', param: 'lm.repmode', label: '--mode' },
+            { part: 'token', param: 'lm.win', label: '--window' },
+            { part: 'token', param: 'lm.drybase', label: '--dry-base' },
+            { part: 'token', param: 'lm.drymin', label: '--dry-min' },
           ],
         },
         {
@@ -172,11 +172,11 @@ export const repetition = {
       children: [
         {
           part: 'termLine',
-          opts: { command: 'guard', flags: ['--penalty', '--mode', '--window'] },
+          opts: { command: 'guard' },
           children: [
-            { part: 'token', param: 'mm.rep' },
-            { part: 'termChips', param: 'mm.repmode' },
-            { part: 'token', param: 'mm.win' },
+            { part: 'token', param: 'mm.rep', label: '--penalty' },
+            { part: 'termChips', param: 'mm.repmode', label: '--mode' },
+            { part: 'token', param: 'mm.win', label: '--window' },
           ],
         },
         {
@@ -193,9 +193,12 @@ export const repetition = {
       children: [
         {
           part: 'termLine',
-          opts: { command: 'guard plan', flags: ['--penalty', '--window'] },
+          opts: { command: 'guard plan' },
           dim: { when: { param: 'yp.rep', is: 1 }, says: 'guard off' },
-          children: [{ part: 'token', param: 'yp.rep' }, { part: 'token', param: 'yp.win' }],
+          children: [
+            { part: 'token', param: 'yp.rep', label: '--penalty' },
+            { part: 'token', param: 'yp.win', label: '--window' },
+          ],
         },
         {
           part: 'lookback',
@@ -205,9 +208,12 @@ export const repetition = {
         },
         {
           part: 'termLine',
-          opts: { command: 'guard composer', flags: ['--penalty', '--window'] },
+          opts: { command: 'guard composer' },
           dim: { when: { param: 'yc.rep', is: 1 }, says: 'guard off' },
-          children: [{ part: 'token', param: 'yc.rep' }, { part: 'token', param: 'yc.win' }],
+          children: [
+            { part: 'token', param: 'yc.rep', label: '--penalty' },
+            { part: 'token', param: 'yc.win', label: '--window' },
+          ],
         },
         {
           part: 'lookback',

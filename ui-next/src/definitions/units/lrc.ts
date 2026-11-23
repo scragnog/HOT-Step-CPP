@@ -21,6 +21,8 @@ export const lrc = {
       wire: { to: 'param:skipLrc', invert: true, note: 'skipLrc is the opposite.' },
     },
   ],
-  face: [{ part: 'lrcPreview' }],
+  face: [
+    { part: 'lrcPreview', reads: ['lyrics.text'] },
+  ],
   thumb: { file: 'ex-lrc' },
 } satisfies UnitDef;

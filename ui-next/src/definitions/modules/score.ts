@@ -21,7 +21,10 @@ export const score = {
       default: '',
       example: 'X:1\nT:Stay a little longer\nM:4/4\nL:1/4\nK:G\n"G" G A B d | "C" c B A G | "D" A B c d | "G" B2 G2 |]',
       when: { param: 'lm.cotmode', not: 'off' },
-      wire: 'ext:yue2Abc',
+      wire: {
+        to: 'ext:yue2Abc',
+        note: 'Read by backends/yue2/generate.ts as a lead sheet marker; not declared as an extension.',
+      },
     },
     {
       key: 'yue.timing',
@@ -29,14 +32,21 @@ export const score = {
       label: 'Lyric timing',
       default: 'off',
       options: [{ value: 'off', label: 'Off' }, { value: 'bias', label: 'Soft' }, { value: 'mask', label: 'Hard' }],
-      owner: 'engine',
       stored: 'settings',
       wire: 'ext:yue2LyricSchedule',
     },
   ],
   face: [
     { part: 'textArea', param: 'yue.abc', opts: { look: 'staff' } },
-    { part: 'abcFoot', params: ['yue.abc', 'lm.cotmode'] },
+    {
+      part: 'abcFoot',
+      reads: ['yue.abc', 'lm.cotmode'],
+      actions: [
+        { do: 'example', param: 'yue.abc', label: 'Insert example' },
+        { do: 'bespoke', name: 'scorePreview', label: 'Preview this score' },
+        { do: 'set', param: 'lm.cotmode', value: 'full', label: 'Write a full score' },
+      ],
+    },
     {
       part: 'labelled',
       label: 'Lyric timing',
@@ -59,7 +69,7 @@ export const score = {
           when: {
             all: [{ param: 'yue.timing', not: 'off' }, { param: 'yue.cfg', auto: false }, { param: 'yue.cfg', not: 1 }],
           },
-          action: { do: 'auto', param: 'yue.cfg', label: 'Set CFG to auto' },
+          actions: [{ do: 'auto', param: 'yue.cfg', label: 'Set CFG to auto' }],
         },
       ],
       tiers: ['studio', 'lab'],

@@ -1,112 +1,128 @@
 # Parameter names: the concept and the real application
 
-The concept invented its own keys (`pp.ss.str`, `lm.temp`). The rebuild has to talk to the real server, so every
-parameter's `wire` records what the real application calls it, per engine. This page explains where the names were
-found, gives the two lists of mismatches, and ends with the full table (printed from the definitions; see the end).
+The concept invented its own keys (`pp.ss.str`, `lm.temp`). The rebuild talks to the real server, so every parameter's
+`wire` says where its value goes in the real application, per engine. This page explains where the names were found,
+gives the lists of mismatches, and ends with the full table. The counts, the first list and the table are generated
+from the definitions by `npm run docs`, and the validator fails when they are out of date.
 
 ## Where the names come from
 
 | Channel | Where the real app keeps it | How it travels |
 | --- | --- | --- |
-| `param:` | `ui/src/stores/globalParamsStore.ts`, defaults in `GENERATION_DEFAULTS` (`server/src/contracts/generationControls.ts`) | Fields of the Create request body, assembled by `getGlobalParams()` |
-| `ext:` | Each backend's `capabilities().extensions` (`server/src/services/backends/<engine>/index.ts`), with key, type, range, default and options | `backendParams`, per backend, rendered generically by the existing UI |
-| `content:` | `CreateContent` in `ui/src/components/create/createContent.ts` (caption, lyrics, bpm, keyScale, duration...) | Per-song fields of the request |
-| `model:` | `GET/POST /api/backends/models` buckets per backend (ACE's ditModel and friends are `param:`) | Engine state, not part of the request |
-| `ui:` | Form state the browser keeps (`hs-*` keys) and uses itself, such as the auto-expand switch or the caption source | Not sent as such |
-| `plugin:` | Lua plugin parameters, `pluginParams` as `"<plugin>:<key>"` | Not used by any concept parameter today (see below) |
+| `param:` | `GENERATION_DEFAULTS` (`server/src/contracts/generationControls.ts`), held by the existing UI in `ui/src/stores/globalParamsStore.ts` | The input of `resolveGenerationParams()`, which makes the request's engine fields |
+| `ext:` | Each backend's `capabilities().extensions` (`server/src/services/backends/<engine>/index.ts`), with key, type, range, default and options; or a field the backend's code reads without declaring it | `backendParams`, flattened into the request |
+| `content:` | `CreateContent` in `ui/src/components/create/createContent.ts` (caption, lyrics, bpm, keyScale, duration...) | The input of `createContentParams()` |
+| `body:` | Fields the existing UI sets on the request itself (HeartMuLa's frozen model choices) | Top-level request fields |
+| `model:` | `GET/POST /api/backends/models` buckets per backend (ACE-Step's `ditModel` and friends are `param:`) | Engine state, not part of the request |
+| `ui:` | Form state the browser keeps (`hs-*` keys), such as the auto-expand switch or the caption source | Not sent |
 
-The engine ids in definitions are the server's: `ace`, `minimax-m3`, `yue2`, `sa3`, `heartmula`. The concept's `mm3`,
-`yue` and `hm` are not used.
+The engine ids in definitions are the server's: `ace`, `minimax-m3`, `yue2`, `sa3`, `heartmula` (`engines.ts`). The
+concept's `mm3`, `yue` and `hm` are not used.
 
-The extension lists were read from the backends' source as it is on `ui-next` (MiniMax-Music3 declares 27, YuE2 86,
-Stable Audio 3 5, HeartMuLa 14). `docs/dev/frontend-create-controls.md` in the repository is the narrative for the
-`param:` fields and was checked against `generationControls.ts`.
+What each backend declares and reads is read from the server's source into `tools/fixtures/real-app.json` by
+`npm run fixtures`: the extensions (MiniMax-Music3 declares 27, YuE2 86, Stable Audio 3 5, HeartMuLa 14), the
+backend-prefixed fields each backend's code reads, the `GENERATION_DEFAULTS` fields each engine's code reads (directly,
+or through a field `resolveGenerationParams()` makes from them), the plugin ids, the model buckets, and the existing
+UI's slider for each `GENERATION_DEFAULTS` field. The validator checks every wire against it ([07](07-checking.md)).
 
 ## Counts
 
-- 284 parameters, 515 parameter-engine pairs.
-- 501 pairs have a real name: `param` 276, `ext` 139, `content` 49, `model` 19, `ui` 18.
-- 275 of the 284 parameters have a real name on every engine they are on.
-- 14 pairs on 9 parameters have none.
+<!-- generated: counts (npm run docs) -->
+- 40 definitions: 25 modules, 10 pedals, 5 side units, on 5 engines.
+- 284 parameters; 515 parameter-engine pairs. Of those, 501 say where the value goes (content 50, ui 18, model 19, body 4, param 281, ext 138): 444 as a plain name, 40 through wire fields (invert, scale, divide, map, auto, when, several fields), 17 through a named transform. 14 pairs, on 9 parameters, have no counterpart in the real app.
+- 11 state entries; 73 parts in the inventory, 73 used; 6 transforms; 7 factory workflows and 11 factory revisions.
+<!-- end generated -->
 
-## The concept has it, the real app does not (9 parameters)
+## The concept has it, the real app does not
 
+<!-- generated: none (npm run docs) -->
 | Key | Engines | What the real app does instead |
 | --- | --- | --- |
-| `den.on` | ace | No switch: the spectral denoiser runs while `denoiseStrength` is above 0. The concept's Off has to send 0. |
-| `lss.on` | ace | No switch: LSS runs while `lssStrength` is above 0. |
-| `pp.vst.on` | all | No chain switch: the VST3 chain runs while any plugin in it is enabled (`vstChainStore.chainEnabled`). |
-| `ad.trigcap` | mm3 | No "add trigger to caption" switch was found; the Create form always puts a set LoRA trigger at the start of the caption (`composeCaption`). |
-| `yue.btakes` | yue2 | The real Build by section (`Yue2Build`) has no takes-per-section setting; takes come one at a time from the build session. |
+| `cap.ds` | mm3 | MiniMax-Music3 takes its caption tracks from a Lyric Studio handoff, not from a dataset dropdown. |
+| `s0` | yue2 | On YuE2 the AR slot's strength is its two dials, Plan and Compose (ad.arp, ad.arc). |
+| `ad.trigger` | yue2 | YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there. |
+| `den.on` | ace | No switch in the real app: the denoiser runs while denoiseStrength is above 0. This switch gates den.str's wire. |
+| `lss.on` | ace | No switch in the real app: LSS runs while lssStrength is above 0. This switch gates lss.str's wire. |
+| `yue.btakes` | yue2 | The real Build by section (Yue2Build) has no takes-per-section setting; takes come one at a time from the build session. |
 | `yue.bmode` | yue2 | No section mode in the real Build by section. |
-| `cap.ds` | mm3 | MiniMax-Music3 takes caption tracks from a Lyric Studio handoff, not a dataset dropdown (YuE2 has `hs-yue2CaptionDataset`). |
-| `s0` | yue2 | On YuE2 the AR adapter's strength is two dials, plan and compose (`ad.arp`, `ad.arc`); there is no single strength. |
-| `takes.n` | sa3, hm | One song per run; there is nothing to send. |
+| `takes.n` | sa3, hm | One song per run. |
+| `pp.vst.on` | ace, mm3, yue2, sa3, hm | No chain switch in the real app: the VST3 chain runs while any plugin in it is enabled (vstChainStore chainEnabled). |
+<!-- end generated -->
 
 ### Close, but not the same
 
-These have a real counterpart that differs in a way the rebuild must handle. Each is in its `wire` note.
+These have a real counterpart that differs in a way the request handles. Each is in its `wire`, and the note says why.
 
-- **Units and scale**: StableStep strength and the refiner mix are percent in the concept and 0..1 in the real app;
-  YuE2's longest length is seconds in the concept and minutes (`yue2MaxMinutes`) in the real app; the auto-trim fade is
-  seconds against milliseconds (`autoTrimFadeMs`).
+- **Units and scale**: StableStep strength and the refiner mix are percent in the concept and 0..1 in the real app
+  (`divide: 100`); YuE2's longest length is seconds in the concept and minutes in the real app (`divide: 60`); the
+  auto-trim fade is seconds against milliseconds (`scale: 1000`).
 - **Inverted**: Plan the song first is `skipLm`; Keep this seed is `randomSeed`; Lyric timestamps is `skipLrc`.
-- **Packed**: the schedule shapes (`sch.alpha`, `sch.beta`, `sch.exp`, `sch.a`, `sch.b`, `sch.x`, `sch.split`) are
-  packed into the scheduler string, `'beta:0.50:0.70'`, `'power:2.00'`, `'composite:<a>+<b>:<x>:<split>'`.
-- **Different type**: the merge VRAM choice (`ad.mq`) is the boolean `adapterMergeLowVram`; the retake seed and
-  StableStep's fixed seed are numbers in the real app and text in the concept; YuE2's composer CFG is a text knob where
-  empty means auto.
-- **Different step or range**: MiniMax-Music3's window hop steps by 10 in the real app and 5 in the concept, and YuE2's
-  composer CFG rescale by 0.05 against 0.01; the definitions follow the server. ACE-Step's batch maximum is 8
-  (`batch.max`), the concept's takes go to 9 (kept, as a question). YuE2's noise variations and batch size are declared
-  with a maximum of 1 in the static manifest and raised by the engine at run time. YuE2's planner lie curve and overdrive
-  shape options are stored as the server's values (`constant`, `late`).
-- **Read but not declared**: MiniMax-Music3's renderer and TensorRT precision (`mm3DitBackend`, `mm3DitPrecision`) are
-  read by `backends/minimax/generate.ts` but are no longer declared as extensions (the control was removed).
-- **Not sent, by design** (`ui:`): vocal gender, the BPM and key on MiniMax-Music3 (read by Compose caption), the language
-  on MiniMax-Music3, the LUFS preset (the wire carries the target), the caption source and dataset, the auto-expand
-  switch, and Build by section's condition and AR strengths (`Yue2Build` settings; the real AR default is 0.6, the
-  concept's 1).
-- **Per slot**: YuE2's adapter dials are kept per slot (AR and NAR, each with its own six) as engine state; the concept has
-  one bank for both.
+- **Mapped**: the stack choice (`ad.adv`) is the boolean `advancedAdapters`; the merge VRAM choice (`ad.mq`) is the
+  boolean `adapterMergeLowVram`; the normalizer's presets send their target (`lufsTarget`), the preset itself being form
+  state.
+- **Gated**: the denoiser and LSS switches send their strength while on and 0 while off.
+- **Packed**: the schedule shapes (`sch.*`) and the schedule are one scheduler string, `'beta:0.50:0.70'`,
+  `'power:2.00'`, `'composite:<a>+<b>:<x>:<split>'` (transform `scheduler`); the recording and its span are
+  `yue2Continuation` (transform `continuation`).
+- **Different type**: the retake seed and StableStep's fixed seed are numbers in the real app and text in the concept
+  (transform `int`); YuE2's composer CFG is a text knob where empty means auto (transform `text`).
+- **Different step or range**: the concept's step or range is kept and the wire's note gives the existing UI's: the
+  stack's combined strength (UI to 4, concept to 2), the steps of the LM temperature, CFG rescale, latent shift and
+  rescale, PP-VAE blend, the lifter's denoise and transient, and the naturalizer's amount; the codes steps (the UI's
+  slider stops at the step count). MiniMax-Music3's window hop and YuE2's composer CFG rescale follow the server. YuE2's
+  noise variations and batch size are declared with a maximum of 1 in the static manifest and raised by the engine.
+  ACE-Step's takes go to 9 where `batch.max` is 8.
+- **Read but not declared**: MiniMax-Music3's adapter (`mm3LmAdapter`), its mode, scales and merge switch, the trigger
+  switch, the renderer and its TensorRT precision; YuE2's lead sheet (`yue2Abc`). A compact intent's `backendParams`
+  cannot carry these ([08](08-open-questions.md) question 1).
+- **Not sent, by design** (`ui:`): vocal gender (Compose caption writes it), the LUFS preset, the caption source and
+  dataset, the auto-expand switch, and Build by section's condition and plan strengths (`Yue2Build` settings; the real
+  plan strength default is 0.6, the concept's 1).
+- **Read nowhere on some engines**: the APG momentum on Stable Audio 3 and HeartMuLa, and the APG norm threshold on
+  Stable Audio 3; the concept shows them, nothing those engines run reads them.
+- **Stood back, not hidden**: MiniMax-Music3's manifest hides the repetition mode and window while the penalty is 1,
+  and YuE2's hides the Plan CFG and CADS sub-controls while they are off (`visible_when`); the definitions stand them
+  back with `dim` instead, as the concept does. The server's `visible_when` is the one condition language the
+  definitions could be checked against.
+- **Per slot**: YuE2's adapter dials are kept per slot (AR and NAR, each with its own six) as engine state; the concept
+  has one bank for both.
 
-## The real app has it, the concept does not (28)
+## The real app has it, the concept does not
 
-From `GENERATION_DEFAULTS` (21):
+From `GENERATION_DEFAULTS` (20): `lmAdapterScale` (the ACE-Step planner adapter's strength; the concept loads a planner
+adapter but gives it no strength), `embeddingModel`, `adapterSectionIsolation`, `adapterFolder`, `lmAdapterFolder`,
+`adaptersOpen` (form state), `pluginParams` and `backendParams` (the two free-form channels themselves), `lmSeed` (an
+independent planner seed; the concept has only "LM seed follows"), `storkSubsteps`, `beatStability`,
+`frequencyDamping`, `temporalSmoothing` (solver-specific, sent only for STORK and JKASS), and StableStep's own sampler:
+`stableStepBackend`, `stableStepAdapters`, `stableStepSolver`, `stableStepScheduler`, `stableStepGuidanceMode`,
+`stableStepGuidanceScale`.
 
-- Adapter plumbing that the cartridges would carry: `adapter`, `adapterScale` (Simple mode's single slot, which the
-  concept's slot 1 maps onto), `adapterSectionIsolation`, `adapterFolder`, `lmAdapterFolder`, `adaptersOpen` (form state).
-- `lmAdapterScale`: the ACE-Step planner adapter's strength. The concept loads a planner adapter but gives it no strength.
-- `embeddingModel`: ACE-Step's embedding model choice.
-- `lmSeed`: an independent planner seed for ACE-Step (the concept has only "LM seed follows").
-- `storkSubsteps`, `beatStability`, `frequencyDamping`, `temporalSmoothing`: solver-specific knobs, sent only for STORK
-  and JKASS. The concept has no per-solver controls on ACE-Step; in the real app they belong with `pluginParams`, which
-  the Lua plugins declare.
-- `pluginParams`, `backendParams`: the two free-form channels themselves.
-- StableStep's own sampler: `stableStepBackend`, `stableStepAdapters`, `stableStepSolver`, `stableStepScheduler`,
-  `stableStepGuidanceMode`, `stableStepGuidanceScale`.
-
-From the backends' extensions (6, all YuE2): `yue2PlanMaxTokens`, `yue2SemMinTokens`, `yue2EndThreshold`, `yue2EndBias`,
-`yue2EndBiasFrom`, `yue2EndBiasRamp` (the plan's token budget, the composer's minimum length, and the song-ending
-controls). [06-how-to.md](06-how-to.md) uses two of these as its worked examples.
+From the backends' extensions (6, all YuE2): `yue2PlanMaxTokens`, `yue2SemMinTokens`, `yue2EndThreshold`,
+`yue2EndBias`, `yue2EndBiasFrom`, `yue2EndBiasRamp`.
 
 From the Create form (1): `sourceLatentUrl`.
 
-Not counted: the parameters of other studios that the backend mappers also read (MiniMax-Music3's `mm3A2a*`, `mm3Guide*`
-and `mm3Force*` cover controls, YuE2's lyric schedule sub-knobs, the cover and repaint fields), which are outside the
-Create page.
+From the model buckets (3): MiniMax-Music3's `cond` and `voc`, HeartMuLa's `scalar_decoder`. The existing UI sends
+HeartMuLa's scalar decoder with the request ([08](08-open-questions.md) question 9).
+
+From the app's settings (2): `triggerPlacement` and `triggerUseFilename` (`ace-settings`), which decide how adapter
+trigger words are placed. They are settings of the app, not of the desk, and reach the resolver as its `settings`.
+
+Not counted: the parameters of other studios that the backend mappers also read (MiniMax-Music3's `mm3A2a*`,
+`mm3Guide*` and `mm3Force*` cover controls, YuE2's lyric schedule sub-knobs, the cover and repaint fields), which are
+outside the Create page.
 
 ## The table
 
-Printed from the definitions with `node tools/validate-definitions.ts --names`; print it again after changing a `wire`
-rather than editing rows here. A real name is shown once when it is the same on every engine the parameter is on.
+A real name is shown once when it is the same on every engine the parameter is on.
 
+<!-- generated: names (npm run docs) -->
 ### Prompt (`prompt`, module)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `prompt.text` | text | all | `content:caption` |
-| `wild.auto` | boolean | ace, mm3, yue2, sa3 | `ui:hs-main-auto-expand` |
+| `wild.auto` | boolean | ace, mm3, yue2, sa3 | `ui:hs-main-auto-expand`. Read by the Create intent's compose step (compose.autoExpand), not a request field. |
 | `song.artist` | text | all | `content:artist` |
 | `song.title` | text | all | `content:title` |
 | `song.subject` | text | all | `content:subject` |
@@ -119,36 +135,36 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | --- | --- | --- | --- |
 | `lyrics.text` | text | ace, mm3, yue2, hm | `content:lyrics` |
 | `lyrics.instr` | boolean | ace, mm3, yue2, hm | `content:instrumental` |
-| `lyrics.lang` | choice | ace, mm3 | ace: `content:vocalLanguage`<br>mm3: `ui:hs-vocalLanguage`. Sent on every engine and read only by ACE-Step; Compose caption writes it into Vocal Details on MiniMax-Music3. |
-| `lyrics.gender` | choice | mm3 | `ui:hs-vocalGender`. Deliberately not sent: it reaches the model only through Compose caption writing it into Vocal Details (createContent.ts). Real values are "", male, female, duet. |
+| `lyrics.lang` | choice | ace, mm3 | ace: `content:vocalLanguage`<br>mm3: `content:vocalLanguage`. createContentParams sends it on every engine; only ACE-Step reads it. Compose caption writes it into Vocal Details on MiniMax-Music3. |
+| `lyrics.gender` | choice | mm3 | `ui:hs-vocalGender`. Not sent: it reaches the model only through Compose caption writing it into Vocal Details (createContent.ts). |
 
 ### Models (`models`, module)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `model.var` | choice | hm | `model:heartmula.variant` |
-| `model.dit` | choice | all | ace: `param:ditModel`<br>mm3: `model:minimax-m3.dit`<br>yue2: `model:yue2.lm`<br>sa3: `model:sa3.dit`<br>hm: `model:heartmula.global` |
-| `model.lm` | choice | ace, mm3, hm | ace: `param:lmModel`<br>mm3: `model:minimax-m3.lm`<br>hm: `model:heartmula.local` |
-| `model.x` | choice | mm3, hm | mm3: `model:minimax-m3.depth`<br>hm: `model:heartmula.flow` |
+| `model.var` | choice | hm | `model:heartmula.variant` + `body:heartmulaVariant`. Sent with the request so a queued job keeps the models it was queued with. |
+| `model.dit` | choice | all | ace: `param:ditModel`<br>mm3: `model:minimax-m3.dit`<br>yue2: `model:yue2.lm`<br>sa3: `model:sa3.dit`<br>hm: `model:heartmula.global` + `body:heartmulaGlobalModel`. Sent with the request so a queued job keeps the models it was queued with. |
+| `model.lm` | choice | ace, mm3, hm | ace: `param:lmModel`<br>mm3: `model:minimax-m3.lm`<br>hm: `model:heartmula.local` + `body:heartmulaLocalModel`. Sent with the request so a queued job keeps the models it was queued with. |
+| `model.x` | choice | mm3, hm | mm3: `model:minimax-m3.depth`<br>hm: `model:heartmula.flow` + `body:heartmulaFlowModel`. Sent with the request so a queued job keeps the models it was queued with. |
 | `model.vae` | choice | ace, yue2 | ace: `param:vaeModel`<br>yue2: `model:yue2.vae` |
 
 ### Repaint (`repaint`, module)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `rp.mode` | choice | ace | `content:repaintMode` |
-| `rp.xfade` | number | ace | `content:crossfadeFrames` |
-| `rp.lyrics` | text | ace | `content:lyrics`. The Repaint studio's own lyrics field (studioWorkflows repaint fields). |
+| `rp.mode` | choice | ace | `ui:repaint.mode`. A field of the Repaint studio (studioWorkflows), not of the Create form. |
+| `rp.xfade` | number | ace | `ui:repaint.crossfadeFrames`. A field of the Repaint studio (studioWorkflows), not of the Create form. |
+| `rp.lyrics` | text | ace | `ui:repaint.lyrics`. The Repaint studio's own lyrics field (studioWorkflows). |
 
 ### Tempo, key & length (`tempo`, module)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `tempo.bpm` | number | ace, mm3, yue2 | ace: `content:bpm` (auto: 0). Auto is 0.<br>mm3: `ui:hs-bpm` (auto: 0). Sent on every engine, read by MiniMax-Music3 only through Compose caption.<br>yue2: `content:bpm` (auto: 0). Composed into the caption tail unless yue2CaptionBpmKey is false. |
-| `tempo.key` | choice | ace, mm3, yue2 | ace: `content:keyScale` (auto: ""). Auto is "". Real values are "C major" style.<br>mm3: `ui:hs-keyScale` (auto: ""). Read only by Compose caption.<br>yue2: `content:keyScale` (auto: ""). Composed into the caption tail. |
-| `tempo.sig` | choice | ace | `content:timeSignature` (auto: ""). Only the numerator reaches the engine. |
-| `tempo.dur` | number | ace, sa3, hm | `content:duration` (auto: -1). Auto is -1. SA3 renders 30 s for -1. |
-| `tempo.max` | number | yue2 | `ext:yue2MaxMinutes` (× 0.0167). Real is minutes, step 0.5. |
+| `tempo.bpm` | number | ace, mm3, yue2 | `content:bpm` (auto: 0). Auto is 0. createContentParams sends it on every engine: MiniMax-Music3 reads it only through Compose caption, YuE2 composes it into the caption tail unless yue2CaptionBpmKey is false. |
+| `tempo.key` | choice | ace, mm3, yue2 | `content:keyScale`. Auto is the option "". Real values are "C major" style. Sent on every engine, as tempo.bpm. |
+| `tempo.sig` | choice | ace | `content:timeSignature`. Auto is the option "". Only the numerator reaches the engine. |
+| `tempo.dur` | number | ace, sa3, hm | `content:duration` (auto: -1). Auto is -1. Stable Audio 3 renders 30 s for -1. |
+| `tempo.max` | number | yue2 | `ext:yue2MaxMinutes` (÷ 60). Real is minutes, step 0.5. |
 | `tempo.incap` | boolean | yue2 | `ext:yue2CaptionBpmKey` |
 | `tempo.beatio` | boolean | ace, mm3, sa3 | `content:beatIntro` |
 | `tempo.beatbars` | choice | ace, mm3, sa3 | `content:introBars` |
@@ -172,10 +188,10 @@ rather than editing rows here. A real name is shown once when it is the same on 
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `s0` | number | ace, mm3, yue2, hm | ace: `param:adapterStack[0].scale`. adapterScale in Simple mode.<br>mm3: `ext:mm3LmAdapterScale`<br>yue2: none: On YuE2 the AR slot's strength is its two dials, Plan and Compose (ad.arp, ad.arc).<br>hm: `ext:heartmulaAdapterStrength` |
+| `s0` | number | ace, mm3, yue2, hm | ace: `param:adapterScale` + `param:adapterStack[0].scale`<br>mm3: `ext:mm3LmAdapterScale`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: none: On YuE2 the AR slot's strength is its two dials, Plan and Compose (ad.arp, ad.arc).<br>hm: `ext:heartmulaAdapterStrength` |
 | `s1` | number | ace, yue2 | ace: `param:adapterStack[1].scale`<br>yue2: `model:yue2.nar.scales.global` |
 | `s2` | number | ace | `param:adapterStack[2].scale` |
-| `ad.mode` | choice | ace, mm3 | ace: `param:adapterMode`. Real values merge, runtime, runtime_lowrank.<br>mm3: `ext:mm3LmAdapterMode` |
+| `ad.mode` | choice | ace, mm3 | ace: `param:adapterMode`. Real values merge, runtime, runtime_lowrank.<br>mm3: `ext:mm3LmAdapterMode`. Read by backends/minimax/generate.ts; not declared as an extension. |
 | `ad.planner` | choice | ace | `param:lmAdapter` |
 | `ad.dora` | boolean | ace | `param:adapterRuntimeDora` |
 | `ag.self` | number | ace | `param:adapterGroupScales.self_attn` |
@@ -184,26 +200,26 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | `ag.cond` | number | ace | `param:adapterGroupScales.cond_embed` |
 | `ag.time` | number | ace | `param:adapterGroupScales.time_embed` |
 | `ag.proj` | number | ace | `param:adapterGroupScales.proj_in` |
-| `ad.att` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleAttn`<br>yue2: `model:yue2.ar.scales.attn`. Engine state; each YuE2 slot (ar, nar) has its own six dials. The concept has one bank for both.<br>hm: `ext:heartmulaAdapterScaleAttn` |
-| `ad.mlp` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleMlp`<br>yue2: `model:yue2.ar.scales.mlp`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleMlp` |
-| `ad.early` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleEarly`<br>yue2: `model:yue2.ar.scales.early`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleEarly` |
-| `ad.mid` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleMid`<br>yue2: `model:yue2.ar.scales.mid`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleMid` |
-| `ad.late` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleLate`<br>yue2: `model:yue2.ar.scales.late`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleLate` |
-| `ad.plan` | number | mm3 | `ext:mm3LmAdapterScalePlan` |
-| `ad.adv` | choice | ace | `param:advancedAdapters`. Simple is false, Advanced is true. |
+| `ad.att` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleAttn`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: `model:yue2.ar.scales.attn`. Engine state; each YuE2 slot (ar, nar) has its own six dials. The concept has one bank for both.<br>hm: `ext:heartmulaAdapterScaleAttn` |
+| `ad.mlp` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleMlp`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: `model:yue2.ar.scales.mlp`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleMlp` |
+| `ad.early` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleEarly`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: `model:yue2.ar.scales.early`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleEarly` |
+| `ad.mid` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleMid`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: `model:yue2.ar.scales.mid`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleMid` |
+| `ad.late` | number | mm3, yue2, hm | mm3: `ext:mm3LmAdapterScaleLate`. Read by backends/minimax/generate.ts; not declared as an extension.<br>yue2: `model:yue2.ar.scales.late`. Per slot in the real app.<br>hm: `ext:heartmulaAdapterScaleLate` |
+| `ad.plan` | number | mm3 | `ext:mm3LmAdapterScalePlan`. Read by backends/minimax/generate.ts; not declared as an extension. |
+| `ad.adv` | choice | ace | `param:advancedAdapters` (map simple → false, advanced → true) |
 | `ad.stack` | choice | ace | `param:adapterStackMode` |
-| `ad.sigma` | number | ace | `param:adapterStackBudget` |
+| `ad.sigma` | number | ace | `param:adapterStackBudget`. The existing UI's slider goes to 4; the concept stops at 2. |
 | `ad.rq` | choice | ace | `param:adapterRuntimeQuant` |
-| `ad.mq` | choice | ace | `param:adapterMergeLowVram`. A boolean in the real app: HQ is false, Low is true. |
+| `ad.mq` | choice | ace | `param:adapterMergeLowVram` (map hq → false, low → true) |
 | `ad.home` | choice | ace | `param:rebaseSource` |
 | `ad.beta` | number | ace, yue2, hm | ace: `param:rebaseBeta`<br>yue2: `model:yue2.ar.scales.rebase`<br>hm: `ext:heartmulaAdapterRebase` |
 | `ad.ref` | boolean | ace | `param:noAdapterRender` |
 | `ad.align` | number | ace | `param:adapterSectionAlignAt` |
 | `ad.arp` | number | yue2 | `model:yue2.ar.scales.plan`. The AR slot's planner strength (engine state, POST /api/backends/models). |
 | `ad.arc` | number | yue2 | `model:yue2.ar.scales.global`. The AR slot's composer strength (engine state). |
-| `ad.trigcap` | boolean | mm3 | none: No such switch found: the Create form always puts the LoRA trigger at the start of the caption when one is set (composeCaption). |
-| `ad.gpu` | boolean | mm3 | `ext:mm3LmMergeGpu` |
-| `ad.trigger` | text | ace, mm3, yue2, hm | ace: `content:loraTrigger`<br>mm3: `ext:mm3LmAdapterTrigger`<br>yue2: `ext:yue2LmAdapterTrigger`<br>hm: `content:loraTrigger` |
+| `ad.trigcap` | boolean | mm3 | `ext:mm3LmAdapterTrigger`. Read with !== false by backends/minimax/generate.ts: on puts the adapter's own trigger into the caption. Not declared as an extension. |
+| `ad.gpu` | boolean | mm3 | `ext:mm3LmMergeGpu`. Read by backends/minimax/generate.ts; not declared as an extension. |
+| `ad.trigger` | text | ace, mm3, yue2, hm | ace: `content:loraTrigger`. composeCaption puts it at the start of the caption.<br>mm3: `content:loraTrigger`. composeCaption puts it at the start of the caption.<br>yue2: none: YuE2 composes its adapter's own trigger (yue2LmAdapterTrigger); createContentParams drops a typed trigger word there.<br>hm: `content:loraTrigger`. composeCaption puts it at the start of the caption. |
 
 ### Planner (`planner`, module)
 
@@ -213,17 +229,17 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | `lm.cot` | boolean | ace | `param:useCotCaption` |
 | `lm.cotmode` | choice | yue2 | `ext:yue2Cot` |
 | `lm.preview` | boolean | yue2 | `ext:yue2PreviewScore` |
-| `lm.temp` | number | ace | `param:lmTemperature` |
+| `lm.temp` | number | ace | `param:lmTemperature`. The existing UI steps by 0.01; the concept by 0.05. |
 | `lm.cfg` | number | ace | `param:lmCfgScale` |
 | `lm.topk` | number | ace | `param:lmTopK` |
 | `lm.topp` | number | ace | `param:lmTopP` |
 | `lm.minp` | number | ace | `param:lmMinP` |
 | `lm.plaus` | number | ace, yue2 | ace: `param:lmCfgMinP`<br>yue2: `ext:yue2CfgMinP` |
-| `lm.resc` | number | ace, yue2 | ace: `param:lmCfgRescale`<br>yue2: `ext:yue2CfgRescale` |
+| `lm.resc` | number | ace, yue2 | ace: `param:lmCfgRescale`. The existing UI steps by 0.05; the concept by 0.01.<br>yue2: `ext:yue2CfgRescale` |
 | `lm.logp` | boolean | ace, yue2 | ace: `param:lmCfgLogprob`<br>yue2: `ext:yue2CfgLogprob` |
 | `lm.codes` | number | ace | `param:lmCodesStrength` |
 | `lm.codesmode` | choice | ace | `param:lmCodesMode` |
-| `lm.codesteps` | number | ace | `param:lmCodesSteps` |
+| `lm.codesteps` | number | ace | `param:lmCodesSteps`. The existing UI's slider stops at the step count in force; the concept at 300. |
 | `lm.neg` | text | ace | `param:lmNegativePrompt` |
 | `lm.seedlock` | boolean | ace | `param:lmSeedFollowsDit` |
 | `mm.temp` | number | mm3 | `ext:mm3LmTemperature` |
@@ -237,7 +253,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | `yc.topp` | number | yue2 | `ext:yue2SemTopP` |
 | `yc.topk` | number | yue2 | `ext:yue2SemTopK` |
 | `yc.minp` | number | yue2 | `ext:yue2SemMinP` |
-| `yue.cfg` | number | yue2 | `ext:yue2CfgScale` (auto: ""). A text knob in the real app: empty means the checkpoint default. |
+| `yue.cfg` | number | yue2 | `ext:yue2CfgScale` (via text; auto: ""). A text knob in the real app: empty means the checkpoint's own. |
 | `hm.temp` | number | hm | `ext:heartmulaTemperature` |
 | `hm.topk` | number | hm | `ext:heartmulaTopK` |
 | `hm.cfg` | number | hm | `ext:heartmulaCfgScale` |
@@ -265,25 +281,25 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | --- | --- | --- | --- |
 | `samp.steps` | number | all | ace: `param:inferenceSteps`<br>mm3: `ext:mm3Steps`<br>yue2: `ext:yue2OdeSteps`<br>sa3: `ext:sa3Steps`<br>hm: `ext:heartmulaCodecSteps` |
 | `samp.cfg` | number | ace, mm3, sa3, hm | ace: `param:guidanceScale`<br>mm3: `ext:mm3CfgFlow`<br>sa3: `param:guidanceScale`. Read only with samplerPluginsEnabled and above 1.<br>hm: `ext:heartmulaCodecGuidance` |
-| `samp.shift` | number | ace, mm3, hm | ace: `param:shift`<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
+| `samp.shift` | number | ace, mm3, hm | ace: `param:shift` (auto: null). Auto sends nothing, so the engine's own shift applies.<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
 | `samp.solver` | choice | all | ace: `param:inferMethod`<br>mm3: `param:inferMethod`<br>yue2: `ext:yue2NarSolver`<br>sa3: `param:inferMethod`<br>hm: `param:inferMethod` |
-| `samp.sched` | choice | all | ace: `param:scheduler`<br>mm3: `param:scheduler`<br>yue2: `ext:yue2NarScheduler`<br>sa3: `param:scheduler`<br>hm: `param:scheduler` |
+| `samp.sched` | choice | all | ace: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>mm3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>yue2: `ext:yue2NarScheduler`<br>sa3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>hm: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70". |
 | `samp.guide` | choice | ace, mm3, sa3, hm | `param:guidanceMode` |
 | `samp.plugins` | boolean | mm3, sa3, hm | `ext:samplerPluginsEnabled` |
 | `sa3.sampler` | choice | sa3 | `ext:sa3Sampler` |
 | `samp.cs` | number | ace | `param:cfgIntervalStart` |
 | `samp.ce` | number | ace | `param:cfgIntervalEnd` |
 | `samp.retake` | number | ace | `param:retakeVariance` |
-| `samp.rseed` | text | ace | `param:retakeSeed`. A number in the real app (-1 is a fresh one each run); the concept keeps it as text. |
+| `samp.rseed` | text | ace | `param:retakeSeed` (via int). -1 is a fresh one each run. |
 | `sa3.lufs` | boolean | sa3 | `ext:sa3LufsEnabled` |
 | `sa3.lufst` | number | sa3 | `ext:sa3LufsTarget` |
-| `sch.alpha` | number | ace | `param:scheduler`. Packed into the scheduler string: "beta:<alpha>:<beta>". |
-| `sch.beta` | number | ace | `param:scheduler`. Packed into the scheduler string: "beta:<alpha>:<beta>". |
-| `sch.exp` | number | ace | `param:scheduler`. Packed into the scheduler string: "power:<exponent>". |
-| `sch.a` | choice | ace | `param:scheduler`. Packed into the scheduler string: "composite:<a>+<b>:<crossover>:<split>"; stage names are plugin ids (bong_tangent, linear). |
-| `sch.b` | choice | ace | `param:scheduler`. Packed into the scheduler string (see sch.a). |
-| `sch.x` | number | ace | `param:scheduler`. Packed into the scheduler string (see sch.a). |
-| `sch.split` | number | ace | `param:scheduler`. Packed into the scheduler string (see sch.a). |
+| `sch.alpha` | number | ace | `param:scheduler` (via scheduler) |
+| `sch.beta` | number | ace | `param:scheduler` (via scheduler) |
+| `sch.exp` | number | ace | `param:scheduler` (via scheduler) |
+| `sch.a` | choice | ace | `param:scheduler` (via scheduler) |
+| `sch.b` | choice | ace | `param:scheduler` (via scheduler) |
+| `sch.x` | number | ace | `param:scheduler` (via scheduler) |
+| `sch.split` | number | ace | `param:scheduler` (via scheduler) |
 | `yn.wassersteinflow.0` | number | yue2 | `ext:yue2WassTau` |
 | `yn.wassersteinflow.1` | number | yue2 | `ext:yue2WassSpectral` |
 | `yn.wassersteinflow.2` | number | yue2 | `ext:yue2WassRmsWeight` |
@@ -324,8 +340,8 @@ rather than editing rows here. A real name is shown once when it is the same on 
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `apg.mom` | number | ace, sa3, hm | `param:apgMomentum` |
-| `apg.norm` | number | ace, mm3, sa3, hm | `param:apgNormThreshold` |
+| `apg.mom` | number | ace, sa3, hm | ace: `param:apgMomentum`<br>sa3: `param:apgMomentum`. The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).<br>hm: `param:apgMomentum`. The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3). |
+| `apg.norm` | number | ace, mm3, sa3, hm | ace: `param:apgNormThreshold`<br>mm3: `param:apgNormThreshold`<br>sa3: `param:apgNormThreshold`. The concept has it here; nothing this engine runs reads it today, so it changes nothing until the server does (docs/08, question 3).<br>hm: `param:apgNormThreshold` |
 
 ### Performance trades (`perf`, module)
 
@@ -340,18 +356,18 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `lat.ts` | text | ace | `param:customTimesteps` |
-| `lat.shift` | number | ace | `param:latentShift` |
-| `lat.rescale` | number | ace | `param:latentRescale` |
+| `lat.shift` | number | ace | `param:latentShift`. The existing UI steps by 0.01; the concept by 0.05. |
+| `lat.rescale` | number | ace | `param:latentRescale`. The existing UI steps by 0.01; the concept by 0.05. |
 | `dcw.on` | boolean | ace | `param:dcwEnabled` |
 | `dcw.mode` | choice | ace | `param:dcwMode` |
-| `den.on` | boolean | ace | none: No switch in the real app: the denoiser runs while denoiseStrength is above 0. Off has to send denoiseStrength 0. |
-| `lss.on` | boolean | ace | none: No switch in the real app: LSS runs while lssStrength is above 0. Off has to send lssStrength 0. |
+| `den.on` | boolean | ace | none: No switch in the real app: the denoiser runs while denoiseStrength is above 0. This switch gates den.str's wire. |
+| `lss.on` | boolean | ace | none: No switch in the real app: LSS runs while lssStrength is above 0. This switch gates lss.str's wire. |
 | `dcw.low` | number | ace | `param:dcwLowScaler` |
 | `dcw.high` | number | ace | `param:dcwHighScaler` |
-| `den.str` | number | ace | `param:denoiseStrength` |
+| `den.str` | number | ace | `param:denoiseStrength` (while {"param":"den.on","is":true}, else 0). The denoiser runs while denoiseStrength is above 0, so its switch off sends 0. |
 | `den.smooth` | number | ace | `param:denoiseSmoothing` |
 | `den.mix` | number | ace | `param:denoiseMix` |
-| `lss.str` | number | ace | `param:lssStrength` |
+| `lss.str` | number | ace | `param:lssStrength` (while {"param":"lss.on","is":true}, else 0). LSS runs while lssStrength is above 0, so its switch off sends 0. |
 | `lss.var` | number | ace | `param:lssVarThresh` |
 | `lss.dc` | boolean | ace | `param:lssDcRemove` |
 
@@ -359,7 +375,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `yue.abc` | text | yue2 | `ext:yue2Abc` |
+| `yue.abc` | text | yue2 | `ext:yue2Abc`. Read by backends/yue2/generate.ts as a lead sheet marker; not declared as an extension. |
 | `yue.timing` | choice | yue2 | `ext:yue2LyricSchedule` |
 
 ### Build by section (`build`, module)
@@ -443,7 +459,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `takes.n` | number | all | ace: `param:batchSize`<br>mm3: `ext:mm3Takes`<br>yue2: `ext:yue2BatchSize`<br>sa3: none: One song per run.<br>hm: none: One song per run. |
+| `takes.n` | number | all | ace: `param:batchSize`<br>mm3: `ext:mm3Takes`<br>yue2: `ext:yue2BatchSize`. Declared with a maximum of 1 in the static manifest; the engine raises it to its batch limit.<br>sa3: none: One song per run.<br>hm: none: One song per run. |
 
 ### Pedalboard (`post`, module)
 
@@ -456,7 +472,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.tile.on` | boolean | ace, sa3 | `param:postprocessEnabled` |
-| `pp.tile.plugin` | choice | ace, sa3 | `param:postprocessPlugin` |
+| `pp.tile.plugin` | choice | ace, sa3 | `param:postprocessPlugin`. The concept starts on V2.1, so turning the decoder on uses it; the real app starts with none chosen. |
 
 ### MM3 latent refiner (`refiner`, pedal)
 
@@ -464,16 +480,16 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | --- | --- | --- | --- |
 | `pp.refiner.on` | boolean | all | `param:mm3RefinerEnabled` |
 | `pp.refiner.steps` | number | all | `param:mm3RefinerSteps` |
-| `pp.refiner.win` | number | all | `param:mm3RefinerWindowSeconds` |
-| `pp.refiner.ov` | number | all | `param:mm3RefinerOverlapSeconds` |
-| `pp.refiner.mix` | number | all | `param:mm3RefinerMix` (× 0.01). Real is 0..1. |
+| `pp.refiner.win` | number | all | `param:mm3RefinerWindowSeconds`. The existing UI takes any length from 0, by 0.1; the concept 0 to 60 by 1. |
+| `pp.refiner.ov` | number | all | `param:mm3RefinerOverlapSeconds`. The existing UI keeps it below the window; the concept 0 to 10 by 0.5. |
+| `pp.refiner.mix` | number | all | `param:mm3RefinerMix` (÷ 100). Real is 0..1. |
 
 ### StableStep (`ss`, pedal)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.ss.on` | boolean | ace, mm3, yue2, hm | `param:stableStepOn` |
-| `pp.ss.str` | number | ace, mm3, yue2, hm | `param:stableStepStrength` (× 0.01). Real is 0..1. |
+| `pp.ss.str` | number | ace, mm3, yue2, hm | `param:stableStepStrength` (÷ 100). Real is 0..1. |
 | `pp.ss.vox` | number | ace, mm3, yue2, hm | `param:stableStepVocalTrimDb` |
 | `pp.ss.steps` | number | ace, mm3, yue2, hm | `param:stableStepSteps` |
 | `pp.ss.dyn` | boolean | ace, mm3, yue2, hm | `param:stableStepPreserveDynamics` |
@@ -483,24 +499,24 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | `pp.ss.xw` | number | ace, mm3, yue2, hm | `param:stableStepCrossoverWidthHz` |
 | `pp.ss.mix` | number | ace, mm3, yue2, hm | `param:stableStepMix` |
 | `pp.ss.seedf` | boolean | ace, mm3, yue2, hm | `param:stableStepSeedFollowsDit` |
-| `pp.ss.seed` | text | ace, mm3, yue2, hm | `param:stableStepSeed`. A number in the real app. |
+| `pp.ss.seed` | text | ace, mm3, yue2, hm | `param:stableStepSeed` (via int) |
 
 ### PP-VAE (`ppvae`, pedal)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.ppvae.on` | boolean | ace | `param:ppVaeReencode` |
-| `pp.ppvae.blend` | number | ace | `param:ppVaeBlend` |
+| `pp.ppvae.blend` | number | ace | `param:ppVaeBlend`. The existing UI steps by 0.01; the concept by 0.05. |
 
 ### Spectral lifter (`lift`, pedal)
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.lift.on` | boolean | ace | `param:spectralLifterEnabled` |
-| `pp.lift.den` | number | ace | `param:slDenoiseStrength` |
+| `pp.lift.den` | number | ace | `param:slDenoiseStrength`. The existing UI steps by 0.01; the concept by 0.05. |
 | `pp.lift.floor` | number | ace | `param:slNoiseFloor` |
 | `pp.lift.hf` | number | ace | `param:slHfMix` |
-| `pp.lift.tr` | number | ace | `param:slTransientBoost` |
+| `pp.lift.tr` | number | ace | `param:slTransientBoost`. The existing UI steps by 0.01; the concept by 0.05. |
 | `pp.lift.shim` | number | ace | `param:slShimmerReduction` |
 
 ### Vocal naturalizer (`nat`, pedal)
@@ -508,7 +524,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.nat.on` | boolean | ace, mm3, yue2 | `param:vocalNaturalizerEnabled` |
-| `pp.nat.amt` | number | ace, mm3, yue2 | `param:naturalizeAmount` |
+| `pp.nat.amt` | number | ace, mm3, yue2 | `param:naturalizeAmount`. The existing UI steps by 0.01; the concept by 0.05. |
 | `pp.nat.vr` | number | ace, mm3, yue2 | `param:natVibratoRate` |
 | `pp.nat.vd` | number | ace, mm3, yue2 | `param:natVibratoDepth` |
 | `pp.nat.fm` | number | ace, mm3, yue2 | `param:natFormantStrength` |
@@ -540,7 +556,7 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
 | `pp.norm.on` | boolean | all | `param:lufsEnabled` |
-| `pp.norm.target` | choice | all | `ui:lufsPreset`. Form state; the wire carries lufsTarget from the preset. |
+| `pp.norm.target` | choice | all | `ui:hs-lufsPreset`. Form state: the real app keeps the preset to show it and sends only the target. + `param:lufsTarget` (map spotify → -14, apple → -16, ebu → -23, club → -8). Custom sends the Custom knob's value instead. |
 | `pp.norm.custom` | number | all | `param:lufsTarget` |
 | `pp.norm.ceil` | number | all | `param:lufsCeilingDb` |
 
@@ -579,3 +595,4 @@ rather than editing rows here. A real name is shown once when it is the same on 
 | --- | --- | --- | --- |
 | `pp.q.on` | boolean | ace, mm3, yue2, sa3 | `param:qualityEvalEnabled` |
 | `pp.q.eval` | choice | ace, mm3, yue2, sa3 | `param:qualityEvalTarget` |
+<!-- end generated -->

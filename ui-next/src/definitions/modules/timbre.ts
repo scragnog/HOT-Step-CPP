@@ -11,7 +11,7 @@ export const timbre = {
   category: 'Compose',
   engines: ['ace'],
   owner: 'song',
-  stored: 'content',
+  stored: 'settings',
   size: { w: 1, grow: true, stretch: 144 },
   tierSummary: ['Drop a track', '+ strength knob', 'Same as Studio'],
   params: [
@@ -20,7 +20,6 @@ export const timbre = {
       type: 'number',
       label: 'Reference blend',
       range: [0, 1, 0.05],
-      format: { percent: true },
       default: 1,
       wire: 'param:timbreReferenceStrength',
     },
@@ -30,28 +29,53 @@ export const timbre = {
       key: 'timbreFile',
       kind: 'file',
       noun: 'the timbre reference',
-      load: 'Load {file} as the timbre reference',
+      steps: { load: 'Load {file} as the timbre reference' },
       owner: 'song',
-      stored: 'content',
+      stored: 'none',
       wire: 'param:timbreAudioPath',
+    },
+    {
+      key: 'recentRefs',
+      kind: 'list',
+      noun: 'the recent references',
+      owner: 'song',
+      stored: 'none',
+      wire: { none: 'The page\'s own list of recent reference files.' },
     },
   ],
   face: [
-    { part: 'recentRefs', tiers: ['studio', 'lab'] },
+    { part: 'recentRefs', state: ['recentRefs', 'timbreFile'], tiers: ['studio', 'lab'] },
     {
       part: 'dropZone',
-      opts: { look: 'sleeve', state: 'timbreFile', empty: 'Drop a track', hint: 'or choose a file' },
-      tiers: ['quick'],
-    },
-    {
-      part: 'dropZone',
-      opts: { look: 'sleeve', state: 'timbreFile', empty: 'Drop a reference track', hint: 'or click to choose audio' },
-      tiers: ['studio', 'lab'],
+      state: ['timbreFile'],
+      opts: { look: 'sleeve', empty: 'Drop a reference track', hint: 'or click to choose audio' },
+      per: [
+        { tiers: ['quick'], opts: { look: 'sleeve', empty: 'Drop a track', hint: 'or choose a file' } },
+        {
+          when: {
+            all: [{ param: 'pp.master.timbre', is: true }, { state: 'masterRef', set: true }, { onDesk: 'master' }],
+          },
+          state: ['masterRef'],
+          opts: { look: 'sleeve', from: 'from Mastering' },
+        },
+      ],
     },
     {
       part: 'timbreBlend',
       param: 'timbre.str',
-      dim: { when: { state: 'timbreFile', set: false }, says: 'Load a track to blend it in' },
+      dim: {
+        when: {
+          all: [
+            { state: 'timbreFile', set: false },
+            {
+              not: {
+                all: [{ param: 'pp.master.timbre', is: true }, { state: 'masterRef', set: true }, { onDesk: 'master' }],
+              },
+            },
+          ],
+        },
+        says: 'Load a track to blend it in',
+      },
       tiers: ['studio', 'lab'],
     },
   ],
