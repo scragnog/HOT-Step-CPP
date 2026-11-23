@@ -70,7 +70,7 @@ reference if memory allows. No audio-quality ranking between variants is claimed
 
 The smallest LM rungs trade precision for memory. IQ1_S produced clipping in
 one fixed-seed validation render, so it is an experimental memory option.
-Long prose in the tags field can produce poor output in the original model too.
+Long prose in the tags field can produce poor output in the original model too. The Tags field shows a soft warning past 60 words; it never blocks Generate.
 Native inference does not need the optional encoder pack for text generation.
 
 The publication manifest contains exact paths, byte sizes and SHA-256 values.

@@ -120,6 +120,7 @@
     "globalBar.standardVariant": "Standard",
     "contentSection.heartmulaTags": "Tags",
     "contentSection.heartmulaTagsInfo": "Comma-separated genre, mood, instruments and vocal style for HeartMuLa. Lyrics go in the Lyrics field below.",
+    "contentSection.heartmulaTagsLong": "Long text ({{count}} words). HeartMuLa sings nonsense on prose captions. Use short comma-separated tags (under {{limit}} words).",
     "contentSection.heartmulaTagsPlaceholder": "indie folk, acoustic guitar, warm, female vocals",
     "globalBar.modelBucket.lm": "Language Model",
     "globalBar.modelBucket.synth": "Synth / Flow Model",

@@ -14,6 +14,9 @@ import { StyleGenreSelect } from './StyleGenreSelect';
 import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 
+// Prose captions past roughly this length make HeartMuLa sing gibberish (HOTSTEP-766); tag lists stay well under.
+const HEARTMULA_TAG_WORD_LIMIT = 60;
+
 interface ContentSectionProps {
   caption: string;
   onCaptionChange: (v: string) => void;
@@ -69,6 +72,7 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
 }) => {
   const { t } = useTranslation();
   const tagsMode = useBackendStore(s => s.activeBackendId === 'heartmula');
+  const tagWordCount = caption.trim() ? caption.trim().split(/\s+/).length : 0;
   const { capabilities } = useCapabilities();
   const hasMetadata = !!(title || artist || subject);
   const [showMetadata, setShowMetadata] = usePersistedState('hs-create-fold-songInfo', hasMetadata);
@@ -151,6 +155,11 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           onChange={e => onCaptionChange(e.target.value)}
           rows={captionReadOnly ? 8 : 3}
         />
+        {tagsMode && tagWordCount > HEARTMULA_TAG_WORD_LIMIT && (
+          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+            {t('contentSection.heartmulaTagsLong', 'Long text ({{count}} words). HeartMuLa sings nonsense on prose captions. Use short comma-separated tags (under {{limit}} words).', { count: tagWordCount, limit: HEARTMULA_TAG_WORD_LIMIT })}
+          </p>
+        )}
 
       </div>
 
