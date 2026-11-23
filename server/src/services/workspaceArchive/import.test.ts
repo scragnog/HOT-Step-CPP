@@ -73,7 +73,7 @@ function world(opts: { extraColumn?: boolean } = {}) {
   const cb = childrenOf(b);
   put(path.join(cb.models, 'm.gguf'), 'weights here');
   put(path.join(b, 'tools', 'whisper', 'whisper-cli'), 'bin');
-  put(cb.envFile, ['GEMINI_API_KEY=B-OWN-KEY', 'SERVER_PORT=3005', 'GEMINI_MODEL=gemini-from-B', 'CUDA_VISIBLE_DEVICES=1', `DATA_DIR=${cb.library}`].join('\n'));
+  put(cb.envFile, ['GEMINI_API_KEY=B-OWN-KEY', 'SERVER_PORT=3005', 'GEMINI_MODEL=gemini-from-B', 'CUDA_VISIBLE_DEVICES=1', `DATA_DIR=${cb.library}`, 'LYRICS_EXPORT_DIR=exports/lyrics'].join('\n'));
   fs.mkdirSync(cb.library, { recursive: true });
   const dbB = new Database(cb.db);
   dbB.exec(TABLES);
@@ -194,7 +194,7 @@ test('round trip A -> zip -> new folder on B: files verified, paths rewritten, s
   const env = dotenvParse(fs.readFileSync(t('settings', '.env'), 'utf-8'));
   assert.deepEqual(env, {
     GEMINI_API_KEY: 'B-OWN-KEY', SERVER_PORT: '3005', GEMINI_MODEL: 'gemini-from-A', CUDA_VISIBLE_DEVICES: '1', THEME_ACCENT: 'teal',
-    ACESTEPCPP_MODELS: w.cb.models, WHISPER_EXE: w.here.paths.WHISPER_EXE,
+    LYRICS_EXPORT_DIR: path.join(w.b, 'exports', 'lyrics'), ACESTEPCPP_MODELS: w.cb.models, WHISPER_EXE: w.here.paths.WHISPER_EXE,
   });
   assert.ok(!Object.values(env).some(v => v.includes('A-SECRET')));
 
@@ -210,11 +210,16 @@ test('mergeEnvText: carried categories take the layout default, left-behind ones
   const adapters = path.join(dir, 'adapters');
   fs.mkdirSync(adapters);
   const carried = { library: true, training: true, adapters: false, models: true, secrets: true };
-  const r = mergeEnvText('TRAINING_DIR=/x/t\nKEEP=1\nLYRICS_EXPORT_DIR=/my/lyrics\n', 'OPENAI_API_KEY=from-archive\nACESTEPCPP_EXE=/a/exe\nSERVER_HOST=0.0.0.0\n', carried,
-    { ACESTEPCPP_ADAPTERS: adapters, ACESTEPCPP_MODELS: path.join(dir, 'models'), MISSING: path.join(dir, 'nope') });
-  assert.deepEqual(dotenvParse(r.text), { KEEP: '1', LYRICS_EXPORT_DIR: '/my/lyrics', OPENAI_API_KEY: 'from-archive', ACESTEPCPP_ADAPTERS: adapters });
+  const hereRoot = path.join(dir, 'here-root');
+  const r = mergeEnvText('TRAINING_DIR=/x/t\nKEEP=1\nLYRICS_EXPORT_DIR=/my/lyrics\nDOWNLOAD_DIR=dl\nACESTEPCPP_EXE=bin/ace\n',
+    'OPENAI_API_KEY=from-archive\nACESTEPCPP_EXE=/a/exe\nSERVER_HOST=0.0.0.0\n', carried,
+    { ACESTEPCPP_ADAPTERS: adapters, ACESTEPCPP_MODELS: path.join(dir, 'models'), MISSING: path.join(dir, 'nope') }, hereRoot);
+  assert.deepEqual(dotenvParse(r.text), {
+    KEEP: '1', LYRICS_EXPORT_DIR: '/my/lyrics', DOWNLOAD_DIR: path.join(hereRoot, 'dl'), ACESTEPCPP_EXE: 'bin/ace',
+    OPENAI_API_KEY: 'from-archive', ACESTEPCPP_ADAPTERS: adapters,
+  }, 'a relative data-folder path keeps its location here; other relative values stay as they are');
   assert.deepEqual(r.fromArchive, ['OPENAI_API_KEY']);
-  assert.equal(dotenvParse(mergeEnvText('', 'OPENAI_API_KEY=x\n', { ...carried, secrets: false }, {}).text).OPENAI_API_KEY, undefined);
+  assert.equal(dotenvParse(mergeEnvText('', 'OPENAI_API_KEY=x\n', { ...carried, secrets: false }, {}, hereRoot).text).OPENAI_API_KEY, undefined);
 });
 
 // ── Negatives ────────────────────────────────────────────────────────
@@ -227,11 +232,11 @@ test('names: traversal, absolute, backslash, outside a category, case clash and 
     [withManifest([{ name: 'C:/evil.txt', data: 'x' }]), /absolute path/],
     [withManifest([{ name: 'library\\evil.txt', data: 'x' }]), /invalid characters/],
     [withManifest([{ name: 'plugins/evil.lua', data: 'x' }]), /not under library\/, adapters\/ or models\//],
-    [withManifest([{ name: 'library/a.txt', data: 'x' }, { name: 'library/A.txt', data: 'y' }]), /differs only in case/],
-    [withManifest([{ name: 'library/link', data: '/etc/passwd', mode: 0o120777 }]), /a link/],
+    [withManifest([{ name: 'library/audio/a.txt', data: 'x' }, { name: 'library/audio/A.txt', data: 'y' }]), /differs only in case/],
+    [withManifest([{ name: 'library/audio/link', data: '/etc/passwd', mode: 0o120777 }]), /a link/],
     [withManifest([{ name: 'adapters/a.safetensors', data: 'x' }]), /not under a category the archive carries/],
-    [[...withManifest([{ name: 'library/a.txt', data: 'x' }]), { name: 'library/extra.txt', data: 'x' }], /in the zip, not in the manifest/],
-    [withManifest([{ name: 'library/a.txt', data: 'x' }], { files: [{ name: 'library/a.txt', bytes: 1, sha256: sha('x') }, { name: 'library/gone.txt', bytes: 1, sha256: sha('x') }] }), /missing from the zip/],
+    [[...withManifest([{ name: 'library/audio/a.txt', data: 'x' }]), { name: 'library/audio/extra.txt', data: 'x' }], /in the zip, not in the manifest/],
+    [withManifest([{ name: 'library/audio/a.txt', data: 'x' }], { files: [{ name: 'library/audio/a.txt', bytes: 1, sha256: sha('x') }, { name: 'library/audio/gone.txt', bytes: 1, sha256: sha('x') }] }), /missing from the zip/],
   ];
   for (const [i, [entries, re]] of cases.entries()) {
     const zip = rawZip(path.join(w.dir, 'neg', `n${i}.zip`), entries);
@@ -244,10 +249,10 @@ test('names: traversal, absolute, backslash, outside a category, case clash and 
 test('missing manifest, another platform, an unknown format: refused', async () => {
   const w = world();
   const z = (n: string, e: RawEntry[]) => rawZip(path.join(w.dir, 'neg', n), e);
-  await refused(importWorkspace({ zipFile: z('nomanifest.zip', [{ name: 'library/a.txt', data: 'x' }]), target: w.target, here: w.here }), /no manifest\.json/, w.target);
+  await refused(importWorkspace({ zipFile: z('nomanifest.zip', [{ name: 'library/audio/a.txt', data: 'x' }]), target: w.target, here: w.here }), /no manifest\.json/, w.target);
   const other = process.platform === 'win32' ? 'darwin' : 'win32';
-  await refused(importPreview(z('plat.zip', withManifest([{ name: 'library/a.txt', data: 'x' }], { platform: other })), null, w.here), new RegExp(`made on ${other}`));
-  await refused(importPreview(z('fmt.zip', withManifest([{ name: 'library/a.txt', data: 'x' }], { format: 2 })), null, w.here), /format 2 is not supported/);
+  await refused(importPreview(z('plat.zip', withManifest([{ name: 'library/audio/a.txt', data: 'x' }], { platform: other })), null, w.here), new RegExp(`made on ${other}`));
+  await refused(importPreview(z('fmt.zip', withManifest([{ name: 'library/audio/a.txt', data: 'x' }], { format: 2 })), null, w.here), /format 2 is not supported/);
   fs.writeFileSync(path.join(w.dir, 'neg', 'junk.zip'), 'not a zip');
   await refused(importPreview(path.join(w.dir, 'neg', 'junk.zip'), null, w.here), /not a readable zip/);
 });
@@ -364,6 +369,45 @@ test('cli: import arguments', () => {
   assert.deepEqual(parseImportArgs(['import', '--zip', 'a.zip', '--into', 'b']), { zip: path.resolve('a.zip'), into: path.resolve('b') });
   assert.throws(() => parseImportArgs(['import', '--zip', 'a.zip']), /usage/);
   assert.throws(() => parseImportArgs(['import', '--zip', 'a.zip', '--into', 'b', '--switch']), /unknown argument --switch/);
+});
+
+const leftovers = (dir: string) => fs.readdirSync(dir).filter(n => n.includes('.hs-import-'));
+
+test('database metadata: a DB the manifest does not declare, a declared DB the zip lacks, and SQLite sidecars are refused', async () => {
+  const w = world();
+  const z = (n: string, e: RawEntry[]) => rawZip(path.join(w.dir, 'neg', n), e);
+  const db = { name: 'library/hotstep.db', userVersion: 0, credentialRowsRemoved: 0 };
+  await refused(importWorkspace({ zipFile: z('undeclared.zip', withManifest([{ name: 'library/hotstep.db', data: 'not checked' }])), target: w.target, here: w.here }),
+    /manifest\.db does not match the zip \(the zip holds library\/hotstep\.db\)/, w.target);
+  await refused(importWorkspace({ zipFile: z('missing.zip', withManifest([{ name: 'library/audio/a.txt', data: 'x' }], { db })), target: w.target, here: w.here }),
+    /manifest\.db does not match the zip \(the zip lacks/, w.target);
+  for (const [i, n] of ['library/hotstep.db-wal', 'library/hotstep.db-journal', 'library/lireek.db', 'library/training/other.db'].entries()) {
+    await refused(importWorkspace({ zipFile: z(`side${i}.zip`, withManifest([{ name: n, data: 'x' }])), target: w.target, here: w.here }), /not a library entry HOT-Step exports/, w.target);
+  }
+  assert.deepEqual(leftovers(w.dir), []);
+});
+
+test('the target is re-checked before the switch: files that appear in it are never touched, and only the staging folder is removed', async () => {
+  const w = world();
+  const zip = await exported(w);
+  fs.mkdirSync(w.target);
+  const mine = path.join(w.target, 'mine.txt');
+  hooks.afterFile = () => { if (!fs.existsSync(mine)) fs.writeFileSync(mine, 'user file'); };
+  try {
+    await refused(importWorkspace({ zipFile: zip, target: w.target, here: w.here, schedule: () => assert.fail('must not switch') }), /checked again before the switch: .*is not empty/);
+  } finally { hooks.afterFile = () => {}; }
+  assert.deepEqual(fs.readdirSync(w.target), ['mine.txt']);
+  assert.equal(fs.readFileSync(mine, 'utf-8'), 'user file');
+  assert.deepEqual(leftovers(w.dir), [], 'staging folder removed');
+
+  // A folder that appears where there was none is left alone too.
+  const fresh = path.join(w.dir, 'Fresh');
+  hooks.afterFile = () => { if (!fs.existsSync(fresh)) { fs.mkdirSync(fresh); fs.writeFileSync(path.join(fresh, 'x'), 'x'); } };
+  try {
+    await refused(importWorkspace({ zipFile: zip, target: fresh, here: w.here }), /is not empty/);
+  } finally { hooks.afterFile = () => {}; }
+  assert.deepEqual(fs.readdirSync(fresh), ['x']);
+  assert.deepEqual(leftovers(w.dir), []);
 });
 
 test('ZIP64: a 5 GB file round trips (opt-in: HS_ARCHIVE_ZIP64=1)', { skip: process.env.HS_ARCHIVE_ZIP64 !== '1' }, async () => {

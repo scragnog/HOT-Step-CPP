@@ -26,7 +26,7 @@ import { canonical, rewriteDb, rewriteJsonFiles } from '../../dataroot/transfer.
 import { removeSync } from '../fsRemove.js';
 import { isCredentialKey } from '../generation/requestCapture.js';
 import { DB_ENTRY, ENV_ENTRY, envLine, isMachineKey } from './export.js';
-import { freeBytes } from './inventory.js';
+import { freeBytes, LIBRARY_NAMES, TRAINING_NAMES } from './inventory.js';
 import { ARCHIVE_FORMAT, ARCHIVE_KIND, MANIFEST_NAME, type CategoryId, type Manifest, type ManifestFile } from './manifest.js';
 
 export class ImportError extends Error {
@@ -105,6 +105,12 @@ const pathStyle =(p: string) => (p === 'win32' ? 'win32' : 'posix');
 export function nameError(name: string, platform: NodeJS.Platform = process.platform): string | null {
   if (name === MANIFEST_NAME || name === ENV_ENTRY) return null;
   if (!/^(library|adapters|models)\/./.test(name)) return `${name}: not under library/, adapters/ or models/`;
+  // The library takes only what the exporter writes: the one DB snapshot and
+  // its allowlisted folders, so no WAL, journal or second SQLite file rides in.
+  const [top, a, b] = name.split('/');
+  if (top === 'library' && name !== DB_ENTRY && !(a === 'training' ? b !== undefined && TRAINING_NAMES.has(b) : LIBRARY_NAMES.has(a))) {
+    return `${name}: not a library entry HOT-Step exports`;
+  }
   for (const seg of name.split('/')) {
     if (!seg || seg === '.' || seg === '..') return `${name}: empty, . or .. path segment`;
     if (platform === 'win32' && (WIN_BAD.test(seg) || WIN_RESERVED.test(seg) || /[. ]$/.test(seg))) return `${name}: not a valid Windows file name`;
@@ -169,6 +175,9 @@ export async function openArchive(zipFile: string): Promise<OpenedArchive> {
 
     for (const s of manifest.sources) {
       if (!SOURCE_PREFIXES.has(s.prefix) || typeof s.path !== 'string' || !path.isAbsolute(s.path)) errors.push(`manifest source ${s.prefix} (${s.path}) is not one this app knows`);
+    }
+    if (entries.has(DB_ENTRY) !== !!manifest.db || (manifest.db && manifest.db.name !== DB_ENTRY)) {
+      errors.push(`manifest.db does not match the zip (${entries.has(DB_ENTRY) ? 'the zip holds' : 'the zip lacks'} ${DB_ENTRY})`);
     }
     const prefixes = manifest.sources.map(s => s.prefix + '/');
     const listed = new Set<string>();
@@ -270,6 +279,10 @@ export function copyCredentialRows(target: Database.Database, hereDb: string): n
   } finally { here.close(); }
 }
 
+/** Keys config.ts resolves against the data folder when relative. */
+const DATA_RELATIVE_KEYS = new Set(['ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'DOWNLOAD_DIR', 'LYRICS_EXPORT_DIR', 'TENSORRT_LIBS',
+  'TRAINING_DIR', 'WHISPER_EXE', 'WHISPER_MODELS_DIR', 'MUSCRIPTOR_MODELS_DIR']);
+
 /** Path keys that follow a carried category to the new layout's default. */
 const CATEGORY_KEYS: Record<Exclude<CategoryId, 'secrets' | 'library'>, string[]> = {
   training: ['TRAINING_DIR'],
@@ -282,8 +295,9 @@ const CATEGORY_KEYS: Record<Exclude<CategoryId, 'secrets' | 'library'>, string[]
  *  carried secrets). Path keys: DATA_DIR and those of carried categories take
  *  the new layout's default; those of categories left behind, and tools no
  *  category carries, point at this machine's current folders when they exist;
- *  other path keys keep this machine's value. */
-export function mergeEnvText(hereText: string, archiveText: string, carried: Manifest['categories'], here: Record<string, string | undefined>): {
+ *  other path keys keep this machine's value, made absolute against
+ *  `hereBase` (this machine's data folder) where config would resolve it there. */
+export function mergeEnvText(hereText: string, archiveText: string, carried: Manifest['categories'], here: Record<string, string | undefined>, hereBase: string): {
   text: string; fromArchive: string[]; pointedHere: Record<string, string>; dropped: string[];
 } {
   const out = new Map<string, string>();
@@ -292,7 +306,11 @@ export function mergeEnvText(hereText: string, archiveText: string, carried: Man
   const toLayout = new Set(['DATA_DIR']);
   for (const [cat, keys] of Object.entries(CATEGORY_KEYS)) if (carried[cat as CategoryId]) keys.forEach(k => toLayout.add(k));
 
-  for (const [k, v] of Object.entries(dotenvParse(hereText))) if (!toLayout.has(k)) out.set(k, v);
+  // A relative value resolves against the data folder (config.ts resolveDataPath):
+  // made absolute against this machine's, it keeps pointing where it points now.
+  for (const [k, v] of Object.entries(dotenvParse(hereText))) {
+    if (!toLayout.has(k)) out.set(k, DATA_RELATIVE_KEYS.has(k) && v && !path.isAbsolute(v) ? path.resolve(hereBase, v) : v);
+  }
   for (const [k, v] of Object.entries(dotenvParse(archiveText))) {
     if (ENV_PATH_KEYS.includes(k) || isMachineKey(k) || (!carried.secrets && isCredentialKey(k))) continue;
     out.set(k, v);
@@ -355,9 +373,13 @@ export type ImportPreview = Awaited<ReturnType<typeof importPreview>>;
 export const hooks = { afterFile: (_abs: string): void | Promise<void> => {} };
 
 export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
-  const pre = targetErrors(o.target, o.here);
   const target = path.resolve(o.target);
-  if (!pre.length && o.targetErrors) pre.push(...o.targetErrors(target));
+  const errorsNow = () => {
+    const e = targetErrors(o.target, o.here);
+    if (!e.length && o.targetErrors) e.push(...o.targetErrors(target));
+    return e;
+  };
+  let pre = errorsNow();
   if (pre.length) throw new ImportError(pre.join('; '), 400, { errors: pre });
   const check = () => { if (o.signal?.aborted) throw new ImportCancelled(); };
   check();
@@ -368,13 +390,23 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
   const tell = () => o.onProgress?.({ ...progress });
   tell();
 
-  const created = !fs.existsSync(target);
-  let wrote = false;
+  // Everything is built in a staging folder beside the target that only this
+  // import creates, then renamed into place once the target is re-checked.
+  // Cleanup removes only the staging folder, or after the rename only the
+  // entries it moved in. Stored paths name the target, not the staging folder.
+  const stage = path.join(path.dirname(target), `.${path.basename(target)}.hs-import-${crypto.randomBytes(4).toString('hex')}`);
+  const inStage = (name: string) => path.join(stage, ...name.split('/'));
+  let staged = false;
+  let moved: string[] | null = null;
+  let createdTarget = false;
+  let restoreEmpty = false;
   try {
-    const free = freeBytes(created ? path.dirname(target) : target);
+    pre = errorsNow();   // the target may have changed while the archive was read
+    if (pre.length) throw new ImportError(pre.join('; '), 409, { errors: pre });
+    const free = freeBytes(path.dirname(target));
     if (free !== null && free < bytesTotal) throw new ImportError(`not enough free space at ${target}: ${(bytesTotal / 1e9).toFixed(1)} GB needed, ${(free / 1e9).toFixed(1)} GB free`);
-    if (created) fs.mkdirSync(target);
-    wrote = true;
+    fs.mkdirSync(stage);
+    staged = true;
 
     // ── Extract and verify ──
     progress.phase = 'extracting'; tell();
@@ -389,8 +421,8 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
         const hash = crypto.createHash('sha256');
         let n = 0;
         const hasher = new Transform({ transform(chunk, _e, cb) { hash.update(chunk); n += chunk.length; cb(null, chunk); } });
-        const abs = f.name === ENV_ENTRY ? null : path.join(target, ...f.name.split('/'));
-        if (abs && !isInside(target, abs)) throw new ImportError(`${f.name} leads outside the new folder`);
+        const abs = f.name === ENV_ENTRY ? null : inStage(f.name);
+        if (abs && !isInside(stage, abs)) throw new ImportError(`${f.name} leads outside the new folder`);
         if (abs) fs.mkdirSync(path.dirname(abs), { recursive: true });
         const ac = new AbortController();
         current = ac;
@@ -416,9 +448,11 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
     zip.close();
 
     // ── Database: integrity, schema, credentials ──
+    // openArchive guarantees: manifest.db is set exactly when the zip holds DB_ENTRY,
+    // and no other SQLite file (WAL, journal, a second DB) can be in the library.
     progress.phase = 'rewriting'; tell();
-    const dbFile = path.join(target, ...DB_ENTRY.split('/'));
-    const hasDb = !!manifest.db && fs.existsSync(dbFile);
+    const dbFile = inStage(DB_ENTRY);
+    const hasDb = !!manifest.db;
     let credentialRowsCopied = 0;
     if (hasDb) {
       const db = new Database(dbFile);
@@ -440,25 +474,25 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
     if (hasDb) {
       dbRewritten = rewriteDb(dbFile, pairs, 'import', () => {});
       // rewriteDb keeps a copy of what it changed; here that is the archive itself.
-      for (const ext of ['', '-wal', '-shm']) removeSync(path.join(target, 'library', `hotstep.pre-transfer-import.db${ext}`), { force: true });
+      for (const ext of ['', '-wal', '-shm']) removeSync(path.join(stage, 'library', `hotstep.pre-transfer-import.db${ext}`), { force: true });
     }
     let jsonFiles = 0;
     const roots = [...new Set(pairs.map(p => p.to).filter(t => isInside(target, t)))];
     for (const r of roots.filter(r => !roots.some(o => o !== r && isInside(o, r)))) {
-      if (!r.startsWith(path.join(target, 'models'))) jsonFiles += rewriteJsonFiles(r, pairs);
+      if (!isInside(path.join(target, 'models'), r)) jsonFiles += rewriteJsonFiles(path.join(stage, path.relative(target, r)), pairs);
     }
     check();
 
     // ── Settings ──
     progress.phase = 'finishing'; tell();
-    const l = dataLayout(target);
+    const l = dataLayout(stage);
     const c = o.here.children;
     const hereText = fs.existsSync(c.envFile) ? fs.readFileSync(c.envFile, 'utf-8') : '';
     const herePaths: Record<string, string | undefined> = {
       TRAINING_DIR: c.training, ACESTEPCPP_ADAPTERS: c.adapters, ACESTEPCPP_MODELS: c.models,
       MUSCRIPTOR_MODELS_DIR: c.muscriptorModels, ...o.here.paths,
     };
-    const env = mergeEnvText(hereText, archiveEnv, manifest.categories, herePaths);
+    const env = mergeEnvText(hereText, archiveEnv, manifest.categories, herePaths, o.here.dataRoot ?? path.join(o.here.appRoot, 'server'));
     initLayout(l);
     if (env.text) fs.writeFileSync(l.envPath, env.text, { encoding: 'utf-8', flag: 'wx' });
 
@@ -471,11 +505,11 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
       env: { fromArchive: env.fromArchive, pointedHere: env.pointedHere, dropped: env.dropped },
       externals: manifest.externals.map(x => ({ ...x, existsHere: fs.existsSync(x.path) })),
       skipped: manifest.skipped.length + manifest.skippedNotListed,
-      scheduled: false,
+      scheduled: !!o.schedule,
     };
-    writeJsonAtomic(path.join(target, REPORT_NAME), report);
+    writeJsonAtomic(path.join(stage, REPORT_NAME), report);
 
-    // ── Switch ──
+    // ── Wait for running work, then move into place ──
     if (o.schedule) {
       for (let b = o.blockers?.() ?? []; b.length; b = o.blockers!()) {
         progress.phase = 'waiting'; progress.blockers = b; tell();
@@ -483,22 +517,33 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
         check();
       }
       progress.phase = 'finishing'; delete progress.blockers; tell();
-      check();
-      report.scheduled = true;
-      writeJsonAtomic(path.join(target, REPORT_NAME), report);
-      o.schedule(target);
     }
+    check();
+    pre = errorsNow();
+    if (pre.length) throw new ImportError(`the new folder was checked again before the switch: ${pre.join('; ')}`, 409, { errors: pre });
+    const names = fs.readdirSync(stage);
+    createdTarget = !fs.existsSync(target);
+    // rmdir refuses a folder that gained an entry; rename refuses a target that reappeared.
+    if (!createdTarget) { fs.rmdirSync(target); restoreEmpty = true; }
+    fs.renameSync(stage, target);
+    staged = false;
+    moved = names;
+
+    o.schedule?.(target);
     return report;
   } catch (e) {
     zip.close();
-    if (wrote) {
-      // Retries: Windows can hold a just-destroyed write stream's file for a moment.
-      const rm = (p: string) => removeSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-      try {
-        if (created) rm(target); else for (const n of fs.readdirSync(target)) rm(path.join(target, n));
-      } catch (c: any) {
-        if (e instanceof Error) e.message += `; the half-written folder ${target} could not be removed (${c.message}): delete it by hand`;
+    // Retries: Windows can hold a just-destroyed write stream's file for a moment.
+    const rm = (p: string) => removeSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    try {
+      if (staged) rm(stage);
+      if (moved) {
+        for (const n of moved) rm(path.join(target, n));
+        if (createdTarget && isEmptyDir(target)) fs.rmdirSync(target);
       }
+      if (restoreEmpty && !fs.existsSync(target)) fs.mkdirSync(target);
+    } catch (c: any) {
+      if (e instanceof Error) e.message += `; the half-written folder ${staged ? stage : target} could not be removed (${c.message}): delete it by hand`;
     }
     throw e;
   }

@@ -15,7 +15,7 @@ import { isCredentialKey } from '../generation/requestCapture.js';
 import type { CategoryChoice, CategoryId, SkippedEntry } from './manifest.js';
 
 /** Library top-level names that are the workspace. hotstep.db is carried as a snapshot. */
-const LIBRARY_NAMES = new Set([
+export const LIBRARY_NAMES = new Set([
   'audio', 'references', 'profiles', 'seeds', 'midi', 'stems', 'vst', 'lyrics', 'muscriptor',
   'mm3-planks', 'mm3-hiddens', 'stream-sessions',
 ]);
@@ -28,7 +28,7 @@ const LIBRARY_LEFT: Record<string, SkippedEntry['reason']> = {
 };
 /** Carried by the DB snapshot, never as files. */
 const DB_NAMES = new Set(['hotstep.db', 'hotstep.db-wal', 'hotstep.db-shm', 'hotstep.db-journal']);
-const TRAINING_NAMES = new Set([
+export const TRAINING_NAMES = new Set([
   'datasets', 'jobs', 'pipelines', 'previews', 'tensors', 'worker-datasets', 'yue2-batches', 'yue2-preparation',
   'mm3-linked.json', 'mm3-mirror.json', 'yue2-linked.json', 'yue2-aitk-runs.json', 'yue2-mirror-tombstones.json',
 ]);
