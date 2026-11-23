@@ -15,16 +15,14 @@ import type { PartProps } from '../definitions/parts.ts';
 import { CHECKS } from '../definitions/parts.ts';
 import { SCHEDULE_CURVES } from '../definitions/option-faces.ts';
 import { CARD_GB } from './controls.ts';
-import { type Desk, type Index, applies, formatValue, has, isAuto, mmss, resolve, stateOf, valueOf } from './core.ts';
+import { type Desk, type Index, applies, formatValue, has, isAuto, mmss, nodeAt, resolve, stateOf, valueOf } from './core.ts';
+import { nodeWord } from './strings.ts';
 import { EN, type Msg, type Slot, msg } from './messages.ts';
 import { spellKey } from './readouts.ts';
+import { nodeShown } from './desk.ts';
 
 /* the core's words for these instruments, added to its table (messages.ts EN) where this file is loaded */
 Object.assign(EN, {
-  'wheel.label': 'Key: circle of fifths. Arrow keys move around and between rings.',
-  'wheel.auto': 'Automatic key',
-  'wheel.autoText': 'Auto',
-  'cap.label': 'Add to the {box|lower}:',
   'flap.random': 'Random seed',
   'flap.title': 'Click to type or paste a seed',
   'flap.title.rand': 'Random: the next run draws a fresh seed. Lock to keep {seed}, or click to type one',
@@ -36,17 +34,18 @@ Object.assign(EN, {
   'flap.lm.off': 'LM seed: random',
   'flap.lm.rand': 'random, like the DiT',
   'flap.lm.uses': 'uses {seed} too',
-  'stars.none': 'No saved seeds yet.',
-  'stars.noMatch': 'No saved seed matches.',
   'stars.first': 'Roll or load a seed first. Random draws are saved with each song.',
   'stars.saveFirst': 'Save a seed first',
   'stars.loaded': 'Loaded “{name}” ({seed})',
   'stars.loadedPlain': 'Loaded saved seed {seed}',
+  'stars.saved': 'Saved seed {seed}',
+  'stars.updated': 'Updated saved seed {seed}',
+  'stars.deleted': 'Deleted {name}',
   'stars.name': 'seed_{seed}',
   'takes.cost': '{need} of {card} GB',
   'takes.bar': 'About {need} GB of the {card} GB card',
-  'takes.each': '+{gb} GB per take',
-  'takes.eachExtra': '+{gb} GB per extra take',
+  'takes.each': '+{gb}\u00a0GB per take',
+  'takes.eachExtra': '+{gb}\u00a0GB per\u00a0extra take',
   'takes.wontFit': "Won't fit. Try {n} takes.",
   'takes.passes': 'Plans in {n} passes to fit the card',
   'takes.tight': 'Tight on the card',
@@ -74,12 +73,12 @@ export interface InstrumentModel {
   /** capChips: each chip's words, whether the text it edits holds it as an item, and the step a press takes. */
   caps?: { chips: { text: string; on: boolean }[] };
   /** splitFlap: the ten cells' characters, random or a kept seed, the field's text, and its words. */
-  flap?: { cells: string[]; rand: boolean; edit: string; title: Slot; aria: Slot; lm: Slot | null };
+  flap?: { cells: string[]; rand: boolean; edit: string; title: Slot; aria: Slot; lm: Slot | null; lock: boolean };
   /** savedSeeds: the saved seeds, starred first, each with what a search finds it by; the seed shown; the save form's
    *  defaults (null when there is no seed to save). */
   stars?: { rows: { v: number | string; name: string; desc: string; tags: string[]; star: boolean; cur: boolean; find: string }[]; form: { old: boolean; name: string; desc: string; tags: string } | null };
   /** takesReels: how many reels, how many lit, the grid's columns, and the VRAM the count costs. */
-  takes?: { max: number; n: number; cols: number; valuetext: Slot; cost: { bar: number; text: Slot; tip: Slot; cls: '' | 'split' | 'over'; msg: Slot | null; each: Slot | null } };
+  takes?: { max: number; n: number; cols: number; valuetext: Slot; labels: [Slot, Slot]; cost: { bar: number; text: Slot; tip: Slot; cls: '' | 'split' | 'over'; msg: Slot | null; each: Slot | null } };
   /** samplerScope: the schedule as points in a 300 x 110 box, the step dots (percent of the box) while 32 or fewer,
    *  the guidance band and the hatched CFG cutoff, the read-out's pieces (with the node's action each offers), and the
    *  interval handles' places (percent across the box). */
@@ -87,23 +86,23 @@ export interface InstrumentModel {
   /** latentCurve: the grid's x places, the zero line, and the curves before and after (points in a 300 x 80 box). */
   dist?: { grid: number[]; zero: number; before: string; after: string };
   /** repaintRegion: the song (its title, style line, length, hue), the region as fractions of it, and its words. */
-  region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot };
+  region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot; ctl: boolean; one: boolean };
   /** timbreBlend: the blend as its percent. */
   blend?: { pct: Slot };
 }
 
 /** What a bespoke part draws on the desk, or undefined for a part this file does not draw. */
-export function instrumentModel(ix: Index, node: Node, desk: Desk): InstrumentModel | undefined {
+export function instrumentModel(ix: Index, node: Node, desk: Desk, key: string): InstrumentModel | undefined {
   const f = DRAW[node.part];
-  return f ? f(ix, node, desk) : undefined;
+  return f ? f(ix, node, desk, key) : undefined;
 }
 
-const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk) => InstrumentModel } = {
+const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {
   keyWheel: (ix, node, desk) => ({ wheel: wheelOf(ix, node, desk) }),
   capChips: (ix, node, desk) => ({ caps: { chips: capOffer(node, desk).map(text => ({ text, on: capHas(textOf(ix, node.param, desk), text) })) } }),
   splitFlap: (ix, node, desk) => ({ flap: flapOf(ix, node, desk) }),
   savedSeeds: (ix, node, desk) => ({ stars: starsOf(ix, node, desk) }),
-  takesReels: (ix, node, desk) => ({ takes: takesOf(ix, node, desk) }),
+  takesReels: (ix, node, desk, key) => ({ takes: takesOf(ix, node, desk, key) }),
   samplerScope: (ix, node, desk) => ({ scope: scopeOf(ix, node, desk) }),
   latentCurve: (ix, node, desk) => ({ dist: distOf(num(ix, desk, node.reads?.[0], 0), num(ix, desk, node.reads?.[1], 1)) }),
   repaintRegion: (ix, node, desk) => { const r = regionOf(ix, node, desk); return r ? { region: r } : {}; },
@@ -190,9 +189,10 @@ function seedOf(ix: Index, node: Node, desk: Desk): { seed: number | string | nu
 }
 function flapOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentModel['flap']> {
   const { seed, rand } = seedOf(ix, node, desk), show = rand ? '  RANDOM  ' : String(seed).slice(-FLAPS).padStart(FLAPS, ' ');
-  const lmKey = node.reads?.[0], lm = lmKey && has(ix, lmKey, desk.engine) ? read(ix, desk, lmKey) : null;
+  /* the LM seed's link: its switch (the flaps' second child) and what it does, while that switch is shown */
+  const lmKey = node.reads?.[0], link = node.children?.[1], lm = lmKey && link && nodeShown(ix, link, desk) ? read(ix, desk, lmKey) : null;
   return {
-    cells: [...show], rand, edit: seed === null ? '' : String(seed),
+    cells: [...show], rand, edit: seed === null ? '' : String(seed), lock: !!node.children?.[0] && nodeShown(ix, node.children[0], desk),
     title: rand && seed !== null ? msg('flap.title.rand', { seed }) : msg('flap.title'),
     aria: rand ? (seed !== null ? msg('flap.aria.randKept', { seed }) : msg('flap.aria.rand')) : msg('flap.aria', { seed: seed! }),
     lm: lm === null ? null : lm === true ? (rand ? msg('flap.lm.rand') : msg('flap.lm.uses', { seed: seed! })) : msg('flap.lm.off'),
@@ -254,7 +254,7 @@ export function takesCost(ix: Index, desk: Desk, n: number): { models: number; n
   const passes = e.split && need > CARD_GB && each ? Math.ceil(extra / Math.max(each, CARD_GB - models)) : 1;
   return { models, need, each, passes, refuses: !!e.refuses && need > CARD_GB };
 }
-function takesOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentModel['takes']> {
+function takesOf(ix: Index, node: Node, desk: Desk, key: string): NonNullable<InstrumentModel['takes']> {
   const k = node.param!, f = resolve(ix.params.get(k)!.p, desk.engine), max = f.range?.[1] ?? 1, n = Math.min(num(ix, desk, k, 1), max);
   const cols = max <= 5 ? max : [5, 4, 3].find(c => max % c === 0) ?? Math.ceil(max / 2);
   const v = takesCost(ix, desk, n), over = v.need > CARD_GB, e = VRAM[desk.engine] ?? VRAM.ace!;
@@ -262,6 +262,8 @@ function takesOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentModel
   const m = over ? (v.refuses ? msg('takes.wontFit', { n: Math.max(1, Math.floor((CARD_GB - v.models) / (v.each || 1)) + 1) }) : e.split ? msg('takes.passes', { n: v.passes }) : msg('takes.tight')) : null;
   return {
     max, n, cols, valuetext: msg('takes.valuetext', { n }),
+    /* the count's words for one take and for more, as the node says them at each (a reel's preview says its count) */
+    labels: [1, 2].map(x => { const at = { ...desk, vals: { ...desk.vals, [k]: x } }, n0 = nodeAt(ix, node, at); return (n0 && key ? nodeWord(ix, n0, at, key, 'label') : undefined) ?? ''; }) as [Slot, Slot],
     cost: {
       bar: Math.min(1, v.need / CARD_GB), text: msg('takes.cost', { need: gb(v.need), card: CARD_GB }), tip: msg('takes.bar', { need: gb(v.need), card: CARD_GB }),
       cls: v.refuses ? 'over' : over ? 'split' : '', msg: m, each: v.each ? msg(e.each === 'all' ? 'takes.each' : 'takes.eachExtra', { gb: v.each }) : null,
@@ -331,7 +333,9 @@ function scopeOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentModel
   if (ts) read.push({ text: msg('scope.ts', { n: ts.length }), tone: 'ts', action: 0 });
   if (ivl) {
     const z = Math.min(ce, cutV), steps = ts ? ts.length - 1 : num(ix, desk, k.steps, 12), why = cutV < 1 && cutV <= ce;
-    const say = (z - cs) * steps < 1 ? msg('scope.off') : cs > 0 ? msg('scope.from', { a: cs.toFixed(2), b: z.toFixed(2) }) : z < 1 ? msg('scope.until', { b: z.toFixed(2) }) : msg('scope.everyStep');
+    /* its numbers are set in bold: each between two U+0001 marks, which the part draws as <b> */
+    const b = (x: number) => `\u0001${x.toFixed(2)}\u0001`;
+    const say = (z - cs) * steps < 1 ? msg('scope.off') : cs > 0 ? msg('scope.from', { a: b(cs), b: b(z) }) : z < 1 ? msg('scope.until', { b: b(z) }) : msg('scope.everyStep');
     const tone = (z - cs) * steps < 1 ? 'warn' : cs > 0 || z < 1 ? 'amber' : '';
     read.push({ text: why ? { id: 'scope.why', en: '{s}{c}', slots: { s: say, c: msg('scope.cut') } } : say, tone, action: why ? 1 : null });
   }
@@ -374,6 +378,10 @@ function regionOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentMode
   return {
     title: src.title, style: msg('region.song', { style: src.style, dur: mmss(src.dur) }), dur: src.dur, durText: mmss(src.dur), hue: src.hue, id,
     a, b, cap: msg('region.cap', { a: t(Math.min(a, b)), b: t(Math.max(a, b)) }), text: msg('region.text', { a: t(a), b: t(b) }),
+    /* its children: the first two stand on the wave's caption line where shown (Lab), the rest beside the wave; with
+       nothing beside it but the note (Quick), the wave takes the width (Q-28) */
+    ctl: !!node.children?.[0] && nodeShown(ix, node.children[0], desk),
+    one: !(node.children ?? []).slice(2, -1).some(c => nodeShown(ix, c, desk)),
   };
 }
 /** Where a key or a drag takes the region (25-module-repaint.js): arrows move it a hundredth of the song (Alt: a
@@ -402,13 +410,15 @@ export function regionMove(a: number, b: number, how: { key?: string; shift?: bo
 /* ---------------------------------------------------------------- what a hand on a part does */
 
 /** A hand on a bespoke part, worked out here and made through the part's own setters (bindPart), so the change is
- *  cleaned, bound and named as every other: `name` is what the hand did, `arg` what it gives. `tell` says a refusal. */
-export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: string, arg: unknown, tell: (m: Msg) => void): void {
+ *  cleaned, bound and named as every other: `name` is what the hand did, `arg` what it gives. `tell` says what it did or
+ *  why it did nothing (with `undo`, the toast offers to undo the step just taken). False when it was refused. */
+export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: string, arg: unknown, tell: Tell): boolean {
   const f = ACTS[node.part]?.[name];
   if (!f) throw new Error(`${node.part} has no act "${name}"`);
-  f({ ix, node, v, desk, arg, tell });
+  return f({ ix, node, v, desk, arg, tell }) !== false;
 }
-interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: (m: Msg) => void }
+export type Tell = (m: Msg, undo?: boolean) => void;
+interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
 
 /** Sets the seed and its lock in one step (the seed state's `set`): a number kept, or null for random. */
 function setSeed(x: ActIn, seed: number | string | null): void {
@@ -422,7 +432,7 @@ function seedList(x: ActIn): { key: string; list: SavedSeed[] } | null {
   return key && x.v.state[key] ? { key, list: cleanSeeds(x.v.state[key]!.value) } : null;
 }
 
-const ACTS: { [part: string]: { [name: string]: (x: ActIn) => void } } = {
+const ACTS: { [part: string]: { [name: string]: (x: ActIn) => boolean | void } } = {
   keyWheel: {
     /* a key on the wheel, from the value in force */
     walk: x => {
@@ -445,7 +455,7 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => void } } = {
   },
   splitFlap: {
     /* a seed typed or pasted (empty is random); refused and said when it is no seed */
-    type: x => { const r = seedTyped(String(x.arg ?? '')); if ('error' in r) { x.tell(msg('flap.bad', { max: SEED_MAX })); return; } setSeed(x, r.seed); },
+    type: x => { const r = seedTyped(String(x.arg ?? '')); if ('error' in r) { x.tell(msg('flap.bad', { max: SEED_MAX })); return false; } setSeed(x, r.seed); },
     /* left with no seed in it: kept as it was, and said */
     left: x => { const r = seedTyped(String(x.arg ?? '')); if ('error' in r) { x.tell(msg('flap.bad.left', { max: SEED_MAX })); return; } setSeed(x, r.seed); },
     /* Roll once: a fresh seed, kept; `arg` is the hand's draw, 0 to 1 */
@@ -453,12 +463,15 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => void } } = {
     random: x => setSeed(x, null),
   },
   savedSeeds: {
+    /* the save form opens on a seed: there is none while each run draws its own */
+    open: x => { if (seedOf(x.ix, x.node, x.desk).seed === null) { x.tell(msg('stars.first')); return false; } },
     /* save the seed shown with the form's words (`arg`: name, description, tags), or update it when it is saved */
     save: x => {
       const l = seedList(x), { seed } = seedOf(x.ix, x.node, x.desk); if (!l || seed === null) { x.tell(msg('stars.first')); return; }
       const o = (x.arg ?? {}) as { name?: string; desc?: string; tags?: string }, old = l.list.find(s => String(s.v) === String(seed));
       const entry: SavedSeed = { v: seed, n: (String(o.name ?? '').trim() || `seed_${seed}`).slice(0, 40), d: String(o.desc ?? '').trim().slice(0, 120), tags: String(o.tags ?? '').split(',').map(t => t.trim()).filter(Boolean).slice(0, 12), ...(old?.star ? { star: true } : {}) };
       x.v.state[l.key]!.apply(old ? 'update' : 'save', [entry, ...l.list.filter(s => String(s.v) !== String(seed))] as unknown as Json, undefined, { seed: String(seed) });
+      x.tell(msg(old ? 'stars.updated' : 'stars.saved', { seed: String(seed) }), !!old);
     },
     star: x => {
       const l = seedList(x), at = l?.list.findIndex(s => String(s.v) === String(x.arg)) ?? -1; if (!l || at < 0) return;
@@ -468,12 +481,13 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => void } } = {
     delete: x => {
       const l = seedList(x), s = l?.list.find(y => String(y.v) === String(x.arg)); if (!l || !s) return;
       x.v.state[l.key]!.apply('delete', l.list.filter(y => y !== s) as unknown as Json, undefined, { seed: seedName(s) });
+      x.tell(msg('stars.deleted', { name: seedName(s) }), true);
     },
     load: x => { const l = seedList(x), s = l?.list.find(y => String(y.v) === String(x.arg)); if (s) setSeed(x, s.v); },
     /* a random saved seed: with two or more, never the one already loaded (L-22); said with its name (L-20). `arg` is
        the hand's draw, 0 to 1 */
     random: x => {
-      const l = seedList(x); if (!l || !l.list.length) { x.tell(msg('stars.saveFirst')); return; }
+      const l = seedList(x); if (!l || !l.list.length) { x.tell(msg('stars.saveFirst')); return false; }
       const { seed } = seedOf(x.ix, x.node, x.desk), pool = l.list.length > 1 ? l.list.filter(s => String(s.v) !== String(seed)) : l.list;
       const s = pool[Math.floor(clamp(Number(x.arg) || 0, 0, 0.999999999) * pool.length)]!;
       setSeed(x, s.v);
@@ -481,11 +495,13 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => void } } = {
     },
   },
   repaintRegion: {
-    /* a key or a drag on the waveform (`arg`: the key and its modifiers, or the drag's kind and places as fractions) */
+    /* a key or a drag on the waveform (`arg`: the key and its modifiers, or the drag's kind, its places as fractions and
+       the region it started from, `a0` and `b0`) */
     move: x => {
       const { src, a, b } = regionAt(x.ix, x.node, x.desk), span = x.node.state?.find(k => x.ix.states.get(k)?.s.kind === 'span');
       if (!src || !span || !x.v.state[span]) return;
-      const r = regionMove(a, b, (x.arg ?? {}) as Parameters<typeof regionMove>[2]);
+      const how = (x.arg ?? {}) as Parameters<typeof regionMove>[2] & { a0?: number; b0?: number };
+      const r = regionMove(how.a0 ?? a, how.b0 ?? b, how);
       if (!r || (Math.abs(r[0] - a) < 1e-12 && Math.abs(r[1] - b) < 1e-12)) return;
       x.v.state[span]!.apply('move', { start: r[0] * src.dur, end: r[1] * src.dur });
     },

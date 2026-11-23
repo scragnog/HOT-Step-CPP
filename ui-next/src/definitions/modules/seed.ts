@@ -60,7 +60,8 @@ export const seed = {
       reads: ['lm.seedlock'],
       children: [
         { part: 'lockButton', param: 'seed.lock', tiers: ['studio', 'lab'] },
-        { part: 'pill', param: 'lm.seedlock', label: 'LM seed follows', engines: ['ace'], tiers: ['lab'] },
+        /* the planner's switch: it works while the planner is on the desk, as every value does */
+        { part: 'pill', param: 'lm.seedlock', label: 'LM seed follows', engines: ['ace'], tiers: ['lab'], when: { onDesk: 'planner' } },
       ],
     },
     { part: 'savedSeeds', param: 'seed.lock', state: ['stars', 'seed'], tiers: ['studio', 'lab'] },

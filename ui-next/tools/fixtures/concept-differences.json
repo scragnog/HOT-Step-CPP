@@ -262,6 +262,18 @@
    ],
    "why": "Inside a sentence a label's first letter is lower-cased unless the word is an acronym or has capitals inside, by one rule wherever it happens (messages.ts lowFirst); the page lower-cases any first letter in its Also set line (DH-23).",
    "n": 10
+  },
+  {
+   "derivation": "tier contents",
+   "match": "ace lab seed( loaded)?: only the page \\[\"lm.seedlock\"\\], only the definitions \\[\\]",
+   "why": "LM seed follows is the planner's switch: the Seed tile shows it while the planner is on the desk, where it is in force. With the planner off the desk the page offers a switch that changes nothing the request sends (package 3a).",
+   "n": 2
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "ace lab seed .*only the page \\[\"lm.seedlock\"\\], only the definitions \\[\\]",
+   "why": "As above: LM seed follows stands on the Seed tile while the planner, whose switch it is, is on the desk.",
+   "n": 1
   }
  ]
 }

@@ -10,7 +10,7 @@ import { liveDefs } from './request.ts';
 import { cleanState, setValue } from './values.ts';
 import { type Msg, msg } from './messages.ts';
 import { checkText, paramWords, textMsg } from './strings.ts';
-import { stepChanges, stepWords, type StepWords } from './steps.ts';
+import { stepChanges, stepWords, type NamedStep, type StepWords } from './steps.ts';
 import { fractionValue, keyStep, parseTyped } from './models.ts';
 import { autoEstimate, rulerSnap, scrubValue } from './controls.ts';
 import { FILE_STEPS } from './steps.ts';
@@ -23,6 +23,8 @@ export interface Change {
   words: StepWords;
   /** The one-time sentence a typed number out of range gets ("Steps: 1 to 64. Set to 64."). */
   said?: Msg;
+  /** The named step it took, so a gesture of several (a region dragged) is named by it from its first desk to its last. */
+  named?: NamedStep;
 }
 
 /** Applies a change to a desk (null removes a value: back to its default). */
@@ -53,7 +55,7 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
   const finish = (b: NonNullable<typeof batch>) => {
     const after = applyChange(b.at, { ...b, words: { label: msg(''), put: msg('') } });
     const words = stepWords(ix, b.at, after, b.named ? { named: b.named } : undefined);
-    if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}) });
+    if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}), ...(b.named ? { named: b.named } : {}) });
     /* a typed value already at the end it was put at changes nothing, and is still said (21-knob.js) */
     else if (b.said) tell?.(b.said);
   };

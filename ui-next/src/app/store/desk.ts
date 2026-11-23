@@ -123,12 +123,12 @@ export const useDesk = create<DeskStore>()((set, get) => {
   seeEngine(start.desk.engine);
   let saying = false;
   /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string) => {
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named']) => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
     /* the gesture in progress is this change's when the change comes from the part that began it */
     const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
     if (g && last && last.gesture === g) {
-      const merged = stepWords(ix, last.first, next.desk) ?? words;
+      const merged = stepWords(ix, last.first, next.desk, named ? { named } : undefined) ?? words;
       const undo = [...s.undo.slice(0, -1), { ...last, after, words: merged, at: Date.now() }];
       set({ ...next, undo, redo: [] });
       return;
@@ -156,7 +156,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
 
     commit(c, from) {
       const prev = parts(), desk = applyChange(prev.desk, c);
-      record(prev, { ...prev, desk }, c.words, undefined, from);
+      record(prev, { ...prev, desk }, c.words, undefined, from, c.named);
       if (c.said) get().showToast({ text: c.said });
     },
     beginGesture(tag) { const g = get().gesture; if (!g || !g.startsWith(tag + '#')) set({ gesture: `${tag}#${++gestures}` }); },

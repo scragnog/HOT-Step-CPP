@@ -23,6 +23,9 @@ export function Note(v: PartView) {
   /* in a terminal, its quiet ink; in an LCD's row, the LCD's dimmed words */
   if (v.surface === 'term') return <span className="k" title={tip}>{text}</span>;
   if (v.surface === 'lcdrow') return <span className="lcd-dim" title={tip}>{text}</span>;
+  /* the caption note under an instrument (Tempo's), with its actions after it; Quick's hint */
+  if (v.opts.look === 'cap') return <div className="cap-note" title={tip}>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" /></div>;
+  if (v.opts.look === 'hint') return <span className="qhint" title={tip}>{text}</span>;
   return <span className="lbl" title={tip}>{text}</span>;
 }
 
@@ -31,7 +34,7 @@ export function LcdValue(v: PartView) {
   /* in an LCD's row: its caps word, then the value lit (Tempo's KEY AUTO) */
   if (v.surface === 'lcdrow') {
     const r = v.reads[0];
-    return <span><span className="cdot-lcd" data-ctl={r?.key}>{say(v.label ?? '', { upper: true })}</span> <b data-keylcd="">{say(v.words.text ?? r?.lcd ?? '', { upper: true })}</b></span>;
+    return <span><span className={`cdot-lcd${r?.changed ? ' changed' : ''}`} data-ctl={r?.key}>{say(v.label ?? '', { upper: true })}</span> <b data-keylcd="">{say(v.words.text ?? r?.lcd ?? '', { upper: true })}</b></span>;
   }
   return (
     <>

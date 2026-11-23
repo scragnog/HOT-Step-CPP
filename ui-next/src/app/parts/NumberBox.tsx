@@ -27,8 +27,10 @@ function useBox(v: PartView) {
     onBlur: (e: { currentTarget: HTMLInputElement }) => { const t = e.currentTarget.value; if (was.current !== null && t !== was.current) commit(t); else setDraft(null); was.current = null; },
     onKeyDown: (e: KeyboardEvent<HTMLInputElement>) => {
       const el = e.currentTarget;
-      if (e.key === 'Enter') { e.preventDefault(); commit(el.value); was.current = box?.text ?? ''; select(el); return; }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDraft(null); select(el); return; }
+      /* the box then shows what is in force, even when what it held was written into it without an input event (a
+         paste the browser did not report): a refused word is put back */
+      if (e.key === 'Enter') { e.preventDefault(); commit(el.value); el.value = box?.text ?? ''; was.current = box?.text ?? ''; select(el); return; }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setDraft(null); el.value = box?.text ?? ''; select(el); return; }
       if (p && /^(ArrowUp|ArrowDown|PageUp|PageDown)$/.test(e.key)) {
         e.preventDefault(); if (!e.repeat) v.gesture.end('key'); v.gesture.begin('key');
         p.press(e.key, e.shiftKey); setDraft(null); select(el);

@@ -60,7 +60,14 @@ function actionsOf(def: Definition, node: Node, key: string) {
     apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
     load: (k: string, name: string, type: string) => { const no = fileRefused(name, type); if (no) tell(no); else bound()?.state[k]?.apply('load', name, undefined, { file: name }); },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
-    act: (name: string, arg?: unknown) => { const b = bound(); if (b) partAct(ix, b.node, b, desk(), name, arg, tell); },
+    /* a bespoke part's hand (src/derive/instruments.ts): what it says may offer to undo the step it just took */
+    act: (name: string, arg?: unknown) => {
+      const b = bound(); if (!b) return false;
+      return partAct(ix, b.node, b, desk(), name, arg, (m, undo) => {
+        const e = undo ? useDesk.getState().undo.at(-1) : undefined, s = useDesk.getState();
+        s.showToast({ text: m, ...(e ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } } : {}) });
+      });
+    },
     gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
   };
 }

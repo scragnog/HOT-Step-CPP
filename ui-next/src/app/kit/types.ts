@@ -55,8 +55,8 @@ export interface PartView extends Omit<PartModel, 'params' | 'state'> {
   batch(fn: () => void): void;
   /** A bespoke part's hand, worked out by the core (src/derive/instruments.ts partAct): `name` is what the hand did (a
    *  key on the key wheel, a seed typed, a chip pressed), `arg` what it gives. The change is made through the part's
-   *  own setters, cleaned and named as every other, or refused and said. */
-  act(name: string, arg?: unknown): void;
+   *  own setters, cleaned and named as every other, or refused and said: false when refused. */
+  act(name: string, arg?: unknown): boolean;
   gesture: Gesture;
   children?: ReactNode;
 }

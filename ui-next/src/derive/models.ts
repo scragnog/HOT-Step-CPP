@@ -83,7 +83,9 @@ export interface ParamModel {
   run?: number;
 }
 
-export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean }
+/** What a node reads; `changed` when a parameter it reads is changed (an LCD's word carries the changed mark of what it
+ *  shows: Tempo's KEY). */
+export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean; changed?: boolean }
 
 export interface PartModel {
   part: string;
@@ -204,7 +206,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);
   const ro = readoutModel(ix, node, desk);
   if (ro) m.readout = ro;
-  const ins = instrumentModel(ix, node, desk);
+  const ins = instrumentModel(ix, node, desk, key);
   if (ins) m.instrument = ins;
   if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
@@ -213,7 +215,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
 }
 
 function readModel(ix: Index, k: string, desk: Desk): ReadModel {
-  if (ix.params.has(k)) { const on = has(ix, k, desk.engine); return { key: k, value: on ? valueOf(ix, k, desk) ?? null : null, text: on ? textMsg(ix, k, desk) : '', lcd: on ? lcdMsg(ix, k, desk) : '', onDesk: true }; }
+  if (ix.params.has(k)) { const on = has(ix, k, desk.engine); return { key: k, value: on ? valueOf(ix, k, desk) ?? null : null, text: on ? textMsg(ix, k, desk) : '', lcd: on ? lcdMsg(ix, k, desk) : '', onDesk: true, ...(on && changed(ix, k, desk) ? { changed: true } : {}) }; }
   return { key: k, value: desk.state[k] ?? null, text: '', lcd: '', onDesk: true };
 }
 
