@@ -42,3 +42,4 @@
 .st-meter-fill { height: 100%; background: var(--st-accent); display: block; }
 .st-log { font-family: ui-monospace, monospace; font-size: 0.6875rem; max-height: 12rem; overflow: auto; white-space: pre-wrap; }
 .st-error { color: #dc2626; font-size: 0.75rem; }
+.st-bar .st-btn:not(:is(.st-btn-on)) { cursor: pointer; }

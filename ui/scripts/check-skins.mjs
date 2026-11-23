@@ -339,7 +339,8 @@ function checkShellCss(file, id, errors) {
         // The target is the last compound selector (after the last combinator) and must carry a class:
         // `.a button` or `.a [hidden]` would restyle every such element inside the shell, classic pages
         // included. Parenthesised parts are ignored, so `:is(button)` does not count as a class.
-        const flat = bare.replace(/\([^()]*\)/g, '()').replace(/\([^()]*\)/g, '()');
+        let flat = bare;
+        for (let prev = ''; prev !== flat;) { prev = flat; flat = flat.replace(/\([^()]*\)/g, '#'); } // innermost group out, repeated: any nesting depth collapses
         const target = flat.trim().split(/\s*[>+~]\s*|\s+/).pop() ?? '';
         if (!/\.[A-Za-z_][\w-]*/.test(target)) errors.push(`${label} selector "${sel}" has no class on its target (the last part must carry a class)`);
       }
