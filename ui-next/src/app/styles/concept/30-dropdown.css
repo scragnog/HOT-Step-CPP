@@ -1,0 +1,155 @@
+/* The dropdown list (#dd), every kind. */
+.tparams .opt, .term .opt { white-space: nowrap; margin-right: 10px; }
+.tparams .opt.wide { white-space: nowrap; display: inline-block; }
+.el { --hue: 200; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font: 700 15px var(--display); color: #fff; letter-spacing: -.02em; flex: none; position: relative;
+  background: linear-gradient(145deg, hsl(var(--hue) 70% 55%), hsl(var(--hue) 62% 36%)); box-shadow: inset 0 1px 0 #ffffff45, 0 2px 0 hsl(var(--hue) 60% 22%); }
+.el small { position: absolute; top: 2px; left: 4px; font: 500 7.5px var(--mono); opacity: .85; letter-spacing: 0; }
+.dd { z-index: 48; border-radius: var(--r-tile); box-shadow: var(--elev-overlay); animation: ovIn var(--t-base) var(--e-out); transform-origin: 50% 0; }
+.dd .opt { cursor: pointer; }
+.dd-plugin { background: var(--surface); border: 1px solid var(--line); width: min(620px, calc(100vw - 32px)); padding: 14px; display: grid; gap: 10px; grid-template-rows: auto minmax(0, 1fr) auto; max-height: min(540px, 72vh); }
+.dd-head { display: flex; gap: 10px; align-items: center; }
+.dd-head h4 { margin: 0; font: 700 18px var(--display); flex: 1; letter-spacing: -.01em; }
+.dd-head input { width: 170px; border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 5px 9px; font-size: 13px; }
+.dd-body { overflow-y: auto; min-height: 0; padding: 2px 4px 6px 2px; }
+.dd-fam { font: 500 11px var(--mono); color: var(--faint); margin: 12px 2px 6px; }
+.dd-fam:first-child { margin-top: 2px; }
+.dd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 8px; }
+.opt-el { display: grid; gap: 5px; justify-items: start; padding: 9px; border-radius: 12px; border: 1px solid var(--line); background: var(--raised); text-align: left; transition: transform var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out), border-color var(--t-fast) var(--e-out); }
+.opt-el:hover, .opt-el:focus-visible { box-shadow: var(--shadow); border-color: var(--faint); outline: none; }
+.opt-el .el { width: 44px; height: 44px; font-size: 19px; border-radius: 10px; }
+.opt-el b { font-weight: 600; font-size: 13px; line-height: 1.2; }
+.opt-el code { font: 11px var(--mono); color: var(--faint); }
+.dd-foot { font-size: 12px; color: var(--faint); border-top: 1px solid var(--line); padding-top: 8px; }
+.dd-foot code { font: 12px var(--mono); color: var(--muted); }
+.dd-lcd { background: var(--lcd); border: 1px solid #a6f5bd30; padding: 8px; min-width: 230px; max-width: calc(100vw - 32px); color: var(--lcd-fg); box-shadow: 0 22px 60px #000c, inset 0 0 40px #a6f5bd10; display: grid; gap: 2px; position: absolute; }
+.dd-lcd::after { content: ""; position: absolute; inset: 0; border-radius: 16px; pointer-events: none; background: repeating-linear-gradient(transparent 0 2px, #0000002a 2px 3px); }
+.dd-lcd-title { font: 11px var(--lcdfont); letter-spacing: .14em; text-transform: uppercase; opacity: .55; padding: 4px 12px 6px; }
+.opt-lcd { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; border: 0; background: none; color: color-mix(in srgb, var(--lcd-fg) 55%, transparent); font: 20px var(--lcdfont); padding: 6px 12px; border-radius: 8px; text-align: left; }
+.opt-lcd b { font-weight: normal; }
+.opt-lcd small { font-size: 11px; opacity: .8; letter-spacing: .02em; }
+.opt-lcd:hover, .opt-lcd:focus-visible { background: #a6f5bd14; color: var(--lcd-fg); text-shadow: 0 0 10px #a6f5bd88; outline: none; }
+.opt-lcd[aria-selected="true"] { color: var(--lcd); background: var(--lcd-fg); text-shadow: none; }
+.dd-model { background: var(--surface); border: 1px solid var(--line); padding: 8px; width: min(max(400px, var(--ddw, 400px)), calc(100vw - 32px)); display: grid; gap: 4px; }
+.dd-model-title { font: 600 14px var(--body); padding: 6px 10px 4px; display: flex; justify-content: space-between; gap: 10px; }
+.dd-model-title span { font: 11px var(--mono); color: var(--faint); }
+.opt-model { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px 10px; align-items: center; padding: 10px 12px; border-radius: 10px; border: 1px solid transparent; background: none; text-align: left; }
+.opt-model b { font: 500 13px var(--mono); }
+.opt-model:hover, .opt-model:focus-visible { background: var(--raised); outline: none; }
+.opt-model[aria-selected="true"] { border-color: var(--hot); background: var(--hot-soft); }
+.opt-model .mem { height: 7px; }
+/* model list rows (G-D-46): 40px, the name, the quant chips (each an option), the size; the bar is a hairline under the row */
+.dd-model .opt-model { position: relative; grid-template-columns: minmax(0, 1fr) auto auto; min-height: 40px; padding: 0 12px 4px; gap: 0 10px; }
+.dd-model .opt-model .mem, .opt-mrow .mem { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 3px; }
+.opt-mrow { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto 56px; align-items: center; gap: 0 10px; min-height: 40px; padding: 0 12px 4px; border-radius: 10px; border: 1px solid transparent; }
+.opt-mrow b { font: 500 13px var(--mono); }
+.opt-mrow .gb, .dd-model .opt-model .gb { text-align: right; font: 12px var(--mono); color: var(--muted); }
+.opt-mrow.on { border-color: color-mix(in srgb, var(--hot) 45%, var(--line)); background: var(--hot-soft); }
+.opt-mrow:hover { background: var(--raised); }
+.opt-mrow.on:hover { background: var(--hot-soft); }
+.qchips { display: inline-flex; gap: 4px; }
+/* the model's name never yields to its quant chips: the chips wrap inside the row instead, right-aligned (B-20) */
+.opt-mrow { grid-template-columns: max-content minmax(0, 1fr) 56px; padding-top: 4px; padding-bottom: 8px; }
+.opt-mrow b { white-space: nowrap; }
+.opt-mrow .qchips { display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; row-gap: 4px; }
+.opt-q { border: 0; padding: 0; background: none; border-radius: 6px; }
+/* every quant on offer is at full strength; the chosen one carries the ring (C-30) */
+.opt-q .qb { display: inline-block; opacity: 1; transition: opacity var(--t-fast) var(--e-out); }
+.opt-q:hover .qb, .opt-q:focus-visible .qb { opacity: 1; }
+.opt-q:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
+.opt-q[aria-selected="true"] .qb { opacity: 1; box-shadow: inset 0 0 0 1.5px currentColor; }
+.dd-stamp { background: var(--paper); border: 1px solid var(--paper-line); padding: 14px 18px 18px; box-shadow: 0 22px 60px #0006; }
+.dd-stamp-title { font: 500 24px var(--hand); color: var(--paper-ink); margin-bottom: 10px; }
+.stamps { display: grid; grid-template-columns: repeat(4, auto); gap: 16px 18px; }
+.opt-stamp { border: 2.5px solid var(--ink); color: var(--ink); background: none; border-radius: 6px; padding: 7px 11px 5px; font: 700 15px var(--body); letter-spacing: .04em; transform: rotate(var(--r)); transition: transform var(--t-fast) var(--e-out), background var(--t-fast) var(--e-out); display: grid; justify-items: center; gap: 1px; }
+.opt-stamp small { font: 600 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
+/* In the list, stamps sit square on the grid in one ink at 70%, so columns and rows read; hover inks one fully and tilts
+   it 2 degrees; only the chosen one is the pink, tilted stamp that lands on the paper (G-D-43) */
+.dd-stamp .opt-stamp { border-color: var(--paper-ink); color: var(--paper-ink); transform: none; opacity: .7; filter: none; }
+.dd-stamp .opt-stamp:hover, .dd-stamp .opt-stamp:focus-visible { transform: rotate(-2deg); opacity: 1; outline: none; background: color-mix(in srgb, var(--paper-ink) 8%, transparent); }
+.dd-stamp .opt-stamp[aria-selected="true"] { border-color: var(--hot); color: var(--hot-ink); opacity: 1; transform: rotate(-3deg); background: var(--hot); filter: none; }
+@media (max-width: 560px) { .stamps { grid-template-columns: repeat(2, auto); } }
+/* compact periodic table */
+.dd-plugin.pt { width: auto; padding: 12px 14px; gap: 10px; grid-template-rows: auto minmax(0, 1fr) auto; }
+.pt-head { display: flex; gap: 12px; align-items: center; }
+.pt-big { display: flex; gap: 10px; align-items: center; flex: 1; min-width: 0; min-height: 52px; }
+.pt-big .el { width: 52px; height: 52px; font-size: 22px; border-radius: 10px; }
+.pt-big .el small { top: 3px; left: 5px; }
+.pt-info { display: grid; min-width: 0; line-height: 1.25; }
+.pt-info b { font: 700 15px var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-info code { font: 11px var(--mono); color: var(--faint); }
+.pt-info .fam, .pt-fam { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.pt-head input { width: 84px; border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 4px 8px; font-size: 13px; }
+.pt-grid { display: grid; gap: 4px; align-content: start; min-height: 0; overflow-y: auto; scrollbar-width: thin; overscroll-behavior: contain; padding: 5px 5px 5px 0; }
+.pt-row { display: grid; grid-template-columns: 96px repeat(5, 38px); gap: 4px; align-items: center; }
+.pt-fam { text-align: right; padding-right: 6px; line-height: 1.1; font-size: 11px; }
+.opt-pt { padding: 0; border: 0; background: none; border-radius: 8px; transition: transform var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out); position: relative; }
+.opt-pt .el { width: 38px; height: 38px; font-size: 14px; border-radius: 7px; }
+.opt-pt .el small { font-size: 7px; }
+/* highlight by ring and brightness, never by scale, so a tile never covers its neighbours (G-D-34) */
+.opt-pt:hover .el { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--fg) 30%, transparent); }
+.opt-pt:focus-visible { outline: none; }
+.opt-pt:focus-visible .el { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--fg); }
+/* under a finger, the option a first tap shows in the header, ringed as focus is; the header offers to use it (S-02) */
+.opt-pt.pv .el { filter: brightness(1.12); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--fg); }
+.pt-big .pt-use { flex: none; margin-left: auto; min-height: 40px; padding-inline: var(--s-3); }
+.opt-pt[aria-selected="true"]:is(:hover, :focus-visible) .el { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--hot); }
+.opt-pt.dim { opacity: .15; }
+.dd-plugin.pt .dd-foot, .dd-plugin.schedw .dd-foot { font-size: 11px; padding-top: 6px; max-width: 300px; }
+.dd-plugin.schedw { width: min(420px, calc(100vw - 32px)); padding: 12px; }
+.dd-plugin.schedw .dd-head h4, .dd-plugin.pt h4 { font-size: 15px; }
+.dd-grid.sm { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.dd-grid.sm .opt-el { padding: 6px; gap: 4px; border-radius: 9px; }
+.dd-grid.sm .opt-el b { font-size: 11px; font-weight: 500; }
+.dd-grid.sm .opt-el code { display: none; }
+/* a short plugin list (six or fewer): one row each, the symbol leading, then the name and its file (S-02) */
+.dd-grid.list { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.dd-grid.list .opt-el { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: var(--s-3); row-gap: 2px; align-items: center; padding: 8px 12px 8px 8px; }
+.dd-grid.list .opt-el .el { grid-row: 1 / 3; width: 40px; height: 40px; font-size: 17px; }
+.dd-grid.list .opt-el b { font-size: 14px; align-self: end; }
+.dd-grid.list .opt-el code { align-self: start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.dd-plugin.schedw:has(.dd-grid.list) { width: min(340px, calc(100vw - 32px)); }
+.dd-grid.list .opt-el:is(:hover, :focus-visible) { rotate: none; }
+@media (prefers-color-scheme: dark) {
+  /* stamp picker readable on dark */
+  :root:not([data-theme="light"]) .opt-stamp { filter: brightness(1.45); }
+  :root:not([data-theme="light"]) .opt-stamp[aria-selected="true"] { color: #fff; filter: none; }
+}
+:root[data-theme="dark"] .opt-stamp { filter: brightness(1.45); }
+:root[data-theme="dark"] .opt-stamp[aria-selected="true"] { color: #fff; filter: none; }
+/* no text under 10px */
+.el small, .opt-pt .el small { display: none; }
+.pt-big .el small, .opt-el .el small { display: block; font-size: 10px; }
+.opt-el:hover, .opt-el:focus-visible { transform: none; translate: 0 -3px; rotate: -.6deg; }
+.opt-el[aria-selected="true"] { box-shadow: 0 12px 26px -14px color-mix(in srgb, var(--hot) 80%, transparent); border-color: color-mix(in srgb, var(--hot) 35%, var(--line)); }
+.opt-pt[aria-selected="true"] .el { box-shadow: 0 0 14px -2px var(--hot); outline: 2px solid var(--hot); outline-offset: 2px; animation: selPulse var(--t-long) var(--e-out) 1; }
+@keyframes selPulse { 50% { outline-offset: 4px; outline-color: color-mix(in srgb, var(--hot) 45%, transparent); } }
+/* the chip's list is the page's popover surface (paper, not an LCD) */
+.dd-chip { background: var(--surface); border: 1px solid var(--line); padding: 6px; min-width: 220px; max-width: calc(100vw - 32px); }
+.dd-chip .dd-lcd-title { font: var(--caps); letter-spacing: var(--caps-ls); text-transform: uppercase; color: var(--muted); opacity: 1; padding: 6px 10px 4px; }
+.opt-chip { display: grid; gap: 1px; width: 100%; text-align: left; padding: 6px 10px; border: 0; border-radius: var(--r-ctl); background: none; }
+.opt-chip b { font: 500 13px var(--body); }
+.opt-chip small { font: 12px var(--body); color: var(--muted); }
+.opt-chip:hover, .opt-chip:focus-visible, .opt-chip[aria-selected="true"] { background: var(--raised); outline: none; }
+.dd-stamp-title { display: flex; align-items: center; gap: 12px; }
+.dd-stamp-title input { flex: 1; min-width: 120px; font: 13px var(--body); border: 1px solid var(--paper-line); background: color-mix(in srgb, var(--paper) 80%, #fff); color: var(--paper-ink); border-radius: 8px; padding: 4px 8px; }
+.dd-stamp .stamps { max-height: min(330px, 52vh); overflow-y: auto; scrollbar-width: none; padding: 8px 6px 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dd-stamp .stamps::-webkit-scrollbar { display: none; }
+.dd-stamp { width: min(560px, calc(100vw - 32px)); }
+.dd { position: fixed; overscroll-behavior: contain; }
+.dd.scrolls:not(.dd-plugin) { overflow-y: auto; scrollbar-width: none; }
+.dd.scrolls::-webkit-scrollbar { display: none; }
+/* the list that runs past its room fades at its foot under a band of its own background, so it stays opaque (S-25);
+   the LCD list, whose ::after is its scanlines, shows its thin scrollbar instead */
+.dd.scrolls:not(.dd-plugin):not(.dd-lcd)::after { content: ""; position: sticky; bottom: 0; z-index: 3; display: block; flex: none; height: 28px; margin-top: -28px; pointer-events: none; background: inherit; -webkit-mask-image: linear-gradient(transparent, #000); mask-image: linear-gradient(transparent, #000); }
+.dd-lcd.scrolls { scrollbar-width: thin; scrollbar-color: #a6f5bd55 transparent; }
+.dd-plugin.scrolls:not(.pt) { grid-template-rows: auto minmax(0, 1fr) auto; }
+.el { text-shadow: 0 1px 2px #0009; }
+/* overlays: coloured words are mixed toward the page ink, so they keep their hue and pass in both themes */
+.pt-info .fam, .pt-fam { color: color-mix(in srgb, hsl(var(--hue) 60% 50%) 58%, var(--fg)); }
+/* dropdown: a message when a filter matches nothing */
+.dd-none { margin: 8px 12px 12px; font-size: 13px; color: var(--muted); text-align: center; }
+.pt-none b { color: var(--muted); }
+.dd-stamp .stamps-rec { padding: 0 6px 2px; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); }
+.dd-stamp .stamps-rec > .dd-fam { display: block; padding: 6px 6px 0; }
+.dd-stamp .stamps-rec .stamps { max-height: none; overflow: visible; padding: 8px 0 10px; }
+.dd-stamp:has(#ddq:not(:placeholder-shown)) .stamps-rec { display: none; }

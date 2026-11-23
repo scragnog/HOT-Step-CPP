@@ -1,0 +1,83 @@
+/* Seed: the flap display, the dice, saved seeds. */
+/* seed, takes, note, timbre, models */
+.seed-num.rand { color: var(--faint); }
+.seed-btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 112px), 1fr)); gap: var(--s-2); }
+.seed-btns > .sbtn { justify-content: center; white-space: nowrap; }
+.dice.roll svg { animation: roll var(--t-long) var(--e-spring); }
+@keyframes roll { to { transform: rotate(360deg); } }
+.stars { display: grid; gap: 2px; }
+.seed-link { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.seed-row { display: flex; align-items: center; gap: 10px; }
+.seed-row .seed-num { flex: 1; min-width: 0; }
+/* seed: split-flap */
+/* one row always: the flaps shrink with the tile instead of wrapping a ten-digit seed */
+.seed-num { container-type: inline-size; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 22px); justify-content: start; gap: 3px; font: 24px/1 var(--lcdfont); word-break: normal; border: 0; background: none; padding: 2px; margin: -2px; border-radius: 6px; cursor: text; color: inherit; text-align: left; }
+.seed-num:hover .flap { box-shadow: inset 0 1px 0 #ffffff14, 0 2px 0 #0007, 0 0 0 1px var(--faint); }
+/* typing a seed: the flaps' own material, in the flaps' box (Q-23), with the caret where the cells were */
+.seed-in { flex: 1 1 auto; min-width: 0; height: 28px; border: 0; background: linear-gradient(var(--flap1) 0 50%, var(--flap2) 50%); color: #f4efe6; caret-color: #ffd27a; border-radius: 4px; padding: 0 10px; font: 20px/1 var(--lcdfont); letter-spacing: .12em; box-shadow: inset 0 1px 0 #ffffff14, 0 2px 0 #0007; }
+.sm-q::placeholder { color: var(--muted); opacity: 1; }
+.seed-in::placeholder { color: #cfc8d899; font-size: 14px; letter-spacing: .04em; }
+/* typed into the flaps' own footprint, in their face (Q-07) */
+.seed-row .seed-in { flex-grow: 0; padding: 0 6px; font-size: 22px; letter-spacing: .18em; border: 1px solid transparent; }
+.flap { position: relative; display: grid; place-items: center; width: auto; height: auto; aspect-ratio: 11 / 16; font-size: min(24px, calc((100cqi - 27px) / 10)); min-height: 0; border-radius: 4px; background: linear-gradient(var(--flap1) 0 50%, var(--flap2) 50%); color: #f4efe6; box-shadow: inset 0 1px 0 var(--flap-edge), 0 2px 0 #0007, var(--flap-ring); overflow: hidden; }
+.flap::after { content: ""; position: absolute; z-index: 2; left: 0; right: 0; top: 50%; height: 1px; background: #000b; }
+/* the two leaves of a flip (flapFlip): the old top half falling, the new bottom half landing; the seam stays over both */
+.flap .leaf { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; font-style: normal; color: inherit; border-radius: inherit; background: linear-gradient(var(--flap1) 0 50%, var(--flap2) 50%); backface-visibility: hidden; pointer-events: none; }
+.flap .leaf.top { clip-path: inset(0 0 50% 0); }
+.flap .leaf.bot { clip-path: inset(50% 0 0 0); }
+/* RANDOM uses the same ten cells as a seed, in a smaller, dimmer letter, so the row keeps its width (G-M-11) */
+.seed-num.rand .flap { color: #cfc8d8; font-size: min(17px, calc((100cqi - 27px) / 14)); }
+.seed-num.rolling .flap { color: #ffd27a; }
+/* seed manager (G-D-05, G-D-22): a heading with Save on it, a one-column form, rows of three lines */
+.seedmgr { display: grid; gap: var(--s-2); }
+.sm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); min-height: 32px; }
+.sm-savebtn { gap: 6px; }
+.sm-head > .kl, .sm-f > .kl { color: var(--muted); }
+.sm-savebtn[aria-expanded="true"] { border-color: var(--fg); }
+.sm-bar { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.sm-bar .sm-q { flex: 1 1 120px; }
+.sm-bar .sbtn { flex: none; }
+/* the two buttons on the right of the manager share one column: one left edge, one width (L-24) */
+.sm-head > .sm-savebtn, .sm-bar > .sbtn { min-width: 160px; justify-content: center; }
+.sm-q { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--raised); color: var(--fg); border-radius: 8px; padding: 5px 9px; font-size: 13px; }
+/* the saved list scrolls by rows, and fades where it is cut (Q-31) */
+.seedmgr .stars { display: grid; gap: 4px; max-height: 190px; overflow: auto; scrollbar-width: none; scroll-snap-type: y proximity; -webkit-mask: linear-gradient(transparent, #000 12px, #000 calc(100% - 12px), transparent); mask: linear-gradient(transparent, #000 12px, #000 calc(100% - 12px), transparent); padding-block: 6px; }
+.seedmgr .stars > .sm-row { scroll-snap-align: start; scroll-margin-top: 6px; }
+.sm-row { display: flex; align-items: flex-start; gap: var(--s-2); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-1); border-radius: var(--r-ctl); }
+.sm-row:hover { background: var(--raised); }
+/* the current seed: the page's one "current" treatment, as on the workflow rows: raised fill and a semibold name */
+.sm-row.cur { background: var(--raised); }
+.sm-row.cur .sm-load b { font-weight: 650; }
+.sm-star { flex: none; display: grid; place-items: center; width: 24px; height: 20px; border: 0; background: none; color: var(--faint); padding: 0; }
+.sm-row.starred .sm-star { color: var(--amber); --star-fill: currentColor; }
+.sm-load { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 2px var(--s-2); border: 0; background: none; text-align: left; color: var(--fg); padding: 0; }
+.sm-load b { font: 500 13px/20px var(--body); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-load small { font: 12px var(--mono); color: var(--muted); }
+.sm-load .sm-dt { grid-column: 1 / -1; font: 12px/18px var(--body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-load .sm-d { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: 2px; }
+.sm-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; font: normal 11px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-pill); }
+/* a row's delete is always there, quietly, for touch and keyboard alike (Q-31) */
+.sm-del { border: 0; color: var(--muted); font-size: 15px; opacity: 1; }
+.sm-row:hover .sm-del, .sm-del:focus-visible, .sm-del.armed { opacity: 1; }
+/* armed delete: a small red pill over the seed number, so the name keeps its width */
+.sm-del.armed { width: auto; padding: 0 8px; color: var(--hot-ink); background: var(--hot); border-radius: var(--r-pill); font: 600 11px var(--body); }
+@media (hover: none) { .sm-del { opacity: 1; } }
+.sm-save { display: grid; gap: var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-well); background: var(--raised); }
+.sm-f { display: grid; gap: var(--s-1); min-width: 0; }
+.sm-save input { height: 36px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: var(--r-ctl); padding: 0 10px; font-size: 13px; min-width: 0; width: 100%; }
+.sm-acts { display: flex; justify-content: space-between; gap: var(--s-2); margin-top: var(--s-1); }
+.sm-acts .small-btn { height: 36px; padding: 0 14px; }
+.sm-acts .sm-cancel { background: none; border-color: transparent; }
+.sm-acts .sm-cancel:hover { background: var(--surface); border-color: var(--line); }
+/* seed manager: the name takes the room the row has; the number sits at the right */
+.sm-was { font-size: 12px; color: var(--amber); }
+/* Saved seeds (D-15): tags keep their whole pill; the number ends on the content edge; delete overlays on hover */
+.sm-row { position: relative; }
+.sm-load small { justify-self: end; font-variant-numeric: tabular-nums; transition: opacity var(--t-fast) var(--e-out); }
+.sm-del { position: absolute; right: var(--s-2); top: var(--s-2); width: 24px; height: 20px; border-radius: 6px; background: var(--raised); }
+/* the delete key has its own slot beside the number, so pointing at a row never hides its seed (A-26) */
+.sm-load { padding-right: 28px; }
+.sm-del.armed { right: var(--s-1); }
+
+/* a taller tile keeps its face in its middle (Q-23) */
+.bento > .tile.stretched[data-m="seed"] > .tile-body { justify-content: center; }

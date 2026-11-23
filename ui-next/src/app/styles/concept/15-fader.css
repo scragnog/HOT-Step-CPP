@@ -1,0 +1,53 @@
+/* The fader. */
+.faders { display: flex; }
+.fdr { display: grid; justify-items: center; gap: 4px; }
+.fdr-slot { --p: .5; position: relative; cursor: ns-resize; touch-action: none; outline: none; }
+.fdr-slot::before { content: ""; position: absolute; left: 50%; }
+.fdr-slot::after { content: ""; position: absolute; left: 50%; background: var(--hot); }
+.fdr-unity { position: absolute; height: 1px; }
+.fdr-cap { position: absolute; }
+.fdr-cap::after { content: ""; position: absolute; border-radius: 1px; }
+.fdr-slot:focus-visible .fdr-cap { outline-offset: 1px; }
+.fdr output { font: 12px var(--mono); }
+.fdr-l { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
+.faders { align-items: start; }
+.faders .fdr-slot::before { background: #00000070; }
+.faders .fdr output { color: #fff; }
+.fdr-slot { width: 38px; height: 124px; }
+.fdr-slot::before { width: 8px; margin-left: -4px; top: 11px; bottom: 11px; border-radius: 4px; background: #00000059; box-shadow: inset 0 1px 3px #000c, 0 1px 0 #ffffff14; }
+.fdr-slot::after { width: 2px; margin-left: -1px; bottom: 11px; height: calc((100% - 22px) * var(--fp)); border-radius: 1px; box-shadow: 0 0 6px var(--acc, var(--hot)); }
+.fdr-ticks { position: absolute; left: 1px; right: 1px; top: 11px; height: calc(100% - 21px); pointer-events: none; opacity: .45;
+  background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 25%), repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 12.5%);
+  background-size: 100% 100%, 100% 100%; -webkit-mask: linear-gradient(90deg, #000 0 9px, transparent 9px calc(100% - 9px), #000 0); mask: linear-gradient(90deg, #000 0 9px, transparent 9px calc(100% - 9px), #000 0); }
+.fdr-unity { left: 0; right: 0; top: calc(11px + (1 - var(--u, .5)) * (100% - 22px)); background: currentColor; opacity: .5; }
+.fdr-cap { left: 3px; right: 3px; height: 22px; top: calc((1 - var(--fp)) * (100% - 22px)); border-radius: 4px; z-index: 1;
+  background: linear-gradient(#fdfcff, #d3cedb 40%, #8f8999 50%, #cbc6d3 60%, #ebe8ef); box-shadow: 0 3px 4px #0008, inset 0 1px 0 #fff; transition: transform var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.fdr-cap::before { content: ""; position: absolute; left: 5px; right: 5px; top: 3px; bottom: 3px; background: repeating-linear-gradient(to bottom, #0000002e 0 1px, transparent 1px 3px); }
+.fdr-cap::after { left: 3px; right: 3px; top: 10px; height: 2px; background: var(--acc, var(--hot)); box-shadow: 0 0 4px var(--acc, var(--hot)); }
+.fdr-slot:hover .fdr-cap { transform: translateY(-1px); box-shadow: 0 5px 8px #0009, inset 0 1px 0 #fff; }
+.fdr-slot.sliding .fdr-cap { transform: scale(1.06); box-shadow: 0 0 0 2px var(--acc, var(--hot)), 0 6px 10px #0009; }
+.fdr { color: inherit; }
+.faders { justify-content: flex-start; gap: 0; padding: 12px 8px 10px 4px; border-radius: 12px; background: linear-gradient(#2c2735, #18151e); box-shadow: inset 0 1px 0 #ffffff12, 0 3px 0 #0e0c12, 0 8px 16px #0004; color: #ddd8e6; }
+.faders .fdr { width: 62px; padding: 0 3px; border-left: 1px solid #ffffff10; position: relative; }
+.faders .fdr::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #3a2a10; margin-bottom: 2px; box-shadow: inset 0 -1px 1px #0008; }
+.faders .fdr-l { order: 9; white-space: nowrap; background: #efe6cf; color: #2a2430; font: 600 15px/1 var(--hand); letter-spacing: 0; text-transform: none; padding: 2px 6px 3px; border-radius: 2px; transform: rotate(-2.5deg); box-shadow: 0 1px 2px #0007; opacity: 1; }
+.faders .fdr:nth-child(odd) .fdr-l { transform: rotate(2deg); }
+.fdr-slot:focus-visible { outline: none; animation: none; }
+.fdr-slot:focus-visible .fdr-cap { outline: 2px solid var(--ring); outline-offset: 2px; box-shadow: 0 0 14px var(--acc, var(--hot)), 0 3px 4px #0008; }
+@container desk (max-width: 539.98px) {
+  .faders { padding-inline: 2px; }
+  .faders .fdr { width: auto; flex: 1 1 0; min-width: 0; padding: 0 1px; }
+  .faders .fdr-l { font-size: 12px; padding: 2px 3px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .faders .fdr-slot { width: 30px; }
+  .faders .fdr output { font-size: 11px; }
+}
+/* a fader whose range stops short of the printed scale shows where it stops */
+.fdr.stops .fdr-slot { --stop: calc(11px + (1 - var(--top)) * (100% - 22px)); background: repeating-linear-gradient(135deg, #ffffff22 0 2px, transparent 2px 5px) center 11px / 26px calc(var(--stop) - 11px) no-repeat, linear-gradient(#ffffff80, #ffffff80) center calc(var(--stop) - 1px) / 26px 1px no-repeat; }
+.fdr.stops .fdr-slot[aria-valuemax] { cursor: ns-resize; }
+/* --- values set by a discrete action travel; values under the hand follow it 1:1 (G-M-10) ---
+   A key step, a click on the track, a reset or a preset load moves the fader cap and fill, and the ruler cap and bar, over
+   --t-fast. While the pointer drags (.sliding), there is no easing. Knobs already do this (--kp, 15-knob.css). */
+@property --fp { syntax: '<number>'; inherits: true; initial-value: 0; }
+.fdr-slot { --fp: var(--p); transition: --fp var(--t-fast) var(--e-out); }
+.fdr-slot.sliding, .ruler2.sliding { transition: none; }
+@media (prefers-reduced-motion: reduce) { .fdr-slot, .ruler2 { transition: none !important; } }

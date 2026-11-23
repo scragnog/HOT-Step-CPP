@@ -1,0 +1,21 @@
+/* Lead sheet. */
+.staffpad textarea::placeholder { color: color-mix(in srgb, var(--paper-ink) 62%, transparent); font-style: italic; }
+.staffpad textarea { width: 100%; min-height: 150px; border: 1px solid var(--paper-line); border-radius: 10px; resize: none; outline: none; color: var(--paper-ink); font: 13px/14px var(--mono); padding: 14px 14px 10px;
+  background-color: var(--paper); background-attachment: local; }
+.staffpad textarea:focus { border-color: var(--hot); }
+.staff { width: 100%; height: auto; display: block; overflow: visible; }
+.staff .st-line { stroke: currentColor; stroke-opacity: .4; stroke-width: 1; }
+.staff .st-bar { stroke: currentColor; stroke-opacity: .65; stroke-width: 1; }
+.staff .st-bar.fin { stroke-opacity: 1; stroke-width: 3; }
+.staff .st-stem { stroke: currentColor; stroke-width: 1.1; }
+.staff .st-clef { font: 40px "Segoe UI Symbol", "Noto Music", "Apple Symbols", serif; fill: currentColor; }
+.staff .st-acc { font: 15px "Segoe UI Symbol", "Apple Symbols", serif; fill: currentColor; }
+.staff .st-time { font: 700 15px "Times New Roman", Georgia, serif; fill: currentColor; }
+/* lead sheet: the ABC text sits on the staff lines (26px rhythm, like the paper) */
+.staffpad textarea { line-height: 26px; padding-top: 8px; padding-bottom: 8px; background-size: 100% 26px; background-position: 0 8px;
+  background-image: linear-gradient(to bottom, transparent 0 21px, color-mix(in srgb, var(--paper-ink) 20%, transparent) 21px 22px, transparent 22px); }
+/* the composer CFG token, while it keeps Lyric timing from working (B-09) */
+.tok.clash { color: var(--amber); text-decoration: underline wavy var(--amber); text-underline-offset: 3px; }
+/* the paper's rulings start one line below the top padding (the band tiled above it is clipped with the padding, so no
+   ruling doubles the top border) and the sheet is a whole number of lines tall (E-36) */
+.staffpad textarea { background-image: linear-gradient(to bottom, transparent 0 21px, color-mix(in srgb, var(--paper-ink) 20%, transparent) 21px 22px, transparent 22px), none; background-clip: content-box, padding-box; min-height: calc(5 * 26px + 16px + 2px); }

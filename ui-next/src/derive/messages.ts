@@ -71,6 +71,22 @@ export const EN: { [id: string]: string } = {
   'plate.group': '{label}: {values}',
   'plate.switch': '{label} {value}',
   'desk.hidden': 'Hidden at this tier, still applied: {names}',
+  'desk.removed': 'Removed {name}{n, plural, =0 {} one { and its # pedal} other { and its # pedals}}',
+  'desk.tookOff': 'Took {name} off the board{last, select, true {. That was the last one, so the Pedalboard left the desk too} other {}}',
+  'desk.parked': "Parked: {engine} doesn't use {n, plural, one {this. It returns} other {these. Each returns}} on an engine that does.",
+  'step.add': 'Add {name}',
+  'step.remove': 'Remove {name}',
+  'step.move': 'Move {name}',
+  'step.engine': 'Switch to {engine}',
+  'step.engine.put': 'Puts the engine back',
+  'board.count': '{parts}',
+  'board.none': 'No pedals in the chain yet',
+  'board.pedals': '{n, plural, one {# pedal} other {# pedals}}',
+  'board.on': '{n} on',
+  'board.idle': '{n} {n, plural, one {needs} other {need}} setting up',
+  'board.bypassed': 'chain bypassed: no pedal runs',
+  'board.units': '{n, plural, one {# side unit} other {# side units}}, {on} on',
+  'board.parked': '{n} parked under the desk',
 };
 
 const JOIN_EN: { [j in SlotList['join']]: (a: string[]) => string } = {

@@ -45,6 +45,23 @@ export const tile = {
   ],
   face: [
     { part: 'lcdValue', reads: ['pp.tile.plugin'], label: 'decoder', tiers: ['studio'] },
+    /* at Lab the pedal says what it needs on Stable Audio 3 whether or not it is engaged, as the concept's lab() does */
+    {
+      part: 'note',
+      text: 'Needs Lua plugins',
+      tiers: ['lab'],
+      engines: ['sa3'],
+      when: { param: 'samp.plugins', is: false },
+      actions: [
+        {
+          do: 'set',
+          param: 'samp.plugins',
+          value: true,
+          label: 'Turn on',
+          tip: 'Turns on the Sampler\'s Lua plugins (experimental on Stable Audio 3)',
+        },
+      ],
+    },
   ],
   thumb: { file: 'pd-tile' },
 } satisfies PedalDef;

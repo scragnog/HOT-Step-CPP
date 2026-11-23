@@ -1,0 +1,72 @@
+/* Dropdown buttons: the plugin, LCD, chip, model and stamp faces that open #dd. */
+/* Order: the tempo LCD row (the rest of .lcd-row b is in 25-module-tempo.css). Here, before .pk-lcd b, which undoes it for the LCD dropdown in that row. */
+.lcd-row b { font-weight: normal; }
+/* Order: pedal labels (the rest of .pedal b is in 27-pedals.css). Here, before .pk-lcd b, which undoes this for an LCD dropdown inside a pedal. */
+.pedal b { min-height: 28px; display: grid; place-items: center; }
+.stamp-wrap { position: absolute; top: 12px; right: 14px; z-index: 1; transform: rotate(-6deg); }
+.pk-plugin { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px 6px 6px; transition: transform var(--t-fast) var(--e-out), border-color var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.pk-plugin:hover { border-color: var(--faint); transform: translateY(-1px); box-shadow: var(--shadow); }
+.pk-plugin[aria-expanded="true"] { border-color: var(--hot); }
+.pk-txt { display: grid; min-width: 0; line-height: 1.2; }
+.pk-kind { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.pk-val { font: 600 14px var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pk-caret { margin-left: auto; color: var(--faint); font-size: 11px; transition: transform var(--t-base) var(--e-out); }
+[aria-expanded="true"] .pk-caret { transform: rotate(180deg); color: var(--hot); }
+.pk-lcdwrap { display: inline-flex; align-items: center; gap: 1px; background: var(--lcd); border: 1px solid #ffffff1c; border-radius: 7px; padding: 2px; box-shadow: inset 0 2px 6px #000a; max-width: 100%; }
+.pk-lcdwrap .cyc { border: 0; background: none; color: color-mix(in srgb, var(--lcd-fg) 60%, transparent); width: 20px; height: 24px; font: 11px var(--lcdfont); border-radius: 5px; flex: none; }
+.pk-lcdwrap .cyc:hover { background: #ffffff12; color: var(--lcd-fg); }
+.pk-lcd { color: var(--lcd-fg); font: 14px var(--lcdfont); padding: 2px 8px; border-radius: 5px; display: inline-flex; gap: 7px; align-items: baseline; text-shadow: 0 0 8px #a6f5bd66; white-space: nowrap; min-width: 0; overflow: hidden; }
+.pk-lcd:hover, .pk-lcd[aria-expanded="true"] { background: #a6f5bd14; }
+.pk-lcd small { font-size: 11px; opacity: .7; }
+/* the beat dots stand 8px off the numeral, centred on its x-height, in the list as on the stepper (L-28) */
+.pk-lcd .beats, .opt-lcd .beats { letter-spacing: 2px; font-size: 11px; margin-left: 8px; vertical-align: .12em; }
+/* the role column holds the longest role (DECODER, PLANNER) and its changed mark, 4px clear of the name (E-34) */
+.pk-model { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; width: 100%; background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 9px 12px 8px; position: relative; transition: border-color var(--t-fast) var(--e-out), transform var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+/* in the engine panel every model row is one height, a row with no size bar too (S-32) */
+#engPanel .pk-model { min-height: 50px; }
+.pk-model:hover { border-color: var(--faint); transform: translateY(-1px); box-shadow: var(--shadow); }
+.pk-model[aria-expanded="true"] { border-color: var(--hot); }
+.pk-model .pk-val { font: 500 13px var(--mono); }
+.pk-right { display: flex; gap: 8px; align-items: center; }
+.qb { font: 700 11px var(--mono); padding: 2px 6px; border-radius: 5px; letter-spacing: .04em; white-space: nowrap; }
+.q-lo { background: #f08c0026; }
+.q-mid { background: #1d9a5b26; }
+.q-hi { background: #4c6fff26; }
+.q-fp4 { background: #a24cff26; }
+.gb { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+.mem { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--inset); overflow: hidden; display: block; }
+.mem i { display: block; height: 100%; border-radius: 3px; }
+.stamp-wrap .pk-stamp { border: 2px solid var(--ink); border-radius: 5px; padding: 3px 10px; font: 700 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; background: transparent; mix-blend-mode: multiply; }
+:root[data-theme="dark"] .stamp-wrap .pk-stamp { mix-blend-mode: normal; filter: brightness(1.5); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .stamp-wrap .pk-stamp { mix-blend-mode: normal; filter: brightness(1.5); } }
+.stamp-wrap .pk-stamp:hover { transform: scale(1.06); }
+.stamp-wrap.thunk { animation: thunk var(--t-slow) var(--e-spring); }
+@keyframes thunk { 0% { transform: rotate(-6deg) scale(1.5); opacity: .3; } 60% { transform: rotate(-6deg) scale(.94); opacity: 1; } 100% { transform: rotate(-6deg) scale(1); } }
+.pk-lcd b, .opt-lcd b, .pedal .pk-lcd b { font: inherit; display: inline; min-height: 0; padding: 0; place-items: initial; }
+/* VRAM bars: the gradient spans the whole card, the fill reveals it */
+.mem { position: relative; }
+.mem i { position: absolute; inset: 0; width: auto; background: linear-gradient(90deg, var(--ok), #f5b544 55%, var(--hot)); background-size: 100% 100%; clip-path: inset(0 calc(100% - var(--w, 0%)) 0 0 round 3px); transition: clip-path var(--t-slow) var(--e-out); }
+.pk-plugin[aria-expanded="true"], .pk-model[aria-expanded="true"] { box-shadow: 0 12px 26px -14px color-mix(in srgb, var(--hot) 80%, transparent); }
+.pchip .pk-val { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.pchip .pk-caret { color: var(--faint); font-size: 10px; }
+/* the LCD picker fills its 24px well instead of floating in it (its hover tint shows the real target) */
+.pk-lcdwrap > .pk-lcd { align-self: stretch; align-items: center; }
+.qb { color: color-mix(in srgb, var(--qc, currentColor) 62%, var(--fg)); }
+.q-lo { --qc: #e08a10; }
+.q-mid { --qc: #1d9a5b; }
+.q-hi { --qc: #4c6fff; }
+.q-fp4 { --qc: #a24cff; }
+/* R-39: a long plugin name wraps to a second line on its picker face instead of being cut */
+/* plugin pickers are one fixed height, tall enough for a name on two lines, so a selected name is never cut (the
+   families differ only at their ends: MD Confluence V3 / V4 / V5) and changing the schedule never resizes the row
+   (A-10, G-D-21). A row of pickers too narrow for the longest names stacks them one per row (.picks, 25-module-sampler.css). */
+/* the chosen name keeps to one line, so the labels of pickers in a row share one baseline (Q-39); the full name is in the menu */
+.pk-plugin .pk-val { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 16px; }
+.pk-plugin .pk-txt { min-width: 0; gap: 1px; }
+.pk-plugin { height: 64px; min-height: 0; }
+/* L-16: a chosen name may take a second line before it is cut ("Composite (2-Stage)", "SGM-Uniform (Karras)"). The
+   text block is one height in every picker, its kind line at the top, so the kind labels of a row still share a line
+   (Q-39) whether the names under them take one line or two. */
+.pk-plugin .pk-txt { grid-template-rows: auto 32px; align-content: start; }
+.pk-plugin .pk-val { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; text-wrap: balance; }
+.stamp-wrap .pk-stamp { color: color-mix(in srgb, var(--ink) 85%, #000); }

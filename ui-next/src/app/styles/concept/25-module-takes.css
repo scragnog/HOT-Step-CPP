@@ -1,0 +1,55 @@
+/* Takes: the LCD and the reels. */
+.tape-art .reel { animation: adspin var(--spin, 3s) linear infinite; }
+.still .tape-art .reel { animation-play-state: paused; }
+@keyframes adspin { to { transform: rotate(360deg); } }
+/* takes */
+/* the LCD takes the room the reels leave, so the reel grid ends on the content edge (D-31, D-11 Takes in Quick) */
+.takes2 { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.tk-lcd { background: var(--lcd); color: var(--lcd-fg); border-radius: 10px; padding: 8px 14px 7px; display: grid; justify-items: center; min-width: 92px; box-shadow: inset 0 2px 8px #000a, var(--bezel); }
+.tk-lcd b { font: 40px/1 var(--lcdfont); font-weight: normal; text-shadow: 0 0 10px color-mix(in srgb, var(--lcd-fg) 50%, transparent); }
+.tk-lcd small { font: 11px/1.25 var(--lcdfont); letter-spacing: .08em; text-transform: uppercase; opacity: .7; text-align: center; max-width: 100%; text-wrap: balance; }
+.tk-reels { flex-wrap: wrap; min-width: 0; margin: 0 auto; }
+.tk-lcd { flex: 1 0 92px; max-width: none; }
+.reel2 { width: 34px; height: 34px; border-radius: 50%; border: 0; padding: 0; position: relative; cursor: pointer; background: radial-gradient(circle, var(--surface) 0 5px, transparent 5.5px), repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--fg) 30%, var(--surface)) 0 30deg, color-mix(in srgb, var(--fg) 12%, var(--surface)) 30deg 60deg); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--fg) 25%, var(--surface)); transition: transform var(--t-base) var(--e-spring), filter var(--t-fast) var(--e-out); opacity: .55; }
+.reel2 i { position: absolute; inset: 3px; border-radius: 50%; border: 1.5px solid transparent; }
+.reel2:hover { opacity: 1; }
+.reel2.on { opacity: 1; background: radial-gradient(circle, var(--surface) 0 5px, transparent 5.5px), repeating-conic-gradient(from 0deg, var(--hot) 0 30deg, color-mix(in srgb, var(--hot) 45%, #1b1722) 30deg 60deg); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--hot) 70%, #000), 0 3px 8px color-mix(in srgb, var(--hot) 35%, transparent); animation: reelspin 3.2s linear infinite; animation-delay: calc(var(--i) * -.37s); }
+.reel2:focus-visible { outline-offset: 2px; }
+.tk-cost { display: grid; gap: 5px; font: 12px var(--mono); color: var(--muted); text-wrap: pretty; }
+.tk-meter { display: flex; align-items: center; gap: var(--s-2); }
+.tk-meter .tk-bar { flex: 1; }
+.tk-gb { flex: none; font-variant-numeric: tabular-nums; }
+.tk-reels[data-takes] { border-radius: 10px; outline: none; }
+.tk-reels[data-takes]:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--hot); }
+.tk-bar { height: 5px; border-radius: 3px; background: var(--inset); overflow: hidden; }
+.tk-bar i { display: block; height: 100%; border-radius: 3px; background: var(--ok); transition: width var(--t-slow) var(--e-out); }
+.tk-cost.over { color: var(--hot); }
+.tk-cost.over .tk-bar i { background: var(--hot); }
+/* hover lifts stack with spins instead of replacing them */
+.reel2:hover { transform: none; translate: 0 -2px; }
+.reel2.on:hover { translate: 0 -2px; }
+.reel2.on:focus-visible, .xy:focus-visible, .fl-it:focus-visible { animation: none; }
+.reel2:focus-visible { outline: none; translate: 0 -3px; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--hot), 0 6px 14px color-mix(in srgb, var(--hot) 45%, transparent); }
+.reel2.on:focus-visible { animation: reelspin 3.2s linear infinite; }
+.tk-cost.split { color: var(--amber); }
+.tk-cost.split .tk-bar i { background: var(--amber); }
+/* takes: reels in even rows (3 x 3 for nine), and a single-song engine shows its one reel */
+.tk-reels { display: grid; grid-template-columns: repeat(var(--cols, 4), 34px); gap: 6px; flex: 0 1 auto; align-content: center; }
+.tk-reels.one { display: flex; gap: 12px; align-items: center; flex: 1 1 160px; }
+.reel2.solo { flex: none; cursor: default; animation: none; }
+.tape-art .reel { animation-play-state: paused; }
+body.running .tape-art .reel:not(.still *) { animation-play-state: running; }
+.reel2.on { animation-play-state: paused; }
+body.running .reel2.on { animation-play-state: running; }
+.reel2.on:focus-visible { animation-play-state: paused; }
+/* --- Takes: pointing at a reel previews the count (G-B-07): reels up to it half-lit, reels past it dimmed, the number
+   shown dimmed on the LCD; the reels' own hover lift (above) stays --- */
+/* a change from the keyboard ends the preview until the pointer moves (L-32) */
+.tk-reels:not(.kbd) .reel2:not(.on):is(:hover, :has(~ .reel2:hover)) { opacity: .5; background: radial-gradient(circle, var(--surface) 0 5px, transparent 5.5px), repeating-conic-gradient(from 0deg, var(--hot) 0 30deg, color-mix(in srgb, var(--hot) 45%, #1b1722) 30deg 60deg); }
+.tk-reels:not(.kbd) .reel2:hover ~ .reel2.on { opacity: .4; }
+.tk-reels .reel2 { transition: transform var(--t-base) var(--e-spring), filter var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out), translate var(--t-fast) var(--e-out); }
+.tk-lcd.pv > * { opacity: .45; }
+/* the count held for another engine (E-39): one quiet line under the cost, in its type */
+.tk-held { margin: 0; font: 12px var(--mono); color: var(--muted); }
+/* on a one-take engine the tile is a strip, and the held count is its second line (S-37) */
+.mod-strip .tk-held { display: block; margin-top: 2px; }

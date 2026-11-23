@@ -1,0 +1,52 @@
+/* The knob. */
+/* 18px between knobs: a label's changed dot needs 9px after it and keeps clear of the next label (L-08) */
+.knobs { display: flex; gap: 14px 18px; flex-wrap: wrap; align-items: flex-start; }
+.kn { display: grid; justify-items: center; gap: 3px; min-width: 52px; }
+.knob { --p: .5; width: 46px; height: 46px; border-radius: 50%; position: relative; cursor: ns-resize; touch-action: none; background: conic-gradient(from 225deg, var(--hot) calc(clamp(0, var(--kp), 1) * 270deg), var(--line) 0 270deg, transparent 0); }
+.knob::before { content: ""; position: absolute; border-radius: 50%; }
+.knob i { position: absolute; left: 50%; top: 7px; width: 2px; height: 13px; margin-left: -1px; background: var(--fg); border-radius: 1px; transform-origin: 50% 16px; transform: rotate(calc(-135deg + var(--kp) * 270deg)); }
+.knob.sm { width: 34px; height: 34px; }
+.knob.sm::before { inset: 4px; }
+.knob.sm i { top: 5px; height: 9px; transform-origin: 50% 12px; }
+.kn .kl { font: 500 11px var(--mono); color: var(--faint); text-align: center; max-width: 76px; line-height: 1.2; }
+.kn output { font: 12px var(--mono); }
+/* "Changed from default" has one mark on paper controls (G-D-20): a 5px amber dot 4px after the control's label. The
+   label keeps its colour and the control keeps its border. Knob and number-box labels are centred, so their dot hangs
+   outside the label box and does not shift it. Hardware (pedals, LCDs, the terminal) keeps its own amber ink. */
+.kn .kl, .numbox .kl { position: relative; }
+/* a knob that can be automatic carries the auto pill after its label (A-11): lit while automatic */
+.kn.has-auto .kl { max-width: none; white-space: nowrap; }
+/* the pill is no taller than the label's line, so every knob's value sits on one line (Q-24); its hit area is padded */
+.kn-auto { margin-left: 6px; padding: 0 5px; font-size: 10px; line-height: 10px; vertical-align: middle; margin-block: -2px; letter-spacing: 0; text-transform: none; }
+.knob { --sk1: color-mix(in srgb, var(--fg) 30%, var(--surface)); --sk2: color-mix(in srgb, var(--fg) 12%, var(--surface)); --fc1: color-mix(in srgb, var(--fg) 6%, var(--surface)); --fc2: color-mix(in srgb, var(--fg) 16%, var(--surface)); }
+.knob::before { inset: 5px; background: repeating-conic-gradient(from 0deg, #ffffff1c 0 5deg, #0000001f 5deg 10deg), radial-gradient(circle at 35% 30%, var(--sk1), var(--sk2) 75%); box-shadow: 0 2px 3px #0004, 0 0 0 1px #0000001a; transition: box-shadow var(--t-fast) var(--e-out), transform var(--t-fast) var(--e-out); }
+.knob::after { content: ""; position: absolute; inset: 9px; border-radius: 50%; z-index: 1; pointer-events: none; background: radial-gradient(circle at 34% 28%, #ffffff40, transparent 55%), repeating-radial-gradient(circle at 50% 50%, #ffffff0a 0 1px, #0000000a 1px 2px), radial-gradient(circle at 50% 40%, var(--fc1), var(--fc2)); box-shadow: inset 0 1px 0 #ffffff30, inset 0 -1px 1px #0003; transition: transform var(--t-fast) var(--e-out); }
+.knob i { z-index: 2; }
+.knob.sm::after { inset: 7px; }
+.knob:hover { filter: brightness(1.12) saturate(1.15); }
+.knob:hover::before { box-shadow: 0 4px 8px #0006, 0 0 0 1px #0000001a; }
+.kn.turning .knob { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--hot) 55%, transparent)) brightness(1.12); }
+.kn.turning .knob::before, .kn.turning .knob::after { transform: scale(1.04); }
+.kn output { border-radius: 5px; padding: 0 4px; transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.kn.turning output { background: var(--hot); color: var(--hot-ink); }
+.knob i::after { content: ""; position: absolute; left: 50%; top: -2px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: inherit; }
+.knob:focus-visible { outline: none; }
+.kn:has(.knob:focus-visible) .knob { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--hot) 65%, transparent)) brightness(1.12); }
+.kn .kl.sym { text-transform: none; letter-spacing: 0; font: 500 13px/13px var(--body); }
+/* an arc under 8 degrees is a smudge at the pointer's foot, not a reading: below that the knob draws none (S-34) */
+.knob { --arc: calc(clamp(0, (clamp(0, var(--kp), 1) * 270 - 8) * 1000, 1) * clamp(0, var(--kp), 1) * 270deg); }
+.knob { background: conic-gradient(from 225deg, var(--hot) var(--arc), var(--line) 0 270deg, transparent 0); }
+.knob { --kp: var(--p); transition: --kp var(--t-fast) var(--e-spring), filter var(--t-fast) var(--e-out); }
+.kn.turning .knob { transition: filter var(--t-fast) var(--e-out); }
+.kn.resetting .knob { transition: --kp var(--t-base) var(--e-out), filter var(--t-fast) var(--e-out); }
+.kn output { font-variant-numeric: tabular-nums; cursor: text; }
+/* the read-out being typed into (L-40): the LCD field's look, the size of the read-out */
+.kn-in { font: 12px var(--mono); text-align: center; color: var(--lcd-fg); background: var(--lcd); border: 0; border-radius: 5px; padding: 0 4px; min-width: 4ch; height: 1.4em; caret-color: var(--lcd-fg); }
+.kn-in::selection { background: var(--lcd-fg); color: var(--lcd); }
+.knob > .det { position: absolute; inset: 0; border-radius: 50%; pointer-events: none; z-index: 0;
+  background: conic-gradient(from 225deg, transparent calc(var(--d) * 270deg - 2deg), var(--det, color-mix(in srgb, currentColor 35%, transparent)) 0 calc(var(--d) * 270deg + 2deg), transparent 0);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 84%, #000 85%); mask: radial-gradient(circle closest-side, transparent 84%, #000 85%); color: var(--fg); }
+.kn:not(.changed) .knob > .det { --det: var(--ok); }
+@media (prefers-reduced-motion: reduce) { .knob { transition: filter 120ms linear !important; } }
+/* automatic: the arc in the auto colour, at the value auto stands for (L-11) */
+.knob.is-auto { background: conic-gradient(from 225deg, var(--ok) var(--arc), var(--line) 0 270deg, transparent 0); }

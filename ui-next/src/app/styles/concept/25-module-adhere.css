@@ -1,0 +1,24 @@
+/* Plan adherence. */
+.wheel text .acc { font-family: "Segoe UI Symbol", "Apple Symbols", "Noto Sans Symbols 2", var(--body); font-size: 72%; font-weight: 400; }
+[data-adhere] svg { width: 100%; height: 110px; display: block; }
+.ad-axis { display: flex; justify-content: space-between; font: 11px var(--mono); color: #8d8697; padding: 2px 4px 0; }
+.ad-axis b { font-weight: normal; }
+.ad-leg { display: flex; gap: 12px; }
+.l-ps { color: var(--lcd-fg); }
+.l-pc { color: #f5c26b; }
+.l-cd { color: #c3b6ff; }
+.ad-g .toks { font: 12px var(--mono); color: var(--muted); }
+.ad-g .toks { line-height: 26px; }
+.xy-c.c1 { top: 12px; right: 12px; }
+.xy-c.c2 { bottom: calc(var(--sb) + 12px); left: calc(var(--sl) + 12px); }
+.xy-c.c3 { bottom: calc(var(--sb) + 12px); right: 12px; }
+/* Plan adherence (D-29): one setting per pair, never broken across a line */
+.ad-g .toks { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.tk-pair { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.tk-pair > .kl { font: 500 11px var(--mono); color: var(--faint); }
+/* the Plan strength rack has no tokens: its Curve stands at the foot, on the line of the other racks' switches, so the
+   three racks share their rows and no blank is left under it (E-11) */
+.ad-g.ad-ps { grid-template-rows: auto auto 1fr; }
+.ad-ps > .ad-foot { align-self: end; display: grid; gap: 6px; justify-items: start; }
+/* the range's arrow stands clear of the From token's changed dot (E-12) */
+.tk-arrow { margin-left: 5px; color: var(--faint); }

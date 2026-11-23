@@ -1,0 +1,26 @@
+<html lang="en">
+<meta charset="utf-8">
+<title>HOT-Step</title>
+<script>/* the chosen theme applies before the first paint */ try { const t = localStorage.getItem('hotstep.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Share+Tech+Mono&family=Caveat:wght@500&display=swap">
+<script type="module" src="/src/app/main.tsx"></script>
+
+<a class="skip" href="#prompt"></a>
+<header class="top"></header>
+<div class="app" id="app"></div>
+<section class="other" id="other" hidden></section>
+<div class="drawer-scrim" id="drawerScrim" hidden></div>
+<div class="fl" id="pickerWrap" hidden role="dialog" aria-modal="true"></div>
+<div id="menu" class="menu" hidden role="menu"></div>
+<div id="pop" class="pop" hidden></div>
+<div class="notes-scrim" id="notesScrim" hidden></div>
+<aside class="drawer" id="notes" hidden role="dialog" aria-modal="true"></aside>
+<div class="score-modal" id="scoreModal" hidden></div>
+<div class="eng-panel" id="engPanel" role="dialog" hidden></div>
+<div class="logs" id="logs" hidden role="region"></div>
+<div class="player" id="player" hidden></div>
+<div class="toast" id="toast" hidden></div>
+<div class="sr-only" id="say" aria-live="polite"></div>

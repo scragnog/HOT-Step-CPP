@@ -3,7 +3,7 @@
 // tier, what an action does, whether a node stands back, a pedal's idle reason, the note that names the Lab modules a
 // tier hides, and loading a workflow or a draft.
 
-import type { Action, Definition, Draft, Node, Tier, Value, Workflow } from '../definitions/types.ts';
+import type { Action, Definition, Draft, Node, NodeOverride, Tier, Value, Workflow } from '../definitions/types.ts';
 import { layOut, pedalUnits, type PartName } from '../definitions/parts.ts';
 import { RETIRED } from '../definitions/retired.ts';
 import { type Desk, type Index, applies, changed, has, holds, nodeAt, onDesk, resolve, valueOf } from './core.ts';
@@ -11,7 +11,7 @@ import { type Msg, type Slot, list, msg } from './messages.ts';
 import { applyChange, type Change } from './parts.ts';
 import { migrate } from './records.ts';
 import { defName, rowWord, stepWords, type RowStep } from './steps.ts';
-import { fillMsg, formatMsg, paramWords } from './strings.ts';
+import { fillMsg, formatMsg, hash, nodeWord, paramWords, stripWords } from './strings.ts';
 import { plateWords } from './tiers.ts';
 import { cleanValues, setValue } from './values.ts';
 
@@ -20,7 +20,11 @@ import { cleanValues, setValue } from './values.ts';
 /** The row as steps.ts names it, with each choice's words as a message keyed by its place (strings.ts). */
 export function rowOf(ix: Index, d: Definition, node: Node, desk: Desk, key: string): RowStep {
   const at = nodeAt(ix, node, desk)!, choices = at.choices ?? [];
-  return { key: at.param ?? Object.keys(typeof choices[0]?.[1] === 'object' ? choices[0][1] as object : {})[0] ?? '', label: at.label ? fillMsg(ix, `${key}.label`, at.label, desk) : at.param ? paramWords(ix, at.param, desk).label : '', choices: choices.map(([w, v], i) => [{ id: `${key}.c.${i}`, en: w }, v]) };
+  /* a choice's words are keyed under the line that gives the row its choices (strings.ts), so retuning one engine's
+     presets keeps its words */
+  const line = ((node.per || []) as NodeOverride[]).filter(l => l.choices && (!l.engines || l.engines.includes(desk.engine)) && (!l.tiers || l.tiers.includes(desk.tier)) && (!l.when || holds(ix, l.when, desk))).pop();
+  const sfx = line ? `@${hash(JSON.stringify([line.engines, line.tiers, line.when]))}` : '';
+  return { key: at.param ?? Object.keys(typeof choices[0]?.[1] === 'object' ? choices[0][1] as object : {})[0] ?? '', label: at.label ? nodeWord(ix, node, desk, key, 'label') ?? fillMsg(ix, `${key}.label`, at.label, desk) : at.param ? paramWords(ix, at.param, desk).label : '', choices: choices.map(([w, v], i) => [{ id: `${key}.c.${i}${sfx}`, en: w }, v]) };
   void d;
 }
 
@@ -69,7 +73,7 @@ export function boardNodes(ix: Index, d: Definition, desk: Desk): { units: 1 | 2
   const cells: Cell[] = [
     ...(d.kind === 'unit' ? face('lab').filter(n => !(n.opts as { notAtLab?: boolean } | undefined)?.notAtLab).map(n => ({ part: 'node' as const, node: n, shown: true })) : []),
     ...numbers.map(p => (applies(ix, p.key, desk) ? { part: 'knob' as const, param: p.key, shown: true } : { part: 'plate' as const, param: p.key, plate, shown: false })),
-    ...on.filter(p => p.type === 'choice' || p.type === 'text').map(p => { const o = resolve(p, desk.engine).options; return { part: layOut(d.kind, p.type, Array.isArray(o) ? o.length : null), param: p.key, shown: applies(ix, p.key, desk) }; }),
+    ...on.filter(p => (p.type === 'choice' || p.type === 'text') && !p.beside).map(p => { const o = resolve(p, desk.engine).options; return { part: layOut(d.kind, p.type, Array.isArray(o) ? o.length : null), param: p.key, shown: applies(ix, p.key, desk) }; }),
     ...(d.kind === 'pedal' ? face('lab').map(n => ({ part: 'node' as const, node: n, shown: true })) : []),
     ...on.filter(p => p.type === 'boolean' && !p.beside).flatMap(p => [
       { part: 'ledButton' as const, param: p.key, shown: true },
@@ -83,7 +87,7 @@ export function boardNodes(ix: Index, d: Definition, desk: Desk): { units: 1 | 2
 export function idleOf(ix: Index, d: Definition, desk: Desk): { says: Msg; actions: Action[] } | null {
   if (d.kind !== 'pedal' || !d.on || valueOf(ix, d.on, desk) !== true) return null;
   const s = (d.idle || []).find(x => (!x.tiers || x.tiers.includes(desk.tier)) && holds(ix, x.when, desk));
-  return s ? { says: fillMsg(ix, `create.${d.id}.idle`, s.says, desk), actions: s.actions ?? [] } : null;
+  return s ? { says: stripWords(ix, `create.${d.id}.idle`, s, desk).says, actions: s.actions ?? [] } : null;
 }
 
 /** Whether a node stands back on the desk, and why. */

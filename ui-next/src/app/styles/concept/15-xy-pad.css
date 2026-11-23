@@ -1,0 +1,84 @@
+/* The XY pad. */
+.xy { --x: 50%; --y: 50%; --xyc: var(--lcd-fg); position: relative; height: 170px; border-radius: 10px; background-color: var(--inst);
+  box-shadow: inset 0 2px 12px #000d; cursor: crosshair; touch-action: none; outline: none; overflow: hidden; user-select: none; }
+.xy-trail { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.xy-h, .xy-v { position: absolute; background: color-mix(in srgb, var(--xyc) 40%, transparent); pointer-events: none; }
+.xy-h { height: 1px; }
+.xy-v { width: 1px; }
+.xy-dot { transition: transform var(--t-fast) var(--e-out); }
+.xy-c { position: absolute; font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; pointer-events: none; }
+.xy-ax { position: absolute; font: 11px var(--mono); color: color-mix(in srgb, var(--xyc) 75%, #ffffff); pointer-events: none; white-space: nowrap; }
+.xy-ax output { color: #fff; }
+.xy-ax.x { bottom: 6px; left: 50%; transform: translateX(-50%); }
+.xy-ax.y { left: 12px; top: 50%; transform: translate(-50%, -50%) rotate(-90deg); }
+.xy { --dx: 50%; --dy: 50%; --sx: 1; --sy: 1; --ang: 0rad; --tx: 14px; --ty: calc(-100% - 12px); }
+.xy.tip-left { --tx: calc(-100% - 14px); }
+.xy.tip-down { --ty: 12px; }
+.xy-h { top: var(--dy); transition: background var(--t-base) var(--e-out), height var(--t-base) var(--e-out); }
+.xy-v { left: var(--dx); transition: background var(--t-base) var(--e-out), width var(--t-base) var(--e-out); }
+.xy.grab .xy-h, .xy.grab .xy-v { background: color-mix(in srgb, var(--xyc) 70%, transparent); }
+.xy-tx, .xy-ty { position: absolute; background: var(--xyc); pointer-events: none; border-radius: 1px; opacity: .8; }
+.xy-tx { left: var(--dx); width: 2px; height: 7px; margin-left: -1px; }
+.xy-ty { top: var(--dy); width: 7px; height: 2px; margin-top: -1px; }
+.xy-dot, .xy.grab .xy-dot { position: absolute; left: var(--dx); top: var(--dy); width: 0; height: 0; margin: 0; background: none; box-shadow: none; transform: none; border-radius: 0; pointer-events: none; }
+.xy-dot .core { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--xyc); box-shadow: 0 0 8px color-mix(in srgb, var(--xyc) 70%, transparent);
+  transform: rotate(var(--ang)) scale(var(--sx), var(--sy)); transition: left var(--t-base) var(--e-out), top var(--t-base) var(--e-out), width var(--t-base) var(--e-out), height var(--t-base) var(--e-out); }
+.xy-dot .ring { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--xyc) 55%, transparent); opacity: .75; }
+.xy.grab .core { left: -3px; top: -3px; width: 6px; height: 6px; }
+.xy.grab .ring { border-style: dashed; border-color: var(--xyc); opacity: 1; animation: reticle 2.4s linear infinite; }
+/* the grabbed ring is 36px across, so at the plot's edge (XYIN, 18px in) it stays whole inside the pad (S-40) */
+@keyframes reticle { from { transform: scale(1.5) rotate(0deg); } to { transform: scale(1.5) rotate(360deg); } }
+.xy.release .ring { animation: settle var(--t-long) var(--e-spring); }
+@keyframes settle { 0% { transform: scale(1.5); } 55% { transform: scale(.82); } 100% { transform: scale(1); } }
+.xy:focus-visible:not(.grab) .ring { animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.28); opacity: .35; } }
+.xy-tip { position: absolute; left: var(--dx); top: var(--dy); transform: translate(var(--tx), var(--ty)); display: flex; gap: 5px; align-items: baseline; font: 11px var(--mono); color: #fff; white-space: nowrap;
+  background: #000000b8; border: 1px solid color-mix(in srgb, var(--xyc) 45%, transparent); padding: 2px 7px; border-radius: 6px; pointer-events: none; opacity: 0; transition: opacity var(--t-fast) var(--e-out); backdrop-filter: blur(4px); }
+.xy-tip b { font-weight: 500; }
+.xy-tip span { opacity: .45; }
+.xy.grab .xy-tip, .xy.nudge .xy-tip { opacity: 1; }
+.xy-rip { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 1.5px solid var(--xyc); pointer-events: none; animation: rip var(--t-long) var(--e-out) forwards; }
+@keyframes rip { from { transform: scale(.6); opacity: .9; } to { transform: scale(4.5); opacity: 0; } }
+.xy-c, .xy-ax { transition: opacity var(--t-base) var(--e-out); }
+.xy.grab .xy-ax, .xy.grab .xy-c { opacity: calc(var(--near, 1) * .55); }
+.xy:focus-visible { box-shadow: inset 0 2px 12px #000d, 0 0 0 1px color-mix(in srgb, var(--xyc) 45%, transparent); }
+/* contrast: labels on the dark pads, terminals and LCDs */
+.xy-ax { opacity: max(.85, calc(var(--near, 1) * .85)); }
+.xy-c { color: #ffffffcc; opacity: max(.7, calc(var(--near, 1) * .85)); }
+/* --- XY pads: the plot sits inside two read-out strips, Y at the left and X along the foot, so a value is never crossed
+   by the crosshair; the hairlines and their ticks stop at the strips; the corner labels sit 12px in from the plot's
+   corners (D-14). The dot's range follows the plot (xyBox in 08-xy-pads.js reads --sl / --sb). --- */
+.xy { --sl: 0px; --sb: 0px; }
+.xy:not(.xy-overlay) { --sl: 24px; --sb: 24px; height: 194px; }
+.xy:not(.xy-overlay)::before, .xy:not(.xy-overlay)::after { content: ""; position: absolute; z-index: 1; pointer-events: none; background: #09080cd9; }
+.xy:not(.xy-overlay)::before { left: 0; top: 0; bottom: 0; width: var(--sl); box-shadow: inset -1px 0 0 #ffffff14; }
+.xy:not(.xy-overlay)::after { left: 0; right: 0; bottom: 0; height: var(--sb); box-shadow: inset 0 1px 0 #ffffff14; }
+.xy-h { left: var(--sl); right: 0; }
+.xy-v { top: 0; bottom: var(--sb); }
+.xy-tx { bottom: var(--sb); z-index: 2; }
+.xy-ty { left: var(--sl); z-index: 2; }
+.xy-ax { z-index: 2; }
+.xy:not(.xy-overlay) .xy-ax { --near: 1; opacity: .9; }
+.xy:not(.xy-overlay) .xy-ax.x { bottom: 0; height: var(--sb); line-height: var(--sb); left: calc(var(--sl) + (100% - var(--sl)) / 2); transform: translateX(-50%); }
+.xy:not(.xy-overlay) .xy-ax.y { left: calc(var(--sl) / 2); top: calc((100% - var(--sb)) / 2); transform: translate(-50%, -50%) rotate(-90deg); line-height: 1; }
+/* the grid: the plot only (inside the two read-out strips), eight equal cells from its own edges (A-21) */
+/* "off" as its own rail under the plot (E-28): lit while the value is off, and the puck sits in it */
+/* off is no cut at all, the widest: its rail runs along the top (wide) edge (E-32) */
+.xy-rail { position: absolute; left: calc(var(--sl) + 8px); right: 8px; top: 9px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--xyc) 12%, transparent); pointer-events: none; }
+.xy-rail span { position: absolute; right: 0; top: 8px; font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: color-mix(in srgb, var(--xyc) 55%, transparent); }
+.xy.y-off .xy-rail { background: color-mix(in srgb, var(--xyc) 38%, transparent); }
+.xy.y-off .xy-rail span { color: var(--xyc); }
+.xy-grid { position: absolute; left: var(--sl); top: 0; right: 0; bottom: var(--sb); pointer-events: none;
+  background: linear-gradient(#ffffff0c 1px, transparent 1px) 0 0 / 100% 12.5%, linear-gradient(90deg, #ffffff0c 1px, transparent 1px) 0 0 / 12.5% 100%; }
+/* corner words, printed on the tile outside the pad (A-07): the top pair over its top corners, the bottom pair under its
+   foot, in the caps label style; the puck can sit in any corner and never covers one */
+.xy-frame { display: grid; gap: var(--s-1); min-width: 0; }
+.xy-cap { display: flex; justify-content: space-between; gap: var(--s-3); padding: 0 var(--s-1); font: var(--caps); letter-spacing: var(--caps-ls); text-transform: uppercase; color: var(--muted); line-height: 14px; }
+.xy-cap span:last-child { text-align: right; }
+.xy-dot { z-index: 2; }
+.xy:not(.xy-overlay) { box-shadow: inset 0 2px 12px #000d, var(--bezel); }
+.xy:not(.xy-overlay):focus-visible { box-shadow: inset 0 2px 12px #000d, var(--bezel), 0 0 0 2px color-mix(in srgb, var(--xyc) 60%, transparent); }
+.xy:focus-visible:not(.grab) .ring { animation-iteration-count: 1; }
+/* XY pads: the puck's ring grows and brightens */
+.xy:not(.grab):hover .xy-dot .ring { transform: scale(1.18); opacity: 1; border-color: color-mix(in srgb, var(--xyc) 85%, transparent); }
+.xy-dot .ring { transition: transform var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out), border-color var(--t-fast) var(--e-out); }

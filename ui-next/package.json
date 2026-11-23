@@ -8,10 +8,15 @@
   },
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "dev": "vite",
+    "build": "tsc -p tsconfig.app.json && vite build",
+    "build:file": "tsc -p tsconfig.app.json && vite build --mode file",
+    "build:test": "tsc -p tsconfig.app.json && vite build --mode test",
+    "lint": "eslint src/app",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json",
     "validate": "node tools/validate-definitions.ts",
     "request": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
-    "check": "tsc -p tsconfig.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts && node tools/test-view.ts",
     "docs": "node tools/validate-definitions.ts --docs",
     "ship": "node tools/validate-definitions.ts --ship",
     "record": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --record",
@@ -20,10 +25,30 @@
     "test": "node tools/test-validator.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --live",
     "thumb": "node tools/thumb.ts",
     "core": "node tools/test-core.ts",
-    "concept": "node tools/concept/collect.mjs"
+    "view": "node tools/test-view.ts",
+    "concept": "node tools/concept/collect.mjs",
+    "behaviour": "node tools/behaviour/run.mjs --page dist-test/index.html",
+    "baseline": "node tools/visual-baseline/vb.mjs"
+  },
+  "dependencies": {
+    "i18next": "^26.0.10",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-i18next": "^17.0.7",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.10.0",
-    "typescript": "~5.9.3"
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vite": "^8.0.4"
   }
 }

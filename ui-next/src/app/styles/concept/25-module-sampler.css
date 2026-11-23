@@ -1,0 +1,70 @@
+/* Sampler: the scope, the CFG interval handles, the control strip, schedule parameters. */
+/* sampler, planner */
+.scope { background: #100e16; border-radius: 10px; padding: 8px; }
+.scope svg { width: 100%; height: 110px; display: block; }
+.scope.sm svg { height: 80px; }
+.scope-read { font: 12px var(--mono); color: #b9b0c6; padding: 2px 4px 0; display: flex; gap: 12px; flex-wrap: wrap; }
+.scope-read b { color: #fff; font-weight: 500; }
+/* pickers share the row: one takes it, two halve it, four make one row, never three and an orphan (B-29) */
+.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 8px; }
+.picks label { display: grid; gap: 3px; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
+.ivl-wrap { position: relative; }
+.ivl-h { position: absolute; top: 6px; bottom: 8px; cursor: ew-resize; touch-action: none; outline: none; }
+.ivl-h::before { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: #f5c26b; box-shadow: 0 0 6px #f5c26b88; }
+/* a handle's label: at the top, outside the window (start to the left of its line, end to the right); .flip puts it on
+   the inside near the scope's edge (placeIvlLabels) */
+.ivl-l { position: absolute; top: 4px; font: 11px var(--mono); color: #f5c26b; white-space: nowrap; background: #100e16cc; padding: 0 3px; border-radius: 3px; pointer-events: none; }
+.ivl-h:not(.end) .ivl-l { right: 6px; }
+.ivl-h:not(.end).flip .ivl-l { right: auto; left: 28px; }
+.ivl-h.end .ivl-l { left: 6px; }
+.ivl-h.end.flip .ivl-l { left: auto; right: 28px; }
+/* the schedule's end dots sit above the handle lines, so the first and last steps stay whole (A-28) */
+.sdot { z-index: 1; }
+.scope-read .sr-warn { color: #f5c26b; }
+.scope-read .sr-ts { color: #f5c26b; }
+.scope-link { border: 0; background: none; padding: 0 2px; margin-left: 4px; font: inherit; color: #fff; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+/* Steps and Schedule while custom timesteps replace them (A-09): the controls are inert and drawn as the Latent groups
+   are when switched off, with the reason in their tooltip */
+.samp-strip .numbox.overridden .num { opacity: .5; cursor: not-allowed; }
+.samp-strip .numbox.overridden output { color: var(--amber); }
+.picks > .overridden, div.overridden { position: relative; opacity: .55; filter: saturate(.4); background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--fg) 5%, transparent) 6px 7px); border-radius: 12px; }
+.picks > .overridden > [inert] { display: block; height: 100%; }
+.ivl-h:focus-visible::before { width: 3px; background: #fff; }
+.scope-btn { margin-left: auto; border: 1px solid #ffffff25; background: none; font: 11px var(--mono); border-radius: 5px; padding: 1px 7px; }
+.scope-btn.on { color: #ff7aa0; border-color: #ff7aa066; }
+.spark { width: 34px; height: 34px; border-radius: 8px; background: #100e16; flex: none; display: block; }
+.picks { align-items: stretch; }
+.opt-el .spark { width: 100%; height: 44px; }
+@media (max-width: 560px) { .picks, .picks.lead { grid-template-columns: minmax(0, 1fr); } }
+.dd-grid.sm .opt-el .spark { height: 28px; }
+[data-scope] { position: relative; }
+.sdot { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fff; box-shadow: 0 0 4px #ff5b8a; pointer-events: none; }
+/* the strip sizes to what it holds: controls on one 96px pitch, centred, labels on one line (G-D-39) */
+.samp-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); justify-content: center; justify-items: center; align-items: start; gap: var(--s-3) var(--s-6); padding: var(--s-3) var(--s-2) 10px; border-radius: 12px; background: var(--inset); box-shadow: inset 0 1px 3px #0002; }
+.samp-strip .kn .kl { max-width: none; white-space: nowrap; }
+.samp-strip .numbox output { font: 12px var(--mono); color: var(--faint); }
+/* the schedule's own parameters sit in the same well as the knob strip above them (Q-39) */
+.schctl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 10px; border-radius: 12px; background: var(--inset); box-shadow: inset 0 1px 3px #0002; }
+.schctl .lbl { flex: 1 1 220px; }
+.schctl > .kl, .pc-i .kl, .lat-g .kl, .refs .kl { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+/* the CFG interval handles: a 24px grab strip around the line */
+.ivl-h { width: 24px; margin-left: -24px; }
+.ivl-h::before { left: 22px; }
+.ivl-h.end { margin-left: 0; }
+.ivl-h.end::before { left: 0; }
+.cables .plug-c { fill: var(--plug-c); }
+/* a sampler rack with a single control is sized to it, not stretched across the tile (D-11, Stable Audio 3) */
+/* a lone Steps box sits at the left of a full-width rack, so the tile has one skeleton on every engine (B-29) */
+/* one rule on every engine (E-20): the strip's controls start at its left, on one inset, whatever it holds */
+/* the four controls stand on four equal columns across the well, under the pickers (Q-25, L-10) */
+.samp-strip { padding: 12px 28px 10px; }
+/* YuE2: Steps and the two plugin pickers share the well */
+.samp-strip.with-picks { grid-template-columns: 96px minmax(0, 1fr); align-items: center; padding-right: 12px; }
+.samp-strip.with-picks > .picks { justify-self: stretch; }
+.samp-strip .numbox { gap: 3px; }
+.picks:empty { display: none; }
+/* Stable Audio 3's own sampler stands in the well beside Steps, and beside Guidance when Lua plugins bring it (S-30) */
+.samp-strip.with-picks:has(> .kn) { grid-template-columns: 96px 96px minmax(0, 1fr); }
+/* the CFG handles' names live in a band above the plot, beside the handles' tops, never on the curve (L-17) */
+.scope:has(.ivl-h) { padding-top: 26px; }
+.scope .ivl-l { top: -24px; background: none; padding: 0; }

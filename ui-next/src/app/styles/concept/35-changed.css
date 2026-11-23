@@ -1,0 +1,69 @@
+/* "Changed from default": one mark for every control at every tier (L-08, Q-34, E-12). After the components on purpose: it
+   is the only rule that draws the mark, so no component's own styling can move or recolour it.
+
+   The mark is a 5px dot, 4px after the control's name, centred on the name's line. Its right margin cancels its width, so
+   it takes no room: marking a control never re-wraps, clips or shifts anything beside it.
+   - The name is the control's label when it has one (knob, fader tape, LCD caption, row label, a seg's label).
+   - Else it is the control's own words (a pill, an LED chip, a flag, a picker's kind line).
+   - Else, for a value shown on its own (a scrub token, a stepper's read-out), the value.
+   - A control drawn without words, or whose words fill its box (the lock, a segmented control with no label, the language
+     stamp, an LCD key such as BEAT I/O), carries it 4px after its box, on the box's centre line.
+   Its colour is --chg, set by the surface the dot sits on: the dark amber on paper and light faces (--amber, which is the
+   light amber in the dark theme), the LCD's warm amber on dark hardware, a pedal's own --pd-chg on a pedal. Each pair reads
+   at 3:1 or better on its surface in both themes. A flex parent sets --cg to its gap, so the dot still sits 4px off. */
+:root { --chg: var(--amber); }
+:is(.lcd, .lcd-input, .term, .tk-lcd, .u-lcd, .gauge, .xy, .cart.h-sound, .cart.h-plan:not(.empty), .led-btn, .chipsw, .pk-lcdwrap, .lcd-btns, .lcd-bars, .lcd-step, .deck, .ivl-l) { --chg: #ffd27a; }
+:is(.rackrow, .endings, .ad-gh, .ad-g) .led-btn { --chg: var(--amber); }
+.faders .fdr-l { --chg: #8a5200; }
+.pedal, .pedal :is(.led-btn, .chipsw, .kn) { --chg: var(--pd-chg); }
+.pedal :is(.pk-lcdwrap, .lcd-input, .u-lcd, .pwin) { --chg: #ffd27a; }
+/* a label with a control right after it keeps room for its dot (a row's gap is 6px; the dot needs 9px and 4px clear) */
+.foot-ctl > .kl { margin-right: 9px; }
+/* the gap a flex parent puts before the dot */
+.tog { --cg: 10px; } .pextra .tog { --cg: 6px; }
+.pill-tog, .pchip { --cg: 6px; }
+/* a picker chip's label is inline text before its value: the dot sits in room kept after the label */
+.pchip.pk .k { --cg: 0px; margin-right: 7px; }
+.led-btn { --cg: 7px; } .board :is(.psw, .u-ctls) .led-btn { --cg: 8px; }
+.ctl label, .ctl .lab { --cg: 6px; }
+.lcd-bars { --cg: 3px; } .pk-lcdwrap { --cg: 1px; }
+
+/* after the name: the label */
+:is(.changed > label, .changed > .lab, .changed > .ctl-head > label, .ctl.changed .tog, .kn.changed .kl, .numbox.changed .kl,
+  .chipsw.changed > .kl, :is(.qchoice, .mood).changed > .kl, .foot-ctl:has(> :is(.seg, .tok, .pk-lcdwrap).changed) > .kl, :is(.ctl-row, .ad-foot):has(> .seg.changed) > .kl,
+  .ts.changed > .kl, .fdr.changed .fdr-l, .cdot.changed, .cdot-lcd.changed, .ivl-l.changed, :is(.pk-plugin, .pk-model).changed .pk-kind,
+  .wild.changed > span, .pchip.pk.changed .k, .note.changed > b)::after,
+/* after the name: the control's own words */
+:is(.tog.changed, .pill-tog.changed, .led-btn.changed, .flag.changed, .tpow.changed, .tchips.changed, .pchip.changed:not(.pk))::after,
+/* after the value */
+:is(.lcd-bars.changed, .lcd-step.changed, .tape.changed, :not(.foot-ctl) > .pk-lcdwrap.changed, .fdr.changed:not(:has(.fdr-l)) output, .xy-ax.changed output)::after,
+.tok.changed:not(.foot-ctl > .tok)::after {
+  content: ""; display: inline-block; flex: none; position: static; width: 5px; height: 5px; margin: 0 -9px 0 calc(4px - var(--cg, 0px)); border-radius: 50%;
+  vertical-align: middle; translate: 0 -1px; background: var(--chg); box-shadow: none; }
+/* order: the dot after a flex control's words comes after everything in it (an LED chip's LED is first) */
+:is(.pill-tog, .led-btn, .tog, .pchip)::after { order: 9; }
+/* a control without words: 4px after its box, on its centre line */
+:is(.lock, :not(.foot-ctl, .ctl-row, .ad-foot) > .seg, .lcd-btns button).changed { position: relative; }
+:is(.lock, :not(.foot-ctl, .ctl-row, .ad-foot) > .seg, .stamp-wrap, .lcd-btns button).changed::after {
+  content: ""; position: absolute; left: 100%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 4px; border-radius: 50%; background: var(--chg); box-shadow: none; }
+/* the language stamp is already placed (absolutely, at the paper's top right) and is never moved by the mark (L-02,
+   E-01); its right side is the paper's edge, so its dot sits 4px before it, on its centre line */
+.paper-wrap .stamp-wrap.changed::after { left: auto; right: 100%; margin: -2.5px 4px 0 0; }
+/* L-14: places where the general rule collided with a neighbour.
+   - A label with a control after it keeps 4px before the dot and 6px after it (the 9px margin above, with the row's 6px
+     gap); a picker in such a row is marked after its label, as a knob is (Composite's A, not before B).
+   - The seed lock stands at the edge of its column: its dot sits inside its own top-right corner.
+   - A fader's tape label is a padded, rotated strip: its dot sits 4px clear of the strip, not on its edge.
+   - Auto-trim is the last key of the LCD row, against the bezel: its dot sits 4px before it. */
+.seed-row .lock.changed::after { left: auto; right: 4px; top: 4px; margin: 0; }
+.faders .fdr-l { position: relative; }
+.faders .fdr.changed .fdr-l.fdr-l::after { position: absolute; left: calc(100% + 4px); top: 50%; margin: -2.5px 0 0; }
+.lcd-ends > .lcd-btns:has(+ .lcd-trim) button.changed::after { left: auto; right: 100%; margin: -2.5px 4px 0 0; }
+.neg-line > .k { margin-right: 8px; }
+/* the Chain switch writes its state with ::after, so its dot is the switch's own last item, 4px after "BYPASSED" (Q-27) */
+.master.changed::after { content: ""; flex: none; width: 5px; height: 5px; margin: 0 -9px 0 -5px; border-radius: 50%; background: var(--chg); }
+
+/* Plans & endings' deck: one place for the mark, after the row's label, whatever control the row holds (E-36) */
+.deck > .deck-l:has(+ .deck-c .changed)::after { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 -9px 0 4px; vertical-align: middle; translate: 0 -1px; border-radius: 50%; background: var(--chg); }
+/* the controls' own marks keep their (zero) room, unseen, so the deck never moves when they come and go */
+.deck .deck-c .changed::after { visibility: hidden !important; }

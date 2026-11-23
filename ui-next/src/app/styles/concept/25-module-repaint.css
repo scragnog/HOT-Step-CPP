@@ -1,0 +1,25 @@
+/* Repaint. */
+/* repaint */
+.wave canvas { width: 100%; height: 72px; display: block; border-radius: 8px; background: var(--raised); cursor: crosshair; touch-action: none; }
+.wave .cap { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--muted); margin-top: 6px; }
+.songref { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.songref b { display: block; font-weight: 600; }
+.songref span { color: var(--muted); font-size: 12px; }
+.rp-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
+.rp-grid.rp-one { grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+@media (max-width: 760px) { .rp-grid { grid-template-columns: minmax(0, 1fr); } }
+.rp-ctl { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+/* Lab pedals keep their own height instead of stretching to the tallest on the row */
+/* Repaint in Lab: the waveform takes the wide column, the controls and lyrics stack beside it, no blank half */
+.t-lab .rp-grid { grid-template-columns: minmax(0, 1fr); }
+/* Repaint in Lab (G-D-44): the controls are one row under the wave (mode, then the crossfade knob centred on its own
+   label), and the optional lyrics are a three-line sheet that grows with what is typed, not a page beside them */
+.t-lab .rp-grid > div:last-child { grid-template-columns: minmax(0, 1fr); gap: var(--s-3) !important; }
+.t-lab .rp-grid .rp-ctl { align-items: center; gap: var(--s-6); }
+.t-lab .rp-grid .rp-ctl .kn { align-items: center; }
+/* in Lab the mode and the crossfade stand on the wave's caption line, between what will be repainted and the song's
+   length, so the wide tile has no empty band beside them (L-36) */
+.t-lab .wave .cap { align-items: center; gap: var(--s-4); }
+.t-lab .wave .cap > .rp-ctl { margin-left: auto; gap: var(--s-4); }
+.t-lab .wave .cap > .rp-ctl .kn { grid-template-columns: auto auto; column-gap: var(--s-2); align-items: center; }
+.t-lab .wave .cap > .rp-ctl .kn > .knob { grid-row: span 2; }

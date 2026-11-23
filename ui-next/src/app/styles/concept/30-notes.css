@@ -1,0 +1,12 @@
+/* The concept notes drawer. */
+.drawer { position: fixed; z-index: 46; top: 0; right: 0; bottom: 0; width: min(460px, 100%); background: var(--surface); border-left: 1px solid var(--line); box-shadow: var(--elev-overlay); padding: calc(20px + env(safe-area-inset-top, 0px)) max(22px, env(safe-area-inset-right, 0px)) 24px 22px; overflow: auto; }
+.drawer h2 { font: 700 22px var(--display); margin: 0 0 4px; }
+.drawer h3 { font: 600 14px var(--body); margin: 18px 0 6px; }
+/* Close stays in reach while the notes scroll under it: it is the drawer's only control (S-35) */
+.drawer .close { z-index: 4; position: sticky; top: 0; float: right; margin: -6px -8px 0 var(--s-2); background: var(--surface); }
+.drawer ul { padding-left: 18px; margin: 0; display: grid; gap: 8px; color: var(--muted); }
+.drawer li b { color: var(--fg); }
+.notes-scrim { position: fixed; inset: 0; z-index: 45; background: #0b0a0f55; }
+@keyframes ovDrawer { from { opacity: 0; translate: 24px 0; } }
+.drawer { animation: ovDrawer var(--t-slow) var(--e-out); }
+.notes-scrim, .drawer-scrim, .score-modal { animation: ovFade var(--t-base) var(--e-out); }

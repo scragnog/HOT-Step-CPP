@@ -1,0 +1,96 @@
+/* The app grid and the centre column: the bar above the desk (tiers, panel toggles, undo), the Quick column, the other pages. Includes the layout breakpoints of the grid. */
+/* three-pane app */
+.app { display: grid; grid-template-columns: 250px minmax(0, 1fr) 300px; gap: 16px; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px)); align-items: start; }
+.app.no-left { grid-template-columns: 40px minmax(0, 1fr) 300px; }
+.app.no-right { grid-template-columns: 250px minmax(0, 1fr) 40px; }
+.app.no-left.no-right { grid-template-columns: 40px minmax(0, 1fr) 40px; }
+/* centre */
+/* one track that never grows past the column: nothing inside (the go bar with a player in it) can widen the page (C-05) */
+.centre { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; padding-bottom: 20px; }
+/* The bar above the desk (Q-03, Q-14): the tier switch stands centred over the centre column at every tier, so it never
+   moves under the pointer; the panel toggles sit to its left and the saved state and Undo to its right. It stays in view
+   under the top bar while the page scrolls, so a tier is always one press away. */
+.deskbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: var(--s-2) var(--s-4); align-items: center; position: sticky; top: calc(61px + env(safe-area-inset-top, 0px)); z-index: 8; margin: -8px 0; padding: 8px 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); }
+/* at Quick the bar keeps to the column it governs (C-37); centred like the column, so the switch stays where it was */
+.t-quick .deskbar { max-width: 900px; width: 100%; margin-inline: auto; }
+.deskbar > .panel-toggles { grid-column: 1; justify-self: start; }
+.deskbar > .tiers { grid-column: 2; }
+.deskbar-end { grid-column: 3; display: flex; align-items: center; justify-content: flex-end; gap: var(--s-2) var(--s-4); min-width: 0; container: deskend / inline-size; }
+.bento > .tile, .lyr-card { scroll-margin-top: calc(120px + env(safe-area-inset-top, 0px)); }
+.tiers { display: inline-flex; gap: 2px; background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.tiers button { border: 0; background: none; padding: 6px 18px; border-radius: 999px; color: var(--muted); font-weight: 600; font-size: 14px; transition: background var(--t-fast) var(--e-out), color var(--t-base) var(--e-out); }
+.tiers button:hover { color: var(--fg); }
+.panel-toggles { display: none; gap: 6px; }
+.ask { font: 700 clamp(26px, 3.4vw, 40px)/1.05 var(--display); letter-spacing: -0.03em; margin: 10px 0 0; text-wrap: balance; }
+.quickcol { display: grid; gap: 14px; }
+.t-quick .quickcol { max-width: 900px; width: 100%; margin: 0 auto; }
+.hidden-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; font-size: 13px; color: var(--lab); background: var(--lab-soft); border-radius: 10px; padding: 6px 6px 6px 12px; }
+/* the stub page; scoped to its id so the class name can't reach anything else (C-06) */
+#other.other { max-width: 560px; margin: 60px auto; text-align: center; color: var(--muted); padding: 0 16px; }
+#other.other h2 { font: 700 26px var(--display); color: var(--fg); margin: 0 0 8px; }
+#other.other .small-btn { margin-top: var(--s-4); }
+@media (max-width: 1180px) {
+  .app, .app.no-left, .app.no-right, .app.no-left.no-right { grid-template-columns: minmax(0, 1fr); }
+  .panel-toggles { display: flex; }
+}
+@media (max-width: 760px) { .tiers button small { display: none; } }
+/* when the three cells would not fit beside each other (a phone, or a narrow window), the tier switch takes a row of its
+   own, centred, and the panel toggles and Undo share the row under it (S-24) */
+@media (max-width: 760px) {
+  .deskbar { grid-template-columns: auto minmax(0, 1fr); }
+  .deskbar > .tiers { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
+  .deskbar > .panel-toggles { grid-column: 1; grid-row: 2; }
+  .deskbar-end { grid-column: 2; grid-row: 2; }
+}
+.undo-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; max-width: min(320px, 100%); flex: 0 1 auto; min-width: 0; color: var(--fg); }
+.undo-btn span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+/* the arrows keep their size however short the label gets (S-21) */
+:is(.undo-btn, .redo-btn) svg { flex: none; }
+.undo-btn span::before { content: "· "; }
+/* Redo sits beside Undo while there is something to redo; alone, it takes Undo's place at the right */
+.redo-btn { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+.undo-btn[hidden] + .redo-btn { margin-left: auto; }
+/* they come in with a short fade and slide rather than cutting in (F-28); the label stops at 28 characters */
+@keyframes undoIn { from { opacity: 0; translate: 8px 0; } }
+.undo-btn, .redo-btn { animation: undoIn var(--t-fast) var(--e-out); }
+.undo-btn span { white-space: nowrap; max-width: 28ch; }
+@media (prefers-reduced-motion: reduce) { .undo-btn, .redo-btn { animation: ovFade 120ms linear; } }
+/* the work is kept: a quiet read-out before Undo, Saved with a tick, Saving… for the moment before the write (F-35) */
+.save-state { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-1); font-size: var(--fs-12); color: var(--faint); white-space: nowrap; transition: color var(--t-fast) var(--e-out); }
+.save-state svg { transition: opacity var(--t-fast) var(--e-out); }
+.save-state.saving svg { opacity: 0; }
+.deskbar-end .save-state ~ .undo-btn, .deskbar-end .save-state ~ .undo-btn[hidden] + .redo-btn { margin-left: 0; }
+@media (max-width: 760px) { .save-state span { display: none; } }
+/* The end of the bar never crosses into the tier switch (F-02): it is its column's width, and as that narrows things give
+   way in this order: Undo's label shortens (its only elastic part), Redo keeps its arrow alone, Saved keeps its tick
+   alone, and last Undo's label goes, leaving the word Undo. Each keeps its name for the pointer and screen readers. */
+@container deskend (max-width: 300px) { .deskbar-end { column-gap: var(--s-2); } .redo-btn .redo-t { display: none; } }
+@container deskend (max-width: 240px) { .save-state:not(.failed) span { display: none; } }
+@container deskend (max-width: 190px) { .undo-btn span { display: none; } }
+/* when the browser refused the write it says so in words at every width, and drops the tick (F-15) */
+.save-state.failed { color: var(--amber); }
+.save-state.failed svg { display: none; }
+@media (max-width: 760px) { .save-state.failed span { display: inline; } }
+/* an entry with nothing left to put back reads as spent (F-24) */
+.undo-btn.spent { color: var(--muted); }
+.undo-btn.spent span { color: var(--faint); }
+@media (min-width: 1181px) and (max-width: 1679.98px) {
+  /* --- desk layout on laptop-sized windows (D-10, B-08) ---
+     Below 1680px the side panels narrow to 216 / 236 so the desk keeps three columns of ~300px or more at 1440.
+     Below 1400px the Modules panel sits on its rail and opens as an overlay over the desk's right edge. */
+  .app { grid-template-columns: 216px minmax(0, 1fr) 236px; }
+  .app.no-left { grid-template-columns: 40px minmax(0, 1fr) 236px; }
+  .app.no-right { grid-template-columns: 216px minmax(0, 1fr) 40px; }
+  .app.no-left.no-right { grid-template-columns: 40px minmax(0, 1fr) 40px; }
+}
+.app { transition: grid-template-columns var(--t-slow) var(--e-out); }
+.tiers { position: relative; isolation: isolate; }
+.tiers::before { content: ""; position: absolute; z-index: -1; top: 3px; bottom: 3px; left: var(--tx, 3px); width: var(--tw, 0px); border-radius: 999px; background: var(--fg); }
+.tiers.ready::before { transition: left var(--t-base) var(--e-out), width var(--t-base) var(--e-out); }
+.tiers button[aria-checked="true"] { background: none; color: var(--bg); }
+.tiers button:active { translate: none; }
+@media (prefers-reduced-motion: reduce) { .tiers.ready::before { transition: none !important; } }
+/* where the top bar scrolls away (10-topbar.css), the desk bar sticks to the window's top (S-36) */
+@media (max-height: 480px), (max-width: 560px) { .deskbar { top: env(safe-area-inset-top, 0px); } }
+/* on a short window the desk bar scrolls away too, leaving the go bar alone in view (S-36) */
+@media (max-height: 480px) { .deskbar { position: relative; } }

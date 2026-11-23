@@ -1,0 +1,81 @@
+/* Shared form controls: control rows, segmented buttons, toggles, LED switches, chip switches, rack rows, control groups, drop zones, the lock, Quick choices. */
+/* a segmented control is one row, always (G-D-04) */
+.seg { display: inline-flex; background: var(--raised); border: 1px solid var(--line); border-radius: 9px; padding: 2px; flex-wrap: nowrap; }
+.seg > button { white-space: nowrap; }
+.seg button { border: 0; background: none; padding: 4px 11px; border-radius: 7px; color: var(--muted); font-size: 13px; }
+/* one segmented control: the selected segment is ink on paper, as on the tier switch (D-17, B-09); purple stays for Lab */
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+/* controls */
+.ctl { display: grid; gap: 5px; min-width: 0; align-content: start; }
+.ctl.wide { grid-column: 1 / -1; }
+.ctl-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.ctl label, .ctl .lab { color: var(--muted); font-size: 13px; flex: 1; display: flex; align-items: center; gap: 6px; }
+.ctl output { font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+.ctl input[type=text], .ctl textarea { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; }
+.ctl textarea { min-height: 64px; font: 13px/1.5 var(--mono); }
+.tog { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; cursor: pointer; }
+.tog input { appearance: none; width: 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; flex: none; cursor: pointer; transition: background var(--t-fast) var(--e-out); margin: 0; }
+.tog input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); transition: transform var(--t-fast) var(--e-out); }
+.tog input:checked { background: var(--hot); }
+.tog input:checked::after { transform: translateX(14px); }
+.drop { border: 1px dashed var(--faint); border-radius: 10px; padding: 12px; text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; display: block; }
+.drop input { display: none; }
+.pextra { width: 100%; font-size: 12px; text-align: left; }
+.pextra .tog { color: #ffffffd0; font-size: 12px; gap: 6px; }
+.pextra .tog input { width: 28px; height: 16px; }
+.pextra .tog input::after { width: 10px; height: 10px; }
+.pextra .tog input:checked::after { transform: translateX(12px); }
+/* Lab racks: extra settings as hardware */
+.lcdsel .kl, .chipsw .kl { font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; color: #ffffff99; }
+.led-btn { display: inline-flex; gap: 7px; align-items: center; border: 1px solid #ffffff22; background: #00000055; color: #ffffffb8; border-radius: 7px; padding: 6px 9px; font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase; text-align: left; max-width: 220px; line-height: 1.25; }
+.led-btn i { width: 7px; height: 7px; border-radius: 50%; background: #3a0d14; flex: none; }
+.led-btn.on { color: #fff; border-color: #ffffff40; }
+.led-btn.on i { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
+.led-btn:hover { border-color: #ffffff55; }
+.chipsw, .lcdsel { display: grid; gap: 5px; }
+.chipsw > div { display: inline-flex; flex-wrap: wrap; background: #0006; border-radius: 7px; padding: 2px; border: 1px solid #ffffff18; }
+.chipsw button { border: 0; background: none; color: #ffffff90; font: 500 11px var(--mono); padding: 4px 8px; border-radius: 5px; }
+.chipsw button[aria-pressed="true"] { background: var(--lcd-fg); color: var(--lcd); }
+.pill-tog { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 13px 3px 9px; font: 500 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+.pill-tog i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.pill-tog.on { color: var(--fg); }
+.pill-tog.on i { background: var(--hot); box-shadow: 0 0 6px var(--hot); }
+.seg.sm button { padding: 3px 8px; font-size: 12px; }
+.lock { border: 1px solid var(--line); background: var(--raised); width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--faint); flex: none; transition: color var(--t-fast) var(--e-out), background var(--t-fast) var(--e-out), transform var(--t-fast) var(--e-out); }
+.lock:hover { color: var(--fg); }
+.lock .c { display: none; }
+.lock.on .c { display: block; }
+.lock.on .o { display: none; }
+.lock.on { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 50%, var(--line)); background: var(--hot-soft); }
+.qchoice { display: grid; gap: 6px; }
+.qchoice .kl { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.qchoice > div { display: flex; background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.qchoice button { flex: 1; border: 0; background: none; border-radius: 999px; padding: 7px 6px; font: 600 13px var(--body); color: var(--muted); transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.qchoice button:hover { color: var(--fg); }
+.qchoice button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
+/* a value between the options (set at another tier): no option is checked, every option stays plain, a small marker
+   stands on the track at the value's true place, and the label says the value (A-29, Q-30). The same in How adventurous
+   (.mood). */
+:is(.qchoice, .mood) { position: relative; }
+:is(.qchoice, .mood) > .q-mark { position: absolute; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
+:is(.qchoice, .mood) .q-real { color: var(--amber); letter-spacing: .02em; text-transform: none; }
+.qhint { font-size: 12px; color: var(--muted); }
+.foot-ctl { display: inline-flex; gap: 6px; align-items: center; }
+.foot-ctl .kl { font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.ctl-row { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+.rackrow { display: flex !important; flex-wrap: wrap; gap: 6px; grid-template-columns: none; }
+.rackrow .led-btn { background: var(--raised); border-color: var(--line); color: var(--muted); }
+.rackrow .led-btn.on { color: var(--fg); }
+.ad-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.ad-g { display: grid; gap: var(--s-2); align-content: start; justify-items: start; padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-well); transition: opacity var(--t-fast) var(--e-out); }
+.foot-ctl.locked { opacity: .55; }
+.drop { position: relative; }
+.drop-x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); display: grid; place-items: center; font-size: 14px; line-height: 1; padding: 0; z-index: 1; }
+.drop-x:hover { color: var(--fg); border-color: var(--faint); }
+/* Plan adherence: each rack that can be off carries its power chip in its header */
+.ad-gh { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ad-gh .led-btn { padding: 3px 8px; }
+/* LED chips: on at once, glow decays over --t-slow */
+@keyframes ledGlow { from { box-shadow: 0 0 0 2px color-mix(in srgb, var(--led-on) 45%, transparent), 0 0 14px 3px var(--led-on); } }
+.led-btn.kick.on i, .pill-tog.kick.on i, .board .led-btn.kick.on i::after { animation: ledGlow var(--t-slow) var(--e-out); }
+.led-btn i, .pill-tog i { transition: background-color var(--t-instant) var(--e-out); }

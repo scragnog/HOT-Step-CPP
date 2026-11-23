@@ -16,3 +16,4 @@ export * from './derive/parts.ts';
 export * from './derive/strings.ts';
 export * from './derive/messages.ts';
 export * from './derive/view.ts';
+export * from './derive/desk.ts';

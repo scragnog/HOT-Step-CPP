@@ -17,5 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src", "tools"]
+  "include": ["src", "tools"],
+  "exclude": ["src/app", "tools/behaviour", "tools/visual-baseline"]
 }

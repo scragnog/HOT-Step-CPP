@@ -1,0 +1,11 @@
+/* Flow renderer. */
+.flowviz { position: relative; height: 70px; border-radius: 10px; background: var(--inst); box-shadow: inset 0 2px 8px #000a, var(--bezel); overflow: hidden; }
+.flowviz i { position: absolute; top: calc(10px + var(--lane) * 22px); height: 18px; border-radius: 4px; background: color-mix(in srgb, #ff6a3d calc(55% + var(--lane) * 25%), transparent); box-shadow: inset 0 0 0 1px #ffb08a55; transition: left var(--t-slow) var(--e-out); }
+.fv-axis { position: absolute; left: 12px; right: 12px; bottom: 3px; display: flex; justify-content: space-between; font: 10px var(--mono); color: #8d8697; }
+.fv-axis b { font-weight: normal; }
+/* Flow renderer: knobs and switches share one row instead of stacking at the left (D-11) */
+.flow-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; }
+.flow-row > .knobs { flex: none; }
+.flow-row > .rackrow { flex: 1 1 240px; display: flex; flex-wrap: wrap; gap: 8px; align-content: center; }
+/* the windows run on the axis' own track, inset 12px like its labels, so the first is not cut by the corner (E-21) */
+.flowviz i { left: calc(12px + (100% - 24px) * var(--x)); width: calc((100% - 24px) * var(--w) - 3px); }

@@ -1,0 +1,22 @@
+/* Avoid: the sticky note. */
+.note { color: var(--note-ink); border-radius: 4px 4px 14px 4px; padding: 10px 12px; transform: rotate(-.6deg); display: flex; flex-direction: column; }
+.note b { font: 500 22px/1 var(--hand); }
+.note textarea { border: 0; background: none; outline: none; color: inherit; font: 500 20px/1.15 var(--hand); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--note-ink) 45%, transparent); }
+.note textarea::placeholder { text-decoration: none; color: color-mix(in srgb, var(--note-ink) 62%, transparent); }
+/* avoid: brighter paper, a strip of tape, no repeated title */
+.note { position: relative; padding-top: 16px; background: linear-gradient(170deg, color-mix(in srgb, var(--note) 92%, #fff), var(--note)); box-shadow: 0 1px 1px #0002, 0 8px 14px -6px #0006; }
+.note-tape { position: absolute; top: -8px; left: 50%; width: 70px; height: 18px; margin-left: -35px; transform: rotate(-3deg); background: color-mix(in srgb, #fff 45%, transparent); box-shadow: 0 1px 2px #0002; backdrop-filter: blur(1px); }
+.note::after { content: ""; position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; background: linear-gradient(135deg, transparent 50%, #00000026 50%, color-mix(in srgb, var(--note) 70%, #000) 60%); border-radius: 0 0 14px 0; }
+/* content stops stretching to fill space it doesn't need */
+/* the note keeps its shape (Q-38): a 4:3 sheet, at most 260px wide, at the tile's left; long text scrolls inside it,
+   with no scrollbar and a fade at its foot. The tile is never stretched for it. */
+.note { flex: none; min-height: 0; width: min(100%, 260px); aspect-ratio: 4 / 3; align-self: center; }
+.note textarea { flex: 1 1 0; min-height: 0; height: auto; resize: none; overflow-y: auto; scrollbar-width: none; }
+.note textarea::-webkit-scrollbar { display: none; }
+.note textarea.over { -webkit-mask-image: linear-gradient(#000 calc(100% - 18px), transparent); mask-image: linear-gradient(#000 calc(100% - 18px), transparent); }
+/* the strike says "not this" at rest; while you write, the words are plain so they can be read (A-28) */
+.note textarea:focus { text-decoration: none; }
+.note > .smark { right: 6px; background: color-mix(in srgb, var(--note-ink) 45%, transparent); border-radius: 2px; width: 4px; transform: rotate(1.5deg); }
+.note > .smark:hover, .note > .smark.drag { background: var(--note-ink); }
+/* a taller Avoid tile keeps the note in its middle (Q-20, Q-23) */
+.bento > .tile.stretched[data-m="avoid"] > .tile-body { justify-content: center; }

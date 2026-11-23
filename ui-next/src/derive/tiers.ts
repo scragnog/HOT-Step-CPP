@@ -10,11 +10,12 @@ import { fillMsg, formatMsg, paramWords } from './strings.ts';
 import { defName } from './steps.ts';
 
 /** An item of the line: the parameter's `short` (when it says more than two letters) or its label without a
- *  parenthesis, after the pedal's name for a pedal's; a switch is its name, or "<name> off"; else "<name> <value>". */
+ *  parenthesis, after the pedal's or side unit's name for theirs; a switch is its name, or "<name> off"; else "<name> <value>". */
 export function alsoWords(ix: Index, key: string, desk: Desk): Msg {
   const { p, d } = ix.params.get(key)!, w = paramWords(ix, key, desk), v = valueOf(ix, key, desk)!;
   let n: Msg = w.short && w.short.en!.length > 2 ? w.short : { ...w.label, en: w.label.en!.replace(/\s*\(.*\)$/, '') };
-  if (d.kind === 'pedal') n = msg('name.owned', { owner: defName(d, desk), label: n });
+  /* a pedal's or a side unit's setting after its name, as the concept's alsoWords (pedalOf looks through both) */
+  if (d.kind !== 'module') n = msg('name.owned', { owner: defName(d, desk), label: n });
   if (p.type === 'boolean') return v ? n : msg('also.off', { name: n });
   return msg('also.value', { name: n, value: formatMsg(ix, key, desk, v) });
 }

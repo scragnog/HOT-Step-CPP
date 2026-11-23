@@ -1,0 +1,5 @@
+/* The one mono caps label across tiles and panels. After the components on purpose: it wins over their own label type. */
+/* --- systems: one mono caps label across the tiles and panels (the scales are in 00-tokens.css) ---
+   Pedal labels keep their tighter tracking (27-pedals.css: they have to fit a 64px cell). */
+:is(.kn .kl, .numbox .kl, .pre-group, .br-group, .pop h4, .dd-fam, .rig-mh, .songinfo span, .ad-g .kl, .lat-g .kl, .refs .kl, .schctl > .kl, .tk-pair > .kl, .ctl-row .kl, .deck-l, .endings .kl, .sm-head > .kl, .sm-f > .kl) {
+  font-family: var(--mono); font-size: var(--fs-11); font-weight: 500; letter-spacing: var(--caps-ls); text-transform: uppercase; }

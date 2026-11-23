@@ -1,0 +1,28 @@
+/* Plans and endings. */
+.ctl-row .kl, .deck-l, .endings .kl, .ad-g .kl { font: 500 11px var(--mono); color: var(--faint); }
+.deck { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 12px; background: linear-gradient(#26222d, #18151e); box-shadow: inset 0 1px 0 #ffffff12, 0 3px 0 #0e0c12; color: #ddd8e6; }
+.deck-c { display: flex; min-width: 0; }
+.deck-l { color: #8d8697; }
+/* a recorder's own lines (Replay, Name) are indented under it */
+.deck-l.deck-sub { padding-left: 12px; }
+.deck-lcd > .pk-lcdwrap { flex: 1; min-width: 0; }
+.deck-lcd .pk-lcd { flex: 1; justify-content: space-between; }
+.deck-lcd .pk-lcd > b { overflow: hidden; text-overflow: ellipsis; }
+.deck .led-btn { background: #0000004d; border-color: #ffffff22; }
+.rec { border: 1px solid #ffffff22; background: #0000004d; color: #c78a95; border-radius: 6px; font: 700 11px var(--mono); padding: 4px 9px; letter-spacing: .06em; }
+.rec.on { background: #c0263d; color: #fff; border-color: #ff5b73; box-shadow: 0 0 10px #ff3b5c88; animation: recBlink 1.6s steps(2) infinite; }
+/* armed is a setting, not work in progress: under reduced motion it is a steady light (B-45) */
+@media (prefers-reduced-motion: reduce) { .rec.on { animation: none !important; } }
+@keyframes recBlink { 50% { box-shadow: none; } }
+.deck-why { font: 11px var(--mono); color: #a39cae; }
+.deck-name { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.deck-name:focus { text-overflow: clip; }
+/* Endings is a caption above its chips, so every chip starts on one left edge (B-44) */
+.endings { display: grid; gap: 6px; }
+.endings-chips { display: flex; gap: 6px 8px; align-items: center; flex-wrap: wrap; }
+.endings .led-btn { background: var(--raised); border-color: var(--line); color: var(--muted); }
+.endings .led-btn.on { color: var(--fg); }
+/* the plans deck is dark hardware in both themes */
+.deck .deck-l { color: #a39cae; }
+.deck .rec:not(.on) { color: #e8a3ae; }
+.deck-row { flex-wrap: wrap; gap: 6px 8px; align-items: center; }

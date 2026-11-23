@@ -1,0 +1,126 @@
+/* The Workflows panel: workflow and revision rows, the save row, revision details, renaming. */
+/* presets */
+.pre-group { font: 500 11px var(--mono); color: var(--faint); padding: 14px 8px 4px; }
+.empty-note { color: var(--faint); font-size: 13px; padding: 2px 8px 4px; }
+/* Rows (C-01, C-04): one height per state, whatever the pointer or focus does, and the name is the last thing to give
+   way. The name line ends in the row's note (the revision count, a content mark); the action keys float over the end
+   of that line on hover or focus, on the row's own fill, and never enter the layout. A modified row adds one line,
+   for Revert and Update. 36px a workflow, 32px a revision. */
+.pre { position: relative; display: flex; flex-wrap: wrap; align-items: center; column-gap: 9px; row-gap: 2px; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 8px; cursor: pointer; text-align: left; background: none; width: 100%; }
+/* three states, three looks (F-08): the open row is filled and its name is bold; a hovered row takes a lighter fill;
+   focus is the ring alone, drawn inside the row so the list's edge never cuts it. --row-bg is the fill under the row's
+   action keys. */
+.pre { --row-bg: var(--bg); }
+@media (max-width: 1180px) { .pre { --row-bg: var(--surface); } }
+.pre:hover { background: color-mix(in srgb, var(--raised) 60%, transparent); --row-bg: color-mix(in srgb, var(--raised) 60%, var(--bg)); }
+.pre:active { background: var(--inset); --row-bg: var(--inset); }
+.pre.on { background: var(--raised); --row-bg: var(--raised); }
+.pre:focus-visible { outline-offset: -2px; }
+/* a name is shown whole: the longest a name may be (28 characters) wraps to a second line rather than being cut (F-31) */
+.pre b { flex: 1; min-width: 0; font-weight: 500; font-size: 14px; line-height: 1.3; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.pre.on b { font-weight: 600; }
+.pre .pdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--faint); }
+.pre .pdot.quick { background: var(--ok); }
+.pre .pdot.studio { background: var(--hot); }
+.pre .pdot.lab { background: var(--lab); }
+.pre.mod b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); margin-left: 6px; vertical-align: middle; }
+.pre .pslot { flex: none; display: flex; align-items: center; height: 24px; }
+.pre .ptier { display: inline-flex; align-items: center; font: 11px var(--mono); color: var(--faint); white-space: nowrap; }
+.pre .pacts { position: absolute; right: 6px; top: 6px; height: 24px; display: inline-flex; align-items: center; gap: 1px; padding-left: 20px; border-radius: 0 6px 6px 0;
+  background: linear-gradient(90deg, transparent, var(--row-bg) 16px); opacity: 0; pointer-events: none; transition: opacity var(--t-fast) var(--e-out); }
+.pre.rev .pacts { top: 4px; }
+.pre:is(:hover, :focus-within) .pacts { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .pre .pacts { opacity: 1; pointer-events: auto; } }
+.pre .ptier .ico { color: var(--faint); }
+.pre .jump { border: 0; background: none; font-size: 12px; color: var(--muted); padding: 2px 4px; border-radius: 5px; white-space: nowrap; }
+.pre .jump:hover { color: var(--fg); background: var(--surface); }
+/* Row actions (G-D-29): one drawn icon set, 24px keys; at most the row's own action and ⋯ inline, the rest in the menu */
+.pre .pacts .jump.ico-btn { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border-radius: 6px; }
+.pre .pacts .in-menu { display: none !important; }
+.pre.wfrow .ptier .rc { font-style: normal; font: 600 10px var(--mono); color: var(--muted); background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 0 5px; }
+.pre.wfrow.on .ptier .rc, .pre.wfrow:hover .ptier .rc { background: var(--surface); }
+/* a 24px target (F-26) that takes 16px of the row: it reaches 4px into the space either side */
+.pchev { border: 0; background: none; color: var(--faint); width: 24px; height: 24px; margin-inline: -4px; padding: 0; display: grid; place-items: center; transition: rotate var(--t-base) var(--e-out); flex: none; }
+.pchev:disabled { opacity: 0; pointer-events: none; }
+.wf { border-radius: 10px; min-width: 0; }
+.wf.open { background: color-mix(in srgb, var(--raised) 55%, transparent); }
+.wf.open > .wfrow .pchev { rotate: 90deg; color: var(--fg); }
+.revs { position: relative; margin: 0 0 4px 21px; padding-left: 10px; min-width: 0; }
+.revs::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 14px; width: 1.5px; background: var(--line); border-radius: 1px; }
+.pre.rev { min-height: 32px; padding: 4px 8px; column-gap: 7px; position: relative; }
+.pre.rev::before { content: ""; position: absolute; left: -10px; top: 16px; width: 8px; height: 1.5px; background: var(--line); }
+.pre.rev b { font-size: 13px; font-weight: 500; }
+.pre.rev.on b { font-weight: 600; }
+.rev-eng { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--ec); background: color-mix(in srgb, var(--ec) 14%, transparent); flex: none; }
+/* Modified rows (G-D-31): the amber dot after the name says "modified"; the second line holds two small ghost buttons
+   with an icon and a word, starting at the name's left edge in both row types */
+.pre .pmodrow { flex: 1 0 100%; display: flex; gap: var(--s-1); padding-left: var(--name-x, 0px); box-sizing: border-box; }
+.pre.wfrow { --name-x: 41px; }
+.pre.rev { --name-x: 25px; }
+.pre .pmodrow .jump.show { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font: 500 12px var(--body); }
+.pre .pmodrow .jump.show:hover { color: var(--fg); border-color: var(--faint); }
+/* Renaming (G-D-30): the field takes the name's place and the whole rest of the row, in the name's own type */
+.pre:has(> .pren) :is(.pslot, .pmodrow) { display: none !important; }
+/* the field keeps the row's 9px gap from the tier dot; its text is inset by its padding instead (F-20) */
+.pre > .pren { flex: 1; min-width: 0; height: 24px; margin: 0; padding: 0 6px; border: 0; border-radius: 6px; background: var(--surface); box-shadow: inset 0 0 0 2px var(--hot); color: var(--fg); font: 600 14px var(--body); outline: none; }
+.pre.rev > .pren { font-size: 13px; font-weight: 500; }
+/* the row menu */
+.rowmenu { display: grid; gap: 2px; }
+.rowmenu button { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border: 0; border-radius: var(--r-ctl); background: none; color: var(--fg); font: 13px var(--body); text-align: left; white-space: nowrap; }
+.rowmenu button .ico { color: var(--muted); }
+.rowmenu button:hover, .rowmenu button:focus-visible { background: var(--raised); outline: none; }
+.rowmenu button.danger { color: var(--hot); }
+.rowmenu button.danger .ico { color: currentColor; }
+.rowmenu button.armed { background: var(--hot); color: var(--hot-ink); }
+/* revision details: what it holds; on a modified revision, what changed since, in amber with its value now (C-36) */
+.pdetail { margin: 0 6px 6px 22px; padding: 8px 10px; border-radius: var(--r-ctl); background: var(--raised); display: grid; gap: 8px; }
+.pre.rev .pdetail, .revs .pdetail { margin-left: 26px; }
+.pd-g { display: grid; gap: 2px; }
+.pd-g i { font: 500 10.5px var(--mono); font-style: normal; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.pd-g span { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--muted); }
+.pd-g span b { font: 500 12px var(--mono); color: var(--fg); text-align: right; }
+.pd-g .pd-wide { display: block; font-style: italic; }
+.pd-g .pd-ch { color: var(--amber); }
+.pd-g .pd-ch em { font-style: normal; color: var(--amber); }
+/* the save row */
+.save-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
+.save-field { flex: 1; min-width: 0; position: relative; display: flex; }
+.save-field input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 5px 9px; font-size: 13px; }
+.save-field input:focus-visible { outline-offset: 1px; }
+/* the length limit shows itself near the end of it (C-22) */
+.save-field:has(.save-count:not([hidden])) input { padding-right: 44px; }
+.save-count { position: absolute; right: 8px; top: 50%; translate: 0 -50%; font-size: var(--fs-11); color: var(--muted); pointer-events: none; }
+#saveOk.warn { background: var(--amber); border-color: var(--amber); color: #ffffff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #saveOk.warn { color: #1b1722; } }
+:root[data-theme="dark"] #saveOk.warn { color: #1b1722; }
+/* the checkbox and its words are one group on the field's left edge (D-24) */
+.save-inc { flex-basis: 100%; display: flex; gap: 8px; align-items: center; justify-content: flex-start; font-size: 13px; color: var(--muted); padding: 2px 0 0; }
+.save-inc input { flex: none; margin: 0; width: 14px; height: 14px; accent-color: var(--hot); }
+.save-as { flex-basis: 100%; display: flex; gap: 2px; background: var(--raised); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+.save-as button { flex: 1; min-width: 0; border: 0; background: none; border-radius: 7px; padding: 5px 8px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.save-as button[aria-pressed="true"] { background: var(--fg); color: var(--bg); box-shadow: none; }
+.save-as button:disabled { opacity: .4; }
+.save-hint { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.save-hint.warn { color: var(--amber); }
+/* the panel head: heading, Save, Import and Collapse fit a 216px panel (C-10) */
+.side.left .side-head { gap: var(--s-1); padding-right: 2px; }
+.side-head #saveBtn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px 4px 6px; }
+/* at the 216px panel (laptop sizes) the heading steps down one size, and a modified row's Revert and Update start at
+   the row's edge instead of under the name, so both stay whole */
+.side.left { container-type: inline-size; }
+/* the heading stands at least 12px clear of the first button, so it does not read as one more key in the strip (F-31) */
+.side.left .side-head h2 { margin-right: var(--s-2); }
+@container (max-width: 240px) {
+  .side.left .side-head h2 { font-size: 15px; }
+  .side.left .side-head .icon-btn { width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; }
+  .pre .pmodrow { padding-left: 0; }
+  .pre .pmodrow .jump.show { padding: 0 6px; }
+}
+.b-src button .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 480px) { .b-src button .nm { display: none; } }
+/* a revision you saved under a factory workflow says so at rest, beside its name (F-23): the chip the revision count uses */
+.pre .pmine { flex: none; font: 600 10px/16px var(--mono); font-style: normal; color: var(--muted); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 0 6px; }
+.pre.on .pmine, .pre:hover .pmine { background: var(--surface); }
+/* a refused rename (F-11): the reason under the row, lined up with the name, and the field ringed amber until it changes */
+.pre > .pren-hint { flex: 1 0 100%; padding-left: var(--name-x, 0px); }
+.pre > .pren[aria-invalid="true"] { box-shadow: inset 0 0 0 2px var(--amber); }

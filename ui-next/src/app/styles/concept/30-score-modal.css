@@ -1,0 +1,44 @@
+/* The lead-sheet score modal. */
+.score-modal { position: fixed; inset: 0; z-index: 60; background: #0009; backdrop-filter: blur(3px); display: grid; place-items: center; padding: 16px; }
+/* the card is a column whose header and buttons stay put; only the paper scrolls (E-24) */
+.sc-card { width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-tile); box-shadow: var(--elev-overlay); padding: 16px; display: flex; flex-direction: column; gap: 10px; animation: ovIn var(--t-base) var(--e-out); }
+.sc-card > * { flex: none; }
+.sc-head { display: flex; gap: 12px; align-items: flex-start; }
+.sc-head > div { flex: 1; }
+.sc-head h3 { margin: 0; font: 700 18px var(--display); }
+.sc-meta { font: 12px var(--mono); color: var(--muted); }
+.sc-verdict { font: 700 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; border-radius: 6px; padding: 4px 8px; }
+.v-healthy { background: color-mix(in srgb, var(--ok) 22%, transparent); }
+.v-long { background: color-mix(in srgb, var(--amber) 22%, transparent); }
+.v-runaway { background: color-mix(in srgb, var(--hot) 22%, transparent); }
+.sc-why { margin: 0; font-size: 13.5px; color: var(--muted); }
+.sc-order { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12.5px; }
+.sc-order i { color: var(--faint); font-style: normal; }
+.sc-paper { background: #f6f1e4; color: #2a2433; border-radius: 10px; padding: 28px; flex: 0 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.sc-sec { font: 600 11px var(--body); }
+/* chord symbols over a full lead sheet's bars, in the paper's ink, under the section marks (E-12) */
+.staff .st-chord { font: italic 600 10px var(--body); fill: currentColor; opacity: .8; }
+.sc-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sc-gap { flex: 1; }
+.v-healthy { color: color-mix(in srgb, var(--ok) 70%, var(--fg)); }
+.v-long { color: color-mix(in srgb, var(--amber) 65%, var(--fg)); }
+.v-runaway { color: color-mix(in srgb, var(--hot) 65%, var(--fg)); }
+/* the pasted lead sheet in its own preview: the ABC as written, on the paper (G-B-02) */
+.sc-abc { margin: 0; font: 13px/1.7 var(--mono); color: inherit; white-space: pre-wrap; }
+/* playing: the playhead stands on the system being played and the section it is in lights in the trail and on the
+   staff (B-47, E-01); the trail's names are buttons that play from their section */
+.staff .st-head { fill: #e0225a; opacity: 0; transition: opacity var(--t-fast) var(--e-out); pointer-events: none; }
+.sc-paper.playing .st-head { opacity: 1; }
+.staff .sc-mark { opacity: 0; transition: opacity var(--t-fast) var(--e-out); }
+.staff .sc-mark.cur { opacity: 1; }
+.staff .sc-sec { transition: fill var(--t-fast) var(--e-out); }
+.staff .sc-sec.cur { fill: #fff !important; }
+/* a long plan's bars past the lyrics, and a runaway's open end (E-23) */
+.staff .st-past { fill: color-mix(in srgb, var(--amber) 18%, transparent); }
+.staff .st-pastlbl { fill: color-mix(in srgb, var(--amber) 70%, #2a2433); font-style: italic; }
+.staff .st-dot { fill: currentColor; }
+.staff .st-line.open { stroke-dasharray: 2 3; }
+.staff .st-more { fill: color-mix(in srgb, var(--hot) 70%, #2a2433); font-style: italic; }
+.sc-order button { font: inherit; font-weight: 600; border: 0; background: none; cursor: pointer; border-radius: 5px; padding: 1px 5px; color: color-mix(in srgb, var(--c) 62%, var(--fg)); transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.sc-order button:hover { background: color-mix(in srgb, var(--c) 14%, transparent); }
+.sc-order button.cur { background: var(--c); color: #fff; }

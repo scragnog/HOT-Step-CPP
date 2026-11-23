@@ -1,0 +1,25 @@
+/* Repetition guard. */
+.codes { display: flex; gap: 1px; height: 34px; align-items: flex-end; cursor: ew-resize; touch-action: none; margin-top: 10px; outline: none; }
+.codes i { flex: 1; background: #3a3446; height: var(--h); border-radius: 1px; }
+.codes i.w { background: #ff7aa0; }
+.codes-cap { display: flex; justify-content: space-between; gap: 8px; font: 11px var(--mono); margin-top: 4px; white-space: nowrap; }
+/* at one column the caption keeps its two ends; the sentence between them is in the strip's tooltip (E-29) */
+.tile[data-m="repetition"] .term { container-type: inline-size; }
+@container (max-width: 440px) { .codes-cap .cc-mid { display: none; } }
+/* YuE2: a strip per guard, plan and composer (E-30) */
+.gline + .gline { margin-top: var(--s-3); }
+.tile[data-m="repetition"] .codes { margin-top: 6px; }
+.guard-off .codes i.w { background: #6d6579; }
+.codes-cap { color: #9a91a8; }
+/* the guard's terminal holds lines and a histogram, not typed text: the markup's own line breaks are not blank lines
+   (they left 55px of dead space above the histogram, A-28) */
+.tile[data-m="repetition"] .term { white-space: normal; }
+/* scrub values have their pad clear of the row beneath */
+.term .codes, .tile[data-m="repetition"] .term .codes { margin-top: 12px; }
+/* a guard at penalty 1.00 says so on its own LCD instead of in a sentence under it (V-01) */
+.term .term-off { display: none; margin-left: var(--s-2); color: #f5c26b; }
+.guard-off .term-off { display: inline; }
+.term .term-plan-off { display: none; margin-left: var(--s-2); color: #f5c26b; }
+.tile[data-m="repetition"].lm-off .term .term-plan-off { display: inline; }
+.tile[data-m="repetition"].lm-off .term .term-off { display: none; }
+.tile[data-m="repetition"].lm-off .term > :not(:first-child), .tile[data-m="repetition"].lm-off .term > :first-child > :not(.term-plan-off) { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }

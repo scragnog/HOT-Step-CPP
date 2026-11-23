@@ -1,0 +1,20 @@
+/* Number boxes and tokens. */
+.tok { border-bottom: 1px dotted #a6f5bd77; cursor: ew-resize; padding: 0 2px; user-select: none; touch-action: none; border-radius: 2px; outline: none; }
+.tok-in { background: none; border: 0; border-bottom: 1px dotted #a6f5bd77; color: var(--lcd-fg); font: inherit; outline: none; padding: 0; field-sizing: content; min-width: 4ch; }
+.num { font: inherit; }
+.numbox { display: grid; justify-items: center; gap: 3px; }
+.numbox .num { width: 62px; height: 46px; border-radius: 10px; border: 1px solid var(--line); background: var(--inset); text-align: center; font: 24px/1 var(--lcdfont); color: var(--fg); cursor: ns-resize; outline: none; box-shadow: inset 0 2px 5px #0003; }
+.numbox .num:focus { cursor: text; border-color: var(--hot); box-shadow: 0 0 0 3px var(--hot-soft); }
+.numbox .kl { font: 500 11px var(--mono); color: var(--faint); }
+.tok-in { width: auto; }
+/* scrub values: terminal green only inside the dark terminals and LCDs; on the page they use the page's ink */
+.tok { color: var(--fg); border-bottom-color: color-mix(in srgb, var(--hot) 60%, transparent); }
+.tok:hover, .tok:focus-visible { background: var(--hot-soft); }
+/* a token is never narrower than three characters, so a one-digit value (Top-K 0) is still a fair target (L-25) */
+.tok { display: inline-block; min-width: 3ch; text-align: center; }
+.tok:focus-visible { outline: 2px solid var(--hot); outline-offset: 1px; }
+.term .tok, .lcd .tok { color: var(--lcd-fg); border-bottom-color: #a6f5bd77; }
+.term .tok:hover, .term .tok:focus-visible, .lcd .tok:hover, .lcd .tok:focus-visible { background: #a6f5bd1f; }
+.term .tok:focus-visible, .lcd .tok:focus-visible { outline-color: var(--lcd-fg); }
+/* Sampler rack (D-21): the step box's label and read-out sit on the knobs' baselines */
+.numbox .kl { line-height: 1.2; }

@@ -1,0 +1,17 @@
+/* Performance trades. */
+.gauge { font: 28px var(--lcdfont); color: var(--lcd-fg); background: var(--lcd); border-radius: 8px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: baseline; }
+.gauge small { font-size: 12px; opacity: .7; }
+.xy-heat { --xyc: #f5c26b; height: 150px; background-image: radial-gradient(circle at 0 0, #ff4d7e55, transparent 70%), radial-gradient(circle at 100% 100%, #4fd18b38, transparent 70%); }
+/* pads with a side column */
+.padrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: stretch; }
+.padside { display: grid; gap: var(--s-2); align-content: center; justify-items: center; min-width: 96px; }
+.padside .gauge { flex-direction: column; align-items: center; gap: 0; padding: 8px 12px; }
+/* one width, set for its widest read-out ("+100%"), so dragging the pad never pushes the knob beside it (L-18) */
+.padside .gauge { width: 7ch; box-sizing: content-box; text-align: center; }
+/* Performance trades: on a narrow tile the pad takes the full width and the gauge and knob sit under it */
+.tile[data-m="perf"] .tile-body { container: perf / inline-size; }
+@container perf (max-width: 360px) {
+  .padrow { grid-template-columns: minmax(0, 1fr); }
+  .padside { grid-auto-flow: column; justify-content: center; align-items: end; gap: 22px; }
+}
+.xy-heat:not(.xy-overlay), .xy-apg:not(.xy-overlay) { height: 174px; }

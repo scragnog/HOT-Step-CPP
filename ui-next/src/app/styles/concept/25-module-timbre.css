@@ -1,0 +1,68 @@
+/* Timbre reference: the sleeve, the vinyl, the venn. */
+.minwave { height: 36px; width: 100%; display: block; }
+.venn-leg { position: absolute; left: 10px; right: 10px; bottom: 5px; display: flex; justify-content: space-between; font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); pointer-events: none; }
+.sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.sw.a { background: var(--hot); }
+.sw.b { background: #4c6fff; }
+.venn { --p: .5; position: relative; height: 82px; cursor: ew-resize; touch-action: none; outline: none; border-radius: 10px; overflow: hidden; }
+.vc { position: absolute; top: 6px; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--fg); }
+/* the pair stays in the middle of the pad (G-D-23): "your sound" is fixed at the centre and the reference slides onto it
+   from the left, so at 100% the two circles are one, centred */
+.venn { --t: min(80px, calc(50% - 44px)); }
+.vc.a { left: calc(50% - 26px); background: color-mix(in srgb, var(--hot) 30%, transparent); border: 2px solid var(--hot); }
+.vc.b { left: calc(50% - 26px - (1 - var(--p)) * var(--t)); background: color-mix(in srgb, #4c6fff 30%, transparent); border: 2px solid #4c6fff; z-index: 1; transition: left var(--t-instant) var(--e-out); }
+.venn-cap { justify-content: space-between; font: 12px var(--mono); color: var(--muted); }
+/* timbre: record sleeve */
+.drop.sleeve { display: flex; align-items: center; gap: 14px; text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 10px 10px; background: linear-gradient(110deg, color-mix(in srgb, #4c6fff 14%, var(--raised)), var(--raised) 60%); box-shadow: 0 2px 0 color-mix(in srgb, var(--fg) 8%, transparent); transition: border-color var(--t-fast) var(--e-out), transform var(--t-fast) var(--e-out); }
+.drop.sleeve:hover { border-color: #4c6fff; }
+.vinyl { flex: none; width: 58px; height: 58px; border-radius: 50%; background: radial-gradient(circle, #4c6fff 0 7px, #ece8f2 7px 8.5px, #4c6fff 8.5px 13px, transparent 13.5px), repeating-radial-gradient(circle, #141218 0 1.5px, #24212b 1.5px 3px); box-shadow: 0 2px 6px #0006, inset 0 0 0 1px #ffffff14; transition: transform var(--t-slow) var(--e-spring); }
+.drop.sleeve.loaded .vinyl { animation: reelspin 2.2s linear infinite; }
+.sl-txt { display: grid; gap: 3px; min-width: 0; flex: 1; }
+/* the file name may wrap to two lines rather than be cut to a stub (G-D-23) */
+/* the reference's name on one line, its middle cut so the extension stays (Q-27); the whole name is its tooltip */
+.sl-txt b { font: 600 13px/1.25 var(--body); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sl-txt small { font: 12px var(--mono); }
+.vc.b { cursor: grab; }
+.vc.b .grip { position: absolute; right: -7px; top: 50%; width: 12px; height: 22px; margin-top: -11px; border-radius: 4px; background: #4c6fff; box-shadow: 0 1px 3px #0006; }
+.vc.b .grip::before { content: ""; position: absolute; inset: 5px 3px; background: radial-gradient(circle, #fff 0 1px, transparent 1.4px) 0 0 / 3px 4px; }
+.vc.a, .vc.b { mix-blend-mode: normal; }
+:root .venn .vc.b { background: color-mix(in srgb, #4c6fff 34%, transparent); }
+/* light mode: no white slabs behind the venn and the rack units */
+.venn { background: color-mix(in srgb, var(--fg) 6%, var(--surface)); box-shadow: inset 0 1px 3px #0000002a; }
+.drop.sleeve:hover .vinyl { transform: none; translate: 6px 0; rotate: 40deg; }
+.drop.sleeve.loaded:hover .vinyl { rotate: none; }
+.ruler2:focus-visible, .codes:focus-visible { outline: none; animation: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hot) 70%, transparent), 0 0 18px -4px var(--hot); }
+/* recent references: one row that scrolls sideways, not three rows of chips (D-31) */
+/* the recent references wrap onto a second line, so every one can be reached by any pointer (Q-29) */
+.refs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.refs::-webkit-scrollbar { display: none; }
+.refs > * { flex: none; }
+.refs .pref { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the label stands on its own line; the chips under it share the row and give way before wrapping (L-21) */
+.refs:not(.refs-all) { display: grid; grid-template-columns: repeat(3, minmax(0, max-content)); justify-content: start; }
+.refs > .kl { grid-column: 1 / -1; }
+.refs > .pref { min-width: 0; max-width: 100%; }
+.refs > .refs-more { color: var(--fg); overflow: visible; }
+.refs-all { max-width: 320px; }
+.refs-all .pref { max-width: 100%; }
+.pref { border: 1px solid var(--line); background: var(--raised); color: var(--muted); border-radius: 999px; padding: 3px 10px; font: 12px var(--mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pref.on { border-color: #4c6fff; color: var(--fg); background: color-mix(in srgb, #4c6fff 14%, var(--raised)); }
+.drop.sleeve.loaded { padding-right: 36px; }
+/* the Mastering pedal's reference, lent (L-15): not chosen or cleared here */
+.drop.sleeve.lent { cursor: default; border-style: dashed; }
+.sl-from { color: var(--muted); }
+.sl-txt small { color: var(--muted); }
+.drop.sleeve.loaded .vinyl { animation-play-state: paused; }
+body.running .drop.sleeve.loaded .vinyl { animation-play-state: running; }
+.venn-cap { display: flex; gap: var(--s-2); align-items: baseline; }
+/* the blend reads as a percentage (A-28): the reference circle carries its share, and a scale of quarters runs under its
+   travel, from 0 at the far left to 100 where the circles are one */
+.venn-pct { font: 600 11px var(--mono); letter-spacing: 0; color: var(--fg); text-transform: none; }
+.venn { height: 92px; }
+.venn-scale { position: absolute; top: 62px; left: calc(50% - var(--t)); width: var(--t); height: 5px; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fg) 35%, transparent) 1px, transparent 1px) 0 0 / calc(25% - .25px) 100% repeat-x, linear-gradient(color-mix(in srgb, var(--fg) 35%, transparent), color-mix(in srgb, var(--fg) 35%, transparent)) right 0 / 1px 100% no-repeat; }
+/* a taller tile keeps its face in its middle (Q-23) */
+.bento > .tile.stretched[data-m="timbre"] > .tile-body { justify-content: center; }
+/* the empty sleeve's record has a lighter rim in the dark theme, so it is not black on near-black (Q-31) */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .vinyl { box-shadow: 0 2px 6px #0006, inset 0 0 0 1px #ffffff33; } }
+:root[data-theme="dark"] .vinyl { box-shadow: 0 2px 6px #0006, inset 0 0 0 1px #ffffff33; }

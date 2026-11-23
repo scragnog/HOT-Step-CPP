@@ -1,0 +1,67 @@
+/* Build by section. */
+.b-empty { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 14px; border: 1px dashed var(--line); border-radius: 12px; }
+.b-empty p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 520px; }
+/* the section strip: each chip keeps its section colour in every state. Selection is an outline outside the box
+   (no layout change, no lift); kept adds a drawn check. On a narrow strip the names fall back to initials (G-D-04, G-D-15) */
+.b-src { display: flex; gap: 3px; padding: 4px; border-radius: 10px; background: var(--inset); container-type: inline-size; }
+.b-src button { min-width: 0; height: 32px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 0; border-radius: 7px; padding: 0 6px; font: 600 12px/1 var(--body); color: #fff; background: color-mix(in srgb, var(--c) 38%, #1b1722); opacity: .7; white-space: nowrap; overflow: hidden; transition: opacity var(--t-fast) var(--e-out), outline-color var(--t-fast) var(--e-out); }
+.b-src button .ab { display: none; }
+.b-src button svg { flex: none; }
+.b-src button:hover { opacity: 1; }
+.b-src button.kept { background: var(--c); opacity: 1; }
+.b-src button.cur { opacity: 1; outline: 2px solid var(--fg); outline-offset: 2px; }
+@container (max-width: 480px) {
+  .b-src button .ab { display: inline; }
+  .b-src button { padding: 0 2px; }
+}
+/* the section's own actions sit right after its sentence, where the eye is (B-37) */
+.b-cur { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; }
+.b-cur .lbl { flex: 0 1 auto; }
+.b-src button.new:not(.kept) { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 38%, #1b1722) 0 6px, color-mix(in srgb, var(--c) 26%, #1b1722) 6px 12px); }
+/* the lyrics changed since the score was planned (B-05): said in the tile, with the two ways on */
+.b-drift { display: flex; gap: 8px 10px; align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--s-3); border-radius: var(--r-ctl); background: color-mix(in srgb, var(--amber) 14%, var(--surface)); color: var(--fg); font-size: 13px; }
+.b-drift > span { flex: 1 1 260px; }
+.b-locknote { font-size: 12px; }
+/* the footer: build actions at the left, the count and the one primary action at the right end */
+.b-foot .b-count { margin-left: auto; }
+/* take cards: one anatomy (wave, title, one meta line, Keep at the foot); a busy card reserves the Keep slot so a
+   landing take does not change the card's height (G-D-14) */
+.b-takes { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 220px)); gap: var(--s-2); }
+.b-take { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: 34px auto 18px 30px; gap: var(--s-1); align-content: start; padding: var(--s-2); border-radius: var(--r-ctl); border: 1px solid var(--line); background: var(--raised); min-width: 0; }
+.b-take > .b-wave, .b-take > small, .b-take > .small-btn, .b-take > .b-slot { grid-column: 1 / -1; }
+.b-take b { font: 600 13px/18px var(--body); align-self: center; }
+.b-take .b-x { width: 24px; height: 24px; margin: -3px -3px 0 0; }
+/* hearing a take (B-07): a play button at the head of its waveform, and a playhead that runs across it */
+.b-wave .b-play { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--fg); display: grid; place-items: center; padding: 0; margin-right: 4px; }
+.b-wave .b-play:hover { border-color: var(--faint); }
+.b-take.playing .b-play { background: var(--hot); border-color: var(--hot); color: var(--hot-ink); }
+.b-bars { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; gap: 2px; align-items: center; }
+.b-bars > i:not(.b-head) { flex: 1; border-radius: 2px; background: hsl(var(--h) 70% 60%); }
+.b-bars > .b-head { position: absolute; top: -2px; bottom: -2px; left: var(--pos, 0%); width: 2px; margin-left: -1px; border-radius: 1px; background: var(--fg); opacity: 0; pointer-events: none; }
+.b-take.playing .b-head { opacity: 1; }
+.b-take.playing .b-bars > i:not(.b-head) { opacity: .55; }
+.b-take small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-take .small-btn { height: 30px; padding: 0 12px; }
+.b-take .b-slot { height: 30px; border-radius: var(--r-ctl); background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.b-take.keep { border-color: var(--hot); box-shadow: 0 10px 22px -14px var(--hot); }
+/* a take still rendering stands back by its drawing only; its words stay readable (E-31) */
+.b-take.busy .b-wave { opacity: .6; }
+.b-take.busy small { color: var(--muted); }
+.b-take.busy .b-bars > i:not(.b-head) { animation: wv 0.9s ease-in-out infinite alternate; }
+@keyframes wv { to { height: 15%; } }
+.b-wave { display: flex; gap: 2px; align-items: center; height: 34px; }
+.b-take small { font: 11px var(--mono); color: var(--faint); }
+.b-ctl { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; }
+.foot-ctl.locked .tok-ro svg { flex: none; }
+/* a locked value is a value in force: it keeps full strength and the padlock carries the state (E-31) */
+.b-ctl .foot-ctl.locked { opacity: 1; }
+.b-ctl .foot-ctl.locked > .kl { color: var(--muted); }
+/* a locked value keeps the live value's face and size, greyed, with the padlock after it (E-26) */
+.tok-ro { display: inline-flex; align-items: center; gap: 4px; font: inherit; color: var(--muted); padding: 0 2px; border-radius: 2px; }
+/* a kept take sung to words the section no longer has: the tab's check becomes an amber "!" (E-26) */
+.b-stale { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--amber); color: var(--bg); font: 700 10px/1 var(--body); flex: none; }
+@media (prefers-reduced-motion: reduce) { .b-take.busy .b-bars > i:not(.b-head) { animation: rmPulse 1.6s linear infinite !important; } }
+.spin { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { rotate: 1turn; } }
+/* under reduced motion "Planning" pulses like every other work in progress (B-45) */
+@media (prefers-reduced-motion: reduce) { .spin { border-right-color: currentColor; animation: rmPulse 1.6s linear infinite !important; } }

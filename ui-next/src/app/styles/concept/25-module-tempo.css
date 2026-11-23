@@ -1,0 +1,102 @@
+/* Tempo, key and length: the LCD and the key wheel. */
+/* tempo */
+.tempo { display: grid; gap: var(--s-4); }
+.tempo.solo { grid-template-columns: minmax(0, 1fr); }
+.lcd-top { display: flex; align-items: baseline; gap: var(--s-2); }
+.lcd-num { min-width: 3ch; }
+.lcd-btns { display: flex; gap: 6px; margin-left: auto; }
+/* LCD keys are 24px tall, as the steppers beside LCDs are (E-45) */
+.lcd-btns button { background: #ffffff10; border: 1px solid #ffffff22; color: var(--lcd-fg); border-radius: 6px; font: 12px var(--lcdfont); padding: 0 8px; min-height: 24px; }
+.lcd-btns button.on { background: var(--lcd-fg); color: var(--lcd); }
+.lcd-row { display: flex; gap: var(--s-4); font: 13px var(--lcdfont); flex-wrap: wrap; align-items: center; }
+.lcd-row b { color: #fff; }
+.wheel path { cursor: pointer; stroke: var(--surface); stroke-width: 1.5; transition: fill var(--t-fast) var(--e-out); }
+.wheel text { font: 500 10px var(--body); pointer-events: none; fill: var(--muted); }
+.wheel .maj { fill: var(--raised); }
+.wheel .min { fill: var(--inset); }
+.wheel path:hover { fill: var(--hot-soft); }
+.wheel path:active { fill: color-mix(in srgb, var(--hot) 22%, var(--raised)); }
+.wheel path.sel { fill: var(--hot); }
+.wheel text.sel { fill: var(--hot-ink); font-weight: 700; }
+.wheel circle { cursor: pointer; fill: var(--surface); stroke: var(--line); }
+.wheel circle.sel { fill: var(--hot); }
+@media (max-width: 760px) {
+  .tempo { justify-items: center; }
+  .tempo .lcd { width: 100%; }
+}
+.lcd-ends { justify-content: space-between; align-items: center; border-top: 1px dashed #a6f5bd26; padding-top: 7px; }
+/* the divider only separates rows: an LCD left with one row has none (G-D-39) */
+.lcd > .lcd-ends:first-child { border-top: 0; padding-top: 0; }
+.lcd-num.num { background: none; border: 0; color: var(--lcd-fg); font: 44px/1 var(--lcdfont); width: 4ch; padding: 0; cursor: ns-resize; text-shadow: 0 0 10px color-mix(in srgb, var(--lcd-fg) 50%, transparent); outline: none; border-radius: 4px; caret-color: var(--lcd-fg); }
+/* on auto the figure shows what auto stands for, at read-out strength, as Shift and Length do (Q-27) */
+.lcd-num.num::placeholder { color: color-mix(in srgb, var(--lcd-fg) 62%, transparent); text-shadow: none; opacity: 1; }
+.lcd-num.num:focus { cursor: text; box-shadow: 0 0 0 1px color-mix(in srgb, var(--lcd-fg) 70%, transparent); border-radius: 4px; }
+.lcd-num.num:hover:not(:focus) { background: #a6f5bd0f; }
+.wheel path:focus, .wheel circle:focus { outline: none; }
+.wheel circle:focus-visible { stroke: var(--ring); stroke-width: 2; }
+.wheel .wring { fill: none; stroke: none; pointer-events: none; }
+.wheel:has(path:focus-visible) .wring { stroke: var(--ring); stroke-width: 2; }
+.lcd-btns button.armed { background: #ffd27a; color: var(--lcd); }
+/* tempo */
+.lcd-pulse { flex: 1; display: flex; gap: 6px; justify-content: center; align-self: center; min-width: 0; }
+.lcd-pulse i { width: 16px; height: 8px; border-radius: 2px; background: #a6f5bd1f; animation: beat calc(var(--beat) * var(--n)) linear infinite; animation-delay: calc(var(--beat) * var(--i)); }
+.lcd-pulse i:first-child { width: 22px; }
+.lcd-pulse i.idle { animation: none; background: #a6f5bd14; }
+@keyframes beat { 0%, 10% { background: var(--lcd-fg); box-shadow: 0 0 8px var(--lcd-fg); } 22%, 100% { background: #a6f5bd1f; box-shadow: none; } }
+.tempo { grid-template-columns: minmax(0, 1fr) 180px; }
+.wheel { width: 180px; height: 180px; }
+.wheel text { font-size: 11px; }
+.lcd-bars { display: inline-flex; align-items: center; gap: 3px; font: 12px var(--lcdfont); }
+.lcd-bars button { background: #ffffff10; border: 1px solid #ffffff22; color: var(--lcd-fg); border-radius: 5px; min-width: 24px; height: 24px; font: 12px var(--lcdfont); padding: 0 5px; }
+.lcd-bars button[aria-pressed="true"] { background: var(--lcd-fg); color: var(--lcd); box-shadow: 0 0 8px #a6f5bd66; }
+.lcd-bars i { font-style: normal; margin-left: 4px; opacity: .8; }
+.lcd-dim { margin-left: auto; font-size: 11px; letter-spacing: .1em; }
+.lcd-trim { font: 12px var(--lcdfont); color: var(--lcd-fg); flex-basis: 100%; text-align: right; }
+.lcd-trim .tok { color: #fff; }
+/* Auto-trim's two values have names, and their row is always there, kept empty while Auto-trim is off, so turning it on
+   moves nothing (L-27) */
+.lcd-trim { display: flex; justify-content: flex-end; gap: var(--s-4); }
+.lcd-trim .kl { font: 12px var(--lcdfont); letter-spacing: .04em; color: var(--lcd-fg); text-transform: uppercase; }
+.lcd-trim.held { visibility: hidden; }
+/* the KEY caption keeps room for its changed dot before the key it names */
+.lcd-row .cdot-lcd { margin-right: 6px; }
+.lcd-dim { opacity: .8; }
+.lcd-top { flex-wrap: wrap; row-gap: 6px; }
+@container desk (max-width: 539.98px) {
+  .tempo { grid-template-columns: minmax(0, 1fr); }
+  .tempo .wheel { justify-self: center; }
+}
+/* Tempo LCD (D-20): the three rows start on one 12px margin; the tap meter is a 4-beat strip under "BPM"; the SIG
+   stepper is as tall as its row; LCD and key wheel share a top edge and the wheel ends on the tile's content edge */
+.tempo { align-items: start; }
+.tempo > .wheel { justify-self: end; }
+.lcd-ends > .lcd-btns:first-child { margin-left: 0; }
+.lcd-unit { display: grid; gap: 5px; align-self: flex-end; padding-bottom: 5px; }
+.lcd-unit > small { line-height: 1; }
+.lcd-unit .lcd-pulse { flex: none; justify-content: flex-start; gap: 3px; align-self: start; }
+.lcd-unit .lcd-pulse i, .lcd-unit .lcd-pulse i:first-child { width: 6px; height: 4px; border-radius: 1px; }
+/* every beat segment is one width; the downbeat is marked by brightness, not size (G-D-26) */
+.lcd-unit .lcd-pulse i:first-child { width: 6px; filter: brightness(1.7); }
+.lcd-btns [data-tap] { min-width: 64px; text-align: center; }
+.lcd-row .pk-lcdwrap { padding: 0 1px; }
+.lcd-row .pk-lcdwrap .cyc { height: 22px; }
+.chipsw button, .lcd-bars > button { transition: background-color var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out), box-shadow var(--t-slow) var(--e-out); }
+/* the time-signature picker and its steppers are 24px tall, the smallest target the page allows (A-12) */
+.lcd-row .pk-lcdwrap > * { min-height: 24px; }
+/* beside the key wheel the LCD is as tall as the wheel, its rows spread from the read-out at the top to the key line at
+   the foot, so no empty band is left under a two-row LCD (B-32) */
+.tempo:not(.solo) > .lcd { align-self: stretch; display: flex; flex-direction: column; justify-content: space-between; }
+/* folded to one column beside the lyric sheet (B-18): the wheel stands under the LCD */
+.tile.narrowed .tempo { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+.tile.narrowed .tempo > .lcd { width: 100%; }
+.tile.narrowed .tempo > .wheel { justify-self: center; }
+/* the BPM field is as wide as its digits, so BPM sits right after a two-digit tempo (Q-35); AUTO keeps its width */
+.lcd-num.num { field-sizing: content; min-width: 2ch; width: auto; max-width: 4ch; }
+.lcd-num.num:placeholder-shown { min-width: 4ch; }
+/* a length held for another engine says so under the ruler, as the Takes tile says its held count (S-10) */
+.held-note { margin: 0; font: 12px var(--mono); color: var(--muted); }
+/* Beat I/O's bar count stands back with it while Beat I/O is off, as everything that is off does (Q-22); it stays usable */
+.lcd-ends:has([data-ledtog="tempo.beatio"][aria-pressed="false"]) .lcd-bars { opacity: .45; }
+/* ... and the chosen bar count is outlined, not lit: nothing on the LCD outshines the switch it waits for (S-13) */
+.lcd-ends:has([data-ledtog="tempo.beatio"][aria-pressed="false"]) .lcd-bars button[aria-pressed="true"] { background: none; color: var(--lcd-fg); border-color: var(--lcd-fg); box-shadow: none; }
+.lcd-bars { transition: opacity var(--t-fast) var(--e-out); }

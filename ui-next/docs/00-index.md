@@ -1,9 +1,9 @@
 # ui-next: the module definition format
 
 `ui-next` is where the Create page's redesign (the "Tiers" concept) is being rebuilt in React, beside the existing
-frontend in `ui`. This folder holds its foundation only: the format in which every module of the desk is defined, and
-every existing module, pedal and side unit written in it. Nothing of the page is built yet: there are no components, no
-store and no Vite setup. What runs is the data, the core that derives everything else from it (`src/derive/`, pure
+frontend in `ui`. This folder holds its foundation: the format in which every module of the desk is defined, and
+every existing module, pedal and side unit written in it; and the first slice of the page in React (`src/app`,
+[09](09-architecture.md)). What runs beneath the page is the data, the core that derives everything else from it (`src/derive/`, pure
 functions of the definitions and a desk, which the React layer will be a view over), and the tools that check both
 against the two references.
 
@@ -49,6 +49,7 @@ one day supplies parameter lists, [08](08-open-questions.md) question 1 says wha
 | [06-how-to.md](06-how-to.md) | Add a parameter, a pedal, a module, a side unit, a part, an engine, a state entry, a transform; change a range, a condition, a real name; move, rename or remove things. Steps and line counts |
 | [07-checking.md](07-checking.md) | The type check, the validator, the request comparison over the value space, the core's tests against the concept page, and the planted mistakes |
 | [08-open-questions.md](08-open-questions.md) | What needs the maintainer's decision, and what was chosen meanwhile |
+| [09-architecture.md](09-architecture.md) | The React layer: its folders, how a part and the generic renderer work, the store, the service boundary, the test layer and its results, the deviations from the concept's markup, and the plan for the rest |
 
 ## The folder
 

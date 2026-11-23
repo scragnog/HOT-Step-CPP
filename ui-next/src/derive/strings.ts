@@ -3,7 +3,7 @@
 // reordering lines, options or nodes keeps every translation; and no two strings share a key (the test checks it).
 
 import type { Action, Definition, Node, NodeOverride, ParamDef, Strip, Value } from '../definitions/types.ts';
-import { PARTS, type PartSpec } from '../definitions/parts.ts';
+import { CHECKS, PARTS, type PartSpec } from '../definitions/parts.ts';
 import { EN } from './messages.ts';
 
 export interface Str { key: string; text: string }
@@ -73,27 +73,15 @@ export function stringsOf(d: Definition): Str[] {
   }
   function actions(k: string, list: Action[] | undefined) {
     for (const a of list || []) {
-      const id = `${a.do}-${keyPart('param' in a ? a.param : 'tier' in a ? a.tier : 'item' in a ? a.item : 'tag' in a ? a.tag : 'name' in a ? a.name : '')}${'value' in a ? '-' + keyPart(String(a.value)) : ''}`;
-      add(`${k}.a.${id}.label`, a.label); if ('tip' in a) add(`${k}.a.${id}.tip`, a.tip);
+      add(actionKey(k, a, 'label'), a.label); if ('tip' in a) add(actionKey(k, a, 'tip'), a.tip);
     }
   }
   function strip(k: string, s: Strip) {
-    const at = `${k}.${hash(J([s.when, s.tiers]))}`;
+    const at = stripKey(k, s);
     add(`${at}.says`, s.says); actions(at, s.actions);
   }
-  /** A node by what it is bound to (its part and its keys), or by its words when it is bound to nothing; a second node
-   *  of the same kind adds a hash of itself. */
-  /** How many siblings share each kind-and-binding, so all of a shared one are told apart by a hash of themselves. */
-  function idOf(n: Node): string {
-    const binds = [n.param, ...(n.params || []), ...(n.reads || []), ...(n.state || [])].filter(Boolean).join('+');
-    return `${n.part}.${binds ? keyPart(binds) : keyPart((n.text ?? n.label ?? n.part).slice(0, 32))}`;
-  }
-  function counts(list: Node[]): Map<string, number> { const m = new Map<string, number>(); list.forEach(n => m.set(idOf(n), (m.get(idOf(n)) ?? 0) + 1)); return m; }
   function node(k: string, n: Node, seen: Map<string, number>) {
-    const what = idOf(n).slice(n.part.length + 1);
-    let id = `${n.part}.${what}`;
-    if ((seen.get(id) ?? 0) > 1) id += `~${hash(J({ ...n, children: undefined, per: undefined }))}`;
-    const at = `${k}.${id}`;
+    const at = nodeKeyAt(k, n, seen);
     const words = (x: Partial<Node>, sfx: string) => {
       add(`${at}.label${sfx}`, x.label); add(`${at}.tip${sfx}`, x.tip); add(`${at}.text${sfx}`, x.text); add(`${at}.dim${sfx}`, x.dim?.says); add(`${at}.between${sfx}`, x.between);
       /* a Quick choice by its place in its row (its engine line): retuning a preset's values keeps its words */
@@ -111,6 +99,35 @@ export function stringsOf(d: Definition): Str[] {
     for (const l of (n.per || []) as NodeOverride[]) words(l, `@${hash(J([l.engines, l.tiers, l.when]))}`);
     (n.children || []).forEach(c => node(at, c, counts(n.children!)));
   }
+}
+
+/** The key of an action's words under its owner's key: by what it does and to what, never by its place. */
+export const actionKey = (k: string, a: Action, field: 'label' | 'tip'): string =>
+  `${k}.a.${a.do}-${keyPart('param' in a ? a.param : 'tier' in a ? a.tier : 'item' in a ? a.item : 'tag' in a ? a.tag : 'name' in a ? a.name : '')}${'value' in a ? '-' + keyPart(String(a.value)) : ''}.${field}`;
+/** The key of a strip or an idle reason, under `create.<id>.strip` or `create.<id>.idle`: by its condition. */
+export const stripKey = (k: string, s: Strip): string => `${k}.${hash(J([s.when, s.tiers]))}`;
+
+/** A node by what it is bound to (its part and its keys), or by its words when it is bound to nothing. */
+function idOf(n: Node): string {
+  const binds = [n.param, ...(n.params || []), ...(n.reads || []), ...(n.state || [])].filter(Boolean).join('+');
+  return `${n.part}.${binds ? keyPart(binds) : keyPart((n.text ?? n.label ?? n.part).slice(0, 32))}`;
+}
+/** How many siblings share each kind-and-binding, so all of a shared one are told apart by a hash of themselves. */
+function counts(list: Node[]): Map<string, number> { const m = new Map<string, number>(); list.forEach(n => m.set(idOf(n), (m.get(idOf(n)) ?? 0) + 1)); return m; }
+/** A node's key under its parent's: a second node of the same kind and binding adds a hash of itself. */
+function nodeKeyAt(k: string, n: Node, seen: Map<string, number>): string {
+  let id = idOf(n);
+  if ((seen.get(id) ?? 0) > 1) id += `~${hash(J({ ...n, children: undefined, per: undefined }))}`;
+  return `${k}.${id}`;
+}
+
+/** The translation key of every node of a definition's face, as stringsOf() keys its words: the view looks a node's
+ *  words up under it (nodeWord), and passes it to dimOf() and choiceOf(). */
+export function nodeKeys(d: Definition): Map<Node, string> {
+  const out = new Map<Node, string>();
+  const walk = (k: string, list: Node[]) => { const seen = counts(list); for (const n of list) { const at = nodeKeyAt(k, n, seen); out.set(n, at); walk(at, n.children || []); } };
+  walk(`create.${d.id}.n`, 'face' in d ? d.face || [] : []);
+  return out;
 }
 
 /* ---------------------------------------------------------------- a definition's words as messages
@@ -179,6 +196,32 @@ function slotValue(ix: Index, slot: string, desk: Desk, own?: ParamFace): Slot {
   if (kind === 'say') return String(factOf(ix, rest, desk) ?? '');
   return fill(ix, `{${slot}}`, desk, own);
 }
+/** A node's own words on the desk (its label, tip, text or between), as a message keyed as stringsOf() keys it: the
+ *  key of the line its words come from when a line that holds gives them, else the node's own. Undefined when it has
+ *  none. `key` is the node's key (nodeKeys). */
+export function nodeWord(ix: Index, n: Node, desk: Desk, key: string, field: 'label' | 'tip' | 'text' | 'between'): Msg | undefined {
+  let text = n[field] as string | undefined, sfx = '';
+  for (const l of (n.per || []) as NodeOverride[]) {
+    if (l.engines && !l.engines.includes(desk.engine)) continue;
+    if (l.tiers && !l.tiers.includes(desk.tier)) continue;
+    if (l.when && !holds(ix, l.when, desk)) continue;
+    if (l[field] !== undefined) { text = l[field] as string; sfx = `@${hash(J([l.engines, l.tiers, l.when]))}`; }
+  }
+  return text === undefined || text === '' ? undefined : fillMsg(ix, `${key}.${field}${sfx}`, text, desk);
+}
+/** A node's option that is words (an XY pad's axis words, a note's prefix), keyed as stringsOf() keys it. */
+export function nodeOptWord(ix: Index, n: Node, desk: Desk, key: string, opt: string, i?: number): Msg | undefined {
+  let v = (n.opts as Record<string, unknown> | undefined)?.[opt], sfx = '';
+  for (const l of (n.per || []) as (NodeOverride & { opts?: Record<string, unknown> })[]) {
+    if (l.engines && !l.engines.includes(desk.engine)) continue;
+    if (l.tiers && !l.tiers.includes(desk.tier)) continue;
+    if (l.when && !holds(ix, l.when, desk)) continue;
+    if (l.opts?.[opt] !== undefined) { v = l.opts[opt]; sfx = `@${hash(J([l.engines, l.tiers, l.when]))}`; }
+  }
+  const text = i === undefined ? v : Array.isArray(v) ? v[i] : undefined;
+  return typeof text === 'string' && text ? fillMsg(ix, `${key}.opt.${opt}${i === undefined ? '' : '.' + i}${sfx}`, text, desk) : undefined;
+}
+
 /** A value as it is written everywhere, as a message where it is words: an option's label, a format word, on or off. */
 export function formatMsg(ix: Index, key: string, desk: Desk, v: Value): Slot {
   const f = wordsOf(ix, ix.params.get(key)!.p, desk);
@@ -197,4 +240,58 @@ export function textMsg(ix: Index, key: string, desk: Desk): Slot {
   const f = wordsOf(ix, ix.params.get(key)!.p, desk);
   if (isAuto(ix, key, desk)) return f.auto && f.auto.says ? fillMsg(ix, wordKey(ix, key, desk, 'auto'), f.auto.says, desk, f) : msg('value.about', { v: formatValue(f, f.default) });
   return formatMsg(ix, key, desk, valueOf(ix, key, desk)!);
+}
+/** A number written without its unit, and the unit, for a read-out that prints the unit on its own line under the
+ *  number (a pedal knob's dB, Hz, LUFS; "%" stays on the number). Null when the parameter has no such unit. */
+export function bareText(ix: Index, key: string, desk: Desk): { text: Slot; unit: string } | null {
+  const f = wordsOf(ix, ix.params.get(key)!.p, desk);
+  if (!f.unit || f.unit === '%') return null;
+  const t = textMsg(ix, key, desk);
+  return { text: typeof t === 'string' && t.endsWith(' ' + f.unit) ? t.slice(0, -(f.unit.length + 1)) : t, unit: f.unit };
+}
+/** What an LCD prints for a parameter: a choice's `lcd` words when its option has them, else the value as it is
+ *  written everywhere (its option's label, a number with its unit). */
+export function lcdMsg(ix: Index, key: string, desk: Desk): Slot {
+  const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), v = valueOf(ix, key, desk);
+  if (p.type === 'choice' && v !== undefined) {
+    const o = (Array.isArray(f.options) ? f.options : f.options?.include ?? []).find(x => x.value === v);
+    if (o?.lcd) return { id: `create.${d.id}.p.${dashed(p.key)}.o.${keyPart(o.value)}.lcd${lineAt(ix, key, desk, 'options')}`, en: o.lcd };
+  }
+  return textMsg(ix, key, desk);
+}
+/** A choice's options on the desk's engine, each with its words as messages: the fixed list, or what the parameter
+ *  includes and then the server's list for its source (desk.lists), without a value twice. */
+export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; lcd?: Msg; detail?: Msg }[] {
+  const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), base = `create.${d.id}.p.${dashed(p.key)}.o`, at = lineAt(ix, key, desk, 'options');
+  const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
+  const listed = !Array.isArray(f.options) && f.options ? (desk.lists?.[f.options.from] ?? []).filter(x => !fixed.some(o => o.value === x.value)) : [];
+  return [
+    ...fixed.map(o => ({ value: o.value, label: { id: `${base}.${keyPart(o.value)}.label${at}`, en: o.label } as Msg,
+      ...(o.lcd ? { lcd: { id: `${base}.${keyPart(o.value)}.lcd${at}`, en: o.lcd } as Msg } : {}),
+      ...('detail' in o && o.detail ? { detail: { id: `${base}.${keyPart(o.value)}.detail${at}`, en: o.detail } as Msg } : {}) })),
+    ...listed.map(o => ({ value: o.value, label: o.label as Slot })),
+  ];
+}
+/** Whether typed text passes its parameter's check on the desk's engine: null when it does (or there is none), else
+ *  the check's message, which the field shows beside it while the text is kept unsent. */
+export function checkText(ix: Index, key: string, desk: Desk, text: string): Msg | null {
+  const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk);
+  if (!f.check || CHECKS[f.check.rule].test(text)) return null;
+  return { id: `create.${d.id}.p.${dashed(p.key)}.check${lineAt(ix, key, desk, 'check')}`, en: f.check.message };
+}
+/** A strip's (or an idle reason's) words and its actions' words, as messages, under its definition's key. */
+export function stripWords(ix: Index, base: string, st: Strip, desk: Desk): { says: Msg; actions: { action: Action; label: Msg; tip?: Msg }[] } {
+  const k = stripKey(base, st);
+  return { says: fillMsg(ix, `${k}.says`, st.says, desk), actions: (st.actions ?? []).map(a => ({ action: a, label: fillMsg(ix, actionKey(k, a, 'label'), a.label, desk), ...('tip' in a && a.tip ? { tip: fillMsg(ix, actionKey(k, a, 'tip'), a.tip, desk) } : {}) })) };
+}
+/** A node's actions' words, as messages: an action a node's line gives is keyed under that line. */
+export function actionWords(ix: Index, n: Node, desk: Desk, key: string): { action: Action; label: Msg; tip?: Msg }[] {
+  let list = n.actions ?? [], k = key;
+  for (const l of (n.per || []) as NodeOverride[]) {
+    if (l.engines && !l.engines.includes(desk.engine)) continue;
+    if (l.tiers && !l.tiers.includes(desk.tier)) continue;
+    if (l.when && !holds(ix, l.when, desk)) continue;
+    if (l.actions) { list = l.actions; k = `${key}@${hash(J([l.engines, l.tiers, l.when]))}`; }
+  }
+  return list.map(a => ({ action: a, label: fillMsg(ix, actionKey(k, a, 'label'), a.label, desk), ...('tip' in a && a.tip ? { tip: fillMsg(ix, actionKey(k, a, 'tip'), a.tip, desk) } : {}) }));
 }

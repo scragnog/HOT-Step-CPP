@@ -1,0 +1,93 @@
+/* Lyrics: the sheet (built into Quick), its tabs, instruments, wildcards, gender and mood. */
+/* lyrics */
+.paper { flex: 1; display: flex; flex-direction: column; min-height: 150px; background: var(--paper); border-radius: 10px; border: 1px solid var(--paper-line); overflow: hidden; }
+.paper textarea { width: 100%; border: 0; outline: none; background-color: transparent; color: var(--paper-ink); font: 14px/26px var(--mono); padding: 4px 12px 4px 46px; min-height: 150px;
+  background-image: linear-gradient(90deg, transparent 36px, var(--paper-margin) 36px, var(--paper-margin) 37px, transparent 37px), repeating-linear-gradient(to bottom, transparent 0 25px, var(--paper-line) 25px 26px); background-attachment: local; background-position: 0 4px; }
+/* the ruled area ends on a whole line: the text starts 4px down and every line is 26px, so the sheet's height is 4 + 26n
+   (A-28); the footer's dashed rule sits right under the last line */
+.paper textarea { padding-bottom: 0; }
+.tile .paper textarea { min-height: 156px; }
+/* grown by the packer (A-01): the sheet itself carries on, ruled, down to its footer */
+.tile.stretched .paper { background-image: linear-gradient(90deg, transparent 36px, var(--paper-margin) 36px, var(--paper-margin) 37px, transparent 37px), repeating-linear-gradient(to bottom, transparent 0 25px, var(--paper-line) 25px 26px); background-position: 0 4px; }
+.tile.stretched .paper-foot { margin-top: auto; background-color: var(--paper); }
+/* ... and the writing takes all of it (L-04): the text box fills the stretched sheet, so long lyrics run to the foot, and it
+   is opaque paper, so the sheet's own rules never show through it out of step with the text's */
+.tile.stretched .paper textarea { background-color: var(--paper); }
+.tile.stretched .paper textarea.capped { flex: 1 1 auto; }
+.tile-foot .stat { margin-left: auto; font-family: var(--mono); font-size: 12px; }
+.lyr-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px 14px; display: grid; gap: 10px; }
+.lyr-card .head { display: flex; align-items: center; gap: 8px; }
+.lyr-card h3 { margin: 0; font: 600 14px var(--body); flex: 1; }
+.cap-note { font-size: 13px; color: var(--muted); background: var(--raised); border-radius: 8px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.paper textarea, .ctl textarea, #prompt { overflow: hidden; resize: none; }
+/* Lab settings live inside each module's own design */
+.paper { position: relative; }
+.paper-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.itabs { display: flex; gap: 3px; padding-left: 40px; flex-wrap: wrap; position: relative; z-index: 1; margin-bottom: -2px; }
+.itabs button { border: 0; border-radius: 6px 6px 0 0; padding: 4px 9px 6px; font: 600 11px var(--mono); color: #fff; background: var(--c); transform: translateY(3px); transition: transform var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out); }
+.itabs button:hover, .itabs button:focus-visible { opacity: 1; transform: none; }
+/* in Lab the language stamp sits over the right end of the tab row, half on the paper's edge, so every line of the sheet
+   runs its full width (B-18) */
+.paper-wrap.lab .paper { overflow: visible; }
+.paper-wrap.lab .itabs { padding-right: 132px; }
+.paper-wrap.lab .stamp-wrap { top: -30px; }
+/* on a narrow desk the tabs need the whole row: the stamp goes back onto the paper, above the first line */
+@container desk (max-width: 600px) { .paper-wrap.lab .itabs { padding-right: 0; } .paper-wrap.lab .stamp-wrap { position: relative; top: auto; right: auto; align-self: flex-end; margin: 10px 14px -2px auto; } }
+.paper-foot { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 8px 12px 10px 46px; border-top: 1px dashed var(--paper-line); background: linear-gradient(90deg, transparent 36px, var(--paper-margin) 36px 37px, transparent 37px); color: color-mix(in srgb, var(--paper-ink) 70%, transparent); font: 12px var(--mono); }
+.paper-foot .pill-tog { background: transparent; border-color: var(--paper-line); color: inherit; }
+.wild > span { margin-right: 4px; }
+/* the wildcard chips; the Expand-on-Generate pill keeps the one pill look (L-21) */
+.wild button:not(.pill-tog) { border: 1px solid var(--paper-line); background: none; color: inherit; font: 12px var(--mono); border-radius: 999px; padding: 1px 9px; }
+.wild button:not(.pill-tog)[aria-pressed="true"] { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
+.instr-btn { border: 1.5px dashed var(--faint); background: none; border-radius: 6px; padding: 3px 10px; font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); transition: transform var(--t-fast) var(--e-out); }
+.instr-btn:hover { color: var(--fg); border-color: var(--fg); }
+.instr-btn.on { border: 2px solid var(--hot); color: var(--hot); transform: rotate(-3deg); }
+.paper-wrap .paper textarea { transition: opacity var(--t-base) var(--e-out); }
+.paper-wrap.instr .paper textarea { opacity: .22; }
+.paper-wrap.instr :is(.itabs, .paper-foot .wild-x) { opacity: .22; transition: opacity var(--t-base) var(--e-out); }
+.paper-wrap.instr .itabs button { cursor: not-allowed; }
+.paper-wrap.instr .paper-foot { background-image: linear-gradient(90deg, transparent 36px, color-mix(in srgb, var(--paper-margin) 22%, transparent) 36px 37px, transparent 37px); }
+.paper-wrap.instr .paper::after { content: "INSTRUMENTAL"; position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) rotate(-12deg); border: 5px double var(--hot); color: var(--hot); font: 800 clamp(18px, 3vw, 30px) var(--mono); letter-spacing: .2em; padding: 6px 18px; border-radius: 8px; pointer-events: none; opacity: .9; animation: stampIn var(--t-slow) var(--e-spring); }
+@keyframes stampIn { from { transform: translate(-50%, -50%) rotate(-12deg) scale(1.6); opacity: 0; } }
+.mood { display: grid; gap: 6px; }
+.mood .kl { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.mood > div { display: flex; background: var(--raised); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.mood button { flex: 1; border: 0; background: none; border-radius: 999px; padding: 6px 4px; font: 600 12px var(--body); color: var(--muted); transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.mood button:hover { color: var(--fg); }
+.mood button[aria-checked="true"] { background: var(--fg); color: var(--bg); }
+.itabs button { opacity: 1; }
+/* the sheet's only instructions: 4.5:1 on the paper, in both themes (L-31) */
+.paper textarea::placeholder { color: color-mix(in srgb, var(--paper-ink) 62%, transparent); font-style: italic; }
+/* text boxes grow with what you type or paste */
+.paper textarea { flex: none; }
+/* the sheet's scroll position: a thin quiet bar on the margin line, so it never reads as a coloured edge (Q-28) */
+.paper > .smark { left: 34.5px; width: 3px; background: var(--faint); box-shadow: 0 0 0 2px var(--paper); }
+.paper > .smark::before { content: ""; position: absolute; }
+.paper > .smark:hover, .paper > .smark.drag { width: 8px; left: 32.5px; }
+.wild { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; align-items: center; margin-left: auto; }
+/* on a narrow sheet the two stack rather than break their words (S-27) */
+.wild > button { white-space: nowrap; }
+.wild-x { border: 1px solid color-mix(in srgb, var(--paper-ink) 25%, transparent); background: none; color: inherit; border-radius: 6px; font: 12px var(--mono); padding: 2px 8px; }
+.gender .seg button { padding: 4px 9px; }
+.paper > .smark::before { inset: -4px -9px; }
+/* page text is not picked up by a drag across a tile; text fields and the plan read-out still select */
+.tile, .lyr-card .strip, .gobar, .deskbar { -webkit-user-select: none; user-select: none; }
+.t-lab .rp-grid .paper { flex: none; min-height: 0; }
+.t-lab .rp-grid .paper textarea { min-height: 86px; }
+.paper-wrap.instr .paper textarea { cursor: not-allowed; }
+/* focus on the writing surfaces shows on the sheet, not only as a caret */
+.paper:has(textarea:focus-visible), .note:has(textarea:focus-visible) { outline: 2px solid var(--hot); outline-offset: 2px; }
+.paper textarea:focus-visible, .note textarea:focus-visible { outline: none; }
+/* the language stamp on the sheet (Studio, and Quick when set): the text keeps clear of it on the right (Q-28) */
+.paper-wrap:not(.lab) .paper:has(> .stamp-wrap) textarea { padding-right: 132px; }
+/* ... except on a narrow desk, where the stamp takes a row of its own above the first line and the writing gets the
+   sheet's whole width, as in Lab (S-20) */
+@container desk (max-width: 600px) {
+  .paper-wrap:not(.lab) .paper > .stamp-wrap { position: relative; top: auto; right: auto; align-self: flex-end; margin: 10px 14px -2px auto; }
+  .paper-wrap:not(.lab) .paper:has(> .stamp-wrap) textarea { padding-right: 12px; }
+}
+/* Instrumental: the language stamp stands back with the lyric tools (Q-27) */
+.paper-wrap.instr .stamp-wrap { opacity: .45; }
+/* On a short window an empty sheet in Lab stands four lines tall (the two lines of its hint and two to start on) and
+   grows as lines are typed, so the desk's first screen shows hardware too (L-07) */
+@media (max-height: 800px) { .t-lab .tile .paper:has(textarea:placeholder-shown) { min-height: 0; } .t-lab .tile .paper textarea:placeholder-shown { min-height: 108px; } }

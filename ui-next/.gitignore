@@ -1,0 +1,5 @@
+dist/
+dist-file/
+dist-test/
+tools/behaviour/out/
+tools/visual-baseline/out/

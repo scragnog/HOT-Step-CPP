@@ -1,0 +1,7 @@
+/* Model: the hardware row, the VRAM gauge and the Quick size choice. */
+.hw { display: grid; gap: 8px; }
+.vram { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: var(--inset); border: 1px solid var(--line); }
+.vram i { display: block; height: 100%; }
+.vram-cap { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--muted); }
+.vram-cap { align-items: center; gap: 8px; }
+.hw .pk-model + .pk-model { margin-top: 2px; }

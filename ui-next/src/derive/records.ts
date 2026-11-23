@@ -12,6 +12,11 @@ import type { EngineBook } from './engine.ts';
 
 const storedOf = (ix: Index, key: string) => { const h = ix.params.get(key)!; return h.p.stored ?? h.d.stored; };
 
+/** What is on the desk, of one kind, in the desk's order: `on` keeps the order things were put on the desk in (a Set
+ *  keeps its insertion order), which is the order the tiles read in; a record keeps it. */
+const onOrder = (ix: Index, desk: Desk, kind: (d: Index['defs'][number]) => boolean): string[] =>
+  [...desk.on].filter(id => ix.defs.some(d => d.id === id && kind(d)));
+
 /** A revision of the desk's engine: every parameter on that engine with stored 'settings' (and 'content' with
  *  content), its value in force and its auto switch, defaults included, and the state with stored 'settings'. A
  *  source module's values (a repaint region's) are never in it. */
@@ -37,8 +42,8 @@ export function draftOf(ix: Index, desk: Desk, name: string): Draft {
 
 /** A workflow: the desk's layout, never a source module. */
 export function workflowOf(ix: Index, desk: Desk, name: string): Workflow {
-  const mods = ix.defs.filter(d => d.kind === 'module' && !d.builtIn && !d.source && desk.on.has(d.id)).map(d => d.id);
-  const board = ix.defs.filter(d => d.kind !== 'module' && desk.on.has(d.id)).map(d => d.id);
+  const mods = onOrder(ix, desk, d => d.kind === 'module' && !d.builtIn && !d.source);
+  const board = onOrder(ix, desk, d => d.kind !== 'module');
   return { v: SAVED_VERSION, name, tier: desk.tier, modules: mods, board };
 }
 
@@ -66,8 +71,8 @@ export function loadRevision(ix: Index, desk: Desk, rev: unknown): { desk: Desk;
 
 /** The desk autosave: everything, for a reload or another tab. */
 export function savedDeskOf(ix: Index, desk: Desk, book: EngineBook): SavedDesk {
-  const mods = ix.defs.filter(d => d.kind === 'module' && !d.builtIn && desk.on.has(d.id)).map(d => d.id);
-  const board = ix.defs.filter(d => d.kind !== 'module' && desk.on.has(d.id)).map(d => d.id);
+  const mods = onOrder(ix, desk, d => d.kind === 'module' && !d.builtIn);
+  const board = onOrder(ix, desk, d => d.kind !== 'module');
   return { v: SAVED_VERSION, engine: desk.engine, tier: desk.tier, modules: mods, board, vals: { ...desk.vals }, auto: { ...desk.auto }, state: { ...desk.state }, stash: structuredClone(book.stash), hold: structuredClone(book.hold) };
 }
 
