@@ -21,9 +21,10 @@ import {
 import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
-import { controlModel, type ControlModel } from './controls.ts';
+import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
 import { kidsOf, type KidModel } from './containers.ts';
 import { readoutModel, type ReadoutModel } from './readouts.ts';
+import { instrumentModel, type InstrumentModel } from './instruments.ts';
 import { stateOf } from './core.ts';
 import type { Json } from '../definitions/types.ts';
 
@@ -76,6 +77,10 @@ export interface ParamModel {
   autoTip?: Slot;
   /** A field that keeps invalid text: what it says is in force meanwhile, and whether there is a value to put back. */
   kept?: { says: Slot; back: boolean };
+  /** It can be automatic (a knob draws its auto pill). */
+  canAuto?: true;
+  /** Presses within this many milliseconds are one step (taps on TAP, keys on the key wheel). */
+  run?: number;
 }
 
 export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean }
@@ -119,6 +124,8 @@ export interface PartModel {
   readout?: ReadoutModel;
   /** The state its node names (a drop zone's file), and whether another definition only lends it to this node. */
   state?: StateModel[];
+  /** A bespoke instrument: what it draws, worked out from what it binds and reads (src/derive/instruments.ts). */
+  instrument?: InstrumentModel;
 }
 
 /** A state a node names, as a part draws it. */
@@ -134,7 +141,9 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
     ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}),
   };
   if (p.type === 'number' && f.range) {
-    const [lo, hi] = f.range, n = typeof v === 'number' ? v : lo, d = typeof f.default === 'number' ? f.default : lo;
+    /* while automatic, a number stands at the value auto stands for (L-11) */
+    const est = out.auto ? autoEstimate(ix, key, desk) : null;
+    const [lo, hi] = f.range, n = est ?? (typeof v === 'number' ? v : lo), d = typeof f.default === 'number' ? f.default : lo;
     out.range = f.range; out.at = (n - lo) / (hi - lo); out.detent = Math.min(1, Math.max(0, (d - lo) / (hi - lo)));
     out.typeName = msg('knob.type', { label: w.label, min: lo, max: hi });
     out.bare = cell?.bare ? bareText(ix, key, desk) : null;
@@ -148,6 +157,8 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
   const kept = p.type === 'text' ? keptMsg(ix, key, desk) : undefined;
   if (kept) out.kept = kept;
+  if (f.auto) out.canAuto = true;
+  if (p.run) out.run = p.run;
   return out;
 }
 
@@ -162,6 +173,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (key) {
     for (const f of ['tip', 'text', 'between'] as const) { const m = nodeWord(ix, node, desk, key, f); if (m) words[f] = m; }
     for (const [o, s] of Object.entries(spec?.opts ?? {})) if (s.type === 'text') { const m = nodeOptWord(ix, node, desk, key, o); if (m) words[o] = m; }
+    /* a list of words (an XY pad's corners): each by its place, `corners.0` ... */
+    else if (s.type === 'texts') ((node.opts as Record<string, unknown> | undefined)?.[o] as string[] | undefined ?? []).forEach((_, i) => { const m = nodeOptWord(ix, node, desk, key, o, i); if (m) words[`${o}.${i}`] = m; });
   }
   const nodeLabel = key ? nodeWord(ix, node, desk, key, 'label') : undefined;
   const label = cell?.label ?? nodeLabel ?? params[0]?.label;
@@ -191,6 +204,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);
   const ro = readoutModel(ix, node, desk);
   if (ro) m.readout = ro;
+  const ins = instrumentModel(ix, node, desk);
+  if (ins) m.instrument = ins;
   if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);

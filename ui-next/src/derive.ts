@@ -21,3 +21,4 @@ export * from './derive/models.ts';
 export * from './derive/controls.ts';
 export * from './derive/containers.ts';
 export * from './derive/readouts.ts';
+export * from './derive/instruments.ts';
