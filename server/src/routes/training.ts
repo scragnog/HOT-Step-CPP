@@ -131,7 +131,7 @@ import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
   missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
-  mm3RunName, isMm3TrainPrecision, countMm3Captions, mm3CkptOffloadPlan,
+  mm3RunName, isMm3TrainPrecision, countMm3Captions, mm3CkptOffloadPlan, fitMm3WorkerCrop,
   type Mm3BasePrecision, type Mm3TrainPrecision,
 } from '../services/training/mm3Train.js';
 import {
@@ -188,7 +188,7 @@ import { CaptionReplaceError, replaceSelectedCaptions } from '../services/traini
 import { essentiaAvailable, essentiaTempoProfile } from '../services/training/essentiaClient.js';
 import { parsePipelineLabelOptions } from '../services/training/pipelineLabelOptions.js';
 import { engineQueueDepth, engineUnderstandReady, pickBestLm } from '../services/training/understandClient.js';
-import { buildGpuEnv } from '../services/gpuDevices.js';
+import { buildGpuEnv, selectedGpuMemoryMB } from '../services/gpuDevices.js';
 import * as queue from '../services/training/labelingQueue.js';
 import { listSa3Runs, resolveSa3Run, sa3Readiness, sa3RunById, SA3_RUN_ID, type Sa3Run } from '../services/training/trainSa3Runner.js';
 import { listSa3PreviewRecords, parseSa3PreviewSettings, renderSa3Previews, sa3PreviewAudioPath, SA3_PREVIEW_DEFAULTS } from '../services/training/sa3Preview.js';
@@ -2773,10 +2773,12 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
     const maxFramesResolved = num('maxFrames', D.maxFrames, 64, 9000);
     // 'excise' is exempt from the gutting check: shortening the long tracks is the whole point of it, and how
     // many survive is not knowable until the retarget pass has run.
-    if (longTracksResolved === 'exclude') {
-      const known = (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && s.duration > 0);
-      const over  = known.filter(s => s.duration * 25 > maxFramesResolved);
-      if (known.length > 0 && over.length * 2 > known.length) {
+    const known = longTracksResolved === 'exclude'
+      ? (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && s.duration > 0)
+      : [];
+    if (known.length) {
+      const over = known.filter(s => s.duration * 25 > maxFramesResolved);
+      if (over.length * 2 > known.length) {
         res.status(400).json({
           error: `${over.length} of ${known.length} tracks are longer than the ${Math.round(maxFramesResolved / 25)} s window `
                + 'and would be excluded; set longTracks to "crop" or raise maxFrames',
@@ -2829,7 +2831,6 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
                  + 'has no fused attention-training kernel; ace-train would refuse to start)');
       attnBackendResolved = 'exact';
     }
-    void framesWillBeEmitted;
     // Refused, not coerced: a typo silently training at full precision would
     // look like the speed-up simply did not work.
     if (b.trainPrecision !== undefined && b.trainPrecision !== null && !isMm3TrainPrecision(b.trainPrecision)) {
@@ -2863,11 +2864,8 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       return;
     }
 
-    // Fit the card this run trains on without touching the recipe: when the
-    // VRAM model says the run would spill, its activation checkpoints move to
-    // host RAM (--ckpt-offload, bit-identical). A request can force it either
-    // way. The window is the longest track the run keeps, as the engine sizes
-    // its buffers.
+    // Size the job where it is enqueued. Both a worker batch and a directly
+    // dispatched training operation reach this route on the worker itself.
     const rankResolved = num('rank', D.rank, 1, 512);
     const missingForMethod = missingMm3TrainModels('train', basePrecision, {
       rank: rankResolved, adapterType, pissa: pissaResolved, hotPizza: hotPizzaResolved,
@@ -2878,14 +2876,32 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
         + 'Install the missing files from the Model Manager.' });
       return;
     }
-    const keptFrames = longTracksResolved === 'exclude'
-      ? (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && s.duration > 0)
-          .map(s => Math.ceil(s.duration * 25)).filter(f => f <= maxFramesResolved)
-      : [];
-    const offloadPlan = mm3CkptOffloadPlan({
-      basePrecision, rank: rankResolved, optimizer, attn: attnBackendResolved, prefixFrames: prefixFramesResolved,
-      trainPrecision: trainPrecisionResolved, frames: keptFrames.length ? Math.max(...keptFrames) : maxFramesResolved,
-    }, process.platform === 'darwin' ? 0 : await trainingGpuTotalMb());  // unified memory: nothing to move
+    const keptFrames = known.map(s => Math.ceil(s.duration * 25)).filter(f => f <= maxFramesResolved);
+    const recipe = {
+      basePrecision, rank: rankResolved, optimizer, attn: attnBackendResolved,
+      prefixFrames: framesWillBeEmitted ? prefixFramesResolved : 0,
+      trainPrecision: trainPrecisionResolved,
+      frames: keptFrames.length ? Math.max(...keptFrames) : maxFramesResolved,
+    };
+    const isWorker = Boolean(config.workers.acceptToken);
+    // Match the trainer's CUDA device selection on the worker, including when
+    // a previous batch stage has stopped the engine. macOS has unified memory.
+    const gpuTotalMb = process.platform === 'darwin' ? 0
+      : isWorker ? selectedGpuMemoryMB() ?? 0 : await trainingGpuTotalMb();
+    const measuredRecipe = recipe.basePrecision === 'q8_0' && recipe.rank === MM3_LM_DEFAULTS.rank
+      && recipe.optimizer === 'adamw' && recipe.attn === 'flash' && recipe.trainPrecision === 'fastest'
+      && recipe.prefixFrames === 0 && prefixNResolved === 0 && !artistTokenResolved && !reg.regEvery
+      && adapterType === 'lora' && hotPizzaResolved && bool('pissaFrozenF16', D.pissaFrozenF16)
+      && !(['dora', 'hira', 'loha', 'hra'] as const).some(k => bool(k, D[k]));
+    const fittedFrames = isWorker && longTracksResolved !== 'excise'
+      ? fitMm3WorkerCrop(recipe, gpuTotalMb, measuredRecipe, installed)
+      : recipe.frames;
+    const cropped = fittedFrames < recipe.frames;
+    const maxFrames = cropped ? fittedFrames : maxFramesResolved;
+    const workerCropReason = cropped
+      ? `Worker GPU has ${gpuTotalMb} MiB VRAM. Reduced the MM3 window from ${maxFramesResolved} to ${maxFrames} frames to fit. Eligible tracks longer than the new window use crops.`
+      : undefined;
+    const offloadPlan = mm3CkptOffloadPlan({ ...recipe, frames: fittedFrames }, gpuTotalMb, installed);
     const ckptOffload = typeof b.ckptOffload === 'boolean' ? b.ckptOffload : offloadPlan.offload;
     if (offloadPlan.offload) {
       console.log(`[Training] mm3-train-lm ${runName}: predicted ${offloadPlan.peakMb} MB against a ${offloadPlan.budgetMb} MB budget; `
@@ -2906,7 +2922,9 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       warmup:      num('warmup', D.warmup, 0, 100000),
       gradAccum:   num('gradAccum', D.gradAccum, 1, 64),
       seed:        num('seed', D.seed, 0, 2 ** 31 - 1),
-      maxFrames:   num('maxFrames', D.maxFrames, 64, 9000),
+      maxFrames,
+      dropOverFrames: cropped && longTracksResolved === 'exclude' ? maxFramesResolved : undefined,
+      workerCropReason,
       cropMode,
       cropStartFrac: num('cropStartFrac', D.cropStartFrac, 0, 1),
       cropEndFrac:   num('cropEndFrac', D.cropEndFrac, 0, 1),
@@ -2931,8 +2949,7 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       evalEvery:   num('evalEvery', D.evalEvery, 0, 100000),
       // Clamped to maxFrames: a larger eval crop than the training crop cannot
       // fit the sequence limit and every eval is silently skipped.
-      evalCrop:    Math.min(num('evalCrop', D.evalCrop, 8, 9000),
-                            num('maxFrames', D.maxFrames, 64, 9000)),
+      evalCrop:    Math.min(num('evalCrop', D.evalCrop, 8, 9000), maxFrames),
       rankDropout: num('rankDropout', D.rankDropout, 0, 0.9),
       captionFile: undefined,
       adapterType,

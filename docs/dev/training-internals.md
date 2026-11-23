@@ -777,6 +777,12 @@ worker. A dispatch or a worker batch of the other family is never joined. The pu
 manifest keeps this machine's absolute `audio_path`s; `pm_resolve_audio` in
 `preprocess-io.h` falls back to the file beside the manifest.
 
+Before a new MM3 LM job is queued, the worker checks the longest training window
+against the GPU selected for the trainer. It can shorten the window and eval
+crop together, keeping the original track exclusion threshold. The run's
+`hotstep-run.json` records the effective options and the reason, which also
+appears in the training log. Resume replays the recorded window.
+
 MM3 runs need no index: a run is its folder, attributed by `hotstep-run.json`. The worker
 offers `GET /api/training/worker/mm3-mirror` (`workerMm3MirrorManifest`: runs of datasets
 whose `sourceDir` is under `worker-datasets/`, with `live` while a job for the dataset or

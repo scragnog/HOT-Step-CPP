@@ -67,6 +67,11 @@ export const WorkersPanel: React.FC = () => {
           {w.online && <div className="flex flex-wrap gap-x-4 gap-y-1 text-zinc-600 dark:text-zinc-400">
             <span>Git {w.commit?.slice(0, 8) ?? 'unknown'}</span>
             <span>Engine {w.engineVersion || w.engine || 'unknown'}{w.engineBuiltAt ? ` · built ${new Date(w.engineBuiltAt).toLocaleString()}` : ''}</span>
+            <span title={t('trainingStudio.workers.tensorUnlockInfo', 'The Tensor-core unlock can speed up training and rendering. The same models and settings work in either state. Status comes from the boot log.')}>
+              {w.tensorCoreUnlock === 'on' ? t('trainingStudio.workers.tensorUnlockOn', 'Tensor-core unlock on')
+                : w.tensorCoreUnlock === 'off' ? t('trainingStudio.workers.tensorUnlockOff', 'Tensor-core unlock off')
+                : t('trainingStudio.workers.tensorUnlockUnknown', 'Tensor-core unlock unknown')}
+            </span>
             <span>GPU {w.gpu ? `${w.gpu.memoryUsedMiB} MiB · ${w.gpu.utilization}%` : 'unavailable'}</span>
             <span>{w.job ? `${w.job.kind}${w.job.dataset ? ` · ${w.job.dataset}` : ''} · ${w.job.status} · ${w.job.done}/${w.job.total}` : t('trainingStudio.workers.idle', 'Idle')}</span>
           </div>}

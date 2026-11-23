@@ -378,7 +378,7 @@ Audio-to-MIDI transcription on its own native engine, with the song's tempo, tim
 
 ## Training Studio
 
-Build datasets from your own audio and train adapters on your GPU, for ACE-Step, MiniMax-Music3, YuE2, HeartMuLa and Stable Audio 3. Preview and apply plain-text caption replacements across selected tracks. Details: [Training Studio](docs/user/studios/training-studio.md), [ACE-Step training](docs/user/training/ace-step.md), [MiniMax-Music3 training](docs/user/training/minimax-music3.md), [YuE2 training](docs/user/training/yue2.md), [HeartMuLa training](docs/user/training/heartmula.md), [Stable Audio 3 training](docs/user/training/sa3.md), [Training internals](docs/dev/training-internals.md)
+Build datasets from your own audio and train adapters on your GPU, for ACE-Step, MiniMax-Music3, YuE2, HeartMuLa and Stable Audio 3. Preview and apply plain-text caption replacements across selected tracks. Check Tensor-core unlock status in Workers. Details: [Training Studio](docs/user/studios/training-studio.md), [ACE-Step training](docs/user/training/ace-step.md), [MiniMax-Music3 training](docs/user/training/minimax-music3.md), [YuE2 training](docs/user/training/yue2.md), [HeartMuLa training](docs/user/training/heartmula.md), [Stable Audio 3 training](docs/user/training/sa3.md), [Training internals](docs/dev/training-internals.md)
 
 | Feature | What it does |
 |---|---|

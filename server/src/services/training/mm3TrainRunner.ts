@@ -656,6 +656,12 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     previewSong: plan?.previewSong,
     previewPlan: plan ? { specs: plan.specs, seconds: plan.seconds, seed: plan.seed, scaleMlp: plan.scaleMlp, scaleAttn: plan.scaleAttn } : undefined,
   });
+  if (opts.workerCropReason) {
+    log(job, 'info', opts.workerCropReason);
+    try {
+      fs.appendFileSync(path.join(opts.outDir, 'train-console.log'), opts.workerCropReason + '\n');
+    } catch { /* the job log and run record also carry the reason */ }
+  }
   clearPause(opts.outDir);
 
   // The output check, shared by every segment. saveEvery 0 means "never

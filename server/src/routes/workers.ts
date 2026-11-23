@@ -19,6 +19,7 @@ import {
   upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerMirrorFile, workerMirrorManifest, workerStatus,
   workerMm3MirrorFile, workerMm3MirrorManifest, type DispatchFamily,
 } from '../services/training/trainingWorkers.js';
+import { tensorCoreUnlockStatus } from '../services/training/tensorCoreUnlock.js';
 import { syncYue2Mirror, yue2MirrorStatus } from '../services/training/yue2Mirror.js';
 
 const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ error: err?.message || String(err) });
@@ -28,6 +29,7 @@ const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ 
 export const workerRouter = Router();
 
 workerRouter.get('/status', async (_req: Request, res: Response) => {
+  const unlock = tensorCoreUnlockStatus();
   let engineVersion = '';
   let engineStatus = 'disconnected';
   try {
@@ -44,7 +46,7 @@ workerRouter.get('/status', async (_req: Request, res: Response) => {
   const job = activeTraining();
   let engineBuiltAt: string | null = null;
   try { engineBuiltAt = fs.statSync(config.aceServer.exe).mtime.toISOString(); } catch { /* binary absent */ }
-  res.json({ commit: startupCommit, dirty: cachedDirtyCheckout(), version: APP_VERSION, aceServer: { status: engineStatus, version: engineVersion }, engineBuiltAt, gpu, job, idle: job === null });
+  res.json({ commit: startupCommit, dirty: cachedDirtyCheckout(), version: APP_VERSION, aceServer: { status: engineStatus, version: engineVersion }, engineBuiltAt, gpu, tensorCoreUnlock: await unlock, job, idle: job === null });
 });
 
 workerRouter.post('/update', async (req: Request, res: Response) => {

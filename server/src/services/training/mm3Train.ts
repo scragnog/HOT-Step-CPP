@@ -475,14 +475,18 @@ const MM3_LM_HIDDEN = 4096;
 
 export interface Mm3OffloadPlan { offload: boolean; peakMb: number; budgetMb: number; offloadedMb: number }
 
+type Mm3VramRecipe = {
+  basePrecision: string; rank: number; frames: number; optimizer: 'muon' | 'adamw' | 'prodigy';
+  attn: 'exact' | 'flash'; prefixFrames: number; trainPrecision: string;
+};
+type Mm3VramBases = Array<Pick<Mm3BaseInfo, 'id' | 'bytes' | 'extraMb'>>;
+
 /** Whether a run needs --ckpt-offload to stay on the card, from the same model
  *  as the VRAM estimate. `frames` is the longest window the run trains (the
  *  engine sizes its buffers to the longest track it keeps). The budget leaves
  *  the recommender's headroom. Unknown card (0) or base: no offload. */
-export function mm3CkptOffloadPlan(o: {
-  basePrecision: string; rank: number; frames: number; optimizer: 'muon' | 'adamw' | 'prodigy';
-  attn: 'exact' | 'flash'; prefixFrames: number; trainPrecision: string;
-}, gpuTotalMb: number, bases: Array<Pick<Mm3BaseInfo, 'id' | 'bytes' | 'extraMb'>> = availableMm3Bases()): Mm3OffloadPlan {
+export function mm3CkptOffloadPlan(o: Mm3VramRecipe, gpuTotalMb: number,
+                                  bases: Mm3VramBases = availableMm3Bases()): Mm3OffloadPlan {
   const S = MM3_VRAM_MODEL.promptTokens + Math.max(0, o.frames);
   const offloadedMb = Math.round((MM3_LM_LAYERS - 2) * MM3_LM_HIDDEN * S * 4 / 1048576);
   const base = bases.find(b => b.id === o.basePrecision);
@@ -491,6 +495,32 @@ export function mm3CkptOffloadPlan(o: {
   const peakMb = estimateMm3PeakMb(base.bytes, o.rank, o.frames, base.extraMb, o.optimizer, o.prefixFrames, o.attn) + stageMb;
   const budgetMb = gpuTotalMb - Math.min(1536, Math.round(gpuTotalMb * 0.08));
   return { offload: peakMb > budgetMb, peakMb, budgetMb, offloadedMb };
+}
+
+/** Prefer the largest window that fits in device memory. The older flash
+ *  estimate overstates the measured 4090 Fast recipe even at 3000 frames.
+ *  For that recipe on a 24 GiB card, use the measured ceiling if the estimate
+ *  cannot find a window. The caller still applies its checkpoint-offload policy.
+ */
+export function fitMm3WorkerCrop(recipe: Mm3VramRecipe, gpuTotalMb: number, measuredRecipe: boolean,
+                                bases: Mm3VramBases): number {
+  if (!mm3CkptOffloadPlan(recipe, gpuTotalMb, bases).offload) return recipe.frames;
+  // HOTSTEP-1071. The 24 GiB 4090 trained at 3000 frames with this recipe.
+  if (measuredRecipe && gpuTotalMb >= 24 * 1024 - 64 && gpuTotalMb <= 24 * 1024) {
+    return Math.min(recipe.frames, 3000);
+  }
+
+  let low = 64;
+  let high = Math.floor(recipe.frames);
+  if (mm3CkptOffloadPlan({ ...recipe, frames: low }, gpuTotalMb, bases).offload) {
+    return recipe.frames;  // Shortening alone cannot fit. Keep checkpoint offload available.
+  }
+  while (low < high) {
+    const frames = Math.ceil((low + high) / 2);
+    if (mm3CkptOffloadPlan({ ...recipe, frames }, gpuTotalMb, bases).offload) high = frames - 1;
+    else low = frames;
+  }
+  return low;
 }
 
 export function recommendMm3Config(gpuTotalMb: number,
@@ -1250,6 +1280,9 @@ export interface ResolvedMm3TrainLmOptions {
   gradAccum: number;
   seed: number;
   maxFrames: number;
+  /** The original exclusion threshold when a worker fits a shorter crop. */
+  dropOverFrames?: number;
+  workerCropReason?: string;
   cropMode: 'random' | 'beginning' | 'structured';
   cropStartFrac: number;
   cropEndFrac: number;
@@ -1500,7 +1533,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // engine never sees the flag for the 'crop' behaviour it already has.
   // 'excise' keeps the flag too: the retarget pass shortens what it can, and whatever it refused must still be
   // left out rather than silently falling back to crops.
-  if ((o.longTracks ?? 'exclude') !== 'crop') args.push('--drop-over-frames', String(o.maxFrames));
+  if ((o.longTracks ?? 'exclude') !== 'crop') args.push('--drop-over-frames', String(o.dropOverFrames ?? o.maxFrames));
   if (o.ckptOffload) args.push('--ckpt-offload', 'on');
   // Soft prompt. Uses the SAME flag names the parser already accepts
   // (--artist-token/-k/-lr) — this is not a new engine surface, just a

@@ -48,16 +48,22 @@ test('a preview relaunch keeps the precision flags', () => {
   assert.equal(flag(args, '--resume'), 'state.bin');
 });
 
-test('a resumed run reads its precision back from the run manifest', () => {
+test('a resumed run reads its precision and worker crop back from the run manifest', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3-precision-'));
   try {
-    writeMm3RunManifest(opts({ outDir: dir, basePrecision: 'q8_0', trainPrecision: 'fastest' }),
-                        { datasetId: 'id', datasetSlug: 'ds', datasetName: 'ds' });
+    writeMm3RunManifest(opts({
+      outDir: dir, basePrecision: 'q8_0', trainPrecision: 'fastest',
+      maxFrames: 3000, dropOverFrames: 9000, evalCrop: 750, workerCropReason: 'Worker VRAM limit',
+    }), { datasetId: 'id', datasetSlug: 'ds', datasetName: 'ds' });
     const back = resumeOptionsFor(dir);
     assert.ok(back);
     const args = buildMm3TrainLmArgs({ ...back, resumeFrom: 'state.bin' });
     assert.equal(flag(args, '--weights'), 'bf16');
     assert.equal(flag(args, '--attn'), 'flash-bf16');
+    assert.equal(flag(args, '--max-frames'), '3000');
+    assert.equal(flag(args, '--drop-over-frames'), '9000');
+    assert.equal(flag(args, '--eval-crop'), '750');
+    assert.equal(back.workerCropReason, 'Worker VRAM limit');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

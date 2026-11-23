@@ -3406,6 +3406,7 @@ export interface TrainingWorkerStatus {
   name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string;
   commit?: string; dirty?: boolean; relation?: 'current' | 'behind' | 'diverged'; behind?: number;
   engineVersion?: string; engineBuiltAt?: string | null; gpu?: { memoryUsedMiB: number; utilization: number } | null;
+  tensorCoreUnlock?: 'on' | 'off' | 'unknown';
   job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean;
 }
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
