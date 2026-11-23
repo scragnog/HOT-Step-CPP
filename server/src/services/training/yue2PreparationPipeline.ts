@@ -7,7 +7,7 @@ import { config } from '../../config.js';
 import type { TrainingSnapshot } from '../../contracts/trainingOperation.js';
 import type { Yue2PreparationPayload, Yue2PreparationStage, Yue2PreparationStageStatus,
   Yue2PreparationSummary } from '../../contracts/trainingPreparation.js';
-import { trainingBaseDir } from './paths.js';
+import { AUDIO_EXTENSIONS, trainingBaseDir } from './paths.js';
 import { getDataset } from './datasetsRepo.js';
 import { activeJobForDataset, cancelJob } from './labelingQueue.js';
 import { hasActivePipeline, registerYue2PreparationActivity } from './pipelineRunner.js';
@@ -433,16 +433,23 @@ export const defaultYue2PreparationAdapter: Yue2PreparationAdapter = {
   },
 };
 
-/** Signature of the exact source tree used by preparation. Generated training
- *  caches live outside the source folder, so this stays stable across stages. */
+/** Signature of the files preparation reads: audio plus `.txt` caption/lyric
+ *  sidecars. Dotfiles and dot-folders (`.DS_Store`, AppleDouble `._x.wav`,
+ *  `.Spotlight-V100`) and `.engine.wav` caches are ignored: macOS writes them
+ *  on external volumes mid-run and they are never training input. */
 export function sourceRevision(root: string): string {
   const hash = createHash('sha256');
   const walk = (dir: string, relative: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.')) continue;
       const rel = path.join(relative, entry.name);
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(file, rel);
       else if (entry.isFile()) {
+        const lower = entry.name.toLowerCase();
+        if (lower.endsWith('.engine.wav')) continue;
+        const ext = path.extname(lower);
+        if (ext !== '.txt' && !AUDIO_EXTENSIONS.has(ext)) continue;
         const stat = fs.statSync(file);
         hash.update(`${rel.replaceAll('\\', '/')}:${stat.size}:${stat.mtimeMs}\n`);
       }

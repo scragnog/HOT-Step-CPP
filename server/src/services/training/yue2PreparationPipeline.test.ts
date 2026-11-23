@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { TrainingSnapshot } from '../../contracts/trainingOperation.js';
 import type { Yue2PreparationPayload } from '../../contracts/trainingPreparation.js';
-import { Yue2PreparationPipeline, type Yue2PreparationAdapter,
+import { sourceRevision, Yue2PreparationPipeline, type Yue2PreparationAdapter,
   type Yue2PreparationArtifacts } from './yue2PreparationPipeline.js';
 
 const artifacts = (): Yue2PreparationArtifacts => ({
@@ -274,4 +274,21 @@ test('every method keeps an unnormalized (0 LUFS = off) cache; a joint chain re-
     await until(() => f.runner.get(run.id)?.status === 'done');
     assert.deepEqual(f.started[1], { stage: 'latents', worker: 'local', workerUrl: null, body: { captionMode: 'yue2', loudnessLufs: 0 } });
   } finally { f.cleanup(); }
+});
+
+test('sourceRevision ignores macOS junk but sees audio and sidecar changes', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'yue2-rev-'));
+  try {
+    writeFileSync(path.join(dir, 'a.wav'), 'x');
+    writeFileSync(path.join(dir, 'a.txt'), 'caption');
+    const base = sourceRevision(dir);
+    writeFileSync(path.join(dir, '.DS_Store'), 'junk');
+    writeFileSync(path.join(dir, '._a.wav'), 'junk');
+    writeFileSync(path.join(dir, 'a.engine.wav'), 'cache');
+    mkdirSync(path.join(dir, '.Spotlight-V100'));
+    writeFileSync(path.join(dir, '.Spotlight-V100', 'b.wav'), 'junk');
+    assert.equal(sourceRevision(dir), base);
+    writeFileSync(path.join(dir, 'a.txt'), 'caption changed');
+    assert.notEqual(sourceRevision(dir), base);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
