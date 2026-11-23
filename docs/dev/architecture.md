@@ -540,7 +540,9 @@ What the policy does not stop, so shell skins still get a code review:
   from the server, and the route serves the reply on the app origin, so shell code
   can read it. The route cannot tell a user-pasted URL from a skin-written one.
   Outside shell skins do not merge until this is accepted or writes of those URL
-  fields need trusted approval.
+  fields need trusted approval. The gate is two things: `check:skins` fails any shell that
+  uses `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or `navigator.sendBeacon` (and `skin-api` writes
+  no artwork URL), and a human reviews every shell for what a static scan misses.
 - Navigating away with data in the URL. No CSP directive covers it.
 
 ## UI source layout

@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-fetch",
+  "name": "bad-shell-fetch",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

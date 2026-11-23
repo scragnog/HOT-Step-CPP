@@ -178,6 +178,9 @@ and dark mode. Your shell is only the part you can see. So:
 
 - **Never** start the runtime, call the server, read `localStorage`, or import app code.
   You get data and actions from `skin-api` (below) and nothing else.
+- **Never** use `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` or `navigator.sendBeacon`, with or
+  without `window.` or `globalThis.`. `check:skins` fails any file that does. A static scan cannot see
+  `window['fe'+'tch']`; human review of shells covers that.
 - Your root component takes no props and is the default export of `index.tsx`.
 - The host puts your shell inside `<div data-shell="<id>">`, which sets font, margin and
   `color-scheme`. Style under that element.

@@ -371,11 +371,21 @@ function checkShellImports(file, dir, errors) {
   }
 }
 
+// A shell reaches the server only through skin-api, so it gets no network API of its own.
+// Static scan: obfuscated calls (window['fe'+'tch']) are left to the human review of shells.
+const NET_API = /(?<![\w$.])(fetch|XMLHttpRequest|WebSocket|EventSource)\b|\b(?:window|globalThis|self)\s*\.\s*(fetch|XMLHttpRequest|WebSocket|EventSource)\b|\bnavigator\s*\.\s*sendBeacon\b/;
+function checkShellNetwork(file, dir, errors) {
+  const label = path.relative(dir, file).split(path.sep).join('/');
+  const src = fs.readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\/|(^|[^:'"`])\/\/.*$/gm, '$1');
+  const m = src.match(NET_API);
+  if (m) errors.push(`${label}: uses ${m[1] || m[2] || 'navigator.sendBeacon'}, a network API shells may not use; go through skin-api`);
+}
+
 function checkShell(dir) {
   const id = path.basename(dir), errors = [];
   checkShellManifest(dir, id, errors);
   for (const f of walkFiles(dir, ['.css'])) checkShellCss(f, id, errors);
-  for (const f of walkFiles(dir, ['.ts', '.tsx'])) if (!/\.test\.tsx?$/.test(f)) checkShellImports(f, dir, errors);
+  for (const f of walkFiles(dir, ['.ts', '.tsx'])) if (!/\.test\.tsx?$/.test(f)) { checkShellImports(f, dir, errors); checkShellNetwork(f, dir, errors); }
   return errors;
 }
 
