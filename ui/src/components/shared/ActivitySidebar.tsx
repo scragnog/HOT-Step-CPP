@@ -18,7 +18,7 @@ import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { PlaylistSidebar } from '../playlist/PlaylistSidebar';
 import { TerminalPanel } from '../terminal/TerminalPanel';
-import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
+import { usePlaylist, type PlaylistItem } from '../../stores/playlistStore';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
 /** Smallest a section may be dragged to, and the room left for the one below. */

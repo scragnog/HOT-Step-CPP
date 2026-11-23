@@ -90,7 +90,7 @@ remain API consumers in the historical import count, but own no server reads.
 | `lyric-studio/CuratedProfileModal.tsx` | Query-backed source reads; curated build remains a streaming command and invalidates on completion |
 | `lyric-studio/ProfilesTab.tsx`, `SourceLyricsTab.tsx`, `WrittenSongsTab.tsx` | Receive authoritative parent detail props; mutations/stream results reconcile via lireek/workflow cache; source-caption helpers owned by shell-queue keep their compatibility projections |
 | `lyric-studio/useAudioGeneration.ts` | Intent capture and enqueue stay commands; preset lookup uses the same Query-backed client |
-| `lyric-studio/playlistStore.ts` | Editable playlist, pending commands and revision conflict reducer retained; authoritative playlist/import snapshots use shared draft queries |
+| `stores/playlistStore.ts` | Editable playlist, pending commands and revision conflict reducer retained; authoritative playlist/import snapshots use shared draft queries |
 | `lyric-studio/StreamingPanel.tsx`, `InlineAudioQueue.tsx` | Client execution/progress display only |
 | `lyric-studio/ArtistGrid.tsx`, `AlbumGrid.tsx`, `AlbumHeader.tsx`, `ArtistSidebar.tsx`, `ArtistPageSidebar.tsx` | Types/forms/parent snapshots; provider picker delegates to its Query owner |
 | `stores/coverStemsStore.ts` | Separation execution/mixer state retained; Query owns separation snapshots; late submission guard prevents resurrection |

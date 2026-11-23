@@ -21,7 +21,7 @@ import {
   setSendToPlaylist,
 } from '../../stores/audioGenQueueStore';
 import type { AudioQueueItem } from '../../stores/audioGenQueueStore';
-import { usePlaylist } from './playlistStore';
+import { usePlaylist } from '../../stores/playlistStore';
 import type { Song } from '../../types';
 import { downloadTrack } from '../../utils/downloadTrack';
 import { play as pbPlay, togglePlay, audioQueueItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';

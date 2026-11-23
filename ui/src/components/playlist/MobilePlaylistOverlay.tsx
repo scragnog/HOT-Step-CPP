@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom';
 import { X, ListMusic } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PlaylistSidebar } from './PlaylistSidebar';
-import type { PlaylistItem } from '../lyric-studio/playlistStore';
+import type { PlaylistItem } from '../../stores/playlistStore';
 
 interface MobilePlaylistOverlayProps {
   isOpen: boolean;

@@ -20,7 +20,7 @@ import type { Generation, AudioGeneration } from '../../services/lireekApi';
 import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { downloadTrack } from '../../utils/downloadTrack';
-import { usePlaylist } from './playlistStore';
+import { usePlaylist } from '../../stores/playlistStore';
 import { playFromList, songToTrack } from '../../stores/playbackStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 

@@ -1,4 +1,4 @@
-import type { UpdateApplyResult, UpdatesStatus, UpdateRestartAttempt } from '../../services/updatesApi';
+import type { UpdateApplyResult, UpdatesStatus, UpdateRestartAttempt } from '../services/updatesApi';
 
 const activePhases = new Set(['checking', 'downloading', 'verifying', 'extracting']);
 export interface UpdateRefusal { error: string; blockers: string[]; errors: string[] }

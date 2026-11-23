@@ -342,7 +342,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/lyric-studio/RenderAcrossModal.tsx` | cover-lyrics | lireekApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/lyric-studio/SourceLyricsTab.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/lyric-studio/WrittenSongsTab.tsx` | cover-lyrics | lireekApi, lyricWorkflowApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/lyric-studio/playlistStore.ts` | cover-lyrics | studioDraftsApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
+| `stores/playlistStore.ts` | cover-lyrics | studioDraftsApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/lyric-studio/useAudioGeneration.ts` | cover-lyrics | lireekApi | - | - | - | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/midi-studio/MidiPlayer.tsx` | studios | midiStudioApi | - | 1 | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/midi-studio/MidiStudio.tsx` | studios | api, midiStudioApi | 1 | - | 2 | Query consumer; forms/commands/streams stay client-owned |

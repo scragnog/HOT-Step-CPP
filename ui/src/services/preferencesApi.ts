@@ -24,7 +24,7 @@ async function request<T>(url: string, method = 'GET', body?: unknown, opts: Rea
 const id = (v: string) => encodeURIComponent(v);
 
 /** Browser-safe sha256 of a serialized value, in the `sha256:<hex>` form the
- *  server expects (same hashing as ui/src/components/lyric-studio/playlistStore.ts). */
+ *  server expects (same hashing as ui/src/stores/playlistStore.ts). */
 export async function hashImportValue(raw: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
   return `sha256:${Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('')}`;

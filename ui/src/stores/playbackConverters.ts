@@ -6,7 +6,7 @@
  */
 
 import type { Song } from '../types';
-import type { PlaylistItem } from '../components/lyric-studio/playlistStore';
+import type { PlaylistItem } from './playlistStore';
 import type { PlaybackTrack } from './playbackStore';
 
 // ── Duration Coercion ────────────────────────────────────────────────────────

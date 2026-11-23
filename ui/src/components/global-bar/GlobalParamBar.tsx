@@ -33,7 +33,7 @@ import { ProfilesModal } from './ProfilesModal';
 import { QueryError } from '../shared/QueryError';
 import { healthOptions } from '../../queries/shell-queue/settings';
 import { engineNotice, noModelsRefetchInterval } from '../shared/noModelsPoll';
-import { usePlaylist } from '../lyric-studio/playlistStore';
+import { usePlaylist } from '../../stores/playlistStore';
 
 type SectionId = 'models' | 'adapters' | 'generation' | 'lm' | 'postprocessing' | null;
 

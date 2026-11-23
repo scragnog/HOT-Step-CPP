@@ -11,7 +11,7 @@ import {
   Play, X, Trash2, ChevronUp, ChevronDown,
   Music, ListPlus, ListMusic, Square, DownloadCloud, Loader2,
 } from 'lucide-react';
-import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
+import { usePlaylist, type PlaylistItem } from '../../stores/playlistStore';
 import { playFromList, togglePlay, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
 import { useAuth } from '../../context/AuthContext';

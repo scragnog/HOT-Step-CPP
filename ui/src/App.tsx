@@ -97,7 +97,7 @@ import {
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
 import type { CreateIntent } from '../../server/src/contracts/resolution';
-import { addToPlaylist, usePlaylist, DELETE_CONFIRM_KEY, type PlaylistItem } from './components/lyric-studio/playlistStore';
+import { addToPlaylist, usePlaylist, DELETE_CONFIRM_KEY, type PlaylistItem } from './stores/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';

@@ -17,7 +17,7 @@ import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import { lireekApi } from '../services/lireekApi';
 import { generateApi, withIntentTimeout, fetchAudioBlob } from '../services/api';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
-import { addToPlaylist } from '../components/lyric-studio/playlistStore';
+import { addToPlaylist } from './playlistStore';
 import type { GenerationParams, GenerationJob } from '../types';
 import { MM3_BACKEND_ID } from '../utils/captionForBackend';
 import { yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID } from '../utils/yue2CaptionSource';

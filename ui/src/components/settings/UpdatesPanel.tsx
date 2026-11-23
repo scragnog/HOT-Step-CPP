@@ -9,7 +9,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { SelectRow } from './SettingsPrimitives';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { UpdateOutcome, UpdateRestartContext } from './UpdateReconnectOverlay';
-import { updateRefusal, updatesViewState } from './updatesViewState';
+import { updateRefusal, updatesViewState } from '../../stores/updatesViewState';
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 8) : null);
 

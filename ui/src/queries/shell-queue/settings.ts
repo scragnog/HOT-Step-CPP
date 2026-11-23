@@ -8,7 +8,7 @@ import { audioQueueApi } from '../../services/audioQueueApi';
 import { dataFolderApi } from '../../services/dataFolderApi';
 import { workspaceArchiveApi, type ArchiveJob } from '../../services/workspaceArchiveApi';
 import { updatesApi, type UpdateRestartAttempt } from '../../services/updatesApi';
-import { completedUpdate, updatesViewState } from '../../components/settings/updatesViewState';
+import { completedUpdate, updatesViewState } from '../../stores/updatesViewState';
 import { getStemStats } from '../../services/stemStudioApi';
 import { serverKey, sharedKeys } from '../keys';
 import { pollWhile } from '../contract';

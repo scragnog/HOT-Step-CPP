@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { UpdateApplyResult, UpdatesStatus, UpdatePrepareStatus } from '../../services/updatesApi';
+import type { UpdateApplyResult, UpdatesStatus, UpdatePrepareStatus } from '../services/updatesApi';
 import { completedUpdate, updateRefusal, updatesViewState, updateVersion } from './updatesViewState';
 
 function fixture(phase: UpdatePrepareStatus['phase'] = 'idle'): UpdatesStatus {

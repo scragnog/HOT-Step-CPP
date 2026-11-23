@@ -7,9 +7,9 @@
  */
 
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { studioDraftsApi, type PlaylistDocument } from '../../services/studioDraftsApi';
-import { getPlaybackState, next } from '../../stores/playbackStore';
+import { useAuth } from '../context/AuthContext';
+import { studioDraftsApi, type PlaylistDocument } from '../services/studioDraftsApi';
+import { getPlaybackState, next } from './playbackStore';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

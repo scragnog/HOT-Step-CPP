@@ -665,7 +665,7 @@ migration. The historical test fake is retained here only to reconcile its row.
 | `components/lyric-studio/RenderAcrossModal.tsx` | cover-lyrics | Query consumer; forms/commands/streams stay client-owned |
 | `components/lyric-studio/SourceLyricsTab.tsx` | cover-lyrics | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/lyric-studio/WrittenSongsTab.tsx` | cover-lyrics | Area service/store adapter; Query reads, explicit commands/client state |
-| `components/lyric-studio/playlistStore.ts` | cover-lyrics | Area service/store adapter; Query reads, explicit commands/client state |
+| `stores/playlistStore.ts` | cover-lyrics | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/lyric-studio/useAudioGeneration.ts` | cover-lyrics | Area service/store adapter; Query reads, explicit commands/client state |
 | `components/midi-studio/MidiPlayer.tsx` | studios | Query consumer; forms/commands/streams stay client-owned |
 | `components/midi-studio/MidiStudio.tsx` | studios | Query consumer; forms/commands/streams stay client-owned |

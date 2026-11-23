@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import type { UpdateApplyResult, UpdateRestartAttempt } from '../../services/updatesApi';
 import { updateReconnectOptions } from '../../queries/shell-queue/settings';
-import { updateVersion } from './updatesViewState';
+import { updateVersion } from '../../stores/updatesViewState';
 
 // App owns the attempt so replacing Settings with a liveness screen cannot
 // discard it. Settings starts the attempt only after apply returns 202.

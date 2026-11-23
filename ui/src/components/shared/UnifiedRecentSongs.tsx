@@ -15,7 +15,7 @@ import { songApi } from '../../services/api';
 import type { UnifiedRecentSong } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { downloadTrack } from '../../utils/downloadTrack';
-import { usePlaylist } from '../lyric-studio/playlistStore';
+import { usePlaylist } from '../../stores/playlistStore';
 import { playFromList, togglePlay, unifiedRecentSongToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { SongActionsMenu, songFromRecent } from './SongActionsMenu';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
