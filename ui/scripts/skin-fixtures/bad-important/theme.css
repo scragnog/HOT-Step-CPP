@@ -1,0 +1,2 @@
+html[data-skin="bad-important"] { --k-ink: 255 255 255 !important; --k-ink: 0 0 0; }
+html[data-skin="bad-important"]:not(.dark) { --k-ink: 255 255 255; }

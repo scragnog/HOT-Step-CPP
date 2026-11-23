@@ -1,0 +1,2 @@
+html[data-skin="bad-gradient-dip"] { --k-on-tint: 118 118 118; --grad-tint: linear-gradient(180deg, #000000 0%, #ffffff 100%); }
+html[data-skin="bad-gradient-dip"]:not(.dark) { --k-on-tint: 118 118 118; --grad-tint: linear-gradient(180deg, #000000 0%, #ffffff 100%); }

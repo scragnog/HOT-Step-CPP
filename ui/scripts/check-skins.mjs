@@ -97,6 +97,7 @@ function checkCss(dir, id, errors) {
     } else if (n.type === 'decl') {
       const sel = n.parent.type === 'rule' ? n.parent.selector : null;
       if (!TOKENS.has(n.prop)) errors.push(`theme.css: "${n.prop}" is not a documented token`);
+      if (n.important) errors.push(`theme.css: ${n.prop} uses !important, which is not allowed`);
       const bad = TOKENS.has(n.prop) ? badValue(n.prop, n.value) : null;
       if (/url\s*\(|@import/i.test(n.value)) errors.push(`theme.css: ${n.prop} uses url() or import, which is not allowed`);
       else if (bad) errors.push(`theme.css: ${n.prop} ${bad}`);
@@ -131,9 +132,28 @@ function gradientStops(val) {
     if (ch === ',' && depth === 0) { parts.push(cur); cur = ''; } else cur += ch;
   }
   parts.push(cur);
-  if (/^\s*(-?[\d.]+(deg|turn|rad|grad)|to\s+[a-z\s]+)\s*$/i.test(parts[0])) parts.shift();
+  // Optional direction: an angle, or "to <side>" / "to <corner>". Anything else in that slot is a stop.
+  if (/^\s*(-?\d*\.?\d+(deg|turn|rad|grad)|to\s+(top|bottom)(\s+(left|right))?|to\s+(left|right)(\s+(top|bottom))?)\s*$/i.test(parts[0])) parts.shift();
   if (parts.length < 2) return [null];
-  return parts.map(p => opaqueColour(p.trim().replace(/(\s+-?[\d.]+(%|px))+$/i, '')));
+  // Each stop is one colour plus at most two positions (% or px); a colour that does not parse is null.
+  return parts.map(p => {
+    const m = /^(.*?)((?:\s+-?\d*\.?\d+(?:%|px)){0,2})$/.exec(p.trim());
+    return m ? opaqueColour(m[1]) : null;
+  });
+}
+
+// Colours the gradient paints: each stop, plus 16 evenly spaced blends between neighbouring stops
+// (browsers blend in sRGB), so a fill that dips below the contrast floor between two passing stops is caught.
+// Stop positions only squeeze segments and never add a colour, so they are ignored. A null stop stays null.
+function paintedColours(stops) {
+  const out = stops.map((c, i) => ({ label: `stop ${i + 1}`, c }));
+  const res = [];
+  for (let i = 0; i < out.length; i++) {
+    res.push(out[i]);
+    const a = out[i].c, b = out[i + 1]?.c;
+    if (a && b) for (let k = 1; k < 16; k++) res.push({ label: `between stops ${i + 1} and ${i + 2}`, c: a.map((x, j) => Math.round(x + (b[j] - x) * k / 16)) });
+  }
+  return res;
 }
 
 function checkContrast(sets, def, errors, label) {
@@ -153,8 +173,8 @@ function checkContrast(sets, def, errors, label) {
     const fills = [['--grad-tint', ['--tint-hover', '--tint', '--tint-deep']], ['--grad-tint-hover', ['--tint-glow', '--tint-hover', '--tint']], ['--grad-tint-press', ['--tint-deep', '--tint']]];
     const surf = ['--grad-raised', '--grad-raised-press', '--grad-panel', '--grad-well'];
     const rgbPairs = [];
-    for (const [name, fb] of fills) stopsOf(name, fb).forEach((bg, i) => rgbPairs.push(['--k-on-tint', triplet(v['--k-on-tint'] ?? ''), `${name} stop ${i + 1}`, bg]));
-    for (const name of surf) stopsOf(name, []).forEach((bg, i) => { for (const t of ['--k-ink', '--k-muted']) rgbPairs.push([t, triplet(v[t] ?? ''), `${name} stop ${i + 1}`, bg]); });
+    for (const [name, fb] of fills) for (const { label, c } of paintedColours(stopsOf(name, fb))) rgbPairs.push(['--k-on-tint', triplet(v['--k-on-tint'] ?? ''), `${name} ${label}`, c]);
+    for (const name of surf) for (const { label, c } of paintedColours(stopsOf(name, []))) for (const t of ['--k-ink', '--k-muted']) rgbPairs.push([t, triplet(v[t] ?? ''), `${name} ${label}`, c]);
     for (const [fg, a, bgName, b] of rgbPairs) {
       if (!a || !b) { errors.push(`${label}${mode}: ${fg} or ${bgName} is not a readable colour`); continue; }
       const r = contrast(a, b);
@@ -191,7 +211,7 @@ for (const t of TOKENS) if (!docs.includes(`\`${t}\``)) { console.error(`docs/de
 // The default kit must itself pass the contrast rules, so the rules are fair.
 const defErr = [];
 checkContrast({ dark: {}, light: {} }, def, defErr, 'default kit ');
-for (const e of defErr) console.log(`note (shipped kit, not gated): ${e}`); // themes are gated; the default look must not change in this slice
+if (defErr.length) console.log(`note (shipped kit, not gated): ${defErr[0]}${defErr.length > 1 ? ` (+${defErr.length - 1} more samples on the same gradient)` : ''}`); // themes are gated; the default look must not change in this slice
 
 const themes = subdirs(THEMES_DIR);
 for (const dir of themes) {

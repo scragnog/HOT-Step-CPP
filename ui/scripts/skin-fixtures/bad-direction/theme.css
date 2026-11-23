@@ -1,0 +1,2 @@
+html[data-skin="bad-direction"] { --grad-tint: linear-gradient(to center, #38bdf8 0%, #0284c7 100%); }
+html[data-skin="bad-direction"]:not(.dark) { --grad-tint: linear-gradient(to center, #38bdf8 0%, #0284c7 100%); }

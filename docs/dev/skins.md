@@ -46,10 +46,13 @@ theme is `html[data-skin="<id>"]`, set by `ui/public/theme-boot.js` before first
 - Values follow a fixed grammar per token: colour channels are `R G B`; gradients
   may use only `linear-gradient()`, `rgb()`, `rgba()` and `var()` of a documented
   token; shadows only `rgb()`, `rgba()` and `var()`; fonts are plain family names.
-  No image function of any kind, no escapes, no strings outside fonts.
+  No image function of any kind, no escapes, no strings outside fonts. A gradient
+  is `linear-gradient(<angle or to side>, <opaque colour> [positions], ...)` with
+  `#hex` or `rgb()` colours; names and transparency are rejected because the
+  checker cannot compute their contrast. `!important` is not allowed.
 - Text must keep 4.5:1 contrast on the fills the kit paints, in both modes: ink and
-  muted on the flat surfaces and on every colour stop of the raised, panel and well
-  gradients, and on-tint on every stop of the accent gradients.
+  muted on the flat surfaces and on every colour stop, and the blends between stops, of the raised, panel and well
+  gradients, and on-tint on the accent gradients.
 
 Run `npm run check:skins` from `ui/`. It parses each theme with PostCSS, checks
 the manifest, the rules above and the contrast pairs (ink and muted on the four
