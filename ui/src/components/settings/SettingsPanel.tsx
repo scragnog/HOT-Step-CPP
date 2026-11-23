@@ -15,6 +15,7 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { engineWorkersOptions, healthOptions, updatesStatusOptions } from '../../queries/shell-queue/settings';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../app/appSettings';
 import { resolveShell, switchShell, type Shell } from '../../app/shell';
+import { SHELLS } from '../../app/shellRegistry';
 import { SKIN_KEY, themesFor } from '../../themes/registry';
 import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
@@ -679,7 +680,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           label="Interface"
           description="Which layout the app starts with. Switching reloads the page. Studio is an unfinished preview."
           value={resolveShell()}
-          options={[{ value: 'classic', label: 'Classic' }, { value: 'studio', label: 'Studio (preview)' }]}
+          options={[{ value: 'classic', label: 'Classic' }, ...SHELLS.map(s => ({ value: s.id, label: s.id === 'studio' ? 'Studio (preview)' : s.name }))]}
           onChange={(v) => switchShell(v as Shell)}
           defaultValue="classic"
         />

@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-root",
+  "name": "bad-shell-root",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

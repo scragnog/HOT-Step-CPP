@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-at-import",
+  "name": "bad-shell-at-import",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

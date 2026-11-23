@@ -41,7 +41,7 @@ const noComponentQuery = {
 }
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'scripts/skin-fixtures-shells/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -71,11 +71,12 @@ export default defineConfig([
       }],
     },
   },
-  // The studio shell builds on the kit and the shared runtime, not on classic's
-  // components (docs/dev/ui-design.md#shells). This block replaces the one above
-  // for these files, so it repeats the contracts pattern.
+  // Shell skins (docs/dev/skins.md#shell-skins) import their own folder, skin-api, react,
+  // lucide-react and the kit, and nothing else from src/. This block replaces the one above
+  // for these files, so it repeats the contracts pattern. It catches the common reaches;
+  // scripts/check-skins.mjs resolves every import path exactly.
   {
-    files: ['src/shells/studio/**/*.{ts,tsx}'],
+    files: ['src/shells/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-imports': ['error', {
@@ -85,8 +86,16 @@ export default defineConfig([
             message: 'Import shared contracts from server/src/contracts/ instead of server implementation code.',
           },
           {
+            regex: '^(?![./])(?!react$)(?!react/jsx-runtime$)(?!lucide-react$)',
+            message: 'A shell may import only react, lucide-react, its own folder, skin-api and the kit.',
+          },
+          {
             regex: '(^|/)components/(?!shared/kit/)',
-            message: 'The studio shell may import only components/shared/kit/. Classic components stay in the classic shell.',
+            message: 'A shell may import only components/shared/kit/. Classic components stay in classic.',
+          },
+          {
+            regex: '^(\\.\\./)+(app|audio|constants|context|data|hooks|i18n|queries|services|stores|themes|types|utils|assets)(/|$)',
+            message: 'A shell reaches the app only through skin-api (docs/dev/skins.md).',
           },
         ],
       }],

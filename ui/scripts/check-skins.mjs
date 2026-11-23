@@ -3,6 +3,8 @@
 // Checks every ui/src/themes/<id>/ (manifest, CSS rules, contrast), then runs the
 // bad fixtures in scripts/skin-fixtures/ and fails unless each is rejected for
 // the reason named in its expect.txt. Classic overlay skins get the scope rules instead of tokens and contrast.
+// The shell half (bottom of the file) checks every ui/src/shells/<id>/: manifest, CSS rules, import fence,
+// against the bad shells in scripts/skin-fixtures-shells/.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -289,5 +291,102 @@ for (const dir of subdirs(FIXTURES_DIR)) {
   else { failed++; console.error(`FAIL fixture ${name}: expected a rejection containing "${want}", got ${errs.length ? errs.join(' | ') : 'none'}`); }
 }
 
+// ── Shell skins (docs/dev/skins.md#shell-skins) ──
+// A shell is a full React UI, so the checker holds its CSS to the shell rules and resolves every import
+// path (the ESLint fence catches the common reaches; this is the exact check).
+const SHELLS_DIR = path.join(UI, 'src/shells');
+const SHELL_FIXTURES_DIR = path.join(HERE, 'skin-fixtures-shells');
+const inside = (file, dir) => { const r = path.relative(dir, file); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
+const ALLOWED_DIRS = ['src/skin-api', 'src/components/shared/kit', '../server/src/contracts'].map(d => path.join(UI, d));
+const ALLOWED_BARE = new Set(['react', 'react/jsx-runtime', 'lucide-react']);
+const walkFiles = (dir, exts) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
+  const p = path.join(dir, e.name);
+  return e.isDirectory() ? walkFiles(p, exts) : exts.some(x => p.endsWith(x)) ? [p] : [];
+});
+
+function checkShellManifest(dir, id, errors) {
+  let m;
+  try { m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); }
+  catch (e) { errors.push(`manifest: unreadable (${e.message})`); return; }
+  const str = k => typeof m[k] === 'string' && m[k].trim() !== '';
+  if (m.id !== id) errors.push(`manifest: id "${m.id}" must equal the folder name "${id}"`);
+  if (!/^[a-z][a-z0-9-]{1,31}$/.test(id)) errors.push(`manifest: folder/id "${id}" must be lowercase letters, digits and dashes`);
+  for (const k of ['name', 'author']) if (!str(k)) errors.push(`manifest: "${k}" must be a non-empty string`);
+  if (!str('version') || !/^\d+\.\d+\.\d+$/.test(m.version)) errors.push('manifest: "version" must be semver (1.0.0)');
+  if (m.api !== 0) errors.push('manifest: "api" must be 0');
+  if (m.kind !== 'shell') errors.push('manifest: "kind" must be "shell"');
+  if (m.license !== undefined && !str('license')) errors.push('manifest: "license" must be a non-empty string when present');
+  if (!fs.existsSync(path.join(dir, 'index.tsx'))) errors.push('index.tsx is missing (its default export is the shell root)');
+}
+
+function checkShellCss(file, id, errors) {
+  const label = `${path.basename(file)}:`;
+  let root;
+  try { root = postcss.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { errors.push(`${label} parse error (${e.message})`); return; }
+  const shellRoot = new RegExp(`^(?:\\.dark\\s+)?\\[data-shell="${id}"\\]$`);
+  root.walk(n => {
+    if (n.type === 'atrule') {
+      const name = n.name.toLowerCase();
+      if (name === 'keyframes') { if (!n.params.startsWith(`${id}-`)) errors.push(`${label} @keyframes "${n.params}" must be named "${id}-<name>" (names are global)`); }
+      else if (!['media', 'supports', 'font-face'].includes(name)) errors.push(`${label} @${n.name} is not allowed`);
+    } else if (n.type === 'rule') {
+      if (n.parent?.type === 'atrule' && n.parent.name.toLowerCase() === 'keyframes') return;
+      for (const sel of splitSelectors(n.selector)) {
+        if (shellRoot.test(sel)) continue;
+        const bare = sel.replace(/\[[^\]]*\]|"[^"]*"|'[^']*'/g, '');
+        if (/:root|(^|[\s>+~(,])(html|body)(?![\w-])|\*/.test(bare)) errors.push(`${label} selector "${sel}" uses :root, html, body or *, which shell CSS may not touch`);
+        else if (!/\.[A-Za-z_][\w-]*/.test(bare)) errors.push(`${label} selector "${sel}" has no class (every shell selector carries a class)`);
+      }
+    } else if (n.type === 'decl') {
+      const p = n.parent;
+      if (n.prop.startsWith('--') && !(p.type === 'rule' && splitSelectors(p.selector).every(s => shellRoot.test(s)))) {
+        errors.push(`${label} custom property ${n.prop} must be set on [data-shell="${id}"] (or .dark [data-shell="${id}"]) only`);
+      }
+      if (/@import/i.test(n.value)) errors.push(`${label} ${n.prop} uses @import, which is not allowed`);
+      for (const m of n.value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) {
+        const u = (m[1] ?? m[2] ?? m[3]).trim();
+        if (/^data:/i.test(u)) continue;
+        if (/^([a-z][a-z0-9+.-]*:|\/)/i.test(u) || u.split(/[\\/]/).includes('..')) errors.push(`${label} ${n.prop} has an external url "${u}"; use a relative file inside the shell folder`);
+      }
+    }
+  });
+}
+
+function checkShellImports(file, dir, errors) {
+  const label = path.relative(dir, file).split(path.sep).join('/');
+  const src = fs.readFileSync(file, 'utf8');
+  for (const m of src.matchAll(/(?:\bfrom|\bimport|\brequire)\s*\(?\s*['"]([^'"\n]+)['"]/g)) {
+    const spec = m[1].replace(/\?.*$/, '');
+    const ok = spec.startsWith('.')
+      ? [dir, ...ALLOWED_DIRS].some(d => inside(path.resolve(path.dirname(file), spec), d))
+      : ALLOWED_BARE.has(spec);
+    if (!ok) errors.push(`${label}: imports "${spec}", which is outside the allowed set (own folder, skin-api, react, lucide-react, the kit)`);
+  }
+}
+
+function checkShell(dir) {
+  const id = path.basename(dir), errors = [];
+  checkShellManifest(dir, id, errors);
+  for (const f of walkFiles(dir, ['.css'])) checkShellCss(f, id, errors);
+  for (const f of walkFiles(dir, ['.ts', '.tsx'])) if (!/\.test\.tsx?$/.test(f)) checkShellImports(f, dir, errors);
+  return errors;
+}
+
+const shells = subdirs(SHELLS_DIR);
+for (const dir of shells) {
+  const errs = checkShell(dir);
+  if (errs.length) { failed += errs.length; console.error(`FAIL shell ${path.basename(dir)}:\n  - ${errs.join('\n  - ')}`); }
+  else console.log(`ok   shell ${path.basename(dir)}`);
+}
+for (const dir of subdirs(SHELL_FIXTURES_DIR)) {
+  const name = path.basename(dir);
+  const want = fs.readFileSync(path.join(dir, 'expect.txt'), 'utf8').trim();
+  const errs = checkShell(dir);
+  const hit = errs.find(e => e.includes(want));
+  if (hit) console.log(`ok   shell fixture ${name} rejected: ${hit}`);
+  else { failed++; console.error(`FAIL shell fixture ${name}: expected a rejection containing "${want}", got ${errs.length ? errs.join(' | ') : 'none'}`); }
+}
+
 if (failed) { console.error(`[check-skins] ${failed} problem(s)`); process.exit(1); }
-console.log(`[check-skins] ok (${themes.length} theme(s))`);
+console.log(`[check-skins] ok (${themes.length} theme(s), ${shells.length} shell(s))`);

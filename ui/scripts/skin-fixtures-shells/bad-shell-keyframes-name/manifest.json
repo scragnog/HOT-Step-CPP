@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-keyframes-name",
+  "name": "bad-shell-keyframes-name",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

@@ -335,26 +335,30 @@ down.
 
 ## Shells
 
-The app has two roots, picked at boot in `ui/src/main.tsx` through `app/shell.ts`: **classic**
-(`App.tsx`, the layout described above) and **studio** (`shells/studio/StudioApp.tsx`, a work in
-progress). `?ui=classic|studio` wins and is saved to `hs-shell`; without it the saved value is used;
-without that, classic. Settings, General, Interface writes the same key. A switch is a full page
-reload, never a live swap, and only the chosen shell is downloaded (`import()` under `Suspense`).
+The app has one classic root and any number of registered shells, picked at boot in
+`ui/src/main.tsx` through `app/shell.ts`: **classic** (`App.tsx`, the layout described above) and the
+shells that `app/shellRegistry.ts` finds in `src/shells/<id>/` (`studio`, a work in progress, and the
+`starter` template). `?ui=<id>` wins and is saved to `hs-shell`; without it the saved value is used; an
+id that is not registered falls back to classic. Settings, General, Interface writes the same key. A
+switch is a full page reload, never a live swap, and only the chosen shell is downloaded.
 
-Both shells call `useAppRuntime` (`ui/src/app/`) once. It owns everything that is not layout: queue
-resume and projection, live MM3 takes and the play-bar handover, song-cache patches from window
-events, the library refetch after a reconnect, offline and restart detection, and the `ace-settings`
-flags a Create render carries. A new runtime concern goes there, not into a shell.
+Classic calls `useAppRuntime` (`ui/src/app/`) itself. Every other shell runs inside `ShellHost`
+(`app/ShellHost.tsx`), which mounts the runtime once, with the providers and the offline, restart and
+update overlays. The runtime owns everything that is not layout: queue resume and projection, live MM3
+takes and the play-bar handover, song-cache patches from window events, the library refetch after a
+reconnect, offline and restart detection, and the `ace-settings` flags a Create render carries. A new
+runtime concern goes there, not into a shell.
 
 Rules:
 
-- **Fence.** `src/shells/studio/**` may import only `components/shared/kit/` from `components/`
-  (`no-restricted-imports` in `ui/eslint.config.js`). Everything else comes from the runtime, stores,
-  queries and services.
-- **CSS.** `index.css` is frozen apart from kit classes. Studio CSS lives in a file imported by the
-  studio entry only.
-- **Persisted keys.** Studio-only keys use an `hs-studio-` prefix. The shape of an existing key never
-  changes, because classic reads it too. `hs-shell` holds a JSON string, `"classic"` or `"studio"`.
+- **Fence.** A shell (`src/shells/**`) may import only its own folder, `src/skin-api/`, `react`,
+  `lucide-react` and `components/shared/kit/` (`no-restricted-imports` in `ui/eslint.config.js`, and the
+  exact path check in `ui/scripts/check-skins.mjs`). Everything else reaches it through `skin-api`.
+- **CSS.** `index.css` is frozen apart from kit classes. Shell CSS follows the rules in
+  [skins.md](skins.md#shell-css-rules).
+- **Persisted keys.** A shell's own keys use `hs-skin-<id>-` (`useSkinStorage`). The shape of an
+  existing key never changes, because classic reads it too. `hs-shell` holds a JSON string, `"classic"`
+  or a shell id.
 
 ## Verifying a change
 

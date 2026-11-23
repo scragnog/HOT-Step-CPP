@@ -6,7 +6,9 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { ToastContainer } from 'react-toastify'
 import './index.css'
 import './i18n'
-import { resolveShell } from './app/shell'
+import { CLASSIC, resolveShell } from './app/shell'
+import { loadShell } from './app/shellRegistry'
+import { ShellHost } from './app/ShellHost'
 import { AuthProvider } from './context/AuthContext.tsx'
 import { startHeapWatch } from './utils/heapWatch'
 import { ErrorBoundary } from './components/shared/ErrorBoundary'
@@ -19,11 +21,12 @@ startHeapWatch()
 
 // theme-boot.js set data-skin from hs-skin; keep it only if the skin targets this shell.
 const shellId = resolveShell()
-dropForeignSkin(shellId)
+dropForeignSkin(shellId === CLASSIC ? 'classic' : 'studio') // every other shell wears kit (studio) themes
 
-// Only the chosen shell is downloaded (app/shell.ts). Both default-export a root.
+// Only the chosen shell is downloaded (app/shell.ts). Classic is App.tsx and runs its own runtime;
+// every other shell is registered in app/shellRegistry.ts and runs inside ShellHost.
 // eslint-disable-next-line react-refresh/only-export-components -- entry file, nothing hot-reloads it
-const Shell = lazy(() => shellId === 'studio' ? import('./shells/studio/StudioApp') : import('./App'))
+const Shell = lazy(() => shellId === CLASSIC ? import('./App') : loadShell(shellId))
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -34,7 +37,7 @@ createRoot(document.getElementById('root')!).render(
           {/* Global error toasts from the axios interceptor (axiosClient.ts). */}
           <ToastContainer />
           <Suspense fallback={null}>
-            <Shell />
+            {shellId === CLASSIC ? <Shell /> : <ShellHost shellId={shellId}><Shell /></ShellHost>}
           </Suspense>
         </AuthProvider>
       </QueryClientProvider>

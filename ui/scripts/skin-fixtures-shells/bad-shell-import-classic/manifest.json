@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-import-classic",
+  "name": "bad-shell-import-classic",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

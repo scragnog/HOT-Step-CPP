@@ -1,0 +1,9 @@
+{
+  "id": "starter",
+  "name": "Starter template",
+  "author": "HOT-Step",
+  "version": "0.1.0",
+  "api": 0,
+  "kind": "shell",
+  "license": "MIT"
+}

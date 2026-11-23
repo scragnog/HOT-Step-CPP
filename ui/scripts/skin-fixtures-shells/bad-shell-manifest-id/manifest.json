@@ -1,0 +1,8 @@
+{
+  "id": "other-name",
+  "name": "other-name",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

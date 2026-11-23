@@ -7,7 +7,10 @@
     if (skin && /^[a-z][a-z0-9-]{1,31}$/.test(skin)) document.documentElement.setAttribute('data-skin', skin);
   } catch (e) { /* storage blocked: no skin */ }
   try {
-    if (localStorage.getItem('hs-theme') === 'light') return; // stay light
+    var t = localStorage.getItem('hs-theme');
+    if (t === 'light') return; // stay light
+    // system follows the OS; without a matchMedia answer it stays dark, the default
+    if (t === 'system' && window.matchMedia && !window.matchMedia('(prefers-color-scheme: dark)').matches) return;
     document.documentElement.classList.add('dark'); // default to dark
   } catch (e) { document.documentElement.classList.add('dark'); }
 })();

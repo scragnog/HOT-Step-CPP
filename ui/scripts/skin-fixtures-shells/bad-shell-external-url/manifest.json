@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-external-url",
+  "name": "bad-shell-external-url",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}
