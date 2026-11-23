@@ -26,9 +26,10 @@ ui/src/themes/<id>/theme.css
 | `name` | Shown in the picker. |
 | `author` | Who to credit. |
 | `version` | Semver, `1.0.0`. |
+| `license` | Optional. The licence of an imported skin (e.g. `MIT`). |
 | `api` | `0`. |
 | `kind` | `"theme"`. |
-| `targets` | `["studio"]`, `["classic"]` or both. Studio themes set kit tokens only (the rules below). Classic rules are not defined yet; the checker skips them and says so. |
+| `targets` | `["studio"]`, `["classic"]` or both. Studio themes set kit tokens only (the rules below). Classic skins follow [Classic overlay skins](#classic-overlay-skins). |
 | `preview` | 2 to 4 hex colours (`#rrggbb`) for the picker swatch. |
 
 The selection is stored as `hs-skin` (`hs-theme` is light or dark). The active
@@ -125,3 +126,33 @@ the app ships.
 1. Copy `ui/src/themes/ice/` to `ui/src/themes/<id>/` and edit both files.
 2. Open `/kit`, pick it in the Skin row, and look at dark and light.
 3. `npm run check:skins` from `ui/`.
+
+## Classic overlay skins
+
+A theme whose manifest targets `classic` is an overlay: plain CSS that restyles
+classic's class names (`ui/src/themes/skeuo/` is the first). The classic UI has no
+semantic colour layer, so an overlay is **tied to classic's markup**. That works
+because classic is meant to stay put; if you change a classic class combination or
+a hook (`sk-fader*` on `EditableSlider`), check the overlays.
+
+To recolour the brand accent, set `--pink-50` to `--pink-950` and `--rose-50` to
+`--rose-950` (RGB channels, `R G B`). Every `pink-*` and `rose-*` utility reads
+them (`tailwind.config.js`); the defaults in `index.css` equal Tailwind's stock
+values, so with no skin classic is unchanged.
+
+The picker is **Settings > Skin** in classic. It sets `html[data-skin]` at once and
+saves `hs-skin`; the default is no skin.
+
+`check-skins.mjs` enforces, for overlays:
+
+- Every selector is scoped to `html[data-skin="<id>"]`, `html.dark[data-skin="<id>"]`
+  or `:root[data-skin="<id>"]`, so a skin is inert until selected.
+- No `@import`, `@font-face` or other at-rules except `@media`, `@keyframes`,
+  `@supports`. No `url()` except `data:` (the embedded images need `img-src data:`
+  in the CSP). Fonts: name system fonts only; a skin cannot ship a font file.
+- No `position: fixed` and no `content` property, so a skin cannot overlay the page
+  or inject fake UI. `!important` is allowed.
+
+There is no token or contrast check: a person reviews an overlay in both modes.
+Keep an `IMPORT.md` beside an imported skin recording the source and every edit,
+so the next drop from its author is a diff.

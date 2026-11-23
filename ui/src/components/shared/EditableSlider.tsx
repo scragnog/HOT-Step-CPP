@@ -123,16 +123,16 @@ export const EditableSlider: React.FC<EditableSliderProps> = ({
           >{displayValue}</span>
         )}
       </div>
-      <div className="relative h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full shadow-inner">
+      <div className="sk-fader relative h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full shadow-inner">
         <input type="range" min={min} max={max} step={step} value={effectiveValue}
           onChange={handleRangeChange} onPointerUp={handleRangeCommit} onTouchEnd={handleRangeCommit}
           className={`absolute inset-0 w-full h-full opacity-0 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           disabled={disabled}
         />
-        <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 to-rose-600 rounded-full pointer-events-none transition-all duration-150"
+        <div className="sk-fader-fill absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 to-rose-600 rounded-full pointer-events-none transition-all duration-150"
           style={{ width: `${Math.max(0, Math.min(100, ((effectiveValue - min) / (max - min)) * 100))}%` }}
         />
-        <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-200 rounded-full shadow-md border-2 border-pink-500 pointer-events-none transition-all duration-150"
+        <div className="sk-fader-thumb absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-zinc-200 rounded-full shadow-md border-2 border-pink-500 pointer-events-none transition-all duration-150"
           style={{ left: `clamp(0px, calc(${((effectiveValue - min) / (max - min)) * 100}% - 8px), calc(100% - 16px))` }}
         />
       </div>

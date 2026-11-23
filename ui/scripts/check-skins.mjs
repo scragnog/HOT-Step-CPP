@@ -2,7 +2,7 @@
 //   node scripts/check-skins.mjs
 // Checks every ui/src/themes/<id>/ (manifest, CSS rules, contrast), then runs the
 // bad fixtures in scripts/skin-fixtures/ and fails unless each is rejected for
-// the reason named in its expect.txt. Slice 3 adds the shell half.
+// the reason named in its expect.txt. Classic overlay skins get the scope rules instead of tokens and contrast.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -203,14 +203,55 @@ function checkContrast(sets, def, errors, label) {
   }
 }
 
+// Classic overlay skins restyle class names, so they cannot be held to a token list; they are reviewed by eye.
+// The checker only enforces what keeps them safe and inert: every selector is scoped to the skin, and a
+// skin cannot load anything or paint fake UI. Judgement calls: `position: fixed` and `content` are rejected
+// outright (no overlays, no injected text); @media, @keyframes and @supports are allowed, @import and
+// @font-face are not; `!important` is allowed (the skin must beat utility classes, and it is scoped).
+const splitSelectors = sel => { // comma-split at depth 0, so :is(a, b) stays whole
+  const out = []; let depth = 0, cur = '';
+  for (const ch of sel) {
+    if (ch === '(' || ch === '[') depth++; else if (ch === ')' || ch === ']') depth--;
+    if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+};
+
+function checkClassicCss(dir, id, errors) {
+  const file = path.join(dir, 'theme.css');
+  if (!fs.existsSync(file)) { errors.push('theme.css is missing'); return; }
+  let root;
+  try { root = postcss.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { errors.push(`theme.css: parse error (${e.message})`); return; }
+  const scope = new RegExp(`^(html|html\\.dark|:root)\\[data-skin="${id}"\\](?![\\w-])`);
+  root.walk(n => {
+    if (n.type === 'atrule') {
+      if (!['media', 'keyframes', 'supports'].includes(n.name.toLowerCase())) errors.push(`theme.css: @${n.name} is not allowed`);
+    } else if (n.type === 'rule') {
+      if (n.parent.type === 'atrule' && /keyframes$/i.test(n.parent.name)) return; // 0%, 50%, from, to
+      for (const part of splitSelectors(n.selector)) if (!scope.test(part)) errors.push(`theme.css: selector "${part}" is not scoped to html[data-skin="${id}"] (or :root / html.dark with it)`);
+    } else if (n.type === 'decl') {
+      for (const m of n.value.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/gi)) {
+        if (!/^data:/i.test((m[1] ?? m[2] ?? m[3]).trim())) errors.push(`theme.css: ${n.prop} has an external url(); only data: URLs are allowed`);
+      }
+      if (/@import/i.test(n.value)) errors.push(`theme.css: ${n.prop} uses @import, which is not allowed`);
+      if (n.prop.toLowerCase() === 'position' && /^fixed(\s|;|$)/i.test(n.value.trim())) errors.push('theme.css: position: fixed is not allowed (a skin must not overlay the page)');
+      if (n.prop.toLowerCase() === 'content') errors.push('theme.css: the content property is not allowed (a skin must not inject text or fake UI)');
+    }
+  });
+}
+
 function checkTheme(dir, def) {
   const id = path.basename(dir), errors = [];
   const targets = checkManifest(dir, id, errors);
-  if (Array.isArray(targets) && targets.includes('classic')) console.log(`note ${id}: classic rules: not implemented yet (HOTSTEP-1322)`);
-  // Studio targets: token-only rules and contrast. Classic-only themes skip them until HOTSTEP-1322.
-  if (Array.isArray(targets) && !targets.includes('studio')) return errors;
-  const sets = checkCss(dir, id, errors);
-  if (sets) checkContrast(sets, def, errors, 'contrast ');
+  if (!Array.isArray(targets)) return errors;
+  if (targets.includes('classic')) checkClassicCss(dir, id, errors);
+  // Studio targets: token-only rules and contrast.
+  if (targets.includes('studio')) {
+    const sets = checkCss(dir, id, errors);
+    if (sets) checkContrast(sets, def, errors, 'contrast ');
+  }
   return errors;
 }
 

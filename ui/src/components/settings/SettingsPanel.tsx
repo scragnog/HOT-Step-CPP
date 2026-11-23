@@ -15,6 +15,7 @@ import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { engineWorkersOptions, healthOptions, updatesStatusOptions } from '../../queries/shell-queue/settings';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../app/appSettings';
 import { resolveShell, switchShell, type Shell } from '../../app/shell';
+import { SKIN_KEY, themesFor } from '../../themes/registry';
 import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
 import { WorkspaceArchivePanel } from './WorkspaceArchivePanel';
@@ -50,6 +51,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const [coverSet, setCoverSetState] = useState<CoverSet>(getCoverSet);
+  const classicSkins = themesFor('classic');
+  const [skin, setSkin] = useState(() => { const id = document.documentElement.getAttribute('data-skin') ?? ''; return classicSkins.some(t => t.id === id) ? id : ''; });
   // The release tag the server reports; a git checkout says "dev" (#185).
   const appVersion = String(useQuery(healthOptions()).data?.version || '');
   const updateStatus = useQuery({
@@ -680,6 +683,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           onChange={(v) => switchShell(v as Shell)}
           defaultValue="classic"
         />
+
+        {resolveShell() === 'classic' && classicSkins.length > 0 && (
+          <SelectRow
+            id="setting-skin"
+            label="Skin"
+            description="A look for the classic layout. It applies at once and is remembered. The default is the standard look."
+            value={skin}
+            options={[{ value: '', label: 'Default' }, ...classicSkins.map(t => ({ value: t.id, label: t.name }))]}
+            onChange={(v) => {
+              const html = document.documentElement;
+              if (v) html.setAttribute('data-skin', v); else html.removeAttribute('data-skin');
+              try { if (v) localStorage.setItem(SKIN_KEY, v); else localStorage.removeItem(SKIN_KEY); } catch { /* storage blocked: this session only */ }
+              setSkin(v);
+            }}
+            defaultValue=""
+          />
+        )}
       </div>
 
 

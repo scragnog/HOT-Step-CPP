@@ -1,0 +1,279 @@
+/* ==========================================================================
+   Skeuomorphic skin — "hardware" look for HOT-Step CPP
+   --------------------------------------------------------------------------
+   Switched on by <html data-skin="skeuo"> (hooks/useTheme.ts, sidebar button).
+   Remove the attribute and none of this applies: the original UI is untouched.
+
+   Design plan
+   - Surfaces: a warm-black chassis with faceplates raised from it. Controls
+     are either recessed wells (things you read or type into) or raised
+     keycaps (things you press). Light comes from the top.
+   - Colour: the existing amber-on-dark scheme. Pink/rose utilities are
+     remapped to amber/copper through the RGB variables that tailwind.config.js
+     reads, so every pink-* class in the app follows without being edited.
+   - Type: Inter for labels (unchanged), JetBrains Mono for readouts.
+   - Restraint: one texture (fine grain on the chassis), one lit colour (amber).
+   Surfaces are dark-mode only; light mode keeps the flat look plus amber.
+   ========================================================================== */
+
+:root[data-skin="skeuo"] {
+  /* pink -> amber */
+  --pink-50: 255 251 235;  --pink-100: 254 243 199; --pink-200: 253 230 138;
+  --pink-300: 252 211 77;  --pink-400: 251 191 36;  --pink-500: 245 158 11;
+  --pink-600: 217 119 6;   --pink-700: 180 83 9;    --pink-800: 146 64 14;
+  --pink-900: 120 53 15;   --pink-950: 69 26 3;
+  /* rose -> copper (the far end of gradients) */
+  --rose-300: 253 186 116; --rose-400: 251 146 60;  --rose-500: 234 88 12;
+  --rose-600: 194 65 12;   --rose-700: 154 52 18;
+
+  --color-primary: #f59e0b;
+  --color-primary-hover: #d97706;
+  --color-primary-light: #fbbf24;
+
+  --sk-chassis: #0b0a09;
+  --sk-plate-hi: #252220;
+  --sk-plate-lo: #181615;
+  --sk-key-hi: #34302d;
+  --sk-key-lo: #1d1b19;
+  --sk-well-hi: #0f0e0d;
+  --sk-well-lo: #070606;
+  --sk-lip: rgba(255, 240, 215, 0.09);   /* lit top edge */
+  --sk-lip-strong: rgba(255, 240, 215, 0.16);
+  --sk-black: rgba(0, 0, 0, 0.7);
+  --sk-amber: #f59e0b;
+  --sk-amber-hot: #fbbf24;
+  --sk-amber-ink: #1c1203;               /* text on a lit amber key */
+  --sk-ink: #e9e3d9;
+  --sk-ink-dim: #9b9389;
+  --sk-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+:root[data-skin="skeuo"] .font-mono { font-family: var(--sk-mono); }
+
+/* Amber replaces the hard-coded pink in index.css */
+:root[data-skin="skeuo"] .lyrics-word--active {
+  color: var(--sk-amber-hot);
+  text-shadow: 0 0 18px rgba(245, 158, 11, 0.6), 0 0 36px rgba(245, 158, 11, 0.3);
+}
+:root[data-skin="skeuo"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23f59e0b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-skin="skeuo"] select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23fbbf24' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-skin="skeuo"] select:hover:not(:disabled) { border-color: rgba(245, 158, 11, 0.55); }
+
+/* ---- everything below is dark mode only ---------------------------------- */
+
+/* Chassis: warm black with fine grain — the only texture in the skin */
+html.dark[data-skin="skeuo"] body {
+  background-color: var(--sk-chassis);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 .95  0 0 0 0 .85  0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  color: var(--sk-ink);
+}
+html.dark[data-skin="skeuo"] .dark\:bg-suno.h-screen { background: transparent; }
+
+/* Faceplates: main panels, sidebar, player */
+html.dark[data-skin="skeuo"] .dark\:bg-suno:not(.h-screen),
+html.dark[data-skin="skeuo"] .dark\:bg-suno-sidebar,
+html.dark[data-skin="skeuo"] .dark\:bg-zinc-950 {
+  background-color: var(--sk-plate-lo);
+  background-image: linear-gradient(180deg, var(--sk-plate-hi) 0%, var(--sk-plate-lo) 100%);
+  box-shadow: inset 0 1px 0 var(--sk-lip), inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 8px 24px -12px var(--sk-black);
+}
+html.dark[data-skin="skeuo"] .dark\:border-white\/5,
+html.dark[data-skin="skeuo"] .dark\:border-white\/10 { border-color: rgba(0, 0, 0, 0.6); }
+
+/* Plates inside panels: raised sections and cards */
+html.dark[data-skin="skeuo"] :is(.rounded-lg, .rounded-xl, .rounded-2xl):is(.dark\:bg-zinc-900, .bg-zinc-900, .dark\:bg-zinc-900\/50, .bg-white\/5, .dark\:bg-white\/5, .bg-white\/\[0\.03\]) {
+  background-image: linear-gradient(180deg, rgba(255, 240, 215, 0.05), rgba(255, 240, 215, 0.01));
+  box-shadow: inset 0 1px 0 var(--sk-lip), 0 2px 6px -2px var(--sk-black);
+  border-color: rgba(0, 0, 0, 0.55);
+}
+/* Modals and menus float above everything */
+html.dark[data-skin="skeuo"] .shadow-2xl:is(.dark\:bg-zinc-900, .bg-zinc-900, .dark\:bg-zinc-950, .bg-zinc-950, .dark\:bg-suno) {
+  background-image: linear-gradient(180deg, var(--sk-plate-hi), var(--sk-plate-lo));
+  box-shadow: inset 0 1px 0 var(--sk-lip-strong), 0 24px 48px -12px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(0, 0, 0, 0.8);
+}
+
+/* Wells: anything you read or type into is cut into the plate */
+html.dark[data-skin="skeuo"] :is(input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"]), textarea, select, .dark\:bg-zinc-800, .dark\:bg-black\/20, .bg-black\/20, .bg-black\/30) {
+  background-color: var(--sk-well-lo);
+  background-image: linear-gradient(180deg, var(--sk-well-lo), var(--sk-well-hi));
+  border-color: rgba(0, 0, 0, 0.85);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75), 0 1px 0 var(--sk-lip);
+  color: var(--sk-ink);
+}
+/* Selects keep their amber arrow on top of the well */
+html.dark[data-skin="skeuo"] select:not(#sk-select) {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23f59e0b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--sk-well-lo), var(--sk-well-hi));
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 10px center, 0 0;
+  background-size: 18px, auto;
+}
+html.dark[data-skin="skeuo"] select:focus:not(#sk-select) {
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M6 9l6 6 6-6' stroke='%23fbbf24' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, var(--sk-well-lo), var(--sk-well-hi));
+}
+html.dark[data-skin="skeuo"] :is(input, textarea, select):focus {
+  outline: none;
+  border-color: rgba(245, 158, 11, 0.7);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75), 0 0 0 2px rgba(245, 158, 11, 0.22), 0 0 14px -2px rgba(245, 158, 11, 0.4);
+}
+html.dark[data-skin="skeuo"] ::placeholder { color: rgba(155, 147, 137, 0.55); }
+
+/* Engraved labels */
+html.dark[data-skin="skeuo"] .uppercase.tracking-wider,
+html.dark[data-skin="skeuo"] .uppercase.tracking-wide {
+  color: var(--sk-ink-dim);
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 240, 215, 0.06);
+}
+
+/* Keycaps: secondary buttons */
+html.dark[data-skin="skeuo"] button:is(.dark\:bg-white\/5, .bg-white\/5, .dark\:bg-zinc-800, .bg-zinc-800, .dark\:bg-zinc-700, .bg-zinc-700, .bg-zinc-200, .bg-zinc-100) {
+  background-color: var(--sk-key-lo);
+  background-image: linear-gradient(180deg, var(--sk-key-hi), var(--sk-key-lo));
+  border: 1px solid #000;
+  box-shadow: inset 0 1px 0 var(--sk-lip-strong), 0 2px 0 #000, 0 3px 6px -1px var(--sk-black);
+  color: var(--sk-ink);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+}
+html.dark[data-skin="skeuo"] button:is(.dark\:bg-white\/5, .bg-white\/5, .dark\:bg-zinc-800, .bg-zinc-800, .dark\:bg-zinc-700, .bg-zinc-700, .bg-zinc-200, .bg-zinc-100):hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+/* Lit keys: the main action (Generate and friends) */
+html.dark[data-skin="skeuo"] button:is(.bg-amber-500, .bg-pink-500, .bg-amber-400, [class*="from-pink-500"], [class*="from-amber-500"]) {
+  background-image: linear-gradient(180deg, #ffc247 0%, #f59e0b 45%, #c76f05 100%);
+  border: 1px solid #7a4303;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -2px 0 rgba(120, 60, 0, 0.35), 0 3px 0 #5a3002, 0 8px 18px -4px rgba(245, 158, 11, 0.45);
+  color: var(--sk-amber-ink);
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: transform 80ms ease, box-shadow 80ms ease, filter 120ms ease;
+}
+html.dark[data-skin="skeuo"] button:is(.bg-amber-500, .bg-pink-500, .bg-amber-400, [class*="from-pink-500"], [class*="from-amber-500"]):hover:not(:disabled) { filter: brightness(1.08); }
+html.dark[data-skin="skeuo"] button:is(.bg-amber-500, .bg-pink-500, .bg-amber-400, [class*="from-pink-500"], [class*="from-amber-500"]):disabled {
+  filter: grayscale(0.7) brightness(0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 0 #000;
+}
+
+/* Every pressable key sinks when pressed */
+html.dark[data-skin="skeuo"] button:is(.dark\:bg-white\/5, .bg-white\/5, .dark\:bg-zinc-800, .bg-zinc-800, .dark\:bg-zinc-700, .bg-zinc-700, .bg-zinc-200, .bg-zinc-100, .bg-amber-500, .bg-pink-500, .bg-amber-400, [class*="from-pink-500"], [class*="from-amber-500"]):active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.6), 0 0 0 #000;
+}
+
+/* Backlit keys: selected chips and tabs light up from inside */
+html.dark[data-skin="skeuo"] :is(button, [role="tab"]):is(.bg-amber-500\/10, .bg-amber-500\/15, .bg-amber-500\/20, .bg-pink-500\/10, .bg-pink-500\/15, .bg-pink-500\/20) {
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(251, 191, 36, 0.28), rgba(245, 158, 11, 0.08) 70%);
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 220, 150, 0.25), inset 0 0 14px rgba(245, 158, 11, 0.18), 0 0 12px -3px rgba(245, 158, 11, 0.5);
+  color: var(--sk-amber-hot);
+}
+
+/* Active sidebar entry: pressed in, with an LED bar */
+html.dark[data-skin="skeuo"] button.dark\:bg-white\/10:not(:hover) {
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.2));
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.7), 0 1px 0 var(--sk-lip);
+}
+html.dark[data-skin="skeuo"] button .bg-pink-500.rounded-r-full {
+  background: var(--sk-amber-hot);
+  box-shadow: 0 0 8px 1px rgba(251, 191, 36, 0.8);
+}
+
+/* Toggle switches: a slot with a metal knob; on = lit */
+html.dark[data-skin="skeuo"] [role="switch"] {
+  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.1));
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.8), 0 1px 0 var(--sk-lip);
+  border: 1px solid #000;
+}
+html.dark[data-skin="skeuo"] [role="switch"][aria-checked="true"]:is(.bg-amber-500, .bg-pink-500) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55), 0 0 12px -1px rgba(245, 158, 11, 0.6), 0 1px 0 var(--sk-lip);
+}
+html.dark[data-skin="skeuo"] [role="switch"] > span {
+  background-image: linear-gradient(180deg, #f3eee6, #a9a198);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.8), inset 0 1px 0 #fff;
+}
+
+/* Faders: native range inputs */
+html.dark[data-skin="skeuo"] input[type="range"] {
+  height: 6px;
+  background: linear-gradient(180deg, var(--sk-well-lo), var(--sk-well-hi));
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 var(--sk-lip);
+  border-radius: 3px;
+}
+html.dark[data-skin="skeuo"] input[type="range"]::-webkit-slider-thumb {
+  width: 12px;
+  height: 22px;
+  border-radius: 3px;
+  border: 1px solid #000;
+  background:
+    linear-gradient(90deg, transparent 5px, var(--sk-amber) 5px, var(--sk-amber) 7px, transparent 7px),
+    linear-gradient(180deg, #5a554f, #2c2926 55%, #1d1b19);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 3px 5px rgba(0, 0, 0, 0.7);
+}
+html.dark[data-skin="skeuo"] input[type="range"]::-webkit-slider-thumb:hover {
+  background:
+    linear-gradient(90deg, transparent 5px, var(--sk-amber-hot) 5px, var(--sk-amber-hot) 7px, transparent 7px),
+    linear-gradient(180deg, #6a655e, #34312d 55%, #222);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 3px 5px rgba(0, 0, 0, 0.7), 0 0 10px rgba(245, 158, 11, 0.4);
+}
+html.dark[data-skin="skeuo"] input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 22px; border-radius: 3px; border: 1px solid #000;
+  background: linear-gradient(180deg, #5a554f, #1d1b19);
+}
+
+/* Faders: the app's custom EditableSlider (track + fill + cap) */
+html.dark[data-skin="skeuo"] .sk-fader {
+  height: 8px;
+  background: linear-gradient(180deg, var(--sk-well-lo), var(--sk-well-hi));
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9), 0 1px 0 var(--sk-lip);
+}
+html.dark[data-skin="skeuo"] .sk-fader-fill {
+  background-image: linear-gradient(180deg, #ffc247, #d98206);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 8px rgba(245, 158, 11, 0.45);
+}
+html.dark[data-skin="skeuo"] .sk-fader-thumb {
+  width: 16px;
+  height: 22px;
+  border-radius: 3px;
+  border: 1px solid #000;
+  background:
+    linear-gradient(90deg, transparent 7px, var(--sk-amber) 7px, var(--sk-amber) 9px, transparent 9px),
+    linear-gradient(180deg, #5a554f, #2c2926 55%, #1d1b19);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 3px 5px rgba(0, 0, 0, 0.7);
+}
+
+/* Lamps: small status dots glow like LEDs */
+html.dark[data-skin="skeuo"] :is(.w-1, .w-1\.5, .w-2, .w-2\.5).rounded-full:is(.bg-emerald-500, .bg-emerald-400, .bg-green-500, .bg-green-400) {
+  background: #4ade80;
+  box-shadow: 0 0 6px 1px rgba(74, 222, 128, 0.75), inset 0 -1px 1px rgba(0, 60, 20, 0.5);
+}
+html.dark[data-skin="skeuo"] :is(.w-1, .w-1\.5, .w-2, .w-2\.5).rounded-full:is(.bg-amber-500, .bg-amber-400, .bg-pink-500, .bg-yellow-400) {
+  box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.8), inset 0 -1px 1px rgba(120, 60, 0, 0.5);
+}
+html.dark[data-skin="skeuo"] :is(.w-1, .w-1\.5, .w-2, .w-2\.5).rounded-full:is(.bg-red-500, .bg-red-400) {
+  box-shadow: 0 0 6px 1px rgba(239, 68, 68, 0.8), inset 0 -1px 1px rgba(80, 0, 0, 0.5);
+}
+
+/* Scrollbars: brushed-metal thumb in a dark channel */
+html.dark[data-skin="skeuo"] ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.35); }
+html.dark[data-skin="skeuo"] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #4a4642, #2d2a27);
+  border: 1px solid #000;
+}
+html.dark[data-skin="skeuo"] ::-webkit-scrollbar-thumb:hover { background: linear-gradient(90deg, #6a655e, #3a3733); }
+
+/* Keyboard focus stays visible on every control */
+html.dark[data-skin="skeuo"] :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.8);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="skeuo"] button { transition: none !important; }
+}

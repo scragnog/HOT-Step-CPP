@@ -21,6 +21,31 @@
   --color-primary-hover: #db2777;
   --color-primary-light: #f472b6;
 
+  /* Stock pink / rose as RGB channels, read by tailwind.config.js so a skin can retint every
+     pink-* and rose-* utility. These defaults equal Tailwind's own values. */
+  --pink-50: 253 242 248;
+  --pink-100: 252 231 243;
+  --pink-200: 251 207 232;
+  --pink-300: 249 168 212;
+  --pink-400: 244 114 182;
+  --pink-500: 236 72 153;
+  --pink-600: 219 39 119;
+  --pink-700: 190 24 93;
+  --pink-800: 157 23 77;
+  --pink-900: 131 24 67;
+  --pink-950: 80 7 36;
+  --rose-50: 255 241 242;
+  --rose-100: 255 228 230;
+  --rose-200: 254 205 211;
+  --rose-300: 253 164 175;
+  --rose-400: 251 113 133;
+  --rose-500: 244 63 94;
+  --rose-600: 225 29 72;
+  --rose-700: 190 18 60;
+  --rose-800: 159 18 57;
+  --rose-900: 136 19 55;
+  --rose-950: 76 5 25;
+
   /* Backgrounds — dark mode */
   --bg-primary-dark: #09090b;
   --bg-secondary-dark: #121214;

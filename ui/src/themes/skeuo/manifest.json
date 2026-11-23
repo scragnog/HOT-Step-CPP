@@ -1,0 +1,11 @@
+{
+  "id": "skeuo",
+  "name": "Skeuo",
+  "author": "Helikaon23s",
+  "license": "MIT",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "targets": ["classic"],
+  "preview": ["#0b0a09", "#252220", "#f59e0b", "#e9e3d9"]
+}
