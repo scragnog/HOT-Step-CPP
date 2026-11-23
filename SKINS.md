@@ -61,10 +61,13 @@ in `preview` for the picker swatch. Shells use `kind: "shell"` with no
   and avoid global resets. Bundle fonts and assets in the skin folder and use
   relative URLs. Include the licence for each third-party asset, including
   `OFL.txt` for an OFL font. External URLs and hosted fonts are prohibited.
-- **Shell data.** Use the skin API for data and actions. The server owns songs,
-  drafts, presets and seeds. If an API export you need is missing, open an
-  issue for it. Use `useSkinStorage()` for layout and preferences and keep raw
-  `localStorage` out of the skin.
+- **Shell data.** The server owns songs, drafts, presets and seeds. If an API
+  export you need is missing, open an issue for it. Use `useSkinStorage()` for
+  layout and preferences and keep raw `localStorage` out of the skin.
+- **Shell networking.** Use `skin-api` for data and actions. Never use `fetch`,
+  `XMLHttpRequest`, `WebSocket`, `EventSource` or `navigator.sendBeacon`, with
+  or without `window.`, `globalThis.` or `self.`. `check:skins` flags direct
+  calls. Human review covers obfuscated calls.
 
 Skin API `0` is unstable, so update your skin against the current API before
 submitting. See the full CSS rules, token list, allowed imports and available
@@ -79,11 +82,14 @@ npm run check:skins
 npx tsc -b
 ```
 
-Open a pull request from your fork and use the
-[skin PR template](.github/PULL_REQUEST_TEMPLATE/skin.md). Keep every changed
-file inside your one skin folder. If you need changes to the API, dependencies,
-configuration or another skin, ask for a separate core review. The skin workflow
-checks the PR's file scope, the skin rules and TypeScript.
+Open a pull request from your fork. Add `?template=skin.md` to the GitHub
+compare URL (or `&template=skin.md` if it already has query parameters) to
+load the [skin PR template](.github/PULL_REQUEST_TEMPLATE/skin.md).
+Keep every changed file inside your one skin folder. The scope check also
+rejects changes to `README.md` or docs outside that folder. If you need changes
+to the API, dependencies, configuration or another skin, ask for a separate
+core review. The skin workflow checks the PR's file scope, the skin rules
+and TypeScript.
 
 Include screenshots in both light and dark mode and say which screens or
 controls you tried. Reviewers check readability, CSS scope, asset licences and,
