@@ -126,18 +126,18 @@ export const tempo = {
       range: [10, 600, 5],
       unit: 's',
       default: 180,
-      auto: {},
+      auto: { tip: 'Auto lets the planner choose the length' },
       engines: ['ace', 'sa3', 'heartmula'],
       held: { note: 'Capped at {shown} here · your {value} returns on {engine}', toast: 'Length capped at {shown}' },
       wire: { to: 'content:duration', auto: -1, note: 'Auto is -1. Stable Audio 3 renders 30 s for -1.' },
       per: [
-        { engines: ['sa3'], range: [1, 600, 1], default: 30, auto: { says: '{default}, exact' } },
+        { engines: ['sa3'], range: [1, 600, 1], default: 30, auto: { says: '{default}, exact', tip: 'Auto renders 30 seconds' } },
         {
           engines: ['heartmula'],
           label: 'Longest it may run',
           range: [1, 240, 1],
           default: 120,
-          auto: { says: 'up to {max}' },
+          auto: { says: 'up to {max}', tip: 'Auto lets the model end the song, up to {max}' },
         },
       ],
     },
@@ -306,7 +306,8 @@ export const tempo = {
       engines: ['heartmula'],
       tiers: ['studio', 'lab'],
     },
-    { part: 'ruler', param: 'tempo.dur', opts: { markers: true } },
+    /* the markers read Beat I/O, its bars, the BPM, Auto-trim and the prompt, in that order (src/derive/controls.ts) */
+    { part: 'ruler', param: 'tempo.dur', opts: { markers: true }, reads: ['tempo.beatio', 'tempo.beatbars', 'tempo.bpm', 'tempo.trim', 'prompt.text'] },
     {
       part: 'ruler',
       param: 'tempo.max',

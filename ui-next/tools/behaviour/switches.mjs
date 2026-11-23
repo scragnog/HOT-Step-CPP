@@ -15,13 +15,16 @@ const only = opt('only') ? new RegExp(opt('only')) : null;
 const dir = path.join(here, 'switches');
 const features = [...new Set(fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort().flatMap(f => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).switches.map(s => s.feature)))].filter(f => !only || only.test(f));
 const vite = path.join(repo, 'node_modules', 'vite', 'bin', 'vite.js');
+const ACC = path.join(here, 'acceptance');
+const WAITING = new Set(fs.readdirSync(ACC).filter(f => f.endsWith('.json')).flatMap(f => JSON.parse(fs.readFileSync(path.join(ACC, f), 'utf8')).scenarios.filter(x => x.waiting).map(x => x.id)));
 const rows = []; let bad = 0;
 for (const f of features) {
   const t0 = Date.now();
   const b = spawnSync(process.execPath, [vite, 'build', '--mode', 'test', '--logLevel', 'error'], { cwd: repo, env: { ...process.env, HS_SWITCH: f }, encoding: 'utf8' });
   if (b.status !== 0) { rows.push([f, 'BUILD FAILED', (b.stderr || b.stdout).split('\n').filter(l => /error|switch/i.test(l)).slice(0, 2).join(' / ')]); bad++; process.stdout.write(`${f.padEnd(16)} ${rows[rows.length - 1].slice(1).join('  ')}\n`); continue; }
   const r = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--slice', '--page', path.join(repo, 'dist-switch', 'index.html'), '--workers', opt('workers', '10')], { cwd: repo, env: process.env, encoding: 'utf8' });
-  const failed = [...new Set((r.stdout.match(/^FAIL (\S+)/gm) || []).map(l => l.slice(5)))];
+  /* a scenario waiting on a later package (acceptance, "waiting") catches nothing: it is left out, passing or failing */
+  const failed = [...new Set((r.stdout.match(/^FAIL (\S+)/gm) || []).map(l => l.slice(5)))].filter(id => !WAITING.has(id));
   rows.push([f, failed.length ? `${failed.length} scenarios fail` : 'NOTHING FAILS', failed.slice(0, 4).join(', ') + (failed.length > 4 ? ', ...' : ''), ((Date.now() - t0) / 1000).toFixed(0) + ' s']);
   if (!failed.length) bad++;
   process.stdout.write(`${f.padEnd(16)} ${rows[rows.length - 1].slice(1).join('  ')}\n`);

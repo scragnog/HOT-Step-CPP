@@ -137,6 +137,8 @@ export type Wire = WireKey | WireMap | Wire[] | { none: Text };
 export interface Auto {
   /** What auto stands for, said with it: "auto (1.00)". Default: the default value as an estimate, "≈ 3.0". */
   says?: Text;
+  /** What its auto button's tip says auto does ("Auto lets the planner choose the length"). */
+  tip?: Text;
 }
 
 /** A text check from the inventory (parts.ts CHECKS), with the message shown when it fails. */

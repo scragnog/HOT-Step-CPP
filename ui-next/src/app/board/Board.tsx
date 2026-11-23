@@ -24,7 +24,8 @@ function LaidOut({ def, cell, keys, unit }: { def: Definition; cell: CellModel; 
   const node = useMemo(() => cell.node ?? ({ part: cell.part, param: cell.param } as Node), [cell.node, cell.part, cell.param]);
   if (cell.part === 'plate' || (!cell.param && !cell.node)) return null;
   const view = <NodeView def={def} node={node} nodeKey={cell.node ? keys.get(cell.node) ?? '' : ''} keys={keys} surface={surface} cell={cell.words} />;
-  if (cell.part === 'node' || cell.part === 'knob' || cell.part === 'ledButton') return view;
+  /* a chip selector carries its own caps label (the concept's chipsw) */
+  if (cell.part === 'node' || cell.part === 'knob' || cell.part === 'ledButton' || cell.part === 'chips') return view;
   if (unit) return <div className="lcdsel"><span className="kl">{say(cell.label)}</span>{view}</div>;
   return (
     <div className={`lcdsel${cell.beside ? ' psw-rev' : ''}`} style={cell.beside && !cell.shown ? { visibility: 'hidden' } : undefined}>

@@ -1,0 +1,61 @@
+{
+ "about": "Package 1's accepted differences between the concept's page and the rebuild's in its states (slice-states/10-controls.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+ "accepted": [
+  {
+   "state": "^controls-dd-",
+   "key": "^#dd",
+   "field": "^--ddw$",
+   "n": 302,
+   "why": "A plugin list is as wide as its button at least (--ddw, set on #dd and inherited by everything in it); the button stands in the Sampler's row, which is laid out around the parts later packages build (its scope, a seam here), so it has another width. The list's own width rule is the concept's."
+  },
+  {
+   "state": "^controls-dd-",
+   "key": "^#dd",
+   "field": "^animation-name$",
+   "n": 2,
+   "why": "A list opens on the side of its button with room (ovUp above, ovIn below, the concept's placeDD rule); the Sampler tile stands higher here, its scope still a seam, so these lists open below."
+  },
+  {
+   "state": "^controls-dd-solvers$",
+   "key": "^shot$",
+   "field": "^pixels$",
+   "n": 1,
+   "why": "The periodic table's shot: its rows stand a pixel lower, a sub-pixel offset of the header (no computed style, attribute or word differs inside the list; both shots are in tools/visual-baseline/out/*-controls/shots)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-(opt|v|setq|setn|base)$",
+   "n": 89,
+   "why": "Deviation 10: an option's hook names its value (data-opt, data-v: \"heun\"), the concept's its label (\"Heun\"); data-setq, data-setn and data-base are the concept's delegated click hooks (a choice row's buttons run their own action here)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:type$",
+   "n": 29,
+   "why": "Deviation 11 (slice-accepted.json): every button and input carries its type."
+  },
+  {
+   "state": "^controls-planner-quick",
+   "key": "\\.mood>div:1>button",
+   "field": "^sem:title$",
+   "n": 10,
+   "why": "Every choice row's buttons say what each sets in one form, \"Temperature: 0.40\" (the core's row.sets, as the Sampler's Quick rows say \"Steps: 8\"); the concept's How adventurous wrote its own \"Temperature 0.4\"."
+  },
+  {
+   "state": "^controls-planner-quick-set-dark$",
+   "key": "\\.mood$",
+   "field": "^(opacity|transition-(duration|property|timing-function))$",
+   "n": 4,
+   "why": "With the planner off the concept stands its tile's planner-only parts back (25-module-planner.js lm-off, a class on the Planner's tile): the Planner tile's own state, which its package builds; the row itself is the same."
+  },
+  {
+   "state": "^controls-build-tokens",
+   "key": "\\.tok",
+   "field": "^(font-size|line-height)$",
+   "n": 8,
+   "why": "A token takes the type of the row it stands in; the concept's Build foot is Build's own row (14px), here the shared tile foot (13px), the Build module's package's to match."
+  }
+ ]
+}

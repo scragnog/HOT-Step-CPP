@@ -21,8 +21,8 @@ export const q = {
       label: 'Evaluate',
       default: 'unmastered',
       options: [
-        { value: 'unmastered', label: 'Unmastered' },
-        { value: 'mastered', label: 'Mastered' },
+        { value: 'unmastered', label: 'Unmastered', short: 'Raw' },
+        { value: 'mastered', label: 'Mastered', short: 'Master' },
         { value: 'both', label: 'Both' },
       ],
       wire: 'param:qualityEvalTarget',

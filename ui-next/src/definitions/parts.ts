@@ -74,12 +74,12 @@ export const PARTS = {
     opts: { travel: { type: 'number', doc: 'The value the top of the slot stands for, when the slot runs past the maximum (Plan: max 1, travel 2).' } },
   },
   ruler: {
-    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-ruler.css'],
-    doc: 'A length on a minutes timeline, dragged along; labels on round steps. The length of a song.',
+    kind: 'control', edits: ['number'], drive: 'keys', css: ['15-ruler.css'], reads: true,
+    doc: 'A length on a minutes timeline, dragged along; labels on round steps. The length of a song. With markers it reads Beat I/O, its bars, the BPM, Auto-trim and the prompt, in that order.',
     states: ['auto (shows the estimate, or "up to" where the model ends the song)', 'sliding', 'at-start/at-end caption'],
     opts: {
       scaleMax: { type: 'number', doc: 'The seconds the timeline spans. Default: the parameter maximum.' },
-      markers: { type: 'boolean', doc: 'Draw Beat I/O and trim markers from the Tempo parameters. Never drawn at Quick.' },
+      markers: { type: 'boolean', doc: 'Draw Beat I/O and trim markers from what it reads (Beat I/O, its bars, the BPM, Auto-trim, the prompt). Never drawn at Quick.' },
     },
   },
   xyPad: {
@@ -108,7 +108,10 @@ export const PARTS = {
     kind: 'control', edits: ['choice'], drive: 'choose', css: ['15-pick.css', '30-dropdown.css'],
     doc: 'The button that shows a choice and opens its dropdown. The variant sets where it lives.',
     states: ['open', 'overridden'],
-    opts: { variant: { type: ['plugin', 'lcd', 'chip', 'model', 'stamp'], doc: 'plugin: a periodic-table tile and the kind above the value (solver, schedule, guidance); lcd: an LCD with previous and next arrows; chip: a pill with its label; model: name, quant badge, size and a memory bar; stamp: an ink stamp (the lyric language).' } },
+    opts: {
+      variant: { type: ['plugin', 'lcd', 'chip', 'model', 'stamp'], doc: 'plugin: a periodic-table tile and the kind above the value (solver, schedule, guidance); lcd: an LCD with previous and next arrows; chip: a pill with its label; model: name, quant badge, size and a memory bar; stamp: an ink stamp (the lyric language).' },
+      title: { type: 'text', doc: 'The heading of its list (plugin: Solvers; stamp: Sung in…). Default: the label of its parameter.' },
+    },
   },
   chips: {
     kind: 'control', edits: ['choice'], drive: 'choose', css: ['15-controls.css'],
@@ -492,6 +495,12 @@ export interface BoundParam {
   typed(text: string): void;
   /** A hand's place along a number's range, 0 to 1. */
   toFraction(f: number): void;
+  /** A hand dragging a scrub token sideways: `px` pixels on from the value it started at (src/derive/controls.ts
+   *  scrubValue: a wide range moves with the value). */
+  scrub(from: number, px: number, shift: boolean): void;
+  /** A hand on a ruler: its place `f` along a scale spanning `span` from 0, on a track `px` pixels wide; a length is
+   *  snapped to round values (src/derive/controls.ts rulerSnap). */
+  along(f: number, span: number, px: number): void;
 }
 
 /** A state the node binds. `apply` takes the name of one of its StateDef's steps; the step's words come from the

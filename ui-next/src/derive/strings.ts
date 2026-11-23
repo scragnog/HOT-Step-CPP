@@ -60,7 +60,7 @@ export function stringsOf(d: Definition): Str[] {
     const face = (f: Partial<ParamDef>, at: string) => {
       add(`${k}.label${at}`, f.label); add(`${k}.short${at}`, f.short); add(`${k}.undoName${at}`, f.undoName); add(`${k}.tip${at}`, f.tip);
       add(`${k}.placeholder${at}`, f.placeholder); add(`${k}.check${at}`, f.check?.message); add(`${k}.keepInvalid${at}`, f.check?.keepInvalid);
-      if (f.auto) add(`${k}.auto${at}`, f.auto.says);
+      if (f.auto) { add(`${k}.auto${at}`, f.auto.says); add(`${k}.autoTip${at}`, f.auto.tip); }
       if (f.format) { add(`${k}.template${at}`, f.format.template); (f.format.words || []).forEach(w => add(`${k}.w.${keyPart(w.value)}${at}`, w.text)); }
       if (Array.isArray(f.options)) for (const o of f.options) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.short${at}`, o.short); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); add(`${ok}.detail${at}`, o.detail); }
       else for (const o of f.options?.include || []) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); }
@@ -267,12 +267,16 @@ export function pickMsg(ix: Index, key: string, desk: Desk): Slot {
 }
 /** A choice's options on the desk's engine, each with its words as messages: the fixed list, or what the parameter
  *  includes and then the server's list for its source (desk.lists), without a value twice. */
-export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; lcd?: Msg; pick?: Msg; detail?: Msg }[] {
+export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; short?: Msg; tip?: Msg; lcd?: Msg; pick?: Msg; detail?: Msg }[] {
   const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), base = `create.${d.id}.p.${dashed(p.key)}.o`, at = lineAt(ix, key, desk, 'options');
   const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
-  const listed = !Array.isArray(f.options) && f.options ? (desk.lists?.[f.options.from] ?? []).filter(x => !fixed.some(o => o.value === x.value)) : [];
+  const from = !Array.isArray(f.options) && f.options ? f.options : null;
+  /* the server's list, without what the definition lists itself, and only the values it names (`only`) */
+  const listed = from ? (desk.lists?.[from.from] ?? []).filter(x => !fixed.some(o => o.value === x.value) && (!from.only || from.only.includes(String(x.value)))) : [];
   return [
     ...fixed.map(o => ({ value: o.value, label: { id: `${base}.${keyPart(o.value)}.label${at}`, en: o.label } as Msg,
+      ...('short' in o && o.short ? { short: { id: `${base}.${keyPart(o.value)}.short${at}`, en: o.short } as Msg } : {}),
+      ...(o.tip ? { tip: { id: `${base}.${keyPart(o.value)}.tip${at}`, en: o.tip } as Msg } : {}),
       ...(o.lcd ? { lcd: { id: `${base}.${keyPart(o.value)}.lcd${at}`, en: o.lcd } as Msg } : {}),
       ...(o.pick ? { pick: { id: `${base}.${keyPart(o.value)}.pick${at}`, en: o.pick } as Msg } : {}),
       ...('detail' in o && o.detail ? { detail: { id: `${base}.${keyPart(o.value)}.detail${at}`, en: o.detail } as Msg } : {}) })),
@@ -285,6 +289,15 @@ export function checkText(ix: Index, key: string, desk: Desk, text: string): Msg
   const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk);
   if (!f.check || CHECKS[f.check.rule].test(text)) return null;
   return { id: `create.${d.id}.p.${dashed(p.key)}.check${lineAt(ix, key, desk, 'check')}`, en: f.check.message };
+}
+/** What a field that keeps invalid text (its check's keepInvalid) says is in force meanwhile: what its words name
+ *  ("Still using seed 12."), or, while nothing valid is set, that nothing is applied; `back` when there is a value to
+ *  offer back (12-values.js keptMsg). Undefined for a field that does not keep. */
+export function keptMsg(ix: Index, key: string, desk: Desk): { says: Msg; back: boolean } | undefined {
+  const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), v = valueOf(ix, key, desk);
+  if (!f.check?.keepInvalid) return undefined;
+  if (v === '' || v === undefined) return { says: msg('field.keptNothing'), back: false };
+  return { says: msg('field.kept', { what: fillMsg(ix, `create.${d.id}.p.${dashed(p.key)}.keepInvalid${lineAt(ix, key, desk, 'check')}`, f.check.keepInvalid, desk) }), back: true };
 }
 /** A strip's (or an idle reason's) words and its actions' words, as messages, under its definition's key. */
 export function stripWords(ix: Index, base: string, st: Strip, desk: Desk): { says: Msg; actions: { action: Action; label: Msg; tip?: Msg }[] } {

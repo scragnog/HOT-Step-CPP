@@ -69,9 +69,9 @@
   {
    "state": "^slice-parts-quick-row$",
    "key": "\\.qchoice",
-   "field": "^(only|sem:data-(base|setq))$",
-   "n": 6,
-   "why": "A Quick row's marker for a value between its choices (the concept's <i>) is package 1's, as planned (docs/09); the concept's data-base and data-setq are its delegated click hooks."
+   "field": "^sem:data-(base|setq)$",
+   "n": 4,
+   "why": "The concept's data-base and data-setq are its delegated click hooks (deviation 10); the row's buttons run their own action. (Its marker for a value between its choices, the concept's <i>, is drawn since package 1.)"
   },
   {
    "field": "^line-height$",

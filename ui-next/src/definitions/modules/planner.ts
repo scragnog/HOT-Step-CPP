@@ -231,7 +231,7 @@ export const planner = {
       check: {
         rule: 'seedOrEmpty',
         message: 'The planner seed is a whole number from 0 to 4294967295, or empty to follow the song\'s seed.',
-        keepInvalid: 'the song\'s seed',
+        keepInvalid: 'seed {value:mm.seed}',
       },
       engines: ['minimax-m3'],
       wire: 'ext:mm3ArSeed',

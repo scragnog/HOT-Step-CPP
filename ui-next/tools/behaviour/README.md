@@ -54,6 +54,23 @@ promote it: remove its `pending` field, and every normal run keeps it passing fr
 The rebuild is expected to make them pass (and then promote them), as well as every normal scenario. Their `right`
 sentence is the specification; the checks say exactly how it is measured.
 
+## Waiting scenarios: right, but not passable until a later package lands
+
+In the rebuild's acceptance (`acceptance/*.json`, `run.mjs --slice`), an entry may say it is waiting on a later work
+package, when what it tests is right but a placeholder that package will replace changes what the scenario sees (a
+tile's height decided by parts not drawn yet):
+
+```
+{ "id": "10-desk-modules/undo-covers-structure", "why": "...",
+  "waiting": { "package": 3, "because": "One sentence: what that package draws, and why the scenario needs it." } }
+```
+
+`run.mjs --slice` still runs it and prints it as `wait <id> (waiting on package N ...)`, lists it with its reason and its
+failing checks after the summary, and does not count it as a failure. If it passes, the run fails ("waiting on package
+N, but it passes"): whoever lands that package removes the `waiting` field, so every run keeps it passing from then on.
+`switches.mjs` ignores waiting scenarios altogether, so a feature switched off is caught only by a scenario that passes
+with the feature on. Keep the list short: a scenario that fails for any other reason is a failure, not a wait.
+
 ## Proving a refactor changes nothing
 
 ```

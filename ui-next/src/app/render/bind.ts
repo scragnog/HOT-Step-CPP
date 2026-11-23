@@ -52,6 +52,8 @@ function actionsOf(def: Definition, node: Node, key: string) {
     press: (k: string, key: string, shift: boolean) => param(k)?.press(key, shift) ?? false,
     typed: (k: string, t: string) => param(k)?.typed(t),
     toFraction: (k: string, f: number) => param(k)?.toFraction(f),
+    scrub: (k: string, from: number, px: number, shift: boolean) => param(k)?.scrub(from, px, shift),
+    along: (k: string, f: number, span: number, px: number) => param(k)?.along(f, span, px),
     check: (k: string, t: string) => checkText(ix, k, desk(), t),
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
     run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
@@ -73,6 +75,7 @@ function assemble(m: PartModel, a: ReturnType<typeof actionsOf>): PartView {
     ...p,
     set: v => a.set(p.key, v), reset: () => a.reset(p.key), setAuto: on => a.setAuto(p.key, on),
     press: (k, shift) => a.press(p.key, k, shift), typed: t => a.typed(p.key, t), toFraction: f => a.toFraction(p.key, f), check: t => a.check(p.key, t),
+    scrub: (from, px, shift) => a.scrub(p.key, from, px, shift), along: (f, span, px) => a.along(p.key, f, span, px),
   }));
   return { ...m, params, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
 }

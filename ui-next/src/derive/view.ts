@@ -11,7 +11,7 @@ import { type Msg, type Slot, list, msg } from './messages.ts';
 import { applyChange, type Change } from './parts.ts';
 import { migrate } from './records.ts';
 import { defName, rowWord, stepWords, type RowStep } from './steps.ts';
-import { fillMsg, formatMsg, hash, nodeWord, paramWords, stripWords } from './strings.ts';
+import { fillMsg, formatMsg, hash, nodeWord, paramWords, stripWords, textMsg } from './strings.ts';
 import { plateWords } from './tiers.ts';
 import { cleanValues, setValue } from './values.ts';
 
@@ -36,7 +36,8 @@ export function choiceOf(ix: Index, d: Definition, node: Node, desk: Desk, key: 
   const inForce = (v: Value | { [k: string]: Value }) => (typeof v === 'object' ? Object.entries(v).every(([k, x]) => valueOf(ix, k, desk) === x) : valueOf(ix, row.key, desk) === v);
   const i = (at.choices ?? []).findIndex(c => inForce(c[1]));
   if (i >= 0) return { checked: i, says: row.choices[i]![0] };
-  if (at.between && at.param) return { checked: null, says: fillMsg(ix, `${key}.between`, at.between.replace('{v}', '{value:' + at.param + '}'), desk) };
+  /* the row's words for a value between its choices name it as {v}, filled with the value as the page writes it */
+  if (at.between && at.param) return { checked: null, says: { ...fillMsg(ix, `${key}.between`, at.between, desk), slots: { v: textMsg(ix, at.param, desk) } } };
   return { checked: null, says: rowWord(ix, row, desk) };
 }
 

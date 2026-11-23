@@ -98,7 +98,10 @@ file of its own; a package adds one and edits no list:
   label): the page's mono caps label, its changed mark, focus ring and disabled state, in the hardware's ink on a pedal
   or an LCD. Every rule has no weight (`:where`), so wherever the concept styles a part its own rule wins;
 - `10-standards.css`: the two boxes standards mode changes in the slice's part of the page (the engine caret, the LCD
-  picker's arrows).
+  picker's arrows);
+- `15-controls-1.css` (package 1): the shared controls on the surfaces the concept never drew them on (a token, a flag
+  or terminal chips off a terminal, an LCD's lit word, bar chips and big number off an LCD, which bring a small LCD of
+  their own, a chip selector or the record button on paper, a ruler or a look-back strip in a row or on a pedal).
 
 The components emit the concept's element structure, classes and `data-*` attributes, so its rules apply unchanged;
 never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's grid
@@ -284,6 +287,15 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
 - The definitions: an option's `pick` words (what an LCD picker prints where it differs from a read-out: closed
   deviations 3 and 4), a module's `starter` (the empty desk's offers and the words it names the first with),
   `CATEGORIES` (the Modules panel's groups, in one place), an engine's `tag`, the power button's `name`.
+- `derive/controls.ts` (package 1): what the shared controls draw beyond their parameters (`controlModel`, given to a
+  part as `PartModel.control`): a number box's text and its words while empty, the seconds a step count takes
+  (`stepSeconds`, an engine's `stepSeconds`), a ruler's scale, fill, caption and markers (`rulerModel`, `rulerScale`,
+  `songTempo`: one function for the song's tempo, S-07), a fader's travel and unity line, a look-back strip, a power
+  chip, where a Quick row's value stands between its choices (`choicePos`), each option's face in a picker
+  (`optionFaces`, `quantOf`); what auto stands for (`autoEstimate`: turning auto off starts there, S-17); where a hand
+  moves a ruler or a token (`rulerSnap`, `scrubValue`). `derive/strings.ts keptMsg` (what a field that keeps invalid
+  text says is in force) and `optionsOf` keeping a source's `only`; a typed empty box puts a parameter with auto back
+  on auto, and text that fails its check is refused and said (`derive/parts.ts`).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 
@@ -332,6 +344,18 @@ node tools/visual-baseline/plants.mjs                # each planted defect is ca
   its concept surface) and runs the comparison and the gallery: 15 caught. The review's 12 (knob keys dead) is
   behaviour, caught by the switches.
 
+**Package 1 (shared controls)** adds `acceptance/1-controls.json` (24 scenarios: 10 of `scenarios/31-controls.mjs`, which
+hold on the concept page too, 8 of `scenarios/32-controls-gallery.mjs`, which drive the controls no module draws yet in
+the parts gallery, and 6 of the concept's suite, three of them pending there: S-18 twice and S-31), `switches/
+1-controls.json` (25 features), `slice-states/10-controls.mjs` (18 states of the controls on their own where the concept
+draws them, compared with `controls-accepted.json`: `vb.mjs compare concept-controls rebuild-controls --accept
+tools/visual-baseline/controls-accepted.json`) and `tools/test-controls.ts` (in `npm run check`). The gallery draws a
+part with variants once in each (`testing/gallery.ts`).
+An acceptance entry may wait on a later package (`"waiting": { "package", "because" }`, tools/behaviour/README.md):
+`run.mjs --slice` reports it apart and fails if it passes, `switches.mjs` leaves it out. The slice's
+`01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
+decide the tile heights their moves need).
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
@@ -354,10 +378,29 @@ node tools/visual-baseline/plants.mjs                # each planted defect is ca
    The toast's package (6) builds both.
 10. **The concept's delegation hooks are absent** (`data-sig`, `data-toast`, `data-luaon`, `data-setq`, `data-base`):
     the rebuild's buttons run their own actions. A dropdown option's `data-opt` is its value, not its label.
-11. **A Quick row's marker for a value between its choices** is package 1's (the row says the value in words now).
+11. **A Quick row's marker for a value between its choices**: built (package 1); closed.
 12. **A tile moved up or down by the keyboard moves its top** that way; the concept compares the middles of the places
     it could take, which a shorter place in the same row can pass as "up". The same on every layout the concept's
     suite checks.
+13. **Delete or Backspace resets a value control** (a knob, a token, a fader, a ruler, the look-back strip), as a
+    double-click does: the concept's pending S-18, in the value contract (`kit/value.ts`). The controls' tips keep the
+    concept's words; S-18's sentence about the tip is not done.
+14. **A hand moves some values by a rule of its own**: dragging a length ruler snaps to 5 s (15 s above 2:00) and to a
+    labelled tick within 6px (pending S-31); a token over a range of more than 500 steps moves with the value, a
+    hundredth of it a pixel (one at 100, ten at 1000; pending S-28). Both are the core's (`derive/controls.ts`
+    `rulerSnap`, `scrubValue`, reached through the setters `along` and `scrub`).
+15. **The switches inside a module's look name their parameter** to a screen reader (a flag, an LCD's lit word, the
+    record button, a power chip: aria-label "Chain of thought" where the concept's says "--cot"), and every one
+    carries the changed mark (the concept's power chip and its rulers without auto have none; a look-back strip off a
+    terminal carries it after its box). The record button off the plans deck has a paper face.
+16. **The LCD number says "type it, or drag up or down"**: the concept's says "or tap" because Tempo's TAP stands
+    beside it; here TAP is another part (package 3).
+17. **The language stamp remembers the languages used last** under the page's own key (`hotstep.create.langRecent`,
+    deviation 5), so the concept's 04-controls/language-stamp, which reads `hs3-lang-recent`, cannot pass as written.
+18. **A plugin's family, symbol, file and curve** are the concept's tables (`src/definitions/option-faces.ts`), keyed
+    by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
+19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
+    the LCD selector it gives a pick (`board/Board.tsx`, one line).
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

@@ -15,12 +15,13 @@ import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, 
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
 import {
-  actionWords, bareText, fillMsg, formatMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stripWords, textMsg,
+  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stripWords, textMsg,
   wordKey,
 } from './strings.ts';
 import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
+import { controlModel, type ControlModel } from './controls.ts';
 
 /* ---------------------------------------------------------------- a part's model */
 
@@ -61,10 +62,14 @@ export interface ParamModel {
   lcd: Slot;
   pick: Slot;
   /** A choice: its options, with their words and whether each is the value in force. */
-  options?: { value: string | number; label: Slot; lcd: Slot; pick: Slot; detail?: Slot; on: boolean }[];
+  options?: { value: string | number; label: Slot; short?: Slot; tip?: Slot; lcd: Slot; pick: Slot; detail?: Slot; on: boolean }[];
   placeholder?: Slot;
   /** The accessible name of the field a number is typed into. */
   typeName?: Slot;
+  /** What its auto button's tip says auto does. */
+  autoTip?: Slot;
+  /** A field that keeps invalid text: what it says is in force meanwhile, and whether there is a value to put back. */
+  kept?: { says: Slot; back: boolean };
 }
 
 export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean }
@@ -93,6 +98,9 @@ export interface PartModel {
   meter?: MeterScale;
   /** An LCD's lines, each with the case it is printed in. */
   lines?: { text: Slot; upper: boolean }[];
+  /** What a shared control draws beyond its parameters (src/derive/controls.ts): a box's text, a ruler, a fader, a
+   *  look-back strip, a power chip, a row's value between its choices, a picker's option faces. */
+  control?: ControlModel;
   /** Why the node stands back, when it does. */
   dim: Slot | null;
   small: boolean;
@@ -117,8 +125,11 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
     const [, , step] = f.range, steps = Math.round((hi - lo) / step);
     if (steps <= 12) out.options = Array.from({ length: steps + 1 }, (_, i) => { const x = +(lo + i * step).toFixed(10), w = formatMsg(ix, key, desk, x); return { value: x, label: w, lcd: w, pick: w, on: x === v }; });
   }
-  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === v }));
+  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === v }));
   if (f.placeholder) out.placeholder = fillMsg(ix, wordKey(ix, key, desk, 'placeholder'), f.placeholder, desk);
+  if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
+  const kept = p.type === 'text' ? keptMsg(ix, key, desk) : undefined;
+  if (kept) out.kept = kept;
   return out;
 }
 
@@ -152,6 +163,11 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
     /* each choice's tip says what it sets ("Steps: 8"), as the concept's buttons do */
     const sets = (v: Value | { [k: string]: Value }) => list(Object.entries(typeof v === 'object' ? v : { [r.key]: v }).filter(([k]) => has(ix, k, desk.engine)).map(([k, x]) => msg('row.sets', { label: paramWords(ix, k, desk).label, value: formatMsg(ix, k, desk, x) })), 'comma');
     m.row = { label: r.label, checked: c.checked, says: c.says, choices: r.choices.map(([w]) => w), sets: r.choices.map(([, v]) => sets(v)) };
+    const ctl = controlModel(ix, node, desk, words, label, { values: r.choices.map(([, v]) => (typeof v === 'object' ? NaN : v)), checked: c.checked });
+    if (ctl) m.control = ctl;
+  } else {
+    const ctl = controlModel(ix, node, desk, words, label);
+    if (ctl) m.control = ctl;
   }
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);

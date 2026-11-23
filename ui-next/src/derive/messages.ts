@@ -117,6 +117,28 @@ export const EN: { [id: string]: string } = {
   'board.bypassed': 'chain bypassed: no pedal runs',
   'board.units': '{n, plural, one {# side unit} other {# side units}}, {on} on',
   'board.parked': '{n} parked under the desk',
+  /* the shared controls (controls.ts) */
+  'box.about': '≈{v}',
+  'box.auto': 'AUTO',
+  'box.seconds': '≈ {s} s',
+  'box.typeNumberOrAuto': 'Type a number for {label}, or leave it empty for auto',
+  'ruler.upTo': 'up to {v}',
+  'ruler.io': '{n} bars of clean beat',
+  'ruler.io.at120': '{n} bars of clean beat, drawn at 120 BPM: the tempo comes from {box}',
+  'ruler.io.short': '{n} bars each way needs about {need} at {bpm} BPM',
+  'lookback.farSeconds': '{s} s ago',
+  'lookback.far': '{n} {unit} ago',
+  'lookback.rate': 'the planner writes {n} {unit} a second',
+  'lookback.now': 'now',
+  'lookback.tip.rate': 'Drag to set how far back {who} checks for repeats. The planner writes {n} {unit} a second. Left reaches further back.',
+  'lookback.tip': 'Drag to set how far back {who} checks for repeats. Left reaches further back.',
+  'power.off': '{label} · off',
+  'power.tip.on': 'Switch it off',
+  'power.tip.off': 'Switch it on: its settings stay adjustable while it is off',
+  'field.kept': 'Still using {what}.',
+  'field.keptNothing': 'Nothing is applied until it is valid.',
+  'field.refused': '{err} Kept “{v}”.',
+  'field.refused.empty': '{err} Kept it empty.',
 };
 
 const JOIN_EN: { [j in SlotList['join']]: (a: string[]) => string } = {

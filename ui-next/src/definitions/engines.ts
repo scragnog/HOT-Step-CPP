@@ -7,14 +7,15 @@
 export const ENGINES = [
   /** `id` is the server's (GET /api/capabilities); `name` is how the page says it, in strips, notes and toasts;
    *  `tag` how a card or a parked chip tags it, in a few letters; `short` is how the generated tables write it; `backend` is its folder in server/src/services/backends, and
-   *  `prefix` the prefix of the request fields its code reads (mm3Steps): tools/make-fixtures.ts reads both. */
-  { id: 'ace', name: 'ACE-Step 1.5', short: 'ace', tag: 'ACE-Step', backend: 'ace', prefix: '' },
+   *  `prefix` the prefix of the request fields its code reads (mm3Steps): tools/make-fixtures.ts reads both;
+   *  `stepSeconds` about how long one sampler step takes, for a step count's estimate ("≈ 1.3 s"). */
+  { id: 'ace', name: 'ACE-Step 1.5', short: 'ace', tag: 'ACE-Step', backend: 'ace', prefix: '', stepSeconds: 0.11 },
   /** `createContent`: what the existing createContentParams() is told about this engine. */
-  { id: 'minimax-m3', name: 'MiniMax-Music3', short: 'mm3', tag: 'MiniMax', backend: 'minimax', prefix: 'mm3', createContent: { mm3Mode: true } },
-  { id: 'yue2', name: 'YuE2', short: 'yue2', tag: 'YuE2', backend: 'yue2', prefix: 'yue2', createContent: { yue2Active: true } },
-  { id: 'sa3', name: 'Stable Audio 3', short: 'sa3', tag: 'SA3', backend: 'sa3', prefix: 'sa3' },
+  { id: 'minimax-m3', name: 'MiniMax-Music3', short: 'mm3', tag: 'MiniMax', backend: 'minimax', prefix: 'mm3', stepSeconds: 0.11, createContent: { mm3Mode: true } },
+  { id: 'yue2', name: 'YuE2', short: 'yue2', tag: 'YuE2', backend: 'yue2', prefix: 'yue2', stepSeconds: 0.16, createContent: { yue2Active: true } },
+  { id: 'sa3', name: 'Stable Audio 3', short: 'sa3', tag: 'SA3', backend: 'sa3', prefix: 'sa3', stepSeconds: 0.05 },
   /** Its jobs run as a per-job override (backendOverride), not on the active backend. */
-  { id: 'heartmula', name: 'HeartMuLa', short: 'hm', tag: 'HeartMuLa', backend: 'heartmula', prefix: 'heartmula', jobOverride: true },
+  { id: 'heartmula', name: 'HeartMuLa', short: 'hm', tag: 'HeartMuLa', backend: 'heartmula', prefix: 'heartmula', stepSeconds: 0.11, jobOverride: true },
 ] as const;
 
 export type EngineId = (typeof ENGINES)[number]['id'];

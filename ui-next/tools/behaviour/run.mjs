@@ -34,7 +34,12 @@ const only = opt('only') ? new RegExp(opt('only')) : null;
 /* --slice: the scenarios the acceptance files list (acceptance/*.json, one per work package), each with the reason it
    is there; a scenario the concept marks pending that the rebuild gets right is run as a normal one */
 const ACC = path.join(here, 'acceptance');
-const SLICE = flag('slice') ? fs.readdirSync(ACC).filter(f => f.endsWith('.json')).sort().flatMap(f => JSON.parse(fs.readFileSync(path.join(ACC, f), 'utf8')).scenarios.map(x => x.id)) : null;
+const ENTRIES = flag('slice') ? fs.readdirSync(ACC).filter(f => f.endsWith('.json')).sort().flatMap(f => JSON.parse(fs.readFileSync(path.join(ACC, f), 'utf8')).scenarios) : null;
+const SLICE = ENTRIES ? ENTRIES.map(x => x.id) : null;
+/* an entry with { waiting: { package, because } } is right but cannot pass until that package lands (a placeholder it
+   will replace changes what the scenario sees): it runs, is reported as waiting and not counted as a failure, and if it
+   passes the run fails, so whoever lands the package moves it back to a normal entry (README, "Waiting scenarios") */
+const WAITING = new Map((ENTRIES ?? []).filter(x => x.waiting).map(x => [x.id, x.waiting]));
 if (SLICE) { const known = new Set(all.map(s => s.id)), bad = SLICE.filter(id => !known.has(id)); if (bad.length) throw new Error('acceptance lists scenarios that do not exist: ' + bad.join(', ')); }
 /* a pending scenario ({ pending: { finding, right } }) states a behaviour the page is known to get wrong: a normal run
    leaves it out, --pending runs only those */
@@ -56,14 +61,16 @@ await Promise.all(Array.from({ length: workers }, async () => {
     const sc = list[next++];
     let r; try { r = await runScenario(browser, sc, server.url, { trace, dump: flag('dump') }); } catch (e) { r = { id: sc.id, results: [[false, 'harness', String(e.stack || e).split('\n')[0]]], trace: [] }; }
     if (saveAs) fs.writeFileSync(tfile(saveAs, sc.id), gz(r.trace));
-    done.push(r); const bad = r.results.filter(x => !x[0]).length;
-    process.stdout.write(`${bad ? 'FAIL' : 'ok  '} ${sc.id} (${r.results.length} checks${bad ? `, ${bad} failed` : ''})\n`);
+    done.push(r); const bad = r.results.filter(x => !x[0]).length, w = WAITING.get(sc.id);
+    if (w) process.stdout.write(bad ? `wait ${sc.id} (waiting on package ${w.package}: ${bad} of ${r.results.length} checks fail)\n` : `FAIL ${sc.id} (waiting on package ${w.package}, but it passes: move it back to a normal entry)\n`);
+    else process.stdout.write(`${bad ? 'FAIL' : 'ok  '} ${sc.id} (${r.results.length} checks${bad ? `, ${bad} failed` : ''})\n`);
   }
 }));
 await browser.close(); server.close();
 
 done.sort((a, b) => a.id.localeCompare(b.id));
-const fails = done.flatMap(r => r.results.filter(x => !x[0]).map(x => `${r.id}: ${x[1]}${x[2] ? ' :: ' + x[2] : ''}`));
+const fails = done.flatMap(r => WAITING.has(r.id) ? (r.results.some(x => !x[0]) ? [] : [`${r.id}: waiting on package ${WAITING.get(r.id).package}, but it passes: move it back to a normal entry`]) : r.results.filter(x => !x[0]).map(x => `${r.id}: ${x[1]}${x[2] ? ' :: ' + x[2] : ''}`));
+const waited = done.filter(r => WAITING.has(r.id) && r.results.some(x => !x[0])).sort((a, b) => a.id.localeCompare(b.id));
 const checks = done.reduce((a, r) => a + r.results.length, 0);
 if (pendingRun) {
   /* each pending scenario is expected to fail; one that passes is the signal to promote it (remove its pending field) */
@@ -78,6 +85,7 @@ if (pendingRun) {
 } else {
   console.log(`\n${done.length} scenarios, ${checks} checks, ${fails.length} failed, in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   fails.forEach(f => console.log('  FAIL ' + f));
+  if (waited.length) { console.log(`${waited.length} scenarios waiting on a later package, not counted as failures:`); waited.forEach(r => { const w = WAITING.get(r.id); console.log(`  waiting on package ${w.package}: ${r.id}: ${w.because}`); r.results.filter(x => !x[0]).forEach(x => console.log(`    fails: ${x[1]}${x[2] ? ' :: ' + x[2] : ''}`)); }); }
   console.log(`${pendingAll.length} pending scenarios not run (behaviours known to be wrong; see README): --pending runs them`);
 }
 

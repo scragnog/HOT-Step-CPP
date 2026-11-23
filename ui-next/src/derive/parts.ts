@@ -9,9 +9,10 @@ import { type Desk, type Index, applies, changed, editsOf, factOf, has, isAuto, 
 import { liveDefs } from './request.ts';
 import { cleanState, setValue } from './values.ts';
 import { type Msg, msg } from './messages.ts';
-import { textMsg } from './strings.ts';
+import { checkText, paramWords, textMsg } from './strings.ts';
 import { stepChanges, stepWords, type StepWords } from './steps.ts';
 import { fractionValue, keyStep, parseTyped } from './models.ts';
+import { autoEstimate, rulerSnap, scrubValue } from './controls.ts';
 
 /** One undo step: what it changes, and its words. The store applies it and records it. */
 export interface Change {
@@ -94,15 +95,25 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
     const { p } = ix.params.get(k)!;
     params[k] = {
       key: k, face: wordsOf(ix, p, desk), value: valueOf(ix, k, desk)!, text: textMsg(ix, k, desk), changed: changed(ix, k, desk), auto: isAuto(ix, k, desk), applies: applies(ix, k, desk),
-      set(value, step, slots, also) { setOne(k, value, false, step, slots, also); },
+      set(value, step, slots, also) {
+        /* text that fails its check is refused, and said with what is kept (12-values.js): a field that keeps it keeps
+           its own draft and never sets it */
+        if (p.type === 'text' && typeof value === 'string') { const at = now(), bad = bindable(at, k) ? checkText(ix, k, at, value.trim()) : null; if (bad) { const v = valueOf(ix, k, at); tell?.(v === '' || v === undefined ? msg('field.refused.empty', { err: bad }) : msg('field.refused', { err: bad, v: String(v) })); return; } }
+        setOne(k, value, false, step, slots, also);
+      },
       press(key, shift) { const at = now(); if (!bindable(at, k)) return false; const to = keyStep(ix, k, at, key, shift); if (to === null) return false; setOne(k, to, false); return true; },
       typed(text) {
         const at = now(); if (!bindable(at, k)) return;
+        /* an empty box (or "auto") puts a parameter with auto back on auto (21-numbox.js commitNum) */
+        if (resolve(p, at.engine).auto && /^(auto)?$/i.test(text.trim())) { change(k, b => { b.auto[k] = true; }); return; }
         const r = parseTyped(ix, k, at, text);
-        if ('error' in r) tell?.(r.error); else setOne(k, r.value, true);
+        if ('error' in r) tell?.(resolve(p, at.engine).auto ? msg('box.typeNumberOrAuto', { label: paramWords(ix, k, at).label }) : r.error); else setOne(k, r.value, true);
       },
       toFraction(f) { const at = now(); if (!bindable(at, k)) return; const v = fractionValue(ix, k, at, f); if (v !== null) setOne(k, v, false); },
-      setAuto(on) { change(k, b => { b.auto[k] = on; }); },
+      scrub(from, px, shift) { const at = now(); if (!bindable(at, k)) return; const v = scrubValue(ix, k, at, from, px, shift); if (v !== null) setOne(k, v, false); },
+      along(f, span, px) { const at = now(); if (!bindable(at, k)) return; setOne(k, rulerSnap(ix, k, at, f, span, px) ?? Math.min(1, Math.max(0, f)) * span, false); },
+      /* turning auto off starts the value where auto was (S-17): "up to 4:00" leaves 4:00, not the default */
+      setAuto(on) { change(k, (b, at) => { b.auto[k] = on; const e = on || k in at.vals ? null : autoEstimate(ix, k, at); if (e !== null && e !== resolve(p, at.engine).default) b.vals[k] = setValue(ix, at, k, e).value; }); },
       reset() { change(k, (b, at) => { b.vals[k] = null; delete b.auto[k]; if (resolve(p, at.engine).auto) b.auto[k] = true; }); },
     };
   }

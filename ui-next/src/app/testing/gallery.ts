@@ -26,8 +26,11 @@ const parts = (p: string): Node[] => {
     if (spec.kind === 'container' || spec.kind === 'bespoke') return [];
     const extra: Record<string, unknown> = name === 'choiceRow' ? { param: `${p}.c`, label: 'Feel', choices: [['Soft', 'soft'], ['Hard', 'hard'], ['Wide', 'wide']] }
       : name === 'meter' ? { reads: [`${p}.n1`], opts: { min: 0, max: 10, red: 8 } }
-      : name === 'textArea' ? { opts: { look: 'note' } } : name === 'powerButton' ? { label: 'Power' } : name === 'pick' ? { opts: { variant: 'lcd' } } : {};
+      : name === 'textArea' ? { opts: { look: 'note' } } : name === 'powerButton' ? { label: 'Power' } : {};
     if (spec.edits?.includes('pair')) return [{ part: name, params: [`${p}.n1`, `${p}.n2`], ...extra } as Node];
+    /* a part with variants (a pick) is drawn once in each */
+    const variants = (spec.opts as { variant?: { type: unknown } } | undefined)?.variant?.type;
+    if (Array.isArray(variants) && spec.edits?.includes('choice')) return variants.map(variant => ({ part: name, param: of.choice!, opts: { variant } }) as Node);
     const t = spec.edits?.find(e => e in of);
     if (t) return [{ part: name, param: of[t]!, ...extra } as Node];
     if (name === 'button' || name === 'link') return [{ part: name, actions: [{ do: 'set', param: `${p}.b`, value: true, label: 'Boost it' }] } as Node];

@@ -23,6 +23,10 @@ export interface ParamView extends ParamModel {
   typed(text: string): void;
   /** Where a hand is along the range, 0 to 1. */
   toFraction(f: number): void;
+  /** A hand dragging a scrub token sideways, `px` pixels on from the value `from` it started at. */
+  scrub(from: number, px: number, shift: boolean): void;
+  /** A hand on a ruler: its place `f` along a scale spanning `span` from 0, on a track `px` pixels wide. */
+  along(f: number, span: number, px: number): void;
   /** Text being typed into a checked field: the check's words while it fails, else null. */
   check(text: string): Slot | null;
 }
