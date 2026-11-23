@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { alignerLyrics, type AlignerLyrics } from '../../lyricsPronunciation.js';
-import { yue2LyricsJson, type Yue2AlignWord } from './align.js';
+import { hasLyricLines, yue2LyricsJson, type Yue2AlignWord } from './align.js';
 
 const LYRICS = '[Verse 1]\nhold the line\n\n[Chorus]\nlet it go\n';
 
@@ -101,4 +101,10 @@ test('offsets are codepoints, not UTF-16 units', () => {
   const json = yue2LyricsJson(lyrics, [{ start: 2, end: 2.5, score: 1, char0: c0, char1: c0 + 4 }]);
   assert.equal(json.lines[0].words[0].word, 'sing');
   assert.equal(json.lines[0].text, '🎵 sing');
+});
+
+test('hasLyricLines: instrumental ranges (blank or tag-only) have none', () => {
+  assert.equal(hasLyricLines(''), false);
+  assert.equal(hasLyricLines('[Instrumental]\n\n  \n[Outro]'), false);
+  assert.equal(hasLyricLines('[Verse]\nمرحبا بالعالم'), true);
 });

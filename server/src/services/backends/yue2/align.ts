@@ -69,6 +69,13 @@ function lyricLines(chars: string[]): LyricLine[] {
   return out;
 }
 
+/** True when the lyrics have at least one sung line (not blank, not a
+ *  `[Section]` tag). An Instrumental range has none, and the engine refuses it
+ *  with "no alignable characters". */
+export function hasLyricLines(lyrics: string): boolean {
+  return lyricLines(Array.from(lyrics)).length > 0;
+}
+
 /**
  * Fold the aligner's spans back onto the lyric words that were sent.
  *

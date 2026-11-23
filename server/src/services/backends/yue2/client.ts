@@ -40,7 +40,7 @@
 import { config } from '../../../config.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Yue2AlignWord } from './align.js';
+import { hasLyricLines, type Yue2AlignWord } from './align.js';
 import type { Yue2LyricScheduleWire } from './lyricSchedule.js';
 
 const base = () => config.aceServer.url;
@@ -720,6 +720,8 @@ export interface Yue2AlignResult {
 export async function yue2Align(
   audio: Buffer, lyrics: string, timeoutMs = 900_000,
 ): Promise<Yue2AlignResult> {
+  // Lyric-free (Instrumental) ranges have nothing to align; the engine would reject them.
+  if (!hasLyricLines(lyrics)) return { audio_s: 0, frames: 0, model: '', words: [] };
   const form = new FormData();
   form.append('audio', new Blob([new Uint8Array(audio)], { type: 'audio/wav' }), 'render.wav');
   form.append('lyrics', lyrics);
