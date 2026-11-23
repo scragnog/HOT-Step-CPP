@@ -58,11 +58,12 @@ function draw(d: Definition, e: EngineId, name: string): string {
 }
 
 /** The picker's drawing of a pedal (27-pedalboard.js thPedalBare): the pedal standing free on its own canvas, at its
- *  unit width, so pedals stand on a shelf; and the size of that canvas. Package 8. */
+ *  unit width, so pedals stand on a shelf; and the size of that canvas. Its gradient's id is its own (thb), clear of
+ *  the ids the modules' drawings carry (thg). Package 8. */
 export const bareSize = (d: Definition): { w: number; h: number } => ({ w: pedalW(d), h: TH_PH });
 export function thumbBare(d: Extract<Definition, { kind: 'pedal' }>, e: EngineId, name: string): string {
   const k = `bare|${d.id}|${e}|${name}`;
   let t = CACHE.get(k);
-  if (t === undefined) { t = svg(pedal(d, e, name), `ped-th${d.on ? '' : ' neutral'}`, `0 0 ${pedalW(d)} ${TH_PH}`, `--h:${d.hue}`); CACHE.set(k, t); }
+  if (t === undefined) { t = svg(pedal(d, e, name).replace(/thg(\d+)/g, 'thb$1'), `ped-th${d.on ? '' : ' neutral'}`, `0 0 ${pedalW(d)} ${TH_PH}`, `--h:${d.hue}`); CACHE.set(k, t); }
   return t;
 }

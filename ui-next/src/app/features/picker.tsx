@@ -180,7 +180,29 @@ export function Picker() {
     return () => { el.removeEventListener('mouseover', over); el.removeEventListener('mouseout', out); el.removeEventListener('focusin', focus); el.removeEventListener('click', click); };
   }, []);
   const el = host();
-  if (!el || !open) return null;
-  return createPortal(<Wall />, el);
+  if (!el) return null;
+  return createPortal(open ? <Wall /> : <Closed />, el);
 }
 fill('overlays', Picker);
+
+/** The closed picker holds its frame, as the concept's page does (12-picker.html): the filter, the close button, the
+ *  two columns, the info line and the bar, empty; the wall is drawn only while it is open. */
+function Closed() {
+  const say = useSay();
+  return (
+    <>
+      <label className="fl-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+        <input id="pkSearch" placeholder={say(ui('panel.filter'))} autoComplete="off" spellCheck="false" aria-label={say(ui('panel.filter'))} defaultValue="" />
+        <span id="pkCount" className="mono" />
+      </label>
+      <button className="fl-close" id="pkClose" type="button" aria-label={say(ui('picker.close'))}><Icon name="x" size={15} /></button>
+      <div className="fl-cols" id="pkCols">
+        <section className="fl-col"><h2>{say(ui('panel.modules'))}</h2><div className="fl-wall" id="pkLeft" role="group" aria-label={say(ui('panel.modules'))} /></section>
+        <section className="fl-col"><h2>{say(ui('picker.board'))}</h2><div className="fl-wall" id="pkRight" role="group" aria-label={say(ui('picker.boardGroup'))} /></section>
+      </div>
+      <div className="fl-info" id="pkInfo" aria-live="polite" />
+      <nav className="fl-bar" id="pkBar" aria-label={say(ui('picker.bar'))} />
+    </>
+  );
+}

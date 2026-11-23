@@ -32,9 +32,9 @@ The slice is a working vertical cut of the page:
   an LCD, a tile's foot, a labelled pairing, a pedal, a side unit), and the registration points the packages add to.
 
 Not built, and left as seams: the prompt card and the lyric sheet, the bespoke parts and the modules made of them, the
-picker, the engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
-workflows and revisions, drafts, drag and drop, the remaining overlays (popover, notes, score modal, song menu, engine
-log), tooltips and touch gestures, and the choreographed tier transition (a View Transition in the concept; here the
+engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
+workflows and revisions, drafts, the remaining overlays (notes, score modal, song menu, engine log), and the
+choreographed tier transition (a View Transition in the concept; here the
 tier changes at once). "The plan for the rest" below divides them into packages.
 
 ## The folder
@@ -102,6 +102,7 @@ file of its own; a package adds one and edits no list:
 - `15-controls-1.css` (package 1): the shared controls on the surfaces the concept never drew them on (a token, a flag
   or terminal chips off a terminal, an LCD's lit word, bar chips and big number off an LCD, which bring a small LCD of
   their own, a chip selector or the record button on paper, a ruler or a look-back strip in a row or on a pedal).
+- `30-overlays.css` (package 8): the ring on the picker's drawing Enter will take while a filter is typed (F-29).
 
 The components emit the concept's element structure, classes and `data-*` attributes, so its rules apply unchanged;
 never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's grid
@@ -247,6 +248,8 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | A part's look, a package's stylesheet | `src/app/styles/rebuild/<NN>-<name>.css` | loaded after the concept's, in name order |
 | A keyboard shortcut | a file in `src/app/features/` | `onKey({ id, when, run, order })` (register/keys.ts) |
 | Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
+| An overlay that takes focus and gives it back (a dialog, a menu) | its own file | `layerOpen(el, { trigger, modal, close })` and `layerClosed(el)` (features/layers.ts): Escape closes the top one, Tab stays in a modal one, Undo waits under one, F6 and F9 wait |
+| Something in the popover (a list, a menu, an offer) | its own file | `openPop(button, () => <Body />)`, `closePop()`, `placeFloat` (features/pop.ts) |
 | A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts) |
 | State of its own | `src/app/store/<package>.ts` | its own store; `defineUndoable(name, { read, write })` when Undo covers it |
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
@@ -298,6 +301,13 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   on auto, and text that fails its check is refused and said (`derive/parts.ts`).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
+- `derive/picker.ts` (package 8): the picker's model (`pickerModel`: each drawing's group, whether the category bar
+  hides or dims it, how it matches the filter, what it says, the groups' counts, the count's words by kind, the order
+  the keys walk, what Enter takes and what the hint names), `pickerGroupOf`, the category bar (`PICKER_CATS`) and the
+  Lab offer's words (`labOffer`). `derive/tips.ts`: a tip's sentences with every digit kept (`tipSentences`), the
+  sentences that teach how to work a control and are said once a session (`tipLesson`, `isHowTo`), a finger's words
+  (`touchTip`) and the rule that a tip repeating a printed line does not open (`sameAsLabel`); the last two languages'
+  rules are the English table's, keyed by language. Tested in `tools/test-overlays.ts` (in `npm run check`).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -360,8 +370,9 @@ decide the tile heights their moves need).
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
    the dropdown are portals into the concept's elements; the overlays' containers are empty until their packages fill
-   them. Package 10 undoes this when the page moves into the real application's root.
-2. **Adding a Lab module outside Lab offers Lab in a toast with an action**, not in the popover (#pop is package 8's).
+   them (the `overlays` slot, drawn at the root by `App.tsx`; the picker portals into `#pickerWrap`, the popover into
+   `#pop`). Package 10 undoes this when the page moves into the real application's root.
+2. **Adding a Lab module outside Lab offers Lab in the popover by its card**, as the concept does (package 8): closed.
 3. **The engine panel holds the five engine cards only**; the taglines, specs and models are package 5's.
 4. **An XY pad changed from elsewhere is drawn where it is**, as the concept draws a pad it has just rebuilt; it springs
    only while it is being worked.
@@ -401,6 +412,16 @@ decide the tile heights their moves need).
     by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
 19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
     the LCD selector it gives a pick (`board/Board.tsx`, one line).
+20. **A drag's preview is an inert copy** (package 8): the tile's own face, as the concept's, but without ids or drag
+    handles of its own, `inert` and hidden from screen readers, so no id is on the page twice while it shows. A pedal
+    or side unit dragged while the Pedalboard is not on the desk previews the Pedalboard holding its drawing (the
+    picker's), where the concept draws the whole pedal. The tile that lands does not play the concept's landing (it
+    settles from the preview's box with a lift and a shadow): that is motion, package 9's.
+21. **The picker's buttons, the Lab offer's and a grip's moves say their type** (deviation 6).
+22. **A move from a grip's menu merges with a key move on the same grip made in the last two seconds**: one rule of
+    the store's (`move`) for a run of moves on one grip; the concept's menu moves are steps of their own.
+23. **Escape in the Modules panel opened over the desk at 1280 closes the panel too while a popover is open from one
+    of its cards**: the panel's own Escape (`shell/panelState.ts`) runs before the layers' (`features/layers.ts`).
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

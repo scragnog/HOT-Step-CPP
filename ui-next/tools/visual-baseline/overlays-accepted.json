@@ -1,0 +1,40 @@
+{
+  "about": "Package 8's accepted differences between the concept's page and the rebuild's in its states (slice-states/80-overlays.mjs, scope overlays), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+  "accepted": [
+    {
+      "state": "^ov8-",
+      "key": "",
+      "field": "^sem:data-sig$",
+      "n": 21,
+      "why": "Deviation 10: the concept's Pedalboard carries a delegation signature (data-sig) the rebuild has no use for (the slice's accepted kind, on the board under the overlays)."
+    },
+    {
+      "state": "^ov8-",
+      "key": "",
+      "field": "^sem:aria-valuetext$",
+      "n": 40,
+      "why": "Deviation 6: a knob says its value with its unit to a screen reader (the pedals' knobs under the overlays)."
+    },
+    {
+      "state": "^ov8-",
+      "key": "",
+      "field": "^sem:type$",
+      "n": 27,
+      "why": "Deviation 6: every button says its type (the board's chain switch under the overlays, and the Lab offer's two buttons, deviation 21)."
+    },
+    {
+      "state": "^ov8-(pop-moves|tip-hover|pop-lab-parked)$",
+      "key": "^#(pop|tip)$",
+      "field": "^(top|bottom|inset-block-start|inset-block-end)$",
+      "n": 12,
+      "why": "The popover and the tip stand where they should by their anchor, which stands elsewhere on the page: the concept's prompt card (package 4) stands above the desk and makes its page taller and scrolled, so a grip, a pedal's knob and a card are lower there (by 142px, 142px and 54px of scroll)."
+    },
+    {
+      "state": "^ov8-picker-light$",
+      "key": "^shot$",
+      "field": "^pixels$",
+      "n": 1,
+      "why": "The picker's shot: the wall, its filter, its count, its info line and its bar are the same; what differs is the page seen blurred through the scrim behind it, where the concept draws its prompt card (package 4) above the desk."
+    }
+  ]
+}

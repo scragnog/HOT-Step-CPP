@@ -38,7 +38,7 @@ const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.des
 const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 const dragKey = () => (dragId?.startsWith('move:') ? dragId.slice(5) : dragId);
 /** The tiles on the desk in order (not the lyric sheet, not the one travelling). */
-const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving')).map(t => t.dataset.m!);
+const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving') && !t.classList.contains('ghost')).map(t => t.dataset.m!);
 /** The module the tile goes before, to stand at place k among `list` (null: the end; past the last shown tile, before
  *  the next module that is not shown here). */
 function beforeAt(list: string[], k: number): string | null {
@@ -49,10 +49,10 @@ function beforeAt(list: string[], k: number): string | null {
 
 /** While dragging, the tiles make room for the preview by sliding, not jumping (M-13). */
 function slideRoom(fn: () => void): void {
-  const before = new Map([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(t => [t.dataset.m!, t.getBoundingClientRect()]));
+  const before = new Map([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]:not(.ghost)')].map(t => [t.dataset.m!, t.getBoundingClientRect()]));
   fn(); packNow(make());
   if (reduced()) return;
-  document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]').forEach(t => {
+  document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]:not(.ghost)').forEach(t => {
     const b = before.get(t.dataset.m!); if (!b) return; const r = t.getBoundingClientRect(), dx = b.left - r.left, dy = b.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 240, easing: 'cubic-bezier(.2, .8, .2, 1)' });
   });
@@ -66,10 +66,13 @@ function drawn(def: ModuleDef): HTMLElement | null {
   root.unmount();
   return el ?? null;
 }
-/** A preview takes no focus, says nothing to a screen reader and holds no ids or drag handles of its own. */
-function inertCopy(g: HTMLElement, key: string): HTMLElement {
-  g.classList.add('ghost'); g.removeAttribute('data-m'); g.dataset.gm = key; g.inert = true; g.setAttribute('aria-hidden', 'true');
-  [g, ...g.querySelectorAll<HTMLElement>('[id], [data-drag], [draggable]')].forEach(x => { x.removeAttribute('id'); x.removeAttribute('data-drag'); x.removeAttribute('draggable'); });
+/** A preview is a copy of the tile (it keeps its name, as the concept's does: data-gm says it is the preview); it holds
+ *  no ids, so none is on the page twice, and a new tile's preview no hooks of its own (the concept's list). */
+const HOOKS = ['data-bind', 'data-knob', 'data-drag', 'data-scope', 'data-term', 'data-pedals'];
+function ghostCopy(g: HTMLElement, key: string, hooks: boolean): HTMLElement {
+  g.classList.add('ghost'); g.dataset.gm = key;
+  [g, ...g.querySelectorAll<HTMLElement>('[id]')].forEach(x => x.removeAttribute('id'));
+  if (!hooks) g.querySelectorAll(HOOKS.map(a => `[${a}]`).join(', ')).forEach(x => HOOKS.forEach(a => x.removeAttribute(a)));
   return g;
 }
 /** The tile being moved leaves the desk while it travels: it stays in the page, hidden where it stood (G-M-04). */
@@ -80,7 +83,7 @@ function liftOut(t: HTMLElement): void {
 function ghostFor(id: string): HTMLElement | null {
   if (id.startsWith('move:')) {
     const m = id.slice(5), t = document.querySelector<HTMLElement>(`#bento > .tile[data-m="${m}"]`); if (!t) return null;
-    const g = inertCopy(t.cloneNode(true) as HTMLElement, m);
+    const g = ghostCopy(t.cloneNode(true) as HTMLElement, m, true);
     t.dataset.mo = m; t.removeAttribute('data-m'); liftOut(t);
     return g;
   }
@@ -92,9 +95,9 @@ function ghostFor(id: string): HTMLElement | null {
     const g = drawn(BOARD); if (!g) return null;
     const body = g.querySelector('.tile-body'), engine = useDesk.getState().desk.engine, name = sayNow(defName(d, useDesk.getState().desk));
     if (body) body.innerHTML = `<div class="board"><div class="pedals">${d.kind === 'pedal' ? thumbBare(d, engine, name) : thumbOf(d, engine, name)}</div></div>`;
-    return inertCopy(g, BOARD.id);
+    return ghostCopy(g, BOARD.id, false);
   }
-  const g = drawn(d); return g ? inertCopy(g, d.id) : null;
+  const g = drawn(d); return g ? ghostCopy(g, d.id, false) : null;
 }
 
 /** Ends a drag: the preview goes, the moved tile is back in the desk's flow, nothing glows or is lifted. */
@@ -150,7 +153,7 @@ document.addEventListener('dragover', e => {
   const dist = (s: Place) => Math.hypot(Math.max(s.x - px, 0, px - s.x - s.w), Math.max(s.y - py, 0, py - s.y - s.h));
   const pick = dragRects.find(inside) ?? [...dragRects].sort((a, b) => dist(a) - dist(b) || a.k - b.k)[0]; if (!pick || pick.k === dropBefore?.k) return;
   const list = deskTiles().filter(x => x !== key && x !== dragKey()), gh = ghost;
-  const at = list[pick.k] ? g.querySelector(`:scope > .tile[data-m="${list[pick.k]}"]`) : tail();
+  const at = list[pick.k] ? g.querySelector(`:scope > .tile[data-m="${list[pick.k]}"]:not(.ghost)`) : tail();
   dropBefore = { k: pick.k, m: beforeAt(list, pick.k) };
   slideRoom(() => g.insertBefore(gh, at));
 });
