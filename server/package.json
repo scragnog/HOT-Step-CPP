@@ -29,6 +29,7 @@
     "music-metadata": "^11.12.3",
     "undici": "^7.25.0",
     "uuid": "^11.1.0",
+    "yauzl": "^3.4.0",
     "zod": "3.25.76"
   },
   "devDependencies": {
@@ -39,6 +40,7 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^22.14.0",
     "@types/uuid": "^10.0.0",
+    "@types/yauzl": "^3.4.0",
     "tsx": "^4.19.3",
     "typescript": "~5.8.2"
   },

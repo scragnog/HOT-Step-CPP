@@ -137,13 +137,13 @@ function gb(n: number): string { return `${(n / 1e9).toFixed(2)} GB`; }
 
 // ── Metadata rewrite ─────────────────────────────────────────────────
 
-const PLAIN_COLUMNS: Record<string, string[]> = {
+export const PLAIN_COLUMNS: Record<string, string[]> = {
   album_presets: ['adapter_path', 'lm_adapter_path', 'mm3_adapter_path', 'yue2_ar_adapter_path', 'yue2_nar_adapter_path', 'reference_track_path'],
   training_datasets: ['source_dir', 'dataset_json_path'],
   yue2_rung_scores: ['checkpoint_dir'],
   settings: ['value'],
 };
-const JSON_COLUMNS: Record<string, string[]> = {
+export const JSON_COLUMNS: Record<string, string[]> = {
   songs: ['generation_params'],
   audio_intents: ['request', 'meta'],
   workflow_jobs: ['input', 'result'],

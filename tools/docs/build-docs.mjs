@@ -157,11 +157,20 @@ function routeIndex() {
   const imports = Object.fromEntries([...index.matchAll(/^import (\w+) from '\.\/routes\/(\w+)\.js';/gm)].map((m) => [m[1], m[2]]));
   const mounts = [...index.matchAll(/^app\.use\('([^']+)',\s*(\w+)\);/gm)].map((m) => ({ prefix: m[1], file: imports[m[2]] })).filter((m) => m.file);
   const verbRe = /router\.(get|post|put|delete|patch)\(\s*['"`]([^'"`]*)['"`]/g;
-  const routesIn = (file) => [...read(file).matchAll(verbRe)].map((m) => ({ verb: m[1].toUpperCase(), path: m[2] }));
+  // Own router.<verb> calls, plus those of a sibling route file mounted with
+  // router.use('/sub', <its default import>) (settings.ts mounts the workspace archive so).
+  const routesIn = (file) => {
+    const src = read(file);
+    const own = [...src.matchAll(verbRe)].map((m) => ({ verb: m[1].toUpperCase(), path: m[2], file: rel(file) }));
+    const imported = Object.fromEntries([...src.matchAll(/^import (\w+) from '\.\/(\w+)\.js';/gm)].map((m) => [m[1], m[2]]));
+    const nested = [...src.matchAll(/router\.use\('([^']+)',\s*(\w+)\)/g)].filter((m) => imported[m[2]])
+      .flatMap((m) => routesIn(path.join(path.dirname(file), `${imported[m[2]]}.ts`)).map((r) => ({ ...r, path: m[1] + (r.path === '/' ? '' : r.path) })));
+    return [...own, ...nested];
+  };
   const sections = mounts.map(({ prefix, file }) => {
     const main = path.join(ROOT, 'server/src/routes', `${file}.ts`);
     const subs = walk(path.join(ROOT, 'server/src/routes', file), (p) => p.endsWith('.ts'));
-    const routes = [main, ...subs].flatMap((f) => routesIn(f).map((r) => ({ ...r, file: rel(f) })));
+    const routes = [main, ...subs].flatMap((f) => routesIn(f));
     const rows = routes.map((r) => [`\`${r.verb}\``, `\`${(prefix + (r.path === '/' ? '' : r.path)) || '/'}\``, `\`${r.file}\``]);
     return `### \`${prefix}\`\n\n${table(['Method', 'Path', 'Defined in'], rows)}`;
   });

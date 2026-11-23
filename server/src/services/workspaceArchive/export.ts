@@ -21,6 +21,7 @@ import type { DataChildren } from '../../dataroot/locate.js';
 import { isCredentialKey } from '../generation/requestCapture.js';
 import { STALE_MS } from '../instance.js';
 import { ENV_PATH_KEYS, samePath } from '../../dataroot/paths.js';
+import { JSON_COLUMNS, PLAIN_COLUMNS } from '../../dataroot/transfer.js';
 import { destinationErrors, ownerOf, planSources, takeInventory, type Inventory, type PlannedSource } from './inventory.js';
 import {
   ARCHIVE_FORMAT, ARCHIVE_KIND, MANIFEST_NAME,
@@ -68,7 +69,7 @@ export function isMachineKey(key: string): boolean {
 /** One KEY=value line that dotenv parses back to exactly `v`, or null when no
  *  quoting can (a value holding all three quote kinds). Single quotes and
  *  backticks expand nothing; double quotes turn \n and \r into line breaks. */
-function envLine(key: string, v: string): string | null {
+export function envLine(key: string, v: string): string | null {
   if (/^[^\s#'"`\\]*$/.test(v)) return `${key}=${v}`;
   const q = ["'", '`', '"'].find(c => !v.includes(c) && !(c === '"' && /\\[nr]/.test(v)));
   return q ? `${key}=${q}${v}${q}` : null;
@@ -96,23 +97,8 @@ export const hooks = {
   opened: (_abs: string, _stream: fs.ReadStream): void => {},
 };
 
-const DB_ENTRY = 'library/hotstep.db';
-const ENV_ENTRY = 'settings/.env';
-
-// ponytail: copy of dataroot/transfer.ts PLAIN_COLUMNS / JSON_COLUMNS; slice B
-// exports those lists, then import them here instead.
-const PLAIN_COLUMNS: Record<string, string[]> = {
-  album_presets: ['adapter_path', 'lm_adapter_path', 'mm3_adapter_path', 'yue2_ar_adapter_path', 'yue2_nar_adapter_path', 'reference_track_path'],
-  training_datasets: ['source_dir', 'dataset_json_path'],
-  yue2_rung_scores: ['checkpoint_dir'],
-  settings: ['value'],
-};
-const JSON_COLUMNS: Record<string, string[]> = {
-  songs: ['generation_params'],
-  audio_intents: ['request', 'meta'],
-  workflow_jobs: ['input', 'result'],
-  workflow_documents: ['data'],
-};
+export const DB_ENTRY = 'library/hotstep.db';
+export const ENV_ENTRY = 'settings/.env';
 
 /** Absolute paths in the DB's path columns that exist here but are not
  *  carried (outside every selected source). Existence separates a file from
