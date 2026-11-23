@@ -87,25 +87,39 @@ function detectAlbum(
  * into it (2026-07-31): the existing-album lookup was working fine, it was just
  * being handed a name no album could ever match.
  *
- * The tags are sitting in the files either way, so read them. Only the fields
- * that are actually empty are filled, so a labelled dataset is untouched and
- * the label store stays authoritative where it has an opinion.
- *
- * Bounded and best-effort: a dataset only needs enough of a majority to name an
- * artist and an album, and an unreadable file must never fail an export.
+ * Also repair stored WAV labels that exactly match the old ASCII decoding
+ * of the source tag. For other formats, bound the best-effort metadata reads
+ * used to seed artist and album detection.
  */
 const TAG_PROBE_LIMIT = 24;
+const SAMPLE_TAGS = { artist: 'tagArtist', album: 'tagAlbum', title: 'tagTitle' } as const;
+const TAG_FIELDS = ['artist', 'album', 'title'] as const;
 
-async function fillTagsFromFiles(included: TrainingSample[]): Promise<void> {
-  const needs = included.filter(s => !s.tagArtist.trim() || !s.tagAlbum.trim());
-  if (needs.length === 0) return;
-  for (const s of needs.slice(0, TAG_PROBE_LIMIT)) {
-    try {
+async function fillTagsFromFiles(included: TrainingSample[], detectNames = true): Promise<void> {
+  let otherProbes = 0;
+  for (const s of included) {
+    const isWave = path.extname(s.audioPath).toLowerCase() === '.wav';
+    if (isWave && TAG_FIELDS.some(field => s[SAMPLE_TAGS[field]].trim())) {
+      const repairs = await audioMeta.readWaveTagRepairs(s.audioPath);
+      for (const field of TAG_FIELDS) {
+        const repair = repairs[field];
+        const key = SAMPLE_TAGS[field];
+        if (repair && s[key] === repair.ascii) s[key] = repair.utf8;
+      }
+    }
+
+    const missingName = !s.tagArtist.trim() || !s.tagAlbum.trim();
+    const needsProbe = isWave
+      ? missingName || !s.tagTitle.trim()
+      : detectNames && missingName && otherProbes < TAG_PROBE_LIMIT;
+    if (needsProbe) {
+      if (!isWave) otherProbes++;
       const md = await audioMeta.read(s.audioPath);
-      if (!s.tagArtist.trim() && md.artist) s.tagArtist = md.artist;
-      if (!s.tagAlbum.trim() && md.album) s.tagAlbum = md.album;
-      if (!s.tagTitle.trim() && md.title) s.tagTitle = md.title;
-    } catch { /* unreadable file — the existing fallbacks still apply */ }
+      for (const field of TAG_FIELDS) {
+        const key = SAMPLE_TAGS[field];
+        if (!s[key].trim() && md[field]) s[key] = md[field];
+      }
+    }
   }
 }
 
@@ -645,14 +659,13 @@ export async function commitLyricStudioExport(
     throw new LyricStudioExportError('No exportable songs: every sample is excluded or is a vocal track without lyrics.');
   }
 
-  // Only when the caller did NOT name both: the manual path posts explicit
-  // artist/album from the preview the user confirmed, and probing files behind
-  // an explicit choice would be pure latency.
-  if (!(input.artist ?? '').trim() || !(input.album ?? '').trim()) {
-    await fillTagsFromFiles(split.included);
-  }
-  const artistName = (input.artist ?? '').trim() || detectArtist(ds, split.included).value;
-  const albumName = (input.album ?? '').trim() || detectAlbum(ds, split.included).value;
+  // POST gets fresh samples, so apply the same tag repair as the preview even
+  // when the user confirmed or edited the artist and album names.
+  const chosenArtist = (input.artist ?? '').trim();
+  const chosenAlbum = (input.album ?? '').trim();
+  await fillTagsFromFiles(split.included, !chosenArtist || !chosenAlbum);
+  const artistName = chosenArtist || detectArtist(ds, split.included).value;
+  const albumName = chosenAlbum || detectAlbum(ds, split.included).value;
 
   const songs = split.included.map(s => toStoredSong(s, ds, albumName));
 

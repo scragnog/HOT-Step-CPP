@@ -104,7 +104,7 @@ The ladder shows the dataset name from the Review list as a static heading above
 | More (YuE2 charts) | Reveals extra series controls: Cursor CE and Learning rate on the joint AR side, Drift and Learning rate on the joint NAR side. Grad norm appears once below the pair for joint runs, alongside step count, Pace and VRAM when recorded. |
 | Milestone badges (ACE-Step) | Appear in the done summary once a run has saved milestones (Milestone loss step above 0). Click a planner (LM) badge to audition that checkpoint; the sound (DiT) badges are labels only. |
 | Codes audition (ACE-Step) | Same-seed A/B between the base planner and the trained adapter, with an optional DiT render pass. |
-| Send to Lyric Studio (Build step) | Exports the dataset's artist/album metadata into Lyric Studio, optionally linking the dataset's trained adapters and a reference track as that album's generation preset. |
+| Send to Lyric Studio (Build step) | Exports the dataset's artist, album and track metadata into Lyric Studio, including Cyrillic names from UTF-8 WAV tags. You can also link trained adapters and a reference track as the album's generation preset. |
 | Monitor queue | Read-only view of the batch pipeline: one row per dataset, a status chip per stage, live progress on whichever stage is currently running. |
 
 Instrumental tracks are included in the Lyric Studio export as captions only.
