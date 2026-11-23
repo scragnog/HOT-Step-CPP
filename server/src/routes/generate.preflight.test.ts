@@ -65,16 +65,29 @@ test('MM3 refused: the /mm3/synth body goes to /mm3/preflight', async () => {
   assert.equal(calls[0].body.dit_backend, 'ggml');
 });
 
-test('MM3 unknown (GPU busy), default renderer: no figures, and never GET /mm3/props', async () => {
+const { mm3DitBackend: _, ...mm3Auto } = mm3;
+
+test('MM3 default renderer, cold props cache: unknown, and no engine call', async () => {
+  // Runs before anything fills the cache. Guessing ggml would under-budget a
+  // TensorRT render by 1 GiB under keep-loaded.
+  const r = await preflightGeneration(mm3Auto, 'user-1');
+  assert.deepEqual(r, { ok: true, preflight: { verdict: 'unknown', detail: 'the MM3 renderer is not known yet; ask again in a moment' } });
+  assert.equal(calls.length, 0);
+});
+
+test('MM3 unknown (GPU busy), default renderer: resolves from the cache, never GET /mm3/props', async () => {
+  const { mm3Props } = await import('../services/backends/minimax/client.js');
+  reply = () => json({ dit_runtime: { available: true } });
+  await mm3Props();  // fills the last-good cache: TensorRT available
+  calls.length = 0;
   // /mm3/props waits on a running render's mutex; auto must resolve without it.
   reply = route => route === '/mm3/preflight'
     ? json({ verdict: 'unknown', need_bytes: 0, free_bytes: 0, budget_bytes: 0, detail: 'the GPU is busy with another job' })
     : new Promise<Response>(() => {}) as unknown as Response;
-  const { mm3DitBackend: _, ...auto } = mm3;
-  const r = await preflightGeneration(auto, 'user-1');
+  const r = await preflightGeneration(mm3Auto, 'user-1');
   assert.deepEqual(r, { ok: true, preflight: { verdict: 'unknown', detail: 'the GPU is busy with another job' } });
   assert.deepEqual(calls.map(c => c.route), ['/mm3/preflight']);
-  assert.ok(['ggml', 'tensorrt'].includes(calls[0].body.dit_backend));
+  assert.equal(calls[0].body.dit_backend, 'tensorrt');
 });
 
 test('a backend without an admission model is unknown and never asks the engine', async () => {

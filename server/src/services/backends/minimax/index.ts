@@ -964,11 +964,15 @@ export const minimaxBackend: EngineBackend = {
   },
   arbitratesResidencyInEngine: true,
   /** The body runMinimaxGeneration would send. Auto resolves as it does, but from
-   *  the last-good props: GET /mm3/props waits on a running render's mutex. */
+   *  the last-good props: GET /mm3/props waits on a running render's mutex. With
+   *  none yet the renderer is unknown, and under keep-loaded TensorRT budgets 1 GiB
+   *  more, so the answer is too. */
   async preflight(envelope) {
     const { req } = mapMinimaxParams(structuredClone(envelope.submission));
     if (req.dit_backend === 'auto') {
-      req.dit_backend = mm3PropsCached()?.dit_runtime?.available === true ? 'tensorrt' : 'ggml';
+      const runtime = mm3PropsCached()?.dit_runtime;
+      if (!runtime) return { verdict: 'unknown', detail: 'the MM3 renderer is not known yet; ask again in a moment' };
+      req.dit_backend = runtime.available === true ? 'tensorrt' : 'ggml';
     }
     return preflightFromEngine(await mm3Preflight(req));
   },
