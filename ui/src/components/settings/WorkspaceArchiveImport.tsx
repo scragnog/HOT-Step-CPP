@@ -37,6 +37,9 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [reloaded] = useState(() => !!readPending());
+  // The job this mounted panel started. Only that job is announced: a `done` seen any other way (a reload,
+  // or reopening Storage after Dismiss) was announced already, and announcing it again loops the page.
+  const [startedId, setStartedId] = useState('');
   const [pending, setPending] = useState(readPending);
 
   const jobQuery = useQuery(workspaceArchiveImportJobOptions());
@@ -48,8 +51,8 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   // reloads the page when the server answers. The poll can miss that window, so the outcome check
   // below runs from the saved mark after the reload, not from seeing `done`.
   const done = job?.state === 'done';
-  // A restored `done` was announced before the reload; announcing it again would reload the page forever.
-  useEffect(() => { if (done && !reloaded) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [done, reloaded]);
+  const announce = done && !!job && job.id === startedId;
+  useEffect(() => { if (announce) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [announce]);
   const mine = !!pending && job?.id === pending.id;
   // Only this import's own failure or cancel clears the mark. After a reload, any other job is a stale mark.
   useEffect(() => {
@@ -95,6 +98,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
       queryClient.setQueryData(key, { job: started });
       const mark = { id: started.id, target: started.target };
       writePending(mark);
+      setStartedId(started.id);
       setPending(mark);
     },
     onSettled: refresh,
@@ -133,7 +137,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
       <button type="button" className="settings-save-btn" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate()}>{t('settings.workspaceArchive.import.cancel')}</button>
       <p>{t('settings.workspaceArchive.import.cancelNote')}</p>
     </div>}
-    {done && job && !reloaded && <div role="status" className="space-y-1">
+    {announce && job && <div role="status" className="space-y-1">
       <p>{t('settings.workspaceArchive.import.restarting', { target: job.target })}</p>
       <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
     </div>}
