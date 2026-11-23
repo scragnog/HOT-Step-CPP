@@ -1034,6 +1034,10 @@ if(BUILD_TESTING)
     add_executable(test-monitor-chain tests/test-monitor-chain.cpp)
     add_test(NAME monitor-chain COMMAND test-monitor-chain)
 
+    # wav.h reader: PCM 16/24/32 and float32, classic and EXTENSIBLE headers.
+    add_executable(wav-read-test tests/test-wav-read.cpp)
+    add_test(NAME wav-read COMMAND wav-read-test)
+
     add_executable(yue2-lyrics-instrumental-test tests/test-yue2-lyrics-instrumental.cpp)
     add_test(NAME yue2-lyrics-instrumental COMMAND yue2-lyrics-instrumental-test)
 

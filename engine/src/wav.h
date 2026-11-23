@@ -1,6 +1,6 @@
 // wav.h: minimal WAV reader
 //
-// read_wav_buf: PCM16 / PCM24 / float32, classic or WAVE_FORMAT_EXTENSIBLE,
+// read_wav_buf: PCM16 / PCM24 / PCM32 / float32, classic or WAVE_FORMAT_EXTENSIBLE,
 //               mono or stereo, any rate -> interleaved [T, 2] float
 
 #pragma once
@@ -33,6 +33,18 @@ static float wav_read_f32le(const uint8_t * p) {
     float    f;
     memcpy(&f, &u, 4);
     return f;
+}
+
+// Signed little-endian PCM sample of 2, 3 or 4 bytes -> [-1, 1).
+static float wav_read_pcm(const uint8_t * p, size_t bytes) {
+    switch (bytes) {
+        case 2:
+            return (float) (int16_t) wav_read_u16le(p) / 32768.0f;
+        case 3:
+            return (float) wav_read_s24le(p) / 8388608.0f;
+        default:
+            return (float) (int32_t) wav_read_u32le(p) / 2147483648.0f;
+    }
 }
 
 // Read WAV from memory buffer.
@@ -86,52 +98,22 @@ static float * read_wav_buf(const uint8_t * data, size_t size, int * T_audio, in
         } else if (memcmp(chunk_id, "data", 4) == 0 && n_channels > 0) {
             size_t data_bytes = (size_t) chunk_size;
 
-            // PCM 16-bit: standard (format=1) or EXTENSIBLE with PCM subformat
-            if ((audio_format == 1 || (audio_format == 0xfffe && extensible_subformat == 1)) && bits_per_sample == 16) {
-                n_samples = (int) (data_bytes / ((size_t) n_channels * 2));
-                audio     = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
+            // PCM 16/24/32-bit integer. EXTENSIBLE with PCM subformat was collapsed to 1 above.
+            if (audio_format == 1 && (bits_per_sample == 16 || bits_per_sample == 24 || bits_per_sample == 32)) {
+                const size_t bps = (size_t) bits_per_sample / 8;
+                n_samples        = (int) (data_bytes / ((size_t) n_channels * bps));
+                audio            = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
                 if (!audio) {
-                    fprintf(stderr, "[WAV] OOM allocating PCM16 buffer for %d samples\n", n_samples);
+                    fprintf(stderr, "[WAV] OOM allocating PCM%d buffer for %d samples\n", bits_per_sample, n_samples);
                     return NULL;
                 }
-                const uint8_t * p = data + pos;
+                const uint8_t * p   = data + pos;
+                const size_t    r_o = n_channels > 1 ? bps : 0;  // mono: right = left
 
                 for (int t = 0; t < n_samples; t++) {
-                    if (n_channels == 1) {
-                        int16_t s        = (int16_t) wav_read_u16le(p + t * 2);
-                        float   f        = (float) s / 32768.0f;
-                        audio[t * 2 + 0] = f;
-                        audio[t * 2 + 1] = f;
-                    } else {
-                        const uint8_t * frame = p + (size_t) t * n_channels * 2;
-                        int16_t         l     = (int16_t) wav_read_u16le(frame + 0);
-                        int16_t         r     = (int16_t) wav_read_u16le(frame + 2);
-                        audio[t * 2 + 0]      = (float) l / 32768.0f;
-                        audio[t * 2 + 1]      = (float) r / 32768.0f;
-                    }
-                }
-            } else if (audio_format == 1 && bits_per_sample == 24) {
-                n_samples = (int) (data_bytes / ((size_t) n_channels * 3));
-                audio     = (float *) malloc((size_t) n_samples * 2 * sizeof(float));
-                if (!audio) {
-                    fprintf(stderr, "[WAV] OOM allocating PCM24 buffer for %d samples\n", n_samples);
-                    return NULL;
-                }
-                const uint8_t * p = data + pos;
-
-                for (int t = 0; t < n_samples; t++) {
-                    if (n_channels == 1) {
-                        int32_t s        = wav_read_s24le(p + t * 3);
-                        float   f        = (float) s / 8388608.0f;
-                        audio[t * 2 + 0] = f;
-                        audio[t * 2 + 1] = f;
-                    } else {
-                        const uint8_t * frame = p + (size_t) t * n_channels * 3;
-                        int32_t         l     = wav_read_s24le(frame + 0);
-                        int32_t         r     = wav_read_s24le(frame + 3);
-                        audio[t * 2 + 0]      = (float) l / 8388608.0f;
-                        audio[t * 2 + 1]      = (float) r / 8388608.0f;
-                    }
+                    const uint8_t * frame = p + (size_t) t * n_channels * bps;
+                    audio[t * 2 + 0]      = wav_read_pcm(frame, bps);
+                    audio[t * 2 + 1]      = wav_read_pcm(frame + r_o, bps);
                 }
             // IEEE float 32-bit: standard (format=3) or EXTENSIBLE with float subformat
             } else if ((audio_format == 3 || (audio_format == 0xfffe && extensible_subformat == 3)) && bits_per_sample == 32) {
