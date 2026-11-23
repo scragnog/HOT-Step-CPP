@@ -102,9 +102,9 @@ export const LyricEditorAlignmentReview: React.FC<LyricEditorAlignmentReviewProp
   const apply = () => {
     if (openRows.length === 0) return;
     // Applied rows already have the run's line in the editor, so the bulk write
-    // must not take them again; kept rows never take.
+    // must not take them again; kept rows never take, so any kept row means the mixed write.
     const payload = take.map((yes, index) => (openRows.includes(index) ? yes !== false : false));
-    if (takenCount === openRows.length && appliedRows.size === 0) {
+    if (takenCount === openRows.length && appliedRows.size === 0 && keptRows.size === 0) {
       onApplyNew();
       return;
     }

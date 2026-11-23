@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import { config } from '../config.js';
 import { getDb } from '../db/database.js';
 import { buildLrc, sidecarPath } from './lrcExport.js';
-import { bumpRevision } from './lyricsRevision.js';
+import { bumpRevision, revisionOf } from './lyricsRevision.js';
 import { polishLines, runSongAlignment, type AlignRangeRequest, type PolishPasses } from './lyricsAlignment.js';
 import { SerialQueue } from './serialQueue.js';
 import { HOP_SEC, fileEnvelope } from './audioActivity.js';
@@ -575,6 +575,10 @@ export function writeTimingsFile(pending: PendingApply): {
   // asking before the next run overwrites those words.
   data.editedByHand = pending.lines.some(line =>
     line.checked === true || line.words.some(word => word.checked === true));
+  // Bump from whichever is newer, the preview's snapshot or the file on disk:
+  // a forced apply of an r4 preview over r5 must write r6, or an editor still
+  // holding r5 would save over it without being refused.
+  data.revision = Math.max(revisionOf(data), revisionOf(readJson(pending.jsonPath)));
   bumpRevision(data);
   fs.writeFileSync(pending.jsonPath, JSON.stringify(data, null, 2));
   fs.writeFileSync(pending.lrcPath, buildLrc(pending.lines, {

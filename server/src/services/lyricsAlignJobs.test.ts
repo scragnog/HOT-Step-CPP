@@ -87,6 +87,29 @@ test('the one writer bumps the revision, clears the hand mark and rebuilds the .
   }
 });
 
+test('a forced apply of an old preview bumps past the revision on disk', () => {
+  // The preview was computed at r4; an editor has since saved r5. Writing r5
+  // again would let that editor's next save through over the forced apply.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyrics-write-'));
+  try {
+    const jsonPath = path.join(dir, 'x.lyrics.json');
+    fs.writeFileSync(jsonPath, JSON.stringify({ version: 1, revision: 5 }));
+    const written = writeTimingsFile({
+      data: { version: 1, revision: 4 },
+      lines: [line([word('one', 1, 2)])],
+      jsonPath,
+      lrcPath: path.join(dir, 'x.lrc'),
+      title: '',
+      artist: '',
+      expectedRevision: 4,
+    });
+    assert.equal(written.revision, 6);
+    assert.equal(JSON.parse(fs.readFileSync(jsonPath, 'utf-8')).revision, 6);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the writer keeps the hand mark when the lines still contain hand placements', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lyrics-write-'));
   try {
