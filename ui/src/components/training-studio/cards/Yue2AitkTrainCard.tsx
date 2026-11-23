@@ -490,6 +490,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     selectJob(selected?.id ?? '');
   };
   const [jointPipelineId, setJointPipelineId] = useScopedId(trainingWorker, datasetId);
+  const pipelineQuery = useQuery({ ...runQueries.preparation(jointPipelineId), enabled: !!jointPipelineId });
+  const pipelineJobQuery = useQuery({ ...runQueries.preparationJob(jointPipelineId), enabled: !!jointPipelineId,
+    refetchInterval: pollWhile<TrainingJobSummary | null>(data => !!jointPipelineId && isActiveJob(data)) });
   // Tracks with no .yue2.txt are re-captioned from the audio before training
   // (on by default): otherwise they train on the long ACE caption. Gemini's
   // model list is the live one the Label panel uses.
@@ -714,8 +717,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // first pass lands it. While that's true, an explicit pick still wins, but
   // there's no history to fall back to: an older local run must not silently
   // stand in for the live one underway.
-  const activeJob = job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job : undefined;
-  const ladderRunRec = pickLadderRun(aitkRuns, pickedLadderRun, activeJob?.id);
+  const ladderJob = jointPipelineId ? pipelineJobQuery.data : job;
+  const activeJob = ladderJob && isJointJob(ladderJob, datasetId) && (ladderJob.status === 'queued' || ladderJob.status === 'running') ? ladderJob : undefined;
+  const ladderRunRec = pickLadderRun(aitkRuns, pickedLadderRun, activeJob?.id, !!jointPipelineId);
+  const newestRun = [...aitkRuns].sort(byNumber(x => x.createdAt, 'desc'))[0];
+  const viewingPreviousRun = !!ladderRunRec && !!pickedLadderRun && (jointPipelineId && !activeJob
+    || !!activeJob && ladderRunRec.jobId !== activeJob.id
+    || !!newestRun && ladderRunRec.jobId !== newestRun.jobId);
   const ladderRunId = ladderRunRec?.jobId;
   const gateHistory = useQuery({ ...runQueries.gateHistory(datasetId, ladderRunId ?? ''), enabled: !!ladderRunId,
     refetchInterval: pollWhile(() => !!ladderRunRec?.live, 5000) });
@@ -723,6 +731,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     enabled: !!job?.id && aitkRuns.some(r => r.jobId === job.id),
     refetchInterval: pollWhile(() => job?.status === 'running', 5000) });
   const awaitingMirror = !ladderRunRec && !!activeJob && !!trainingWorker;
+  const awaitingLadder = !ladderRunRec && (!!jointPipelineId || !!activeJob);
 
   const previewsQuery = useQuery({ ...runQueries.previews(datasetId, ladderRunId ?? ''), enabled: !!ladderRunId,
     refetchInterval: pollWhile(() => !!ladderRunRec?.live || job?.status === 'queued' || job?.status === 'running'
@@ -913,9 +922,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
 
 
-  const pipelineQuery = useQuery({ ...runQueries.preparation(jointPipelineId), enabled: !!jointPipelineId });
-  const pipelineJobQuery = useQuery({ ...runQueries.preparationJob(jointPipelineId), enabled: !!jointPipelineId,
-    refetchInterval: pollWhile<TrainingJobSummary | null>(data => !!jointPipelineId && isActiveJob(data)) });
   useEffect(() => {
     const current = pipelineJobQuery.data;
     if (current && isJointJob(current, datasetId)) {
@@ -1871,7 +1877,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {awaitingMirror && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.awaitingMirror', 'Waiting for the first sync from {{worker}}', { worker: trainingWorker })}</p>
       </div>}
+      {awaitingLadder && !awaitingMirror && <p className="mt-3 text-xs text-zinc-500">{t('trainingStudio.yue2.method.awaitingLadder', 'The new run has no checkpoint ladder yet. Its checkpoints will appear here as they are saved.')}</p>}
       {ladderRunRec && <TrainingCheckpointLadder>
+        {viewingPreviousRun && <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">{t('trainingStudio.yue2.method.previousRun', 'You are viewing a previous run. Render and Use this rung apply to this run.')}</div>}
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {formatDateTime(ladderRunRec.createdAt)}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}
           {ladderRunRec.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
             title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}</p>
@@ -1883,6 +1891,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               label: `${formatDateTime(r.createdAt)} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
         </div>}
         {(ladderRunRec.jobId !== job?.id || !stepHistory.length) && !!gateHistory.data?.steps.length && <Yue2SplitChart points={gateHistory.data.steps} evals={gateHistory.data.readings} gateFrozenAt={gateHistory.data.frozenAt} options={ladderRunRec.options} />}
+        {!ladderRunRec.checkpoints.some(c => c.arPath && c.narPath) && <p className="mt-2 text-xs text-zinc-500">{t('trainingStudio.yue2.method.emptyLadder', 'No complete checkpoints yet. Rungs appear here as they are saved.')}</p>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: by default one 300 s draft take of the dataset\'s first sung track per rung, on the same seed every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Takes per checkpoint adds more, each on a new random seed: a song no other rung made, which shows how the checkpoint does on a fresh draw and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
           renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 1, arScale: form.preview?.arScale ?? LADDER_PREVIEW.arScale, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}

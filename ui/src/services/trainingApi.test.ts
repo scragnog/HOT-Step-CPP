@@ -63,6 +63,14 @@ test('pickLadderRun: an unindexed active job shows live-only instead of falling 
   assert.equal(pickLadderRun(runs, undefined, 'unindexed-worker-job'), undefined);
 });
 
+test('pickLadderRun: preparation waits for the new run, while an explicit history pick remains available', () => {
+  const runs = [{ jobId: 'old', live: false, createdAt: 1 }];
+  assert.equal(pickLadderRun(runs, undefined, undefined, true), undefined);
+  assert.equal(pickLadderRun(runs, 'old', undefined, true)?.jobId, 'old');
+  const newRun = { jobId: 'new', live: true, createdAt: 2, checkpoints: [] };
+  assert.equal(pickLadderRun([...runs, newRun], undefined, 'new', true), newRun);
+});
+
 test('pickLadderRun: an indexed active job, or else the live run, or else the newest, when nothing is picked', () => {
   const runs = [{ jobId: 'old', live: false, createdAt: 1 }, { jobId: 'active', live: false, createdAt: 2 }];
   assert.equal(pickLadderRun(runs, undefined, 'active')?.jobId, 'active');

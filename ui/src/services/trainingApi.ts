@@ -2847,11 +2847,12 @@ export async function listYue2JointPreviewsLocal(
  *  there is no history to fall back to: an older local run must never stand
  *  in for a live job that hasn't landed yet. */
 export function pickLadderRun<T extends { jobId: string; live?: boolean; createdAt: number }>(
-  runs: T[], pickedRun: string | undefined, activeJobId: string | undefined,
+  runs: T[], pickedRun: string | undefined, activeJobId: string | undefined, starting = false,
 ): T | undefined {
   const byId = (id: string | undefined) => runs.find(r => r.jobId === id);
   const picked = byId(pickedRun);
   if (picked) return picked;
+  if (starting && !activeJobId) return undefined;
   if (activeJobId && !byId(activeJobId)) return undefined;
   return byId(activeJobId) ?? runs.find(r => r.live) ?? [...runs].sort(byNumber(x => x.createdAt, 'desc'))[0];
 }
