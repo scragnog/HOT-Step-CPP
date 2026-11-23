@@ -302,6 +302,28 @@ The same function is the comparison point for the resolved-request work: a serve
 request must produce a legacy-shaped body that passes through this capture before envelope
 construction, so old and new can be diffed fixture against fixture.
 
+## Generation control descriptors
+
+`GET /api/generation-controls/descriptors` requires authentication and returns a JSON
+array with one descriptor for each key in `GENERATION_DEFAULTS`. Each entry has a
+`key`, `type`, `label` and `default`. Entries can include `hint`, slider `min`, `max`
+and `step`, or select `options` with string `value` and `label` fields. The defaults
+come from the same dictionary as `GET /api/generation-controls/defaults`.
+
+The scalar types match the plugin schema. `array` and `object` entries carry
+the original JSON defaults for controls that need custom editors. Generation
+and LM seeds use `text` so editors can preserve all 64 bits. Selects that get
+their choices from a model catalogue, plugin registry or saved references omit
+`options`. Bounds describe the classic Create controls in stored units. Check
+the capability manifest and any hints for limits that depend on the backend or
+another control. These descriptors are display metadata. Request validation
+uses the existing generation contract.
+
+Backend controls come from `extensions` on `GET /api/capabilities?backend=<id>`.
+The UI query `backendControlDescriptorsOptions(backend)` exposes those entries
+under `backendParams.<key>` and prefixes conditional visibility keys the same
+way. Use `generationControlDescriptorsOptions()` for the core array.
+
 ## Engine capability manifest
 
 `GET /api/capabilities?backend=<id>` (default: the active backend) returns the backend's

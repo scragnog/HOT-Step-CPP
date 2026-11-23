@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CORE_GENERATION_PARAM_DESCRIPTORS } from './generationControlDescriptors.js';
 import { generationIntentSchema } from './generation.js';
 import { GENERATION_DEFAULTS, generationControlsSchema, parseGenerationControls } from './generationControls.js';
 
@@ -99,7 +100,33 @@ test('type-mismatched and null values on known fields parse identically under bo
 });
 
 
-test('defaults endpoint returns the resolver contract and requires authentication', async () => {
+test('core descriptors cover every default with a matching control type and valid range or options', () => {
+  assert.deepEqual(
+    CORE_GENERATION_PARAM_DESCRIPTORS.map(({ key }) => key).sort(),
+    Object.keys(GENERATION_DEFAULTS).sort(),
+  );
+  for (const { key, type, label, default: value, min, max, step, options } of CORE_GENERATION_PARAM_DESCRIPTORS) {
+    assert.ok(label.trim(), key);
+    assert.deepEqual(value, GENERATION_DEFAULTS[key], key);
+    if (type === 'array') assert.ok(Array.isArray(value), key);
+    if (type === 'object') assert.ok(value && typeof value === 'object' && !Array.isArray(value), key);
+    if (type === 'toggle') assert.equal(typeof value, 'boolean', key);
+    if (type === 'select') assert.equal(typeof value, 'string', key);
+    if (type === 'slider') {
+      assert.ok(typeof value === 'number' && Number.isFinite(value), key);
+      if (min !== undefined) assert.ok(value >= min, `${key} default below min`);
+      if (max !== undefined) assert.ok(value <= max, `${key} default above max`);
+      if (step !== undefined) {
+        assert.ok(step > 0 && Number.isFinite(step), `${key} invalid step`);
+        const ticks = (value - (min ?? 0)) / step;
+        assert.ok(Math.abs(ticks - Math.round(ticks)) < 1e-9, `${key} default off step`);
+      }
+    }
+    if (options) assert.ok(options.some(option => option.value === value), `${key} default missing from options`);
+  }
+});
+
+test('generation controls routes return the contracts and require authentication', async () => {
   const express = (await import('express')).default;
   const { createGenerationControlsRouter } = await import('../routes/generationControls.js');
   const { resolveGenerationParams } = await import('../services/generation/defaults.js');
@@ -115,6 +142,11 @@ test('defaults endpoint returns the resolver contract and requires authenticatio
     const response = await fetch(url, { headers: { authorization: 'Bearer test' } });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), GENERATION_DEFAULTS);
+    const descriptorsUrl = `http://127.0.0.1:${address.port}/api/generation-controls/descriptors`;
+    assert.equal((await fetch(descriptorsUrl)).status, 401);
+    const descriptors = await fetch(descriptorsUrl, { headers: { authorization: 'Bearer test' } });
+    assert.equal(descriptors.status, 200);
+    assert.deepEqual(await descriptors.json(), JSON.parse(JSON.stringify(CORE_GENERATION_PARAM_DESCRIPTORS)));
     const resolved = resolveGenerationParams({}, { backendId: 'ace' });
     assert.equal(resolved.inferenceSteps, GENERATION_DEFAULTS.inferenceSteps);
     assert.equal(resolveGenerationParams({ inferenceSteps: 7 }, { backendId: 'ace' }).inferenceSteps, 7);
