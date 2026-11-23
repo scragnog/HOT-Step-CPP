@@ -1,0 +1,2 @@
+html[data-skin="bad-rgb-mixed"] { --grad-tint: linear-gradient(180deg, rgb(56,189 248) 0%, #0284c7 100%); }
+html[data-skin="bad-rgb-mixed"]:not(.dark) { --grad-tint: linear-gradient(180deg, rgb(56,189 248) 0%, #0284c7 100%); }

@@ -116,7 +116,9 @@ function opaqueColour(s) {
   s = s.trim();
   let m = /^#([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(s);
   if (m) { const h = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1]; return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); }
-  m = /^rgba?\(\s*(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})(?:\s*,\s*|\s+)(\d{1,3})\s*(?:(?:,|\/)\s*(\d*\.?\d+)\s*)?\)$/i.exec(s);
+  // CSS does not allow mixed separators: the comma form and the space form are matched separately.
+  m = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(\d*\.?\d+)\s*)?\)$/i.exec(s)
+    ?? /^rgba?\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s*(?:\/\s*(\d*\.?\d+)\s*)?\)$/i.exec(s);
   if (m && [m[1], m[2], m[3]].every(n => +n <= 255) && (m[4] === undefined || +m[4] === 1)) return [+m[1], +m[2], +m[3]];
   return null;
 }
@@ -142,7 +144,11 @@ function gradientStops(val) {
   });
 }
 
-// Colours the gradient paints: each stop, plus 16 evenly spaced blends between neighbouring stops
+// Blends sampled per segment. The contrast ratio is smooth in the blend position, so 512 samples
+// find the minimum to within about 1e-4 of the true value.
+const BLEND_STEPS = 512;
+
+// Colours the gradient paints: each stop, plus evenly spaced blends between neighbouring stops
 // (browsers blend in sRGB), so a fill that dips below the contrast floor between two passing stops is caught.
 // Stop positions only squeeze segments and never add a colour, so they are ignored. A null stop stays null.
 function paintedColours(stops) {
@@ -151,7 +157,8 @@ function paintedColours(stops) {
   for (let i = 0; i < out.length; i++) {
     res.push(out[i]);
     const a = out[i].c, b = out[i + 1]?.c;
-    if (a && b) for (let k = 1; k < 16; k++) res.push({ label: `between stops ${i + 1} and ${i + 2}`, c: a.map((x, j) => Math.round(x + (b[j] - x) * k / 16)) });
+    // Unrounded blends (the browser's per-pixel rounding moves a ratio by well under 0.01).
+    if (a && b) for (let k = 1; k < BLEND_STEPS; k++) res.push({ label: `between stops ${i + 1} and ${i + 2}`, c: a.map((x, j) => x + (b[j] - x) * k / BLEND_STEPS) });
   }
   return res;
 }
@@ -175,10 +182,15 @@ function checkContrast(sets, def, errors, label) {
     const rgbPairs = [];
     for (const [name, fb] of fills) for (const { label, c } of paintedColours(stopsOf(name, fb))) rgbPairs.push(['--k-on-tint', triplet(v['--k-on-tint'] ?? ''), `${name} ${label}`, c]);
     for (const name of surf) for (const { label, c } of paintedColours(stopsOf(name, []))) for (const t of ['--k-ink', '--k-muted']) rgbPairs.push([t, triplet(v[t] ?? ''), `${name} ${label}`, c]);
+    const worst = new Map(); // one error per text colour and fill, at its lowest ratio
     for (const [fg, a, bgName, b] of rgbPairs) {
-      if (!a || !b) { errors.push(`${label}${mode}: ${fg} or ${bgName} is not a readable colour`); continue; }
+      const key = `${fg} ${bgName}`;
+      if (!a || !b) { worst.set(key, { fg, bgName, r: -1 }); continue; }
       const r = contrast(a, b);
-      if (r < 4.5) errors.push(`${label}${mode}: ${fg} on ${bgName} is ${r.toFixed(2)}:1, needs 4.5:1`);
+      if (r < 4.5 && !(worst.get(key)?.r <= r)) worst.set(key, { fg, bgName, r });
+    }
+    for (const { fg, bgName, r } of worst.values()) {
+      errors.push(r < 0 ? `${label}${mode}: ${fg} or ${bgName} is not a readable colour` : `${label}${mode}: ${fg} on ${bgName} is ${r.toFixed(2)}:1, needs 4.5:1`);
     }
     for (const [fg, bg] of pairs) {
       const a = triplet(v[fg] ?? ''), b = triplet(v[bg] ?? '');
