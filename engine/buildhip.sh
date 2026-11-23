@@ -18,20 +18,22 @@ rm -rf build
 mkdir build
 cd build
 
-if command -v rocminfo >/dev/null 2>&1; then
-    GFX_NAME=$(rocminfo | awk '/ *Name: +gfx[1-9]/ {print $2; exit}')
-else
-    echo "rocminfo missing!"
+if [ -z "${GPU_TARGETS:-}" ]; then
+    if command -v rocminfo >/dev/null 2>&1; then
+        GPU_TARGETS=$(rocminfo | awk '/ *Name: +gfx[1-9]/ {print $2; exit}')
+    else
+        echo "rocminfo missing!"
+    fi
 fi
 
-if [ -z "${GFX_NAME}" ]; then
+if [ -z "${GPU_TARGETS:-}" ]; then
     echo "Warn: Couldn't detect AMD GPU for HIP! Using fallback value (gfx1030)."
-    GFX_NAME="gfx1030"
+    GPU_TARGETS="gfx1030"
 else
-    echo "Building for GPU arch: ${GFX_NAME}"
+    echo "Building for GPU arch: ${GPU_TARGETS}"
 fi
 
-cmake .. -DGGML_HIP=ON -DGPU_TARGETS="${GFX_NAME}" \
+cmake .. -DGGML_HIP=ON -DGPU_TARGETS="${GPU_TARGETS}" -DGGML_NATIVE=OFF \
     -DGGML_STATIC=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build . --config Release -j "$(nproc --ignore=1)"
