@@ -5,7 +5,8 @@ import React from 'react';
 import { Tabs } from './Tabs';
 import { themesFor } from '../../../themes/registry';
 
-const DEFAULT = 'default';
+// Outside the skin id grammar (lowercase letters, digits, dashes), so no theme can collide with it.
+const DEFAULT = '__default__';
 
 export const SkinPicker: React.FC<{ skin: string | null; onChange: (id: string | null) => void }> = ({ skin, onChange }) => (
   <Tabs

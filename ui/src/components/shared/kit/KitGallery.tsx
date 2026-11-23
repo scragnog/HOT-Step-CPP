@@ -61,7 +61,8 @@ export const KitGallery: React.FC = () => {
   const { skin, setSkin } = useSkin();
   const [tint, setTint] = useState('amber');
   const [reduce, setReduce] = useState(false);
-  const [font, setFont] = useState('6');
+  const [font, setFont] = useState(skin ? 'skin' : '6');
+  const pickSkin = (id: string | null) => { setSkin(id); if (id) setFont('skin'); };
   const [tab, setTab] = useState('create');
   const [on, setOn] = useState(true);
   const [small, setSmall] = useState(false);
@@ -83,7 +84,9 @@ export const KitGallery: React.FC = () => {
     return () => { link.remove(); };
   }, []);
   useEffect(() => {
-    const f = FONTS.find(x => x.value === font) ?? FONTS[0];
+    // 'skin' = no override: the active skin (or the default tokens) supplies the fonts.
+    const f = FONTS.find(x => x.value === font);
+    if (!f) return;
     const root = document.documentElement.style;
     root.setProperty('--font-body', f.body);
     root.setProperty('--font-heading', f.heading);
@@ -106,13 +109,13 @@ export const KitGallery: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2 text-xs text-ink-muted">Font
-            <Tabs aria-label="Font pairing" value={font} onChange={setFont} items={FONTS.map(({ value, label }) => ({ value, label }))} />
+            <Tabs aria-label="Font pairing" value={font} onChange={setFont} items={[{ value: 'skin', label: 'Skin' }, ...FONTS.map(({ value, label }) => ({ value, label }))]} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Theme
             <Tabs aria-label="Theme" value={theme} onChange={v => v !== theme && toggleTheme()} items={[{ value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Skin
-            <SkinPicker skin={skin} onChange={setSkin} />
+            <SkinPicker skin={skin} onChange={pickSkin} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink-muted">Tint
             <Tabs aria-label="Tint" value={tint} onChange={setTint} items={TINTS} />

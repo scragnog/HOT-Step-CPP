@@ -43,7 +43,13 @@ theme is `html[data-skin="<id>"]`, set by `ui/public/theme-boot.js` before first
 - Set every colour token in **both** blocks. Both selectors have the same
   specificity as the kit's own defaults, so a token left out of the light block
   would show its dark value in light mode. Fonts need only the first block.
-- Text must keep 4.5:1 contrast on its surface in both modes (see the checker).
+- Values follow a fixed grammar per token: colour channels are `R G B`; gradients
+  may use only `linear-gradient()`, `rgb()`, `rgba()` and `var()` of a documented
+  token; shadows only `rgb()`, `rgba()` and `var()`; fonts are plain family names.
+  No image function of any kind, no escapes, no strings outside fonts.
+- Text must keep 4.5:1 contrast on the fills the kit paints, in both modes: ink and
+  muted on the flat surfaces and on every colour stop of the raised, panel and well
+  gradients, and on-tint on every stop of the accent gradients.
 
 Run `npm run check:skins` from `ui/`. It parses each theme with PostCSS, checks
 the manifest, the rules above and the contrast pairs (ink and muted on the four
