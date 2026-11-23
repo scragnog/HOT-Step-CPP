@@ -479,6 +479,59 @@ Four upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-o
 | `server/src/data/` | Runtime data shipped with the app, such as `model-registry.json` and `assistant-knowledge.md`. The release workflow copies this folder whole |
 | `server/src/engineState.ts` | Engine ready flag, boot status message, the no-models flag and the engine's compute device |
 
+## Content-Security-Policy
+
+The UI page carries a Content-Security-Policy, so code in the page (skins
+included) can only talk to this server. `server/src/contracts/csp.ts` holds the
+policy; it sits in `contracts/` because the UI build reads it too. Node sends it
+on every response from `ui/dist` (the built page, its assets and the service
+worker). The Vite dev server on :3000 sends the dev
+variant through `server.headers` in `ui/vite.config.ts`, and `vite preview`
+sends the production one. API, `/audio`, `/references` and `/listening`
+responses carry no policy.
+
+Production policy:
+
+```
+default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:;
+media-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none';
+base-uri 'self'; form-action 'self'; report-uri /api/csp-report
+```
+
+The dev variant adds `'unsafe-inline'` to `script-src`, for the React Refresh
+preamble Vite injects. `connect-src 'self'` already covers the HMR socket, since
+a same-origin `ws:` URL matches `'self'`.
+
+Why each exception exists:
+
+| Allowance | Reason |
+|---|---|
+| `style-src 'unsafe-inline'` | React `style` props, Vite's dev CSS and library-injected `<style>` tags |
+| Google Fonts in `style-src` and `font-src` | Inter in `ui/src/index.css` and the `/kit` specimen fonts. Self-hosting them would remove both |
+| `img-src https:` | Lyric Studio artist and album art is stored as outside URLs (Genius, plus any URL a user pastes). A server-side image cache would let this become `'self'` |
+| `blob:` in `img-src`, `media-src`, `worker-src` | Local previews, streamed audio and abcjs MIDI playback |
+
+Two things keep the page inside the policy:
+
+- The theme script that runs before CSS loads is a file, `ui/public/theme-boot.js`,
+  not an inline script. The service worker precaches it.
+- `ui/src/main.tsx` imports `server/src/contracts/zodBrowser.ts` first. It puts
+  zod in jitless mode, because zod otherwise probes `new Function()` when a schema
+  is built, and `script-src` has no `'unsafe-eval'`.
+
+Browsers POST violations to `/api/csp-report` (route in `securityGates.ts`). The
+server prints one `[CSP]` line per distinct violation to its console, up to 500
+lines per process. In the browser, the console shows each refusal as it happens.
+
+To extend the policy, add the source to the right directive in `contracts/csp.ts` with a
+comment saying what needs it, then load the affected pages with the console open.
+`CSP_ENFORCE = false` switches to `Content-Security-Policy-Report-Only`, which
+reports violations without blocking, for trying out a change. Keep `connect-src`
+at `'self'`: it is the directive that stops page code from sending data to other
+origins. CSP does not stop a page from navigating away with data in the URL, so
+shell skins still get a code review.
+
 ## UI source layout
 
 | Path | What it is |

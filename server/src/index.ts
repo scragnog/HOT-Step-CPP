@@ -9,6 +9,7 @@
 import express from 'express';
 import { isLoopbackHost } from './services/security/originPolicy.js';
 import { applySecurityGates } from './services/security/securityGates.js';
+import { CSP_HEADER, contentSecurityPolicy } from './contracts/csp.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -143,7 +144,7 @@ maintenance.whenOpen(() => {
 const app = express();
 
 // Middleware
-// Host allowlist (DNS rebinding), then Origin policy and CORS. See services/security/securityGates.ts.
+// Host allowlist (DNS rebinding), then Origin policy, CORS and the CSP report route. See services/security/securityGates.ts.
 applySecurityGates(app, {
   serverHost: config.server.host,
   corsOrigins: process.env.CORS_ORIGINS,
@@ -256,6 +257,9 @@ app.use('/references', express.static(refsDir, {
 // Serve React frontend (production only — in dev, Vite handles this)
 const uiDistPath = path.join(PROJECT_ROOT, 'ui', 'dist');
 if (fs.existsSync(uiDistPath)) {
+  // The UI document and its service worker carry the CSP; API, audio and /listening do not.
+  const csp = contentSecurityPolicy();
+  app.use((_req, res, next) => { res.setHeader(CSP_HEADER, csp); next(); });
   // Assets with content hashes get long cache; index.html always revalidates
   app.use(express.static(uiDistPath, {
     setHeaders: (res, filePath) => {
