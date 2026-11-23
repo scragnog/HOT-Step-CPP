@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-descendant-attribute",
+  "name": "bad-shell-descendant-attribute",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

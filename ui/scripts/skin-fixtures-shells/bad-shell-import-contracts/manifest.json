@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-import-contracts",
+  "name": "bad-shell-import-contracts",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

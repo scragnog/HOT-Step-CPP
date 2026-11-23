@@ -10,7 +10,7 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   setItem: (key: string, value: string) => storage.set(key, value),
 } });
 const { useGlobalParamsStore } = await import('../stores/globalParamsStore');
-const { setParam, resetParam, isEditableParam, defaultOf, paramHistory } = await import('./paramStore');
+const { setParam, resetParam, isEditableParam, defaultOf, paramHistory, readParam, snapshot } = await import('./paramStore');
 
 const steps = () => useGlobalParamsStore.getState().inferenceSteps;
 
@@ -46,4 +46,26 @@ test('content fields and unknown ids are refused', () => {
   assert.equal(isEditableParam('caption'), false);
   assert.throws(() => setParam('notAParam', 1), /not an editable parameter/);
   assert.throws(() => setParam('bpm', 120), /not an editable parameter/);
+});
+
+test('undo after a backend switch restores the backend that was edited, not the active one', async () => {
+  const { useBackendStore } = await import('../stores/backendStore');
+  useBackendStore.setState({ activeBackendId: 'ace' });
+  useGlobalParamsStore.getState().setInferMethod('euler');
+  setParam('inferMethod', 'heun');
+  useBackendStore.setState({ activeBackendId: 'mm3' });
+  const mm3 = useGlobalParamsStore.getState().inferMethod;
+  paramHistory.undo();
+  assert.equal(storage.get('hs-inferMethod'), '"euler"');
+  assert.equal(useGlobalParamsStore.getState().inferMethod, mm3, 'the live (mm3) value is untouched');
+  assert.notEqual(storage.get('hs-inferMethod@mm3'), '"euler"');
+  useBackendStore.setState({ activeBackendId: 'ace' });
+});
+
+test('only declared ids read; store actions and objects do not leak', () => {
+  assert.equal(readParam(useGlobalParamsStore.getState(), 'setSeed'), undefined);
+  assert.equal(readParam(useGlobalParamsStore.getState(), 'getGlobalParams'), undefined);
+  assert.equal(readParam(useGlobalParamsStore.getState(), 'backendParams.__proto__'), undefined);
+  const copy = snapshot(useGlobalParamsStore.getState().adapterGroupScales);
+  assert.notEqual(copy, useGlobalParamsStore.getState().adapterGroupScales);
 });

@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-descendant-element",
+  "name": "bad-shell-descendant-element",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

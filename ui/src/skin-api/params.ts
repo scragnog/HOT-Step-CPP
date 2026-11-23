@@ -6,14 +6,16 @@ import { useQuery } from '@tanstack/react-query';
 import { useGlobalParamsStore } from '../stores/globalParamsStore';
 import { useBackendStore } from '../stores/backendStore';
 import { generationControlDescriptorsOptions, backendControlDescriptorsOptions } from '../queries/generationControlDescriptors';
-import { defaultOf, isBackendParam, isEditableParam, paramHistory, readParam, resetParam, setParam } from '../app/paramStore';
+import { defaultOf, snapshot, isBackendParam, isEditableParam, paramHistory, readParam, resetParam, setParam } from '../app/paramStore';
 import type { ParamHistoryStep, ParamId, ParamMeta } from './types';
 
 const sameValue = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
 
 /** A parameter's value and its writers. `changed` is true when it differs from the default. */
 export function useParam<T = unknown>(id: ParamId): { value: T; set: (v: T) => void; reset: () => void; changed: boolean } {
-  const value = useGlobalParamsStore((s: Record<string, unknown>) => readParam(s, id)) as T;
+  const raw = useGlobalParamsStore((s: Record<string, unknown>) => readParam(s, id));
+  // The store's own object stays private: the skin gets a copy that changes only when the value does.
+  const value = useMemo(() => snapshot(raw), [raw]) as T;
   // Re-render when the active backend changes: a backend knob's default can differ.
   useBackendStore(s => s.activeBackendId);
   const set = useCallback((v: T) => setParam(id, v), [id]);

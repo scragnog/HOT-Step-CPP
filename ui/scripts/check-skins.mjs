@@ -297,7 +297,7 @@ for (const dir of subdirs(FIXTURES_DIR)) {
 const SHELLS_DIR = path.join(UI, 'src/shells');
 const SHELL_FIXTURES_DIR = path.join(HERE, 'skin-fixtures-shells');
 const inside = (file, dir) => { const r = path.relative(dir, file); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
-const ALLOWED_DIRS = ['src/skin-api', 'src/components/shared/kit', '../server/src/contracts'].map(d => path.join(UI, d));
+const ALLOWED_DIRS = ['src/skin-api', 'src/components/shared/kit'].map(d => path.join(UI, d));
 const ALLOWED_BARE = new Set(['react', 'react/jsx-runtime', 'lucide-react']);
 const walkFiles = (dir, exts) => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
   const p = path.join(dir, e.name);
@@ -334,9 +334,14 @@ function checkShellCss(file, id, errors) {
       if (n.parent?.type === 'atrule' && n.parent.name.toLowerCase() === 'keyframes') return;
       for (const sel of splitSelectors(n.selector)) {
         if (shellRoot.test(sel)) continue;
-        const bare = sel.replace(/\[[^\]]*\]|"[^"]*"|'[^']*'/g, '');
-        if (/:root|(^|[\s>+~(,])(html|body)(?![\w-])|\*/.test(bare)) errors.push(`${label} selector "${sel}" uses :root, html, body or *, which shell CSS may not touch`);
-        else if (!/\.[A-Za-z_][\w-]*/.test(bare)) errors.push(`${label} selector "${sel}" has no class (every shell selector carries a class)`);
+        const bare = sel.replace(/\[[^\]]*\]/g, '[]').replace(/"[^"]*"|'[^']*'/g, '');
+        if (/:root|(^|[\s>+~(,])(html|body)(?![\w-])|\*/.test(bare)) { errors.push(`${label} selector "${sel}" uses :root, html, body or *, which shell CSS may not touch`); continue; }
+        // The target is the last compound selector (after the last combinator) and must carry a class:
+        // `.a button` or `.a [hidden]` would restyle every such element inside the shell, classic pages
+        // included. Parenthesised parts are ignored, so `:is(button)` does not count as a class.
+        const flat = bare.replace(/\([^()]*\)/g, '()').replace(/\([^()]*\)/g, '()');
+        const target = flat.trim().split(/\s*[>+~]\s*|\s+/).pop() ?? '';
+        if (!/\.[A-Za-z_][\w-]*/.test(target)) errors.push(`${label} selector "${sel}" has no class on its target (the last part must carry a class)`);
       }
     } else if (n.type === 'decl') {
       const p = n.parent;

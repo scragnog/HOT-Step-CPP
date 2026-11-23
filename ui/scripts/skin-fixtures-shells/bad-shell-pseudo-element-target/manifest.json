@@ -1,0 +1,8 @@
+{
+  "id": "bad-shell-pseudo-element-target",
+  "name": "bad-shell-pseudo-element-target",
+  "author": "fixture",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "shell"
+}

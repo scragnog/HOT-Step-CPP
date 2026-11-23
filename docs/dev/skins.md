@@ -279,7 +279,8 @@ live-take streaming, the song menu actions.
 Your CSS must not touch anything outside your shell: a `button { }` rule would restyle a classic
 page shown inside your frame, and a `body { }` rule would restyle the host's overlays.
 
-- Every selector carries a class. No `:root`, `html`, `body`, `*`, bare element or bare
+- The last part of every selector (its target) carries a class: `.a button` and `.a [hidden]` are
+  rejected, `.a .b` is fine. No `:root`, `html`, `body`, `*`, bare element or bare
   attribute selector (`button`, `[hidden]`).
 - Custom properties (tokens) are set on `[data-shell="<id>"]` only. Dark mode is
   `.dark [data-shell="<id>"]`: the host puts `.dark` on `<html>`.

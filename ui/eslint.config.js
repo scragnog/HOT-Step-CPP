@@ -73,7 +73,7 @@ export default defineConfig([
   },
   // Shell skins (docs/dev/skins.md#shell-skins) import their own folder, skin-api, react,
   // lucide-react and the kit, and nothing else from src/. This block replaces the one above
-  // for these files, so it repeats the contracts pattern. It catches the common reaches;
+  // for these files. It catches the common reaches;
   // scripts/check-skins.mjs resolves every import path exactly.
   {
     files: ['src/shells/**/*.{ts,tsx}'],
@@ -82,8 +82,8 @@ export default defineConfig([
       'no-restricted-imports': ['error', {
         patterns: [
           {
-            regex: '(^|/)server/src/(?!contracts/)',
-            message: 'Import shared contracts from server/src/contracts/ instead of server implementation code.',
+            regex: '(^|/)server/src/',
+            message: 'A shell may not import from server/src. Types it needs come through skin-api.',
           },
           {
             regex: '^(?![./])(?!react$)(?!react/jsx-runtime$)(?!lucide-react$)',
