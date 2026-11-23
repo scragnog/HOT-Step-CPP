@@ -1,0 +1,7 @@
+/* Package 5: the engine panel's model rows. The page is in standards mode (10-standards.css): a model row's caret
+   stands in a line box the height of the row's line, where in the concept's quirks mode it is as tall as its 12px icon;
+   it keeps the concept's height, so it turns about the icon's centre when the list opens. */
+.pk-model .pk-caret { height: 12px; }
+/* A model list's quantisation chips: in quirks mode a chip's line box is as tall as its badge; here it would take the
+   strut of the button's own line, two pixels more. The chip's line takes no height; its badge keeps its own. */
+.opt-q { line-height: 0; }

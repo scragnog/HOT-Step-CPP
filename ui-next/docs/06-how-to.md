@@ -301,9 +301,10 @@ condition, an action, a read, a `beside`, a factory revision), and says saved da
 
 Example: a sixth engine, "X6", with half the modules.
 
-1. When the server has its backend, add it to `ENGINES` in `engines.ts` (one line: id, name, backend folder), add its
-   model buckets in `tools/make-fixtures.ts`, and run `npm run fixtures`, so the validator knows what it declares and
-   reads.
+1. When the server has its backend, add it to `ENGINES` in `engines.ts` (one line: id, name, backend folder, its output
+   rate `khz` and the engine panel's two-line `tagline`, `testing: true` while it is in testing), add its model buckets
+   in `tools/make-fixtures.ts`, and run `npm run fixtures`, so the validator knows what it declares and reads. Its VRAM
+   figures (what it always loads, what a take adds) come from the models service (`src/app/services/models.ts`).
 2. Add `'x6'` to the `engines` of each module, pedal and unit it should have.
 3. Run the validator. It names every parameter of those definitions that differs per engine (it has `per` lines and
    lists its own engines, so the new engine does not get another engine's names, ranges or defaults by accident), every

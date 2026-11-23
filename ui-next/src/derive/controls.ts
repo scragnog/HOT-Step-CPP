@@ -22,8 +22,9 @@ export interface OptionFace {
   n?: number; sym?: string; family?: string; hue?: number; file?: string; curve?: number[];
   /** model: its name before the quantisation, the quantisation's badge and its class (lo, mid, hi, fp4), its size. */
   name?: string; quant?: string; qc?: string; gb?: number;
-  /** model: its size as written ("2.5 GB") and its share of the card (0 to 1). */
-  gbText?: string; mem?: number;
+  /** model: its size as written ("2.5 GB"), its share of the card (0 to 1), and its quantisation chip's tip (its file
+   *  and size, "Turbo · Q8_0 · 2.5 GB"). */
+  gbText?: string; mem?: number; title?: string;
   /** stamp: the language's own name, and its ink: the stamp's pink for the first, then hues a golden angle apart. */
   native?: string; ink?: string;
 }
@@ -258,7 +259,7 @@ export function optionFaces(ix: Index, key: string, desk: Desk, variant: 'plugin
     if (variant === 'stamp') return { native: LANGUAGE_NATIVE[o.label] ?? o.label, ink: i === 0 ? '#e0225a' : `hsl(${Math.round(i * 137.508) % 360} 62% 42%)` };
     if (variant === 'model') {
       const q = quantOf(o.label), gb = 'gb' in o && typeof o.gb === 'number' ? o.gb : null;
-      return { name: q ? o.label.split(' · ')[0]! : o.label, ...(q ?? {}), ...(gb ? { gb, gbText: `${gb.toFixed(1)} GB`, mem: Math.min(1, gb / card) } : {}) };
+      return { name: q ? o.label.split(' · ')[0]! : o.label, ...(q ?? {}), title: `${o.label} · ${(gb ?? 0).toFixed(1)} GB`, ...(gb ? { gb, gbText: `${gb.toFixed(1)} GB`, mem: Math.min(1, gb / card) } : {}) };
     }
     const fam = PLUGIN_FAMILY_OF.params[key] ?? PLUGIN_FAMILY_OF.engines[desk.engine] ?? PLUGIN_FAMILIES.find(x => x.members.includes(o.label)) ?? (/^MD /.test(o.label) ? PLUGIN_COMMUNITY : PLUGIN_OTHER);
     const file = PLUGIN_FILES[o.label] ?? (/exp\./.test(o.label) ? PLUGIN_BUILT_IN.experimental : /^MD /.test(o.label) ? `md_${o.label.slice(3).toLowerCase().replace(/[^a-z0-9.]+/g, '_')}.lua` : PLUGIN_BUILT_IN.plain);

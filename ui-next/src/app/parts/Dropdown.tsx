@@ -195,7 +195,7 @@ export function Dropdown({ anchor, p, variant, faces, title, note, close }: Prop
           return (
             <div key={g.name} className={`opt-mrow${g.os.some(o => o.on) ? ' on' : ''}`}>
               <b>{g.name}</b>
-              <span className="qchips">{g.os.map(o => <button key={String(o.value)} type="button" className="opt opt-q" {...a(o)} title={words(o)} onClick={() => choose(o)}><span className={`qb q-${faceOf(o).qc}`}>{faceOf(o).quant}</span></button>)}</span>
+              <span className="qchips">{g.os.map(o => <button key={String(o.value)} type="button" className="opt opt-q" {...a(o)} title={faceOf(o).title ?? words(o)} onClick={() => choose(o)}><span className={`qb q-${faceOf(o).qc}`}>{faceOf(o).quant}</span></button>)}</span>
               <span className="gb">{f.gbText ?? ''}</span>{mem(f)}
             </div>
           );

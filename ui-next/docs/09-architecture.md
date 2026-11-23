@@ -296,6 +296,17 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   moves a ruler or a token (`rulerSnap`, `scrubValue`). `derive/strings.ts keptMsg` (what a field that keeps invalid
   text says is in force) and `optionsOf` keeping a source's `only`; a typed empty box puts a parameter with auto back
   on auto, and text that fails its check is refused and said (`derive/parts.ts`).
+- `derive/vram.ts` (package 5): the engine panel's cards (`enginePanelModel`: an engine's tagline, output rate, songs per
+  Generate, testing badge, the models heading at the tier), a modelPicker's rows (`modelRows`, given to a part as
+  `PartModel.models`: each model's role, list heading, accessible name and option faces), and the VRAM figures
+  (`vramNeed`: what is loaded and what the next Generate needs, in how many passes, refused or tight, for the Takes
+  tile, the go bar and the log too; `meterModel`, `meterLeds`, `meterEase`). `derive/core.ts`: `Desk.vram` (the
+  figures the models service tells), `listKey` (a model bucket's list is the engine's own, `models.<engine>.<bucket>`),
+  `selectionKey`, `choiceLists` (one statement of a choice's options for words, faces and formatting),
+  `modelDefault` and `shownValue` (a loaded model left at "" is the file the server has selected: shown, written and
+  stored so); `formatValue` takes the engine. The definitions: `OptionsFrom.loaded`, the Models parameters' `short`
+  (their roles: Sound, Planner, Decoder), the Models face split so Quick shows the sound model only, an engine's
+  `khz`, `tagline` and `testing`. The engine switch's toast names a model whole (F-34).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 
@@ -356,13 +367,21 @@ An acceptance entry may wait on a later package (`"waiting": { "package", "becau
 `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
 decide the tile heights their moves need).
 
+**Package 5 (engine panel and models)** adds `acceptance/5-models.json` (12 scenarios: 9 of `scenarios/35-models.mjs`,
+which hold on the concept page too, and 3 of the concept's suite), `switches/5-models.json` (17 features) and
+`slice-states/50-models.mjs` (the panel, a model's list and the meter, compared in the scope `models` with
+`models-accepted.json`: `vb.mjs compare concept-models rebuild-models --scope models --accept
+tools/visual-baseline/models-accepted.json`). The models service (`services/models.ts`) is the concept's catalogue and
+figures behind `ModelsService` (`catalogue(engine)`, `vram()`); the simulated Engine's `models.list` reads the same
+catalogue.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
    the dropdown are portals into the concept's elements; the overlays' containers are empty until their packages fill
    them. Package 10 undoes this when the page moves into the real application's root.
 2. **Adding a Lab module outside Lab offers Lab in a toast with an action**, not in the popover (#pop is package 8's).
-3. **The engine panel holds the five engine cards only**; the taglines, specs and models are package 5's.
+3. **The engine panel holds the five engine cards only**: closed (package 5 draws the taglines, specs and models).
 4. **An XY pad changed from elsewhere is drawn where it is**, as the concept draws a pad it has just rebuilt; it springs
    only while it is being worked.
 5. **The page keeps its records under its own keys** (`hotstep.create.desk`, `hotstep.create.engines`,
@@ -401,6 +420,17 @@ decide the tile heights their moves need).
     by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
 19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
     the LCD selector it gives a pick (`board/Board.tsx`, one line).
+
+20. **ACE-Step's card says ×8**, the most takes the definitions give it (the server takes 8 at most); the concept
+    says ×9.
+21. **A model left at "" (the engine's default) is the file the server has selected**: the row shows that file, its
+    list has no "Engine default" row while the server lists it, a step names it, and choosing it stores "" (question
+    5). The concept's default is the first file of the list; with the simulated server, which selects the first, the
+    page looks and behaves the same.
+22. **The VRAM meter does not yet swing while a run renders, nor show another engine rendering** (B-34): both need the
+    queue (package 6), which can feed the needle's target; and its click opens no engine log yet (the log is drawn by
+    the overlays' package), so its `aria-expanded` stays false.
+23. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys); the concept's does nothing there.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

@@ -25,6 +25,8 @@ const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 export function TopBar() {
   const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false);
   const name = ENGINES.find(e => e.id === engine)!.name;
+  /* the panel is named whether it is open or not, as the concept's markup names it */
+  useEffect(() => { document.getElementById('engPanel')?.setAttribute('aria-label', say(ui('engine.panel'))); }, [say]);
   return (
     <div className="top-in">
       {/* the brand is the one word the page does not translate */}
