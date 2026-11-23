@@ -179,6 +179,7 @@ import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { evictOtherFamilies } from '../services/generation/residency.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
 import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
+import { readGateHistory } from '../services/training/yue2GateHistory.js';
 import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
 import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
@@ -4655,6 +4656,17 @@ router.post('/datasets/:id/yue2-cleanup', async (req: Request, res: Response) =>
     console.log(`[Training] Cleanup around ${ds.slug} run ${run} step ${step}: ${result.done.join(', ') || 'nothing'} (${(result.freedBytes / 1048576).toFixed(0)} MiB)`);
     res.json(result);
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
+});
+
+/** Held-out readings from the selected run's own logs, including mirrored runs. */
+router.get('/datasets/:id/yue2-joint-runs/:jobId/gate-history', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === req.params.jobId);
+    if (!run) { res.status(404).json({ error: 'Run not found' }); return; }
+    res.json(await readGateHistory(run.output));
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — remove a finished run's

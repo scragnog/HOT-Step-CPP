@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { klReading, reduceYue2Metric } from './yue2ChartData';
+import { chartMeans, klReading, reduceYue2Metric, smoothBest } from './yue2ChartData';
 import type { TrainingMetricEvent } from '../../services/trainingApi';
 
 const metric = (step: number, fields: Partial<TrainingMetricEvent> = {}): TrainingMetricEvent => ({ type: 'metric', metric: 'step', ts: step, step, ...fields });
+
+test('smoothed best uses a full trailing window and marks its centre', () => {
+  assert.deepEqual(chartMeans([3, 2, 4, 1], 3), [3, 2.5, 3, 7 / 3]);
+  const points = [3, 2, 4, 1].map((loss, i) => ({ ep: (i + 1) * 10, loss }));
+  assert.equal(smoothBest(points, 3), 30);
+  assert.equal(smoothBest(points, 3, 31), undefined);
+  assert.equal(smoothBest(points.slice(0, 2), 3), undefined);
+});
 
 test('SSE replay and reconnect deduplicate steps and keep sparse checkpoint meters', () => {
   const events = [metric(1, { loss: 4, arCe: 2, arKl: .1, narMse: 1 }), metric(2, { loss: 3, arCe: 1, arKl: .2 }), metric(2, { narRecon: .4, narDrift: .3 })];

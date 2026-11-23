@@ -2803,6 +2803,10 @@ export async function listYue2AitkRuns(
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`, undefined, reqOpts);
 }
 
+export async function getYue2GateHistory(id: string, run: string, opts?: ReadOptions): Promise<{ readings: Array<{ ep: number; loss: number }>; steps: Array<{ step: number; ep: number; narMse: number; frozen?: boolean }>; frozenAt?: number }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(run)}/gate-history`, undefined, opts);
+}
+
 /** `core`: YuE2's latents, codes, lead sheets and prepared set, kept by every clear unless asked. */
 export interface PreparedCache { name: string; path: string; files: number; bytes: number; core?: boolean }
 export async function getPreparedData(id: string, reqOpts?: TrainingReadOptions, target?: 'heartmula'): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {

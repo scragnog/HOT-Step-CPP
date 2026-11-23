@@ -1,5 +1,7 @@
 # YuE2 training
 
+The joint training charts show raw decoder loss and its existing smoothed trend. When held-out planner readings are available, the AR chart shows the raw readings and their five-reading trailing mean. Markers show the planner freeze and the centre of the lowest full smoothing window for each loss. These markers are comparisons and do not change training or guarantee a checkpoint was saved at that step.
+
 This guide covers training YuE2 adapters in the [Training Studio](../studios/training-studio.md) with Joint Training, the default method: what gets trained, what the dataset needs, which preset to start from, and how to pick the finished adapter by ear. YuE2 must be the training target: make YuE2 the active generation backend with the engine picker at the top of the sidebar. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train

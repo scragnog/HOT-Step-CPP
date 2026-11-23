@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TrainingChart, type ChartStepPoint, type ChartMilestone } from './TrainingChart';
-import { klReading, reduceYue2Metric, type Yue2Point } from './yue2ChartData';
+import { klReading, reduceYue2Metric, smoothBest, type Yue2Point } from './yue2ChartData';
 import { isTerminalStatus, jobStreamUrl, type TrainingJobSummary, type TrainingStreamEvent } from '../../services/trainingApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -14,13 +14,14 @@ interface Props {
   options?: Record<string, unknown>;
   milestones?: ChartMilestone[];
   evals?: Array<{ ep: number; loss: number }>;
+  gateFrozenAt?: number;
   totalSteps?: number;
   vramMb?: number;
   /** Loss the run stops on (mm3 only); 0 or absent draws no line. */
   target?: number;
 }
 
-export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, options, milestones = [], evals = [], totalSteps = 0, vramMb, target = 0 }) => {
+export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, options, milestones = [], evals = [], gateFrozenAt, totalSteps = 0, vramMb, target = 0 }) => {
   const { t } = useTranslation();
   const [stream, setStream] = useState<Yue2Point[]>([]);
   const [streamVram, setStreamVram] = useState<number>();
@@ -51,7 +52,11 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   // MM3 computes its own trailing mean (train or held-out) and passes it in.
   const lastStopMean = typeof options?.stopReading === 'number' ? options.stopReading : history.findLast(p => Number.isFinite(p.ma20))?.ma20;
   const frozenIndex = history.findIndex(p => p.frozen);
-  const frozen = frozenIndex < 0 ? undefined : history[Math.max(0, frozenIndex - 1)].step;
+  const frozen = gateFrozenAt ?? (frozenIndex < 0 ? undefined : history[Math.max(0, frozenIndex - 1)].step);
+  const gateBest = mode === 'joint' ? smoothBest(evals, 5) : undefined;
+  const narValues = history.filter(p => Number.isFinite(p.narMse)).map(p => ({ ep: p.step, loss: p.narMse! }));
+  const narWindow = Math.min(51, Math.max(5, Math.round(narValues.length / 25)));
+  const narBest = mode === 'joint' ? smoothBest(narValues, narWindow, frozen) : undefined;
   const kls: number[] = [];
   const klMode = options?.targetKlMode === 'trend' ? 'trend' : 'mean';
   const window = typeof options?.targetLossWindow === 'number' ? options.targetLossWindow : 20;
@@ -66,7 +71,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
     arCe: t('trainingStudio.split.arCe', 'AR CE'), cursorCe: t('trainingStudio.split.cursorCe', 'Cursor CE'),
     arKl: t('trainingStudio.split.kl', 'KL vs base'), narMse: t('trainingStudio.split.decoderLoss', 'Decoder loss'),
     narRecon: t('trainingStudio.split.recon', 'Reconstruction'), narDrift: t('trainingStudio.split.drift', 'Drift'),
-    eval: mode === 'mm3' ? t('trainingStudio.split.heldOut', 'Held-out loss') : t('trainingStudio.split.grammar', 'Token-grammar check'),
+    eval: mode === 'joint' ? t('trainingStudio.split.gateCe', 'Held-out planner CE') : mode === 'mm3' ? t('trainingStudio.split.heldOut', 'Held-out loss') : t('trainingStudio.split.grammar', 'Token-grammar check'),
     klStop: t('trainingStudio.split.klStop', { mode: klMode, window: klMode === 'trend' ? 30 : window, defaultValue: 'KL {{mode}} ({{window}} readings)' }),
     grad: t('trainingStudio.split.grad', 'Grad norm'), lr: t('trainingStudio.chart.mLr', 'Learning rate'),
   };
@@ -75,16 +80,16 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
     narDrift: t('trainingStudio.split.driftInfo', "How much the decoder's predictions changed from its starting adapter on fixed probes."),
     narRecon: t('trainingStudio.split.reconInfo', 'How closely one denoising step rebuilds the training latents on fixed probes. Lower is better on those probes, not a listening score.'),
     grad: t('trainingStudio.split.gradInfo', 'Overall gradient size before clipping. Spikes flag an unstable update.'),
-    eval: mode === 'mm3'
+    eval: mode === 'joint' ? t('trainingStudio.split.gateCeInfo', 'Planner loss on held-out songs. The solid line is a five-reading trailing mean.') : mode === 'mm3'
       ? t('trainingStudio.split.heldOutInfo', 'Loss on songs the run never trains on. It says whether the adapter generalises: rising while the training loss falls means it is memorising.')
       : t('trainingStudio.split.grammarInfo', 'Validation on the minted token pack. It should stay roughly flat; rising means token-grammar damage.'),
   };
   const missing = t('trainingStudio.split.missing', 'Not recorded for this run');
   const chart = (side: 'ar' | 'nar') => {
     const inactive = mode !== 'joint' && mode !== 'mm3' && mode !== side;
-    const series = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad', 'lr'] : ['arCe', 'arKl', 'klStop', 'cursorCe', 'lr'])
+    const series = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad', 'lr'] : ['arCe', 'eval', 'arKl', 'klStop', 'cursorCe', 'lr'])
       : (mode === 'nar' ? ['loss', 'grad', 'lr'] : ['narMse', 'narRecon', 'narDrift', 'lr']);
-    const defaults = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad'] : ['arCe', 'arKl', 'klStop']) : (mode === 'nar' ? ['loss', 'grad'] : ['narMse', 'narRecon']);
+    const defaults = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad'] : ['arCe', 'eval', 'arKl', 'klStop']) : (mode === 'nar' ? ['loss', 'grad'] : ['narMse', 'narRecon']);
     const hasData = steps.some(p => series.some(key => Number.isFinite(p[key === 'grad' ? 'gradNorm' : key as keyof ChartStepPoint]))) || (side === 'ar' && evals.length > 0);
     return <section className="min-w-0 rounded-lg border border-zinc-300/50 dark:border-white/10 p-2">
       {mode !== 'mm3' && <>
@@ -98,7 +103,10 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
           <TrainingChart epochs={[]} steps={steps} milestones={milestones} evals={side === 'ar' ? evals : []} target={mode === 'mm3' ? target : 0}
             klTarget={side === 'ar' && options?.stopMode === 'kl' && typeof options.targetKl === 'number' ? options.targetKl : 0}
             klStopLabel={labels.klStop} config={{ series, defaults, more: series.filter(k => !defaults.includes(k)), labels, tooltips,
-              xMax: last?.step, markers: side === 'ar' && frozen !== undefined ? [{ step: frozen, label: t('trainingStudio.split.frozen', 'Planner frozen') }] : [] }} />
+              xMax: Math.max(last?.step ?? 0, evals.at(-1)?.ep ?? 0), smoothEval: mode === 'joint', markers: side === 'ar' ? [
+                ...(frozen !== undefined ? [{ step: frozen, label: t('trainingStudio.split.frozen', 'Planner frozen') }] : []),
+                ...(gateBest !== undefined ? [{ step: gateBest, label: t('trainingStudio.split.gateBest', 'Smoothed planner best (window centre)') }] : []),
+              ] : narBest !== undefined ? [{ step: narBest, label: t('trainingStudio.split.narBest', 'Smoothed decoder best (window centre)') }] : [] }} />
           {defaults.filter(k => k !== 'klStop' && !(k === 'eval' && evals.length) && !steps.some(p => Number.isFinite(p[(k === 'grad' ? 'gradNorm' : k) as keyof ChartStepPoint]))).map(k => <p key={k} className="text-[10px] text-zinc-500">{labels[k as keyof typeof labels]}: {missing}</p>)}
         </> : <p className="text-xs text-zinc-500">{missing}</p>}
     </section>;

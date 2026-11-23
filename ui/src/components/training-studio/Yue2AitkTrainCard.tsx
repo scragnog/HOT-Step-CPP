@@ -647,6 +647,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // The job SSE endpoint replays its buffer, so this also reconstructs the
   // curve after a reload or EventSource reconnect.
   const [stepHistory, setStepHistory] = useState<JointStepPoint[]>([]);
+  const [liveGate, setLiveGate] = useState<Array<{ ep: number; loss: number }>>([]);
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
   // The KL stop reading at every step, for the chart: the same computation the
   // engine makes, so the line crosses the target where the run stops.
@@ -698,6 +699,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const activeJob = job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job : undefined;
   const ladderRunRec = pickLadderRun(aitkRuns, pickedLadderRun, activeJob?.id);
   const ladderRunId = ladderRunRec?.jobId;
+  const gateHistory = useQuery({ ...runQueries.gateHistory(datasetId, ladderRunId ?? ''), enabled: !!ladderRunId,
+    refetchInterval: pollWhile(() => !!ladderRunRec?.live, 5000) });
+  const activeGateHistory = useQuery({ ...runQueries.gateHistory(datasetId, job?.id ?? ''),
+    enabled: !!job?.id && aitkRuns.some(r => r.jobId === job.id),
+    refetchInterval: pollWhile(() => job?.status === 'running', 5000) });
   const awaitingMirror = !ladderRunRec && !!activeJob && !!trainingWorker;
 
   const previewsQuery = useQuery({ ...runQueries.previews(datasetId, ladderRunId ?? ''), enabled: !!ladderRunId,
@@ -708,6 +714,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     setLiveMetric(null);
     setGateReading(undefined);
+    setLiveGate([]);
     setChartVram(undefined);
     setStepHistory([]);
     setHistoryUnavailable(false);
@@ -767,6 +774,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           }
         } else if (item.type === 'metric' && item.metric === 'eval' && item.plannerGate) {
           setGateReading(item.plannerGate);
+          if (typeof item.step === 'number' && Number.isFinite(item.step) && Number.isFinite(item.plannerGate.ce)) {
+            const ep = item.step, loss = item.plannerGate.ce;
+            setLiveGate(previous => [...previous.filter(p => p.ep !== ep), { ep, loss }].sort((a, b) => a.ep - b.ep));
+          }
         } else if (item.type === 'metric' && item.metric === 'milestone'
           && typeof item.step === 'number' && typeof item.path === 'string') {
           points = [...points.filter(point => point.path !== item.path), { epoch: item.step, loss: item.loss ?? 0, path: item.path,
@@ -1804,9 +1815,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {stepHistory.length > 0 && (
         <div className="mt-3">
           <Yue2SplitChart points={stepHistory} milestones={milestones} totalSteps={job?.total ?? 0} vramMb={chartVram}
+            evals={[...new Map([...(activeGateHistory.data?.readings ?? []), ...liveGate].map(p => [p.ep, p])).values()].sort((a, b) => a.ep - b.ep)} gateFrozenAt={activeGateHistory.data?.frozenAt}
             options={aitkRuns.find(r => r.jobId === job?.id)?.options} />
           {frozenAt !== undefined && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-            {t('trainingStudio.yue2.method.plannerFrozen', "Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the planner's CE and KL lines end here, the step counter and pace below keep moving.", { step: frozenAt })}
+            {t('trainingStudio.yue2.method.plannerFrozenGeneric', "Planner frozen at step {{step}}. The decoder is still training: the planner's CE and KL lines end here, while the step counter and pace keep moving.", { step: frozenAt })}
           </div>}
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
             {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
@@ -1836,6 +1848,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
               label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
         </div>}
+        {(ladderRunRec.jobId !== job?.id || !stepHistory.length) && !!gateHistory.data?.steps.length && <Yue2SplitChart points={gateHistory.data.steps} evals={gateHistory.data.readings} gateFrozenAt={gateHistory.data.frozenAt} options={ladderRunRec.options} />}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: by default one 300 s draft take of the dataset\'s first sung track per rung, on the same seed every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Takes per checkpoint adds more, each on a new random seed: a song no other rung made, which shows how the checkpoint does on a fresh draw and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
           renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 1, arScale: form.preview?.arScale ?? LADDER_PREVIEW.arScale, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}

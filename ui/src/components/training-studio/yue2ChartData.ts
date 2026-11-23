@@ -7,6 +7,27 @@ export interface Yue2Point {
   elapsedMs?: number; ma5?: number; ma20?: number;
 }
 
+/** Same partial trailing mean as the chart; the best is placed at its window centre. */
+export function chartMeans(values: number[], window: number): number[] {
+  let sum = 0;
+  return values.map((v, i) => {
+    sum += v;
+    if (i >= window) sum -= values[i - window];
+    return sum / Math.min(i + 1, window);
+  });
+}
+
+export function smoothBest(points: Array<{ ep: number; loss: number }>, window: number, minCentre = -Infinity): number | undefined {
+  if (points.length < window) return undefined;
+  const means = chartMeans(points.map(p => p.loss), window);
+  let best: number | undefined;
+  for (let i = window - 1; i < means.length; i++) {
+    if (points[i - Math.floor(window / 2)].ep < minCentre) continue;
+    if (best === undefined || means[i] < means[best]) best = i;
+  }
+  return best === undefined ? undefined : points[best - Math.floor(window / 2)].ep;
+}
+
 /** Merge sparse checkpoint meters and replayed steps without inventing history. */
 export function reduceYue2Metric(previous: Yue2Point[], item: TrainingMetricEvent, cap = 2000): Yue2Point[] {
   if (item.metric !== 'step' || !Number.isFinite(item.step)) return previous;

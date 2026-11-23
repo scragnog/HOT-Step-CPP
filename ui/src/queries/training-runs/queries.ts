@@ -22,6 +22,7 @@ const TR = {
   narRuns: 'training-runs/nar-runs',
   arRuns: 'training-runs/ar-runs',
   jointRuns: 'training-runs/joint-runs',
+  gateHistory: 'training-runs/gate-history',
   holdout: 'training-runs/holdout',
   previews: 'training-runs/previews',
   review: 'training-runs/review',
@@ -86,6 +87,10 @@ export const runQueries = {
     queryFn: ({ signal }) => api.listYue2AitkRuns(id, { signal }),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof api.listYue2AitkRuns>>>(data =>
       !data || !!data.activeJob && activeJob(data.activeJob) || data.runs.some(run => run.live), 5000),
+  }),
+  gateHistory: (id: string, run: string) => queryOptions({
+    queryKey: serverKey(TR.gateHistory, { id, filters: { run } }),
+    queryFn: ({ signal }) => api.getYue2GateHistory(id, run, { signal }),
   }),
   holdout: (worker: Worker, id: string, seed: number) => queryOptions({
     queryKey: serverKey(TR.holdout, { worker, id, filters: { seed } }),

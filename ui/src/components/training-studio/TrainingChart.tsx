@@ -39,6 +39,7 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TrainStepPoint } from '../../stores/trainingStore';
+import { chartMeans } from './yue2ChartData';
 
 /** Structural shape of TrainLmEpoch / TrainDitEpoch — the two are identical.
  *  `ms` is the epoch's wall time when the caller has it (both live and persisted
@@ -70,6 +71,7 @@ export interface ChartConfig {
   defaults?: string[];
   more?: string[];
   markers?: Array<{ step: number; label: string }>;
+  smoothEval?: boolean;
   xMax?: number;
 }
 
@@ -300,9 +302,10 @@ export const TrainingChart: React.FC<Props> = ({
 
     if (evalPts.length >= 1) {
       const raw = evalPts.map(e => ({ x: e.ep, v: e.loss }));
+      const trend = config?.smoothEval ? chartMeans(raw.map(p => p.v), 5).map((v, i) => ({ x: raw[i].x, v })) : raw;
       out.push({
         key: 'eval', label: t('trainingStudio.chart.mEval', 'held-out'),
-        raw, trend: raw, colour: '#34d399', trendColour: '#059669', dots: true,
+        raw, trend, colour: '#34d399', trendColour: '#059669', dots: true,
       });
     }
     return config ? out.filter(m => config.series.includes(m.key)).map(m => ({ ...m,
@@ -490,7 +493,7 @@ export const TrainingChart: React.FC<Props> = ({
             )}
 
             {/* milestone ticks, along the bottom edge */}
-            {config?.markers?.map(m => <line key={m.step} x1={xFor(m.step)} x2={xFor(m.step)} y1={0} y2={VB}
+            {config?.markers?.map(m => <line key={`${m.step}-${m.label}`} x1={xFor(m.step)} x2={xFor(m.step)} y1={0} y2={VB}
               stroke="#d97706" strokeDasharray="3 3" vectorEffect="non-scaling-stroke"><title>{m.label}</title></line>)}
             {ticks.map(m => (
               <line
@@ -659,6 +662,7 @@ export const TrainingChart: React.FC<Props> = ({
             {t('trainingStudio.chart.legendMilestone')}
           </span>
         )}
+        {config?.markers?.map(m => <span key={`${m.step}-${m.label}`} className="text-amber-700 dark:text-amber-300">{m.label}: {m.step}</span>)}
         <span className="ml-auto tabular-nums">
           {stepAxis
             ? t('trainingStudio.chart.stepAxis', { step: lastStepEp, defaultValue: 'step {{step}}' })
