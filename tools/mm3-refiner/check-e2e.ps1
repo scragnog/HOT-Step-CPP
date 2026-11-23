@@ -44,6 +44,7 @@ if (-not $DamagedControlsOnly) {
 
 # The native fixtures do not cover the two damaged inputs used in the ablation.
 # Their reference WAVs use the same pinned torch package and default 32 steps.
+# The controls were captured with TF32 off, matching capture-reference.py.
 $repo = (Resolve-Path "$PSScriptRoot/../..").Path
 $controls = "$repo/_experiments/mm3-whats-new-2026-11-05/refiner/control"
 $out = "$PSScriptRoot/artifacts/e2e"
@@ -64,7 +65,7 @@ foreach ($name in 'degraded', 'degraded_heavy') {
     $bytes = (Invoke-WebRequest "$EngineUrl/job?id=$($submitted.id)&result=1" -TimeoutSec 30).Content
     [IO.File]::WriteAllBytes("$out/$name.wav", [byte[]]$bytes)
     $actual = [WavData]::Parse([byte[]]$bytes)
-    $reference = [WavData]::Parse([IO.File]::ReadAllBytes("$controls/out/$name.wav"))
+    $reference = [WavData]::Parse([IO.File]::ReadAllBytes("$controls/out-f32/$name.wav"))
     $metrics = [WavData]::Compare($actual, $reference, $actual.N)
     $ok = $metrics[0] -le 0.02 -and $metrics[1] -le 0.01
     if (-not $ok) { $failed++ }
