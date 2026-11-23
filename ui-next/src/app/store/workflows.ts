@@ -375,11 +375,10 @@ export function deleteDraft(id: string): void {
   const entry = desk().recordStep(draftStep('draftDelete'), {
     undo: () => {
       const t = useWf.getState().drafts; if (!t.some(x => x.id === id)) { const l = [...t]; l.splice(Math.min(i, l.length), 0, structuredClone(gone)); useWf.setState({ drafts: l }); persistDrafts(); }
-      /* focus goes back into the open list, not to Generate (C-25) */
-      desk().setFocus([`#pop [data-draftdel="${i}"]`, '#pop [data-draftload]', '#draftName']);
     },
     redo: () => { useWf.setState({ drafts: useWf.getState().drafts.filter(x => x.id !== id) }); persistDrafts(); },
-  });
+  /* focus goes back into the open list, not to Generate (C-25) */
+  }, '#pop [data-draftdel], #draftName');
   toast(msg('draft.deleted'), undoAction(entry));
 }
 /** Loads a draft: on another engine, the engine switches first; its content replaces the desk's content. */

@@ -104,7 +104,7 @@ export interface DeskStore extends Parts {
   /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
   deskStep(words: StepWords, fn: () => void): void;
   /** A step that undoes and redoes itself (Entry.run): a saved record's replacement, rename or deletion. */
-  recordStep(words: StepWords, run: NonNullable<Entry['run']>): Entry;
+  recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
   /** What the engine told the page: its lists, the selected models, the plugin host's count. */
   told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number }): void;
 }
@@ -244,8 +244,8 @@ export const useDesk = create<DeskStore>()((set, get) => {
       if ([...after].every(([k, v]) => before.get(k) === v)) return;
       set({ undo: [...s.undo, { words, first: prev.desk, before, after, gesture: null, at: Date.now() }].slice(-UNDO_MAX), redo: [] });
     },
-    recordStep(words, run) {
-      const s = get(), f = flatOf(parts()), e: Entry = { words, first: s.desk, before: f, after: f, gesture: null, at: Date.now(), run };
+    recordStep(words, run, back) {
+      const s = get(), f = flatOf(parts()), e: Entry = { words, first: s.desk, before: f, after: f, gesture: null, at: Date.now(), run, ...(back ? { back } : {}) };
       set({ undo: [...s.undo, e].slice(-UNDO_MAX), redo: [] });
       return e;
     },
