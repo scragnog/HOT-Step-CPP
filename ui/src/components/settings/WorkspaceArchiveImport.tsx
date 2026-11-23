@@ -3,13 +3,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { FolderOpen } from 'lucide-react';
 import { workspaceArchiveApi, type ArchiveImportPreview } from '../../services/workspaceArchiveApi';
-import { workspaceArchiveImportJobOptions } from '../../queries/shell-queue/settings';
+import { dataFolderOptions, workspaceArchiveImportJobOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { ParamLabel } from '../shared/ParamLabel';
 
 const gb = (n: number) => `${(n / 1e9).toFixed(2)} GB`;
+// The accepted import's target survives the restart's page reload here, so the outcome can be checked afterwards.
+const PENDING_KEY = 'hotstep:workspace-import-pending';
+const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+const parentDir = (p: string) => p.replace(/[\\/]+[^\\/]*$/, '');
+const readPending = (): string => { try { return sessionStorage.getItem(PENDING_KEY) ?? ''; } catch { return ''; } };
+const writePending = (target: string) => { try { if (target) sessionStorage.setItem(PENDING_KEY, target); else sessionStorage.removeItem(PENDING_KEY); } catch { /* storage unavailable: no outcome check */ } };
 
 /** Import half of the workspace archive: pick a zip and a new folder, preview, confirm, restart. */
 export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
@@ -22,6 +28,10 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
+  const [pending, setPending] = useState(readPending);
+  const [forceCheck, setForceCheck] = useState(false);
+  // Set at start until the poll first shows the job, so the stale pre-start `null` is not read as a restart.
+  const [unseen, setUnseen] = useState(false);
 
   const jobQuery = useQuery(workspaceArchiveImportJobOptions());
   const job = jobQuery.data?.job ?? null;
@@ -29,8 +39,18 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
   const waiting = running && job.progress?.phase === 'waiting';
 
   // The server restarts about 300 ms after `done`; tell the app shell so it shows its restart overlay.
+  // The poll can miss that window, so the outcome below does not depend on seeing `done`.
   const done = job?.state === 'done';
   useEffect(() => { if (done) window.dispatchEvent(new CustomEvent('hotstep:restarting')); }, [done]);
+  // A failed or cancelled job means nothing was switched. A new server has no job (it lives in memory).
+  useEffect(() => { if (pending && (job?.state === 'failed' || job?.state === 'cancelled')) { writePending(''); setPending(''); } }, [pending, job?.state]);
+  useEffect(() => { if (job) setUnseen(false); }, [job]);
+  const restarted = !!pending && !unseen && jobQuery.isSuccess && !job;
+  const locationQuery = useQuery({ ...dataFolderOptions(), enabled: restarted || (!!pending && done && forceCheck), refetchInterval: q => (q.state.data ? false : 2000) });
+  const where = locationQuery.data;
+  const switched = !!where && !!pending && norm(where.dataRoot ?? '') === norm(pending);
+  const reportPath = pending ? `${pending}${/[\\/]$/.test(pending) ? '' : '/'}import-report.json` : '';
+  const dismiss = () => { writePending(''); setPending(''); setForceCheck(false); };
 
   const refresh = () => void queryManager.invalidate(queryClient, workspaceArchiveImportJobOptions().queryKey);
   const fail = (e: unknown) => {
@@ -51,6 +71,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
     mutationFn: () => workspaceArchiveApi.importStart(zip.trim(), target.trim()),
     onMutate: () => { setError(''); setErrors([]); setConfirming(false); },
     onError: fail,
+    onSuccess: ({ job: started }) => { writePending(started.target); setPending(started.target); setForceCheck(false); setUnseen(true); },
     onSettled: refresh,
   });
   const cancelMut = useMutation({
@@ -87,9 +108,16 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
       <button type="button" className="settings-save-btn" disabled={cancelMut.isPending} onClick={() => cancelMut.mutate()}>{t('settings.workspaceArchive.import.cancel')}</button>
       <p>{t('settings.workspaceArchive.import.cancelNote')}</p>
     </div>}
-    {done && job && <div role="status" className="space-y-1">
+    {done && job && !forceCheck && <div role="status" className="space-y-1">
       <p>{t('settings.workspaceArchive.import.restarting', { target: job.target })}</p>
-      <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: `${job.target}${/[\\/]$/.test(job.target) ? '' : '/'}import-report.json` })}</p>
+      <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
+      <button type="button" className="settings-save-btn" onClick={() => setForceCheck(true)}>{t('settings.workspaceArchive.import.checkNow')}</button>
+    </div>}
+    {pending && !running && (!done || forceCheck) && !where && <p role="status">{t('settings.workspaceArchive.import.checking')}</p>}
+    {pending && !running && where && <div role="status" className="space-y-1">
+      <p>{t(switched ? 'settings.workspaceArchive.import.switched' : 'settings.workspaceArchive.import.notSwitched', { target: pending, root: where.dataRoot ?? '' })}</p>
+      <p className="break-all">{t('settings.workspaceArchive.import.reportAt', { path: reportPath })}</p>
+      <button type="button" className="settings-save-btn" onClick={dismiss}>{t('settings.workspaceArchive.import.dismiss')}</button>
     </div>}
     {job?.state === 'cancelled' && <p role="status">{t('settings.workspaceArchive.import.cancelled')}</p>}
     {job?.state === 'failed' && <div role="alert" className="text-red-600 dark:text-red-400">
@@ -130,7 +158,7 @@ export function WorkspaceArchiveImport({ exporting }: { exporting: boolean }) {
 
     <ConfirmDialog isOpen={confirming} title={t('settings.workspaceArchive.import.confirmTitle')} message={t('settings.workspaceArchive.import.confirmMessage', { target: target.trim() })}
       confirmLabel={t('settings.workspaceArchive.import.start')} onCancel={() => setConfirming(false)} onConfirm={() => startMut.mutate()} />
-    <FileBrowserModal open={browse !== null} mode={browse === 'zip' ? 'file' : 'folder'} startPath={browse === 'zip' ? zip : target}
+    <FileBrowserModal open={browse !== null} mode={browse === 'zip' ? 'file' : 'folder'} startPath={browse === 'zip' ? parentDir(zip.trim()) : target}
       title={t(browse === 'zip' ? 'settings.workspaceArchive.import.browseZip' : 'settings.workspaceArchive.import.browseTarget')}
       onClose={() => setBrowse(null)} onSelect={p => { if (browse === 'zip') setZip(p); else setTarget(p); setBrowse(null); clear(); }} />
   </div>;

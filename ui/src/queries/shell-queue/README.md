@@ -66,7 +66,7 @@ disco stem extraction it starts) twice.
 | `.env` values | `shell-queue/env` | Fresh each load; seeds the editable form |
 | GPUs, stem storage | shared `gpus`, `shell-queue/stem-stats` | Clearing stems updates then invalidates |
 | Data folder | `shell-queue/data-folder` | Fresh each visit; refetched after a cancel or a failed command |
-| Workspace archive | `shell-queue/workspace-archive-job`, `shell-queue/workspace-archive-preview` | Job polled each second while it holds or runs; preview fresh per destination |
+| Workspace archive | `shell-queue/workspace-archive-job`, `shell-queue/workspace-archive-import-job`, `shell-queue/workspace-archive-preview` | Jobs polled each second while they hold or run; preview fresh per destination |
 | Update notice | `shell-queue/updates` | Fresh each visit; polled every 2 s while a check started elsewhere (startup, another tab) is still running; Check now writes its result into the entry |
 | File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | shared `adapter-scan` | Fresh per click |

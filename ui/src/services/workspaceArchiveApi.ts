@@ -60,7 +60,7 @@ export interface ArchiveImportPreview {
   files: number;
   bytes: number;
   externals: ArchiveExternal[];
-  skipped: unknown[];
+  skipped: number;
   target: { path: string; freeBytes: number | null; errors: string[] } | null;
   blockers: string[];
 }
