@@ -75,7 +75,7 @@ export const sampler = {
       auto: {},
       when: { any: [{ engine: ['ace', 'yue2'] }, { param: 'samp.plugins', is: true }] },
       engines: ['ace', 'minimax-m3', 'heartmula'],
-      wire: { to: 'param:shift', auto: -1, differs: ['default'], note: 'Auto is -1, as the existing slider\'s Auto button sets it: the engine then uses its own shift (3.0 on turbo models, 1.0 on base ones). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).' },
+      wire: { to: 'param:shift', auto: -1, differs: ['default'], note: 'Auto is -1, as the existing slider\'s Auto button sets it: the engine then works out a shift from the song\'s length and the step count (hot-step-server.cpp: 3 times a length factor and a steps factor, each 0.8 to 1.4, so about 1.9 to 5.9; 3.18 at 12 steps and 60 s). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).' },
       per: [
         {
           engines: ['minimax-m3'],
@@ -782,7 +782,12 @@ export const sampler = {
           dim: { when: { state: 'customTimesteps', set: true }, says: 'custom' },
         },
         { part: 'knob', param: 'samp.cfg' },
-        { part: 'knob', param: 'samp.shift' },
+        {
+          part: 'knob',
+          param: 'samp.shift',
+          /* HeartMuLa reads its flow shift only with one of the three picks set (heartmula/generate.ts samplerPlugins) */
+          dim: { when: { all: [{ engine: ['heartmula'] }, { param: 'samp.solver', is: '' }, { param: 'samp.sched', is: '' }, { param: 'samp.guide', is: '' }] }, says: 'Native picks · not used' },
+        },
         { part: 'knob', param: 'samp.retake', label: 'Retake', engines: ['ace'] },
         { part: 'pick', param: 'samp.solver', opts: { variant: 'plugin' }, engines: ['yue2'] },
         { part: 'pick', param: 'samp.sched', opts: { variant: 'plugin' }, engines: ['yue2'] },

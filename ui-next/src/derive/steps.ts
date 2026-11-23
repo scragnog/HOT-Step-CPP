@@ -1,32 +1,32 @@
 // Undo step names (docs/05, "Undo step names"): what a step is called, and what its Undo and Redo say, from the desk
 // before and after it and the definitions alone. The concept's rules (14-value-steps.js vsWords), on the definitions'
 // words. A part never names a step: it asks for one of its definition's named steps, or sets values, and this names
-// what changed.
+// what changed. Every name is a message (messages.ts), so it reads in any locale.
 
 import type { Definition, Json, ParamDef, Step, Text, Value } from '../definitions/types.ts';
-import { type Desk, type Index, fill, formatValue, has, isAuto, nameOn, resolve, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, has, isAuto, nameOn, resolve, valueOf } from './core.ts';
+import { type Msg, type Slot, list, msg } from './messages.ts';
+import { fillMsg, formatMsg, paramWords, stateWords, stepKey } from './strings.ts';
 
 export interface StepWords {
   /** What the step is called: the Undo button's label. */
-  label: string;
+  label: Msg;
   /** "Undone: ..." and "Redone: ..." in the toasts, when they say more than the label. */
-  undone?: string;
-  redone?: string;
+  undone?: Msg;
+  redone?: Msg;
   /** What Undo will put back, said before it is pressed. */
-  put: string;
+  put: Msg;
 }
 
 /** A step a part asks for by name: one of its parameter's or its state's `steps`, with the slots the part fills. */
 export interface NamedStep { key: string; step: string; slots?: { [slot: string]: string | number } }
 /** A Quick choice row's words, so its step reads as the row does ("How adventurous: Even → Bold"). */
-export interface RowStep { key: string; label: string; choices: [Text, Value | { [k: string]: Value }][] }
+export interface RowStep { key: string; label: Slot; choices: [Slot, Value | { [k: string]: Value }][] }
 
 /** A named step's words, and the parameters it may change besides its own (types.ts Step). */
 export const stepSays = (s: Step): Text => (typeof s === 'string' ? s : s.says);
 export const stepChanges = (s: Step): string[] => (typeof s === 'string' ? [] : s.changes);
 
-const lowFirst = (s: string) => (/^[A-Z][a-z]*(?=[\s(]|$)/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s);
-const and = (a: string[]) => (a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0] ?? '');
 const plural = (n: string) => /s$/.test(n.split(' ').pop() ?? '');
 
 /** The definition a parameter belongs to, for naming: a pedal's or unit's name, else its module's. */
@@ -34,26 +34,32 @@ const ownerOf = (ix: Index, key: string): Definition | undefined => ix.params.ge
 
 /** What a step calls a parameter: its undoName, its words on the desk, with its owner's name first when another
  *  parameter on the engine prints the same words; a pedal's or unit's switch is the pedal or unit. */
-export function stepName(ix: Index, key: string, desk: Desk): string {
+export function stepName(ix: Index, key: string, desk: Desk): Msg {
   const { p, d } = ix.params.get(key)!;
-  const w = wordsOf(ix, p, desk);
-  if (w.undoName) return fill(ix, w.undoName, desk, w);
-  const label = w.label, own = nameOn(d, desk.engine);
+  const w = paramWords(ix, key, desk);
+  if (w.undoName) return w.undoName;
+  const label = w.label.en!, own = nameOn(d, desk.engine), ownMsg = defName(d, desk);
   /* a pedal's or unit's switch labelled On is the pedal or unit */
-  if (d.kind !== 'module' && d.on === key && label === 'On') return own;
+  if (d.kind !== 'module' && d.on === key && label === 'On') return ownMsg;
   /* every parameter's words on this engine, as the concept counts them: those another engine has too */
   const same = [...ix.params.values()].filter(x => (x.p.key === key ? label : resolve(x.p, desk.engine).label).toLowerCase() === label.toLowerCase()).length;
-  return same > 1 && !label.toLowerCase().startsWith(own.toLowerCase()) ? `${own} ${lowFirst(label)}` : label;
+  return same > 1 && !label.toLowerCase().startsWith(own.toLowerCase()) ? msg('name.owned', { owner: ownMsg, label: w.label }) : w.label;
+  void p;
 }
+/** A definition's name on the desk's engine, as a message. */
+export const defName = (d: Definition, desk: Desk): Msg => {
+  const line = d.kind === 'module' ? (d.per || []).find(l => l.engines.includes(desk.engine) && l.name) : undefined;
+  return { id: `create.${d.id}.name${line ? `@${line.engines.join('+')}` : ''}`, en: nameOn(d, desk.engine) };
+};
 
 /** A value as a step shows it: "auto" on auto, else as it is written everywhere. */
-function shown(ix: Index, key: string, desk: Desk): string {
+function shown(ix: Index, key: string, desk: Desk): Slot {
   if (isAuto(ix, key, desk)) return 'auto';
   const { p, d } = ix.params.get(key)!;
   /* a value the engine in use does not have is said as an engine that has it says it */
   const e = has(ix, key, desk.engine) ? desk.engine : (p.engines ?? d.engines).find(x => d.engines.includes(x))!;
   const on = { ...desk, engine: e };
-  return formatValue(wordsOf(ix, p, on), valueOf(ix, key, on)!, desk.lists);
+  return formatMsg(ix, key, on, valueOf(ix, key, on)!);
 }
 
 const J = (x: unknown) => JSON.stringify(x);
@@ -66,12 +72,12 @@ export function changesOf(ix: Index, before: Desk, after: Desk): { keys: string[
   return { keys: [...keys], state };
 }
 
-function stateNoun(ix: Index, key: string): string { return ix.states.get(key)?.s.noun ?? key; }
 /** What a desk path is called in "Change ..." and "Puts back ...". */
-function pathNames(ix: Index, keys: string[], state: string[], desk: Desk): string {
-  const vs = keys.map(k => stepName(ix, k, desk)), rest = [...new Set(state.map(s => stateNoun(ix, s)))];
-  const theVs = vs.filter(x => x.startsWith('the ')), plain = vs.filter(x => !x.startsWith('the '));
-  return and([...rest, ...theVs, ...(plain.length > 2 ? [`${plain.length} settings`] : plain)]);
+function pathNames(ix: Index, keys: string[], state: string[], desk: Desk): Slot {
+  const vs = keys.map(k => stepName(ix, k, desk)), rest = [...new Set(state)].filter(s => ix.states.has(s)).map(s => stateWords(ix, s).noun);
+  const isThe = (m: Msg) => /^the /.test(m.en ?? '');
+  const theVs = vs.filter(isThe), plain = vs.filter(x => !isThe(x));
+  return list([...rest, ...theVs, ...(plain.length > 2 ? [msg('step.settings', { n: plain.length })] : plain)]);
 }
 
 /** The words of the step from `before` to `after`. `named`: the step a part asked for; `row`: the Quick choice row the
@@ -79,46 +85,65 @@ function pathNames(ix: Index, keys: string[], state: string[], desk: Desk): stri
 export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?: NamedStep; row?: RowStep }): StepWords | null {
   const { keys, state } = changesOf(ix, before, after);
   if (!keys.length && !state.length) return null;
+  const put = msg('step.put', { what: pathNames(ix, keys, state, before) });
   if (hint?.named) {
     const n = hint.named, own = ix.params.get(n.key)?.p ?? ix.states.get(n.key)?.s;
     const def = own && (own as { steps?: { [k: string]: Step } }).steps?.[n.step];
     if (!def) throw new Error(`${n.key} has no step "${n.step}"`);
-    const slots: { [k: string]: string } = { ...Object.fromEntries(Object.entries(n.slots || {}).map(([k, v]) => [k, String(v)])) };
+    const slots: { [k: string]: Slot } = { ...n.slots };
     if (ix.params.has(n.key)) slots.name = stepName(ix, n.key, after);
-    if (ix.states.has(n.key)) { const s = ix.states.get(n.key)!.s; slots.noun = s.noun; slots.from = stateText(ix, n.key, before); slots.to = stateText(ix, n.key, after); }
-    const label = fill(ix, stepSays(def), after).replace(/\{(\w+)\}/g, (m, k: string) => slots[k] ?? m);
-    return { label, put: `Puts back ${pathNames(ix, keys, state, before)}` };
+    if (ix.states.has(n.key)) { const s = ix.states.get(n.key)!.s; slots.noun = stateWords(ix, n.key).noun; slots.from = stateText(ix, n.key, before); slots.to = stateText(ix, n.key, after); void s; }
+    const label = fillMsg(ix, stepKey(ix, n.key, n.step), stepSays(def), after);
+    return { label: { ...label, slots: { ...label.slots, ...slots } }, put };
   }
   /* the seed: its number while it is kept, else random */
   const seedKey = [...ix.states.values()].find(x => x.s.kind === 'seed')?.s.key;
   if (seedKey && (state.includes(seedKey) || (keys.length === 1 && !state.length && lockOf(ix, seedKey) === keys[0]))) {
     const a = seedText(ix, seedKey, before), b = seedText(ix, seedKey, after);
-    if (a !== b) return { label: `Seed ${a} → ${b}`, undone: `Seed back to ${a}`, redone: `Seed ${b}`, put: `Puts the seed back to ${a}` };
+    if (J(a) !== J(b)) return { label: msg('step.seed', { from: a, to: b }), undone: msg('step.seed.undone', { from: a }), redone: msg('step.seed.redone', { to: b }), put: msg('step.seed.put', { from: a }) };
   }
   if (keys.length === 1 && !state.length) {
     const k = keys[0]!, p = ix.params.get(k)!.p, name = stepName(ix, k, before);
     if (p.type === 'text') {
       /* a plural is said by the parameter's own undo name (the lyrics, the tags) */
-      const n = /^the /.test(name) ? name : 'the ' + lowFirst(name), many = !!wordsOf(ix, p, before).undoName && plural(n);
-      return { label: `Edit ${n}`, put: `Puts back ${n} as ${many ? 'they were' : 'it was'}` };
+      const the = /^the /.test(name.en ?? '') ? name : msg('name.the', { name });
+      const many = !!paramWords(ix, k, before).undoName && plural(name.en ?? '');
+      return { label: msg('step.edit', { name: the }), put: msg('step.edit.put', { name: the, many: String(many) }) };
     }
     if (hint?.row && hint.row.key === k) {
-      const word = (desk: Desk) => { const v = valueOf(ix, k, desk), c = hint.row!.choices.find(x => typeof x[1] !== 'object' && (x[1] === v || (typeof v === 'number' && Math.abs((x[1] as number) - v) < 1e-9))); return c ? c[0] : shown(ix, k, desk); };
+      const word = (desk: Desk): Slot => { const v = valueOf(ix, k, desk), c = hint.row!.choices.find(x => typeof x[1] !== 'object' && (x[1] === v || (typeof v === 'number' && Math.abs((x[1] as number) - v) < 1e-9))); return c ? c[0] : shown(ix, k, desk); };
       const a = word(before), b = word(after), r = hint.row.label;
-      return { label: `${r}: ${a} → ${b}`, undone: `${r} back to ${a}`, redone: `${r}: ${b}`, put: `Puts ${r} back to ${a}` };
+      return { label: msg('step.row', { row: r, from: a, to: b }), undone: msg('step.row.undone', { row: r, from: a }), redone: msg('step.row.redone', { row: r, to: b }), put: msg('step.row.put', { row: r, from: a }) };
     }
     const a = shown(ix, k, before), b = shown(ix, k, after);
-    return { label: `${name} ${a} → ${b}`, undone: `${name} back to ${a}`, redone: `${name} ${b}`, put: `Puts ${name} back to ${a}` };
+    return { label: msg('step.set', { name, from: a, to: b }), undone: msg('step.set.undone', { name, from: a }), redone: msg('step.set.redone', { name, to: b }), put: msg('step.set.put', { name, from: a }) };
+  }
+  /* a Quick row whose choice set several values at once: the row's words, from choice to choice (DH-09) */
+  if (hint?.row) {
+    const row = hint.row, rowKeys = new Set(row.choices.flatMap(c => (typeof c[1] === 'object' ? Object.keys(c[1]) : [row.key])));
+    if (keys.every(k => rowKeys.has(k)) && !state.length) {
+      const a = rowWord(ix, row, before), b = rowWord(ix, row, after), r = row.label;
+      return { label: msg('step.row', { row: r, from: a, to: b }), undone: msg('step.row.undone', { row: r, from: a }), redone: msg('step.row.redone', { row: r, to: b }), put: msg('step.row.put', { row: r, from: a }) };
+    }
   }
   /* two numbers moved together (an XY pad): both, with their values; both back where they start is a reset */
   if (keys.length === 2 && !state.length && keys.every(k => ix.params.get(k)!.p.type === 'number')) {
     const n = keys.map(k => stepName(ix, k, before)), own = nameOn(ownerOf(ix, keys[0]!)!, before.engine);
-    if (keys.every(k => nameOn(ownerOf(ix, k)!, before.engine) === own) && n.every(x => x.startsWith(own + ' '))) n[1] = n[1]!.slice(own.length + 1);
-    if (keys.every(k => !(k in after.vals) && !(k in after.auto))) return { label: `Reset ${and(n)}`, put: `Puts back ${and(n)}` };
-    return { label: keys.map((k, i) => `${n[i]} ${shown(ix, k, before)} → ${shown(ix, k, after)}`).join(', '), undone: `${and(n)} put back`, put: `Puts back ${and(n)}` };
+    const ownedBoth = keys.every(k => nameOn(ownerOf(ix, k)!, before.engine) === own) && n.every(x => x.id === 'name.owned');
+    if (ownedBoth) n[1] = n[1]!.slots!.label as Msg;
+    const names = list(n);
+    if (keys.every(k => !(k in after.vals) && !(k in after.auto))) return { label: msg('step.reset', { names }), put: msg('step.put', { what: names }) };
+    const each = keys.map((k, i) => msg('step.set', { name: n[i]!, from: shown(ix, k, before), to: shown(ix, k, after) }));
+    return { label: msg('step.pair', { a: each[0]!, b: each[1]! }), undone: msg('step.pair.undone', { names }), put: msg('step.put', { what: names }) };
   }
   const what = pathNames(ix, keys, state, before);
-  return { label: `Change ${what}`, put: `Puts back ${what}` };
+  return { label: msg('step.change', { what }), put: msg('step.put', { what }) };
+}
+
+/** The word a Quick row shows for the desk: the choice whose values are all in force, or none (choiceOf, tiers.ts). */
+export function rowWord(ix: Index, row: RowStep, desk: Desk): Slot {
+  const inForce = (v: Value | { [k: string]: Value }) => (typeof v === 'object' ? Object.entries(v).every(([k, x]) => valueOf(ix, k, desk) === x) : valueOf(ix, row.key, desk) === v);
+  return row.choices.find(c => inForce(c[1]))?.[0] ?? list(row.choices.flatMap(c => (typeof c[1] === 'object' ? Object.keys(c[1]) : [])).filter((k, i, a) => a.indexOf(k) === i).map(k => shown(ix, k, desk)), 'comma');
 }
 
 /** The switch that keeps the seed: the boolean the seed's part edits beside it (Keep this seed). */
@@ -126,15 +151,15 @@ function lockOf(ix: Index, seedKey: string): string | undefined {
   const d = ix.states.get(seedKey)!.d;
   return d.params.find(p => p.type === 'boolean')?.key;
 }
-function seedText(ix: Index, key: string, desk: Desk): string {
+function seedText(ix: Index, key: string, desk: Desk): Slot {
   const lock = lockOf(ix, key), v = desk.state[key];
-  return (!lock || valueOf(ix, lock, desk) === true) && typeof v === 'number' ? String(v) : (ix.states.get(key)!.s.empty ?? 'random');
+  return (!lock || valueOf(ix, lock, desk) === true) && (typeof v === 'number' || typeof v === 'string') ? String(v) : stateWords(ix, key).empty ?? 'random';
 }
-function stateText(ix: Index, key: string, desk: Desk): string {
-  const s = ix.states.get(key)!.s, v = desk.state[key] as Json | undefined;
-  if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) return s.empty ?? 'none';
+function stateText(ix: Index, key: string, desk: Desk): Slot {
+  const v = desk.state[key] as Json | undefined, w = stateWords(ix, key);
+  if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) return w.empty ?? 'none';
   if (typeof v === 'string' || typeof v === 'number') return String(v);
-  return s.noun;
+  return w.noun;
 }
 
 /** The parameters a named step may change: the parameter itself (or the state's part's own), and the step's `changes`. */

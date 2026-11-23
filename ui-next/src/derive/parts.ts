@@ -5,9 +5,11 @@
 
 import type { Definition, Json, Node, StateDef, Value } from '../definitions/types.ts';
 import type { BoundParam, BoundState, PartProps, ReadValue } from '../definitions/parts.ts';
-import { type Desk, type Index, applies, changed, editsOf, has, isAuto, nodeAt, resolve, textOf, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, applies, changed, editsOf, factOf, has, isAuto, nodeAt, resolve, stateOf, valueOf, wordsOf } from './core.ts';
 import { liveDefs } from './request.ts';
-import { setValue } from './values.ts';
+import { cleanState, setValue } from './values.ts';
+import { type Msg, msg } from './messages.ts';
+import { textMsg } from './strings.ts';
 import { stepChanges, stepWords, type StepWords } from './steps.ts';
 
 /** One undo step: what it changes, and its words. The store applies it and records it. */
@@ -17,7 +19,7 @@ export interface Change {
   state: { [key: string]: Json };
   words: StepWords;
   /** The one-time sentence a typed number out of range gets ("Steps: 1 to 64. Set to 64."). */
-  said?: string;
+  said?: Msg;
 }
 
 /** Applies a change to a desk (null removes a value: back to its default). */
@@ -37,9 +39,9 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
   const bound = editsOf(node).filter(k => has(ix, k, desk.engine));
   const live = new Set(liveDefs(ix, desk).map(x => x.id));
   /* a batch gathers every set of one gesture into one step */
-  let batch: { vals: Change['vals']; auto: Change['auto']; state: Change['state']; named?: { key: string; step: string; slots?: { [k: string]: string | number } }; said?: string } | null = null;
+  let batch: { vals: Change['vals']; auto: Change['auto']; state: Change['state']; named?: { key: string; step: string; slots?: { [k: string]: string | number } }; said?: Msg } | null = null;
   const finish = (b: NonNullable<typeof batch>) => {
-    const after = applyChange(desk, { ...b, words: { label: '', put: '' } });
+    const after = applyChange(desk, { ...b, words: { label: msg(''), put: msg('') } });
     const words = stepWords(ix, desk, after, b.named ? { named: b.named } : undefined);
     if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}) });
   };
@@ -59,7 +61,7 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
   for (const k of bound) {
     const { p } = ix.params.get(k)!;
     params[k] = {
-      key: k, face: wordsOf(ix, p, desk), value: valueOf(ix, k, desk)!, text: textOf(ix, k, desk), changed: changed(ix, k, desk), auto: isAuto(ix, k, desk), applies: applies(ix, k, desk),
+      key: k, face: wordsOf(ix, p, desk), value: valueOf(ix, k, desk)!, text: textMsg(ix, k, desk), changed: changed(ix, k, desk), auto: isAuto(ix, k, desk), applies: applies(ix, k, desk),
       set(value, step, slots, also) {
         const r = setValue(ix, desk, k, value);
         change(b => {
@@ -84,8 +86,11 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
       apply(step, next, also, slots) {
         if (lends || hit.d !== d) throw new Error(`${node.part} shows ${key} and may not change it`);
         const s = stepOf(hit.s, step);
+        /* state is cleaned where it enters, as a value is: what its kind cannot hold is refused */
+        const clean = cleanState(hit.s, next);
+        if (clean === undefined) throw new Error(`${JSON.stringify(next).slice(0, 80)} is not a ${hit.s.kind} for ${key}`);
         change(b => {
-          b.state[key] = next; b.named = { key, step, ...(slots ? { slots } : {}) };
+          b.state[key] = clean; b.named = { key, step, ...(slots ? { slots } : {}) };
           for (const [x, v] of Object.entries(also || {})) { allowed(bound, stepChanges(s), x); b.vals[x] = setValue(ix, desk, x, v).value; }
         });
       },
@@ -95,9 +100,9 @@ export function bindPart(ix: Index, d: Definition, node0: Node, desk: Desk, comm
   for (const k of node.reads || []) {
     if (ix.params.has(k)) {
       const on = has(ix, k, desk.engine);
-      reads[k] = { key: k, value: on ? valueOf(ix, k, desk)! : null, text: on ? textOf(ix, k, desk) : '', auto: on && isAuto(ix, k, desk), applies: on && applies(ix, k, desk), onDesk: live.has(ix.params.get(k)!.d.id) };
-    } else if (ix.states.has(k)) reads[k] = { key: k, value: desk.state[k] ?? null, text: '', auto: false, applies: true, onDesk: live.has(ix.states.get(k)!.d.id) };
-    else reads[k] = { key: k, value: desk.facts[k] ?? null, text: '', auto: false, applies: true, onDesk: true };
+      reads[k] = { key: k, value: on ? valueOf(ix, k, desk)! : null, text: on ? textMsg(ix, k, desk) : '', auto: on && isAuto(ix, k, desk), applies: on && applies(ix, k, desk), onDesk: live.has(ix.params.get(k)!.d.id) };
+    } else if (ix.states.has(k)) reads[k] = { key: k, value: stateOf(ix, k, desk) ?? null, text: '', auto: false, applies: true, onDesk: live.has(ix.states.get(k)!.d.id) };
+    else reads[k] = { key: k, value: factOf(ix, k, desk) ?? null, text: '', auto: false, applies: true, onDesk: true };
   }
   return {
     node, engine: desk.engine, tier: desk.tier, params, state, reads,

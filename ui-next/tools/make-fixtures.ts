@@ -206,6 +206,16 @@ function values(): Record<string, string[]> {
   return Object.fromEntries(Object.entries(out).sort().map(([k, v]) => [k, [...v].sort()]));
 }
 
+/* ---- each backend's features (capabilities().features): which subsystems it has. The object literal after
+   `features:`, its comments dropped, every value a literal true or false ---- */
+function features(): Record<string, Record<string, boolean>> {
+  return Object.fromEntries(ENGINES.map(e => {
+    const src = read(`server/src/services/backends/${e.backend}/index.ts`), at = src.indexOf('features: {');
+    const body = src.slice(src.indexOf('{', at) + 1, src.indexOf('}', at)).replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    return [e.id, Object.fromEntries([...body.matchAll(/(\w+):\s*(true|false)/g)].map(m => [m[1]!, m[2] === 'true']))];
+  }));
+}
+
 /* ---- each backend's batch and duration limits (capabilities().core) ---- */
 function core(): Record<string, { batchMax: number | null; durationMax: number | null }> {
   return Object.fromEntries(ENGINES.map(e => {
@@ -229,6 +239,7 @@ const out = {
   buckets,
   values: values(),
   core: core(),
+  features: features(),
   /* the Create intent's parts beside its params (server/src/contracts/resolution.ts createIntentSchema) */
   intent: {
     compose: [...read('server/src/contracts/resolution.ts').match(/compose: z\.object\(\{([\s\S]*?)\}\)/)![1]!.matchAll(/(\w+): z\./g)].map(m => m[1]),

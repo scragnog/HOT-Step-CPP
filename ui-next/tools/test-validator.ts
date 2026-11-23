@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,7 +19,8 @@ const TMP = path.join(os.tmpdir(), 'ui-next-mutations');
 const D = 'src/definitions/';
 const PARAMS = '  params: [\n';
 type Edit = [file: string, old: string, now: string];
-interface Mutation { id: string; says: string; edits: Edit[]; gone?: string; request?: true; core?: true }
+/** `shipped`: the copy records what it ships (npm run ship) before the mistake is made, as after a release. */
+interface Mutation { id: string; says: string; edits: Edit[]; gone?: string; request?: true; core?: true; shipped?: true }
 
 const M: Mutation[] = [
   { id: 'M01', says: 'a parameter added without `engines` beside its neighbours, drawn on YuE2 only', edits: [
@@ -114,7 +115,7 @@ const M: Mutation[] = [
   { id: 'B15', says: 'a "Show in Lab" action that goes to a tier where the control is not shown', edits: [['modules/sampler.ts', "actions: [{ do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show in Lab' }],", "actions: [{ do: 'tier', tier: 'studio', ring: ['lat.ts'], label: 'Show in Lab' }],"]] },
   { id: 'B16', says: 'words that name a value the engine does not have (a YuE2 note saying the APG momentum)', edits: [['modules/sampler.ts', "text: 'YuE2 guides inside its composer. The Planner holds its CFG.',", "text: 'YuE2 guides inside its composer at {value:apg.mom}. The Planner holds its CFG.',"]] },
   { id: 'B17', says: 'a pedal with no main knob and no Studio node', edits: [['pedals/ppvae.ts', "main: 'pp.ppvae.blend',", 'main: null,']] },
-  { id: 'B18', says: 'a module whose owner is flipped (the Planner kept per engine): saved data keeps it where it was kept', edits: [['modules/planner.ts', "  owner: 'song',\n  stored: 'settings',", "  owner: 'engine',\n  stored: 'settings',"]] },
+  { id: 'B18', says: 'a module whose owner is flipped (the Planner kept per engine): saved data keeps it where it was kept', shipped: true, edits: [['modules/planner.ts', "  owner: 'song',\n  stored: 'settings',", "  owner: 'engine',\n  stored: 'settings',"]] },
   { id: 'B19', says: 'song content left as a setting (the lyrics saved in revisions)', core: true, edits: [['modules/lyrics.ts', "  owner: 'song',\n  stored: 'content',", "  owner: 'song',\n  stored: 'settings',"]] },
   { id: 'B20', says: 'a read-out whose reads lost two of the three values its formula uses', edits: [['modules/perf.ts', "{ part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },", "{ part: 'speedGauge', reads: ['perf.cfgcut'] },"]] },
   { id: 'B21', says: 'the same control twice in one face', edits: [['modules/perf.ts', "    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },", "    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },\n    { part: 'knob', param: 'perf.lmcut', label: 'LM cut again' },"]] },
@@ -136,44 +137,80 @@ const M: Mutation[] = [
   { id: 'T04', says: 'a stacked adapter\'s phase window dropped on the way out', request: true, edits: [['transforms.ts', "return { path: s.file, scale: 1, ...(ph && (ph[0]! > 0 || ph[1]! < 100) ? { stepStart: +(1 - ph[1]! / 100).toFixed(4), stepEnd: +(1 - ph[0]! / 100).toFixed(4) } : {}) };", "void ph; return { path: s.file, scale: 1 };"]] },
   { id: 'T05', says: 'a typed trigger word sent on HeartMuLa', request: true, edits: [['modules/prompt.ts', "            none: 'HeartMuLa adds its adapter\\'s own trigger (withHeartmulaTrigger); the existing Create page sends no typed trigger word there.',\n          },", "            none: 'x',\n          },"], ['modules/prompt.ts', "          wire: {\n            none: 'x',\n          },", "          wire: 'intent:compose.loraTrigger',"]] },
   { id: 'T06', says: 'nine takes on ACE-Step, where the server runs eight', request: true, edits: [['modules/takes.ts', '      range: [1, 8, 1],', '      range: [1, 9, 1],']] },
+  /* the third review's (definitions-review3): fourteen mistakes that passed every check (C3 and C3b are two), and
+     those its trials found at run time; `request` runs the request comparison, `core` the derivation tests */
+  { id: 'R1a', says: 'ACE-Step\'s Shift on Auto sends 0 instead of -1', request: true, edits: [['modules/sampler.ts', "wire: { to: 'param:shift', auto: -1,", "wire: { to: 'param:shift', auto: 0,"]] },
+  { id: 'R2', says: 'the scheduler transform writes Beta\'s two numbers the other way round', request: true, edits: [['transforms.ts', "`beta:${f2(o['sch.alpha'], 0.5)}:${f2(o['sch.beta'], 0.7)}`", "`beta:${f2(o['sch.beta'], 0.7)}:${f2(o['sch.alpha'], 0.5)}`"]] },
+  { id: 'R2b', says: 'the scheduler transform exchanges Composite\'s crossover and split', request: true, edits: [['transforms.ts', ":${f2(o['sch.x'], 0.5)}:${f2(o['sch.split'], 0.5)}`", ":${f2(o['sch.split'], 0.5)}:${f2(o['sch.x'], 0.5)}`"]] },
+  { id: 'R4b', says: 'ACE-Step\'s guidance scale applies only under APG', request: true, edits: [['modules/sampler.ts', "      engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],\n      wire: 'param:guidanceScale',", "      engines: ['ace', 'minimax-m3', 'sa3', 'heartmula'],\n      wire: 'param:guidanceScale',\n      when: { param: 'samp.guide', is: 'apg' },"]] },
+  { id: 'R5', says: 'Stable Audio 3\'s guidance starts at 7, not 1', request: true, edits: [['modules/sampler.ts', "          range: [1, 10, 0.1],\n          default: 1,", "          range: [1, 10, 0.1],\n          default: 7,"]] },
+  { id: 'R6', says: 'HeartMuLa\'s adapter never sent with the request', request: true, edits: [['modules/adapters.ts', "            {\n              to: 'body:heartmulaAdapter',\n              via: 'firstPath',\n              note: 'Sent with the request so a queued job keeps its adapter.',\n            },\n", '']] },
+  { id: 'R7', says: 'the trigger word needs two adapters', request: true, edits: [['modules/prompt.ts', "when: { any: [{ state: 'adapters', atLeast: 1 }, { param: 'ad.planner', not: '' }] },", "when: { any: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.planner', not: '' }] },"]] },
+  { id: 'R8', says: 'the lead sheet sent only while the planner writes nothing', request: true, edits: [['modules/score.ts', "when: { param: 'lm.cotmode', not: 'off' },", "when: { param: 'lm.cotmode', is: 'off' },"]] },
+  { id: 'R10', says: 'the self-attention and cross-attention group scales exchange fields', request: true, edits: [['modules/adapters.ts', "wire: 'param:adapterGroupScales.self_attn',", "wire: 'param:adapterGroupScales.swap',"], ['modules/adapters.ts', "wire: 'param:adapterGroupScales.cross_attn',", "wire: 'param:adapterGroupScales.self_attn',"], ['modules/adapters.ts', "wire: 'param:adapterGroupScales.swap',", "wire: 'param:adapterGroupScales.cross_attn',"]] },
+  { id: 'R13', says: 'the scheduler transform sends sgm_uniform as linear', request: true, edits: [['transforms.ts', "      return s;\n    },\n    read: real => {", "      return s === 'sgm_uniform' ? 'linear' : s;\n    },\n    read: real => {"]] },
+  { id: 'C1', says: 'the denoiser strength\'s undo name misspelt', core: true, edits: [['modules/latent.ts', "undoName: 'Denoiser strength',", "undoName: 'Denoizer strenght',"]] },
+  { id: 'C2b', says: 'a fixed option\'s label misspelt', core: true, edits: [['modules/latent.ts', "{ value: 'pix', label: 'Pixel-Space (No Wavelets)', short: 'Pixel' },", "{ value: 'pix', label: 'Pixle-Space (No Wavelets)', short: 'Pixel' },"]] },
+  { id: 'C3', says: 'the engine switch toast counts each setting twice', core: true, edits: [['../derive/engine.ts', 'desk0.lists)); else sets++;', 'desk0.lists)); else sets += 2;']] },
+  { id: 'C3b', says: 'the engine switch toast counts one adapter too many', core: true, edits: [['../derive/engine.ts', "...(slots ? [msg('switch.adapters', { n: slots })] : []),", "...(slots ? [msg('switch.adapters', { n: slots + 1 })] : []),"]] },
+  { id: 'C9', says: 'the Sampler\'s Power group shown while the schedule is Cosine', core: true, edits: [['modules/sampler.ts', "      opts: { title: 'Power' },\n      engines: ['ace'],\n      when: { param: 'samp.sched', is: 'power' },", "      opts: { title: 'Power' },\n      engines: ['ace'],\n      when: { param: 'samp.sched', is: ['power', 'cosine'] },"]] },
+  { id: 'R12', says: 'an engine given to the Prompt without its description (a new engine with no prompt text)', edits: [['modules/prompt.ts', "      undoName: 'the description',\n      default: '',\n      engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],", "      undoName: 'the description',\n      default: '',\n      engines: ['ace', 'minimax-m3', 'yue2', 'sa3'],"]] },
+  { id: 'R15', says: 'a value that is not a number taken from a control (NaN)', core: true, edits: [['../derive/values.ts', "  if (!Number.isFinite(raw)) throw new Error(`${raw} is not a value of ${key}`);", ""]] },
 ];
 
-/* ---------------------------------------------------------------- the runner */
-function fresh(): void {
-  fs.rmSync(TMP, { recursive: true, force: true });
-  fs.mkdirSync(TMP, { recursive: true });
-  for (const x of ['src', 'tools', 'package.json', 'tsconfig.json']) fs.cpSync(path.join(ROOT, x), path.join(TMP, x), { recursive: true });
-  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(TMP, 'node_modules'), 'junction');
+/* ---------------------------------------------------------------- the runner
+   Each mistake is made on its own copy of ui-next, and several copies are checked at once (one per two cores, eight at
+   most), so the whole list takes a few minutes; `--serial` checks one at a time. */
+const NL = String.fromCharCode(10);
+function fresh(dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  for (const x of ['src', 'tools', 'package.json', 'tsconfig.json']) fs.cpSync(path.join(ROOT, x), path.join(dir, x), { recursive: true });
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'junction');
 }
-function run(cmd: string, args: string[]): { ok: boolean; out: string } {
-  try { return { ok: true, out: execFileSync(cmd, args, { cwd: TMP, encoding: 'utf8', stdio: 'pipe', shell: process.platform === 'win32', env: { ...process.env, HOTSTEP_APP: path.resolve(ROOT, '..') } }) }; }
-  catch (e) { const x = e as { stdout?: string; stderr?: string }; return { ok: false, out: `${x.stdout ?? ''}${x.stderr ?? ''}` }; }
+function run(dir: string, cmd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
+  return new Promise(done => execFile(cmd, args, { cwd: dir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, HOTSTEP_APP: path.resolve(ROOT, '..') } },
+    (err, stdout, stderr) => done({ ok: !err, out: `${stdout ?? ''}${stderr ?? ''}` })));
 }
-const only = process.argv.slice(2);
-let bad = 0;
-fresh();
 const tsc = path.join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
-const base = [run('node', [tsc, '-p', 'tsconfig.json']), run('node', ['tools/validate-definitions.ts'])];
-if (!base.every(r => r.ok)) { console.log('the unchanged copy does not pass:\n' + base.map(r => r.out).join('\n')); process.exit(1); }
-for (const m of M.filter(x => !only.length || only.includes(x.id))) {
-  fresh();
+async function check(m: Mutation, dir: string): Promise<{ caught: boolean; lines: string[] }> {
+  fresh(dir);
+  const lines: string[] = [];
+  if (m.shipped) await run(dir, 'node', ['tools/validate-definitions.ts', '--ship']);
   for (const [file, old, now] of m.edits) {
-    const p = path.join(TMP, D, file), text = fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
-    if (!text.includes(old)) { console.log(`${m.id}: the text to change is not in ${file}; update the mutation`); bad++; continue; }
+    const p = path.join(dir, D, file), text = fs.readFileSync(p, 'utf8').replace(/\r\n/g, NL);
+    if (!text.includes(old)) { lines.push(`the text to change is not in ${file}; update the mutation`); return { caught: false, lines }; }
     fs.writeFileSync(p, text.replace(old, now));
   }
-  const t = run('node', [tsc, '-p', 'tsconfig.json']), v = run('node', ['tools/validate-definitions.ts']);
-  const r = m.request ? run('node', ['--no-warnings', '--import', './tools/real-app/load.mjs', 'tools/compare-request.ts', '--quick']) : { ok: true, out: '' };
-  const c = m.core ? run('node', ['tools/test-core.ts']) : { ok: true, out: '' };
-  const tErr = t.out.split('\n').filter(l => l.includes('error TS')).map(l => l.replace(/^.*?error /, 'type: '));
-  const vErr = v.out.includes('errors (') ? v.out.slice(v.out.indexOf('errors (')).split('\n').slice(1).map(l => l.trim()).filter(Boolean) : [];
-  const caught = !t.ok || !v.ok || !r.ok || !c.ok;
-  const rErr = [...r.out.split('\n').filter(l => /new:|tools\/existing-ui/.test(l)), ...c.out.split('\n').filter(l => / [1-9]\d* differ($|;)/.test(l))].map(l => l.trim());
+  const [t, v] = await Promise.all([run(dir, 'node', [tsc, '-p', 'tsconfig.json']), run(dir, 'node', ['tools/validate-definitions.ts'])]);
+  const r = m.request ? await run(dir, 'node', ['--no-warnings', '--import', './tools/real-app/load.mjs', 'tools/compare-request.ts', '--quick']) : { ok: true, out: '' };
+  const c = m.core ? await run(dir, 'node', ['tools/test-core.ts']) : { ok: true, out: '' };
+  const tErr = t.out.split(NL).filter(l => l.includes('error TS')).map(l => l.replace(/^.*?error /, 'type: '));
+  const vErr = v.out.includes('errors (') ? v.out.slice(v.out.indexOf('errors (')).split(NL).slice(1).map(l => l.trim()).filter(Boolean) : [];
+  const rErr = [...r.out.split(NL).filter(l => /new:|tools\/existing-ui|never/.test(l)), ...c.out.split(NL).filter(l => / [1-9]\d* differ($|;)|option labels: [^o]/.test(l))].map(l => l.trim());
+  lines.push(...tErr.slice(0, 2), ...vErr.slice(0, 3), ...rErr.slice(0, 2));
+  return { caught: !t.ok || !v.ok || !r.ok || !c.ok, lines };
+}
+const only = process.argv.slice(2).filter(a => !a.startsWith('--'));
+const width = process.argv.includes('--serial') ? 1 : Math.max(1, Math.min(8, Math.floor(os.cpus().length / 2)));
+const t0 = Date.now();
+fresh(`${TMP}-base`);
+const base = await Promise.all([run(`${TMP}-base`, 'node', [tsc, '-p', 'tsconfig.json']), run(`${TMP}-base`, 'node', ['tools/validate-definitions.ts'])]);
+fs.rmSync(`${TMP}-base`, { recursive: true, force: true });
+if (!base.every(r => r.ok)) { console.log('the unchanged copy does not pass:' + NL + base.map(r => r.out).join(NL)); process.exit(1); }
+const todo = M.filter(x => !only.length || only.includes(x.id)), results = new Array<{ caught: boolean; lines: string[] }>(todo.length);
+let next = 0;
+await Promise.all(Array.from({ length: width }, async (_, slot) => {
+  for (let i = next++; i < todo.length; i = next++) results[i] = await check(todo[i]!, `${TMP}-${slot}`);
+  fs.rmSync(`${TMP}-${slot}`, { recursive: true, force: true });
+}));
+let bad = 0;
+todo.forEach((m, i) => {
+  const { caught, lines } = results[i]!;
   const verdict = m.gone ? (caught ? 'CAUGHT (expected to pass now)' : 'passes, as it should: ' + m.gone) : caught ? 'CAUGHT' : 'NOT CAUGHT';
   if (m.gone ? false : !caught) bad++;
-  console.log(`${m.id} ${m.says}\n   -> ${verdict}`);
-  [...tErr.slice(0, 2), ...vErr.slice(0, 3), ...rErr.slice(0, 2)].forEach(l => console.log('      ' + l.slice(0, 220)));
-}
-fs.rmSync(TMP, { recursive: true, force: true });
-console.log(bad ? `\n${bad} not caught.` : '\nEvery mistake caught.');
+  console.log(`${m.id} ${m.says}${NL}   -> ${verdict}`);
+  lines.forEach(l => console.log('      ' + l.slice(0, 220)));
+});
+console.log(`${NL}${todo.length} mistakes in ${((Date.now() - t0) / 1000).toFixed(0)} s, ${width} at a time. ${bad ? `${bad} not caught.` : 'Every mistake caught.'}`);
 process.exit(bad ? 1 : 0);

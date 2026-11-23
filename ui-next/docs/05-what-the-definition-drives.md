@@ -9,23 +9,43 @@ page does ([07](07-checking.md)).
 
 | File | What it derives |
 | --- | --- |
-| `derive/core.ts` | A parameter on an engine, conditions, the desk facts, values in force, the changed marker, how a number is written, words that name values, which nodes show and what they edit, a tile's strip |
+| `derive/core.ts` | A parameter on an engine, conditions, the value in force, the desk facts, the changed marker, how a number is written, which nodes show and what they edit, a tile's strip |
 | `derive/values.ts` | Cleaning a value, a record's values and its state; whole numbers; a range's two ends; setting a value from a control |
 | `derive/steps.ts` | Undo step names |
 | `derive/engine.ts` | An engine switch: what is put aside, what comes back, what is held, and the toast |
-| `derive/tiers.ts` | Each tile's "Also set" line and where its link goes; a control's tip |
+| `derive/tiers.ts` | Each tile's "Also set" line and where its link goes; a control's tip; a hidden knob's plate |
 | `derive/request.ts` | The desk in real names, the Create intent, and reading real fields back |
 | `derive/records.ts` | What a revision, a draft, a workflow and the desk autosave hold; loading them; older shapes |
 | `derive/parts.ts` | What a part is given at run time ([01](01-parts-inventory.md)) |
-| `derive/strings.ts` | The translation key of every string |
+| `derive/view.ts` | What the view asks: a Quick row, a pedal laid out, an action, a node standing back, loading a workflow or draft |
+| `derive/strings.ts` | The translation key of every string, and the messages that name values |
+| `derive/messages.ts` | Messages: an id and its slots, the core's English table, and `say()`, which fills one |
 
 ## The desk
 
 What everything reads (`Desk` in `derive/core.ts`): the engine in use, the tier, the stored values (parameter key to
-value), the auto switches (key to on or off; absent is on), the module state, the desk facts, what is on the desk, the
-models the server has selected (`selection`) and the server's lists with their words (`lists`). The desk facts named in
-`parts.ts` `DESK_FACTS` are worked out by `factsOf()` from each fact's rule; the two without one (the plugin host's
-count, another engine's adapters) the page is told.
+value), the auto switches (key to on or off; absent is on), the module state, what is on the desk, the two facts the
+page is told (`told`: the plugin host's count and the words for another engine's adapters), the models the server has
+selected (`selection`) and the server's lists with their words (`lists`). Every other desk fact in `parts.ts`
+`DESK_FACTS` is worked out from its rule when it is read (`factOf`), so none is stored and none can be stale.
+
+## The value in force
+
+One answer to "what does this value say now", used by conditions, desk facts, words, the changed marker, the "Also
+set" line and the request alike:
+
+```
+onDesk(d)        = d is a built-in module, or d is on the desk (a module the tier hides is still on the desk)
+valueOf(key)     = onDesk(its definition) ? the stored value as the engine takes it (storedOn) : its default
+stateOf(key)     = onDesk(its definition) ? the state it holds : nothing
+factOf(name)     = the fact's rule over values in force, or what the page was told
+```
+
+A definition off the desk keeps its values for when it comes back, but nothing reads them, so the page and the request
+never describe two different songs. A pedal's switch defaults to off (the validator checks it), so a pedal off the
+board is off. What is about stored values whatever the desk shows (what an engine switch puts aside and holds, what a
+revision saves) reads `everythingOn(desk)`. The existing page has no desk; question 11 in [08](08-open-questions.md)
+asks whether the request may differ from it here.
 
 ## A parameter on an engine
 
@@ -60,16 +80,20 @@ A range's two ends (`staysBelow`) that arrive crossed are put in order. A key th
 that lists it in `was`, an option value likewise, a state key and a definition id too. A key in `retired.ts` is dropped
 without a word; anything else not kept is counted, and the toast says so ("2 settings could not be used").
 
-State is kept by its kind: a file is a string; a seed a whole number from 0 to 4294967295 or null; a span
-`{ start, end }` with start below end; the adapter slots up to three `{ file, type, ph? }`, `ph` being the active phase
-`[from %, to %]`; a list an array; a record an object.
+State is kept by its kind: a file is a string; a seed a whole number from 0 to 18446744073709551615 (the server's
+64-bit seed), as a number while it is exact and as its decimal digits above that, or null; a span `{ start, end }` with
+start below end; the adapter slots up to three `{ file, type, ph? }`, `ph` being the active phase `[from %, to %]`; a
+list an array; a record an object.
 
 **Setting a value** from a control (`setValue`) cleans it against the engine in use: a number is clamped to that
 engine's range and put on its step grid, a range's end stops a step from the other end, and a typed number out of range
-is said once ("Steps: 1 to 64. Set to 64.").
+is said once ("Steps: 1 to 64. Set to 64."). A value that is not a number at all (NaN) is refused with an error, as is
+state a part gives that its kind does not keep (`BoundState.apply` cleans it on the way in): a part's mistake fails
+where it is made.
 
-**Reading a value** on engine `E` (`valueOf`) gives the stored value when `E` can take it, else the nearest `E` can
-take for a number (its limit), else the default. Reading never writes.
+**Reading a value** on engine `E` (`storedOn`) gives the stored value when `E` can take it, else the nearest `E` can
+take for a number (its limit), else the default. Reading never writes. `valueOf` is that while the definition is on
+the desk ("The value in force").
 
 ## The changed marker
 
@@ -104,7 +128,7 @@ Every change is one undo step, named by `stepWords(before, after)` from the desk
 | A named step a part takes | The step's words, its slots filled | Puts back what it changed |
 | The seed, or only its lock | `Seed {from} → {to}`, the number while kept, else "random" | `Seed back to {from}`, `Seed {to}`, `Puts the seed back to {from}` |
 | One text | `Edit {the name}` | `Puts back {the name} as it was` (as they were, for a plural undo name) |
-| One value from a Quick row | `{row}: {from} → {to}`, in the row's words | `{row} back to {from}`, `{row}: {to}` |
+| A choice of a Quick row, one value or several | `{row}: {from} → {to}`, in the row's words (a value between the choices is said as its values) | `{row} back to {from}`, `{row}: {to}` |
 | One value | `{name} {from} → {to}`, "auto" for auto | `{name} back to {from}`, `{name} {to}` |
 | Two numbers together (an XY pad) | `{a} {from} → {to}, {b} {from} → {to}`, the owner said once; `Reset {a} and {b}` when both go back | `{a} and {b} put back` |
 | Anything else | `Change {what}` | `Puts back {what}` |
@@ -149,9 +173,10 @@ of which are the real application's own code, handed in (`RealApp`):
 
 The rules of step 1:
 
-- A module not on the desk sends nothing; its values are kept. A pedal or side unit not on the board is off: its switch
-  sends its off value and nothing else of it is sent (Lyric timestamps taken off the board sends `skipLrc: true`).
-  Built-in modules are always on the desk; a source module is never part of a Create request.
+- A definition not on the desk sends nothing, so the engine's defaults apply, which are its values in force; its values
+  are kept. Built-in modules are always on the desk; a source module is never part of a Create request. The existing
+  page sends what the user last set whatever is shown; the request comparison accepts this as one rule
+  (`off-the-desk`), checked exactly by sending with everything on the desk, and question 11 asks the maintainer.
 - A parameter that does not apply sends nothing.
 - A value is sent unless it is untouched and equals the field's real default (`GENERATION_DEFAULTS` for `param:`, the
   backend's declared default for `ext:`). A field whose real default is unknown is sent once touched; a `body:` and an
@@ -170,13 +195,15 @@ stack, each with its phase window), `continuation`, `mm3CaptionSource` and `yue2
 real value back. `fromReal()` reads a set of real fields back into desk values, through each wire backwards and under a
 field's former names (`was` on the wire), for loading a saved profile or a song's settings.
 
-`tools/compare-request.ts` proves this over the value space against the existing Create page ([07](07-checking.md)).
+`tools/compare-request.ts` compares this over the value space with what the existing Create page sends when its own
+controls are used ([07](07-checking.md)); each difference it accepts is written down exactly and asked about in
+[08](08-open-questions.md).
 
 ## Saved data
 
 | Record | Holds | From the definition |
 | --- | --- | --- |
-| Revision (`revisionOf`) | One engine's settings: every parameter on that engine with `stored: 'settings'`, its value in force (defaults included) and its auto switch, and the state with `stored: 'settings'` | `stored`, `engines` |
+| Revision (`revisionOf`) | One engine's settings: every parameter on that engine with `stored: 'settings'`, its stored value as set, or its default when none is (whether or not its module is on the desk), and its auto switch, and the state with `stored: 'settings'` | `stored`, `engines` |
 | Revision "with content" | The above and every `stored: 'content'` parameter on that engine | `stored` |
 | Draft (`draftOf`) | The `stored: 'content'` values set | `stored` |
 | Workflow (`workflowOf`) | The desk: modules (never a source module), pedals and units, its tier. No values | `id`s |
@@ -231,8 +258,32 @@ no two strings share a key (`tools/test-core.ts` checks both).
 | A strip or idle reason | `create.<id>.strip.<hash of its condition>` |
 
 A key that follows words (an unbound note) changes when the English does; the extraction that writes `en.json` lists
-the keys no definition makes any more. Slots stay in the translated text (`{engine}`, `{value:samp.guide}`). The
-derived sentences of undo steps, toasts and the "Also set" line are the shell's, keyed once each with their slots.
+the keys no definition makes any more. Slots stay in the translated text (`{engine}`, `{value:samp.guide}`).
+
+**Messages.** Nothing the core returns is a finished English sentence. An undo name, a toast, an "Also set" line, a
+plate, a load note, a part's text and a value's words are a message: an id and its slots (`derive/messages.ts`). A
+definition's own words are messages keyed as above, with their English as the template; the core's own sentences are
+the `EN` table, keyed `step.*`, `switch.*`, `also.*`, `load.*` and so on (`coreStrings()` lists them). A slot is text,
+a number, another message, or a list joined as the locale joins one. Plurals, selects and the case of a word inside a
+sentence are written in the template (`{n, plural, one {# setting} other {# settings}}`, `{label|lower}`), so a
+locale's table decides its own grammar. `say(message, table, lang)` fills one; the view calls it with the locale's
+table.
+
+## What the view may decide
+
+The page is a view over the core. A component draws what the core returns and hands back what the user did.
+
+The view may decide: layout, styling and animation; which locale's table `say()` uses; how a part is drawn and
+operated (a knob's drag, a field's caret), as long as it gives the core only what its part's binding takes; when to
+fetch a server list and what to show while it loads; focus, scrolling and which panel is open.
+
+The view may not decide: whether a value applies, is changed, or is in force (`applies`, `changed`, `valueOf`); which
+nodes show at a tier and what they edit (`editsAt`, `boardNodes`); which choice of a Quick row is checked and what
+pressing one sets (`choiceOf`, `applyChoice`); what an action does (`runAction`); whether a node stands back and why
+(`dimOf`), or a pedal's idle reason (`idleOf`); the name of an undo step (`stepWords`); what an engine switch does and
+says (`switchEngine`); what "Also set" lists (`alsoSet`) and which Lab modules a tier hides (`hiddenLabModules`); how a
+number is written (`formatMsg`); what a load keeps and says (`loadRevision`, `loadWorkflow`, `loadDraft`); and what is
+sent (`createIntent`). If a component needs a different answer, the difference belongs in a definition.
 
 ## The thumbnail
 
@@ -243,7 +294,8 @@ middle inside. A side unit is the rack strip with the file as its object.
 
 ## Pedals and side units
 
-Laid out from their parameters by `layOut()` in `parts.ts` ([01](01-parts-inventory.md)).
+Laid out from their parameters by `layOut()` in `parts.ts` ([01](01-parts-inventory.md)); `boardNodes()` in
+`view.ts` gives the cells at the desk's tier, a hidden knob as a plate with its words.
 
 ## Automated tests
 

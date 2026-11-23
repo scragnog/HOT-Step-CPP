@@ -48,9 +48,10 @@ the server declares and no definition carries yet. It belongs on the Planner's p
 follow. If you forget step 3 the validator says "no control edits it on yue2 at any tier". Run `npm run docs`: the
 generated tables, the counts and the list of shipped keys change, and the check fails until you do.
 
-A wire that is more than a plain name (a scale, an inversion, a map, a condition, a transform) also needs one line in
-`tools/existing-ui.ts` saying how the existing page's control holds the same intent; the request comparison says so
-when it is missing.
+A new parameter needs nothing in `tools/existing-ui.ts`: the request comparison lists it as having no control on the
+existing page and its field as new ([08](08-open-questions.md) question 19), and does not fail. A parameter for
+something the existing page already has a control for gets one line there naming that control by its place and words
+("Generation > Shift"), and the comparison asks for it when the field differs.
 
 On a pedal there is no step 3: a pedal's controls are laid out from its parameters, in the order of `params`.
 
@@ -149,7 +150,8 @@ shows one plain choice of three presets that set all three; Studio adds the thre
 4. Add `thumbs/dynamics.svg`: a drawing in the thumbnail kit's classes on the 176 x 112 canvas, kept inside the 15-unit
    inset (start from a module with similar controls).
 
-**Four files: 68 lines of definition in the files' style, 1 in `parts.ts`, 2 in the index, a drawing.** Choosing parts:
+**Four files: 26 lines of definition written as above (about 68 with one field a line), 1 in `parts.ts`, 2 in the
+index, a drawing.** Choosing parts:
 the table in [01](01-parts-inventory.md) says what each part is for, what it edits and reads, and which modules use it.
 For a desk module (not Lab-only), tier the nodes that Quick or Studio should not show, give Quick a `choiceRow` when a
 plain choice makes sense, and set `size`.
@@ -259,6 +261,8 @@ Example: a sixth engine, "X6", with half the modules.
 2. Add `'x6'` to the `engines` of each module, pedal and unit it should have.
 3. Run the validator. It names every parameter of those definitions that differs per engine (it has `per` lines and
    lists its own engines, so the new engine does not get another engine's names, ranges or defaults by accident), every
+   parameter that is on every other engine of its definition but not the new one (a Prompt with no prompt text: it
+   fails until you add the engine or, if it is left off on purpose, name it in `ABSENT_ON` in the validator), every
    real name the new backend does not read, and every Quick row with no choices for it. For each, add `'x6'` to the
    parameter's `engines` and a line for it, or leave it off the engine.
 
@@ -285,7 +289,8 @@ kind says what it may hold, and cleaning keeps nothing else.
 
 When a wire's fields cannot say a packing (several parameters into one field) or a change of type: an entry in
 `transforms.ts` with `send` and `read`, named by `via` on every parameter it packs. Its line in `tools/existing-ui.ts`
-says how the existing page holds the same values, and the request comparison then proves it over the value space.
+says how the existing page holds the same values; the request comparison then compares it over the value space and
+fails until every branch of its `send` is reached.
 
 ## Smaller jobs
 

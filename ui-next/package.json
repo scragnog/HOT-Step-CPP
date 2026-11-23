@@ -13,8 +13,11 @@
     "request": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
     "check": "tsc -p tsconfig.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts",
     "docs": "node tools/validate-definitions.ts --docs",
+    "ship": "node tools/validate-definitions.ts --ship",
+    "record": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --record",
+    "request:live": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --live",
     "fixtures": "node --no-warnings --import ./tools/real-app/load.mjs tools/make-fixtures.ts",
-    "test": "node tools/test-validator.ts",
+    "test": "node tools/test-validator.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --live",
     "thumb": "node tools/thumb.ts",
     "core": "node tools/test-core.ts",
     "concept": "node tools/concept/collect.mjs"

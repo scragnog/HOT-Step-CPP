@@ -4,7 +4,7 @@
 import type { Definition, EngineId, Json, Value, Wire, WireKey, WireMap } from '../definitions/types.ts';
 import { ENGINES } from '../definitions/engines.ts';
 import { TRANSFORMS, type Transform } from '../definitions/transforms.ts';
-import { type Desk, type Index, applies, holds, isAuto, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, applies, holds, isAuto, onDesk, resolve, stateOf, valueOf } from './core.ts';
 
 /** The Create request in real names, before the real application's own code finishes it: `params` for
  *  resolveGenerationParams() (server/src/services/generation/defaults.ts), `backendParams` for its extension bag,
@@ -81,13 +81,13 @@ export function realDefaultsFrom(generationDefaults: { [field: string]: Json }, 
 /** The definitions whose values the request reads on the desk's engine: the built-in modules, and everything on the
  *  desk; never a source module (Repaint). */
 export const liveDefs = (ix: Index, desk: Desk): Definition[] => ix.defs.filter(d => d.engines.includes(desk.engine)
-  && !(d.kind === 'module' && d.source) && ((d.kind === 'module' && d.builtIn) || desk.on.has(d.id)));
+  && !(d.kind === 'module' && d.source) && onDesk(d, desk));
 
 /** Everything on the desk that applies on its engine, through its wires (docs/05, "What is sent"). A value is sent
  *  unless it is untouched and equals the field's real default; a field whose real default is unknown is sent once
- *  touched, and a body: field always. A module not on the desk sends nothing (its values are kept); a pedal or side
- *  unit not on the board is off: its switch sends its off value and nothing else of it is sent. A model choice left
- *  at "" (the engine's default) is sent as the model the server has selected for that bucket. */
+ *  touched, and a body: field always. A definition not on the desk sends nothing, so the engine's defaults apply, as
+ *  its values in force are its defaults (core.ts, "the value in force"). A model choice left at "" (the engine's
+ *  default) is sent as the model the server has selected for that bucket. */
 export function realState(ix: Index, desk: Desk, fieldDefault: (field: string) => Json | undefined = () => undefined, realDefault: RealDefault = () => undefined): RealState {
   const out: RealState = { params: {}, backendParams: {}, content: {}, body: {}, intent: {}, from: {} };
   const packed = new Map<string, { to: WireKey; t: Transform; who: string[]; touched: boolean }>();
@@ -137,16 +137,9 @@ export function realState(ix: Index, desk: Desk, fieldDefault: (field: string) =
       ws.forEach(w => send(w, v, isAuto(ix, p.key, desk), touched || v !== valueOf(ix, p.key, desk), p.key));
     }
   }
-  /* a pedal or side unit not on the board is off */
-  for (const d of ix.defs) {
-    if (d.kind === 'module' || !d.on || !d.engines.includes(desk.engine) || desk.on.has(d.id)) continue;
-    const p = ix.params.get(d.on)!.p;
-    if (!applies(ix, p.key, desk)) continue;
-    flat(resolve(p, desk.engine).wire).forEach(w => send(w, false, false, false, p.key));
-  }
   for (const { to, t, who, touched } of packed.values()) {
     const vals: { [key: string]: Value | Json | undefined } = {};
-    for (const k of t.packs!) vals[k] = ix.params.has(k) ? (applies(ix, k, desk) ? valueOf(ix, k, desk) : undefined) : desk.state[k];
+    for (const k of t.packs!) vals[k] = ix.params.has(k) ? (applies(ix, k, desk) ? valueOf(ix, k, desk) : undefined) : stateOf(ix, k, desk);
     const v = t.send(vals); if (v !== undefined) emit(to, v, touched, who.join('+'));
   }
   return out;

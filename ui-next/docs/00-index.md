@@ -57,7 +57,7 @@ ui-next/
   docs/                      these pages
   src/
     derive.ts                the core, in one import
-    derive/                  core, values, steps, engine, tiers, request, records, parts, strings ([05])
+    derive/                  core, values, steps, engine, tiers, request, records, parts, view, strings, messages ([05])
     definitions/
       types.ts               the format, and the saved records
       engines.ts             the engines, in one place
@@ -74,14 +74,15 @@ ui-next/
   tools/
     validate-definitions.ts  the checks
     compare-request.ts       the request over the value space against the existing Create page's
-    existing-ui.ts           how the existing page holds each intent the definitions can express
+    existing-ui.ts           which control of the existing page a user would use for each parameter
     test-core.ts             the core's derivations against the concept page, and its other tests
     test-validator.ts        the validator's own test: planted mistakes it must catch
     make-fixtures.ts         reads what the real application declares into tools/fixtures/real-app.json
     thumb.ts                 draws a pedal's thumbnail from its definition
-    real-app/                runs the existing frontend's request code in Node (app.ts: the existing Create page)
-    concept/collect.mjs      collects what the concept page does into tools/fixtures/concept.json
-    fixtures/                real-app.json, concept.json, shipped.json and the two lists of accepted differences
+    real-app/                runs the existing Create page's bar and CreatePanel in Node (page.ts), with a small React
+    concept/                 collects what the concept page does (concept.json, concept-tiers.json)
+    fixtures/                real-app.json, the existing page's recorded requests, the concept's, shipped.json and the
+                             two lists of accepted differences
   package.json, tsconfig.json
 ```
 

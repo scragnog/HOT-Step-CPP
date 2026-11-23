@@ -1,175 +1,1313 @@
 {
- "note": "Differences between the request the definitions build and the one the existing Create page sends for the same intent, over the value space (tools/compare-request.ts). Each entry is a class: engines, fields and the kind of difference, with why it is accepted. An entry no state matches any more fails the comparison.",
+ "note": "Differences between the request the definitions build and the one the existing Create page sends when a user does the same things on it (tools/compare-request.ts). Each entry names exactly what it covers: one field, the engines, the state (a condition on the desk, and parameters set or left alone) and what each side sends there: a value, \"absent\", \"sent\" (any value) or \"value:<key>\" (that parameter's value). Any other difference fails, and an entry that no longer occurs on one of its engines fails too. Every entry is a question to the maintainer in docs/08-open-questions.md; until it is answered the entry records what the new page would do differently.",
  "differences": [
   {
+   "id": "off-the-desk",
+   "rule": "on the desk",
+   "field": "*",
    "engines": [
     "ace",
     "minimax-m3",
+    "yue2",
     "sa3",
     "heartmula"
    ],
-   "fields": [
-    "inferMethod",
-    "scheduler",
-    "guidanceMode"
-   ],
-   "kind": "value differs",
-   "why": "With Lua plugins on and the solver, schedule and guidance left alone, the definitions send Native (\"\", the engine's own loop), as the concept starts them. The existing page sends the shared pickers' ACE-Step values (euler, linear, APG), which moves the render onto those plugins (backends/minimax/generate.ts mapMinimaxSamplerPlugins)."
+   "existing": "sent",
+   "definitions": "what they send with every module, pedal and unit on the desk",
+   "why": "A module, pedal or unit not on the desk reads as its defaults, so what it was set to is not sent, as the concept's page does (generate() reads Takes and Tempo only while they are on the desk). The existing page has no desk: it keeps sending what the user set. Accepted only where putting everything on the desk makes the definitions send exactly what the existing page sends.",
+   "question": 11
   },
   {
-   "engines": [
-    "minimax-m3",
-    "sa3",
-    "heartmula"
-   ],
-   "fields": [
-    "apgMomentum",
-    "apgNormThreshold"
-   ],
-   "kind": "only the existing page sends it",
-   "why": "Follows from the line above: the existing page's guidance is APG there, so the resolver adds APG's two settings; the definitions' Native guidance has none."
-  },
-  {
-   "engines": [
-    "sa3"
-   ],
-   "fields": [
-    "guidanceScale"
-   ],
-   "kind": "value differs",
-   "why": "Stable Audio 3 reads guidanceScale only with Lua plugins on. The concept's default there is 1 (no extra guidance); the existing page carries ACE-Step's 9 into it."
-  },
-  {
+   "id": "shift-auto",
    "engines": [
     "ace"
    ],
-   "fields": [
-    "shift"
-   ],
-   "kind": "value differs",
-   "why": "The concept starts Shift on Auto, which is -1 (the existing slider's own Auto): the engine uses its own shift, 3.0 on turbo models and 1.0 on base ones. The existing page starts at 3.0. Docs 08, question 10."
+   "field": "shift",
+   "when": {
+    "param": "samp.shift",
+    "auto": true
+   },
+   "existing": 3,
+   "definitions": -1,
+   "why": "The concept starts ACE-Step's Shift on Auto (-1): the engine then works out a shift from the song's length and the step count (hot-step-server.cpp: 3 times a length factor and a steps factor, each 0.8 to 1.4, so about 1.9 to 5.9; 3.18 at 12 steps and 60 s, 4.13 at 12 steps and 3:00), on every model. The existing page starts at 3.0. Whether the Sampler is on the desk does not change this: a module off the desk reads as its defaults, and its default is Auto.",
+   "question": 10
   },
   {
+   "id": "native-solver",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "inferMethod",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.solver",
+      "is": ""
+     }
+    ]
+   },
+   "existing": "euler",
+   "definitions": "",
+   "why": "With Lua plugins on and the solver left alone, the definitions send Native (the engine's own loop), as the concept starts it; the existing page sends the shared picker's euler.",
+   "question": 10
+  },
+  {
+   "id": "native-schedule",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "scheduler",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.sched",
+      "is": ""
+     }
+    ]
+   },
+   "existing": "linear",
+   "definitions": "",
+   "why": "As native-solver, for the schedule: the existing page sends linear.",
+   "question": 10
+  },
+  {
+   "id": "native-guidance",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "guidanceMode",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.guide",
+      "is": ""
+     }
+    ]
+   },
+   "existing": "apg",
+   "definitions": "",
+   "why": "As native-solver, for the guidance: the existing page sends APG.",
+   "question": 10
+  },
+  {
+   "id": "native-apg-momentum",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgMomentum",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.guide",
+      "is": ""
+     }
+    ]
+   },
+   "existing": 0.75,
+   "definitions": "absent",
+   "why": "Follows from native-guidance: with APG the existing page's resolver adds APG's momentum.",
+   "question": 10
+  },
+  {
+   "id": "native-apg-norm",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgNormThreshold",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.guide",
+      "is": ""
+     }
+    ]
+   },
+   "existing": 2.5,
+   "definitions": "absent",
+   "why": "Follows from native-guidance: with APG the existing page's resolver adds APG's norm threshold.",
+   "question": 10
+  },
+  {
+   "id": "sa3-guidance-default",
+   "engines": [
+    "sa3"
+   ],
+   "field": "guidanceScale",
+   "when": {
+    "param": "samp.plugins",
+    "is": true
+   },
+   "unset": [
+    "samp.cfg"
+   ],
+   "existing": 9,
+   "definitions": 1,
+   "why": "Stable Audio 3 reads guidanceScale only with Lua plugins on. The concept starts it at 1; the existing page has no guidance control on Stable Audio 3 and sends ACE-Step's 9.",
+   "question": 10
+  },
+  {
+   "id": "sa3-guidance-set",
+   "engines": [
+    "sa3"
+   ],
+   "field": "guidanceScale",
+   "when": {
+    "param": "samp.plugins",
+    "is": true
+   },
+   "set": [
+    "samp.cfg"
+   ],
+   "existing": 9,
+   "definitions": "value:samp.cfg",
+   "why": "As sa3-guidance-default, once the guidance is set on the new page: the existing page cannot set it there.",
+   "question": 10
+  },
+  {
+   "id": "yue2-autoexpand",
    "engines": [
     "yue2"
    ],
-   "fields": [
-    "compose.autoExpand"
-   ],
-   "kind": "value differs",
-   "why": "The concept offers \"Expand wildcards at Generate\" on YuE2 and the server honours it there (resolveCreateIntent); the existing page hides the switch on YuE2 and sends it off. Docs 08, question 10."
+   "field": "compose.autoExpand",
+   "when": {
+    "param": "wild.auto",
+    "is": true
+   },
+   "existing": false,
+   "definitions": true,
+   "why": "The concept offers Expand wildcards on YuE2 and the server honours it there; the existing page hides the switch on YuE2.",
+   "question": 10
   },
   {
+   "id": "mm3-precision-on-auto",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3DitPrecision",
+   "when": {
+    "param": "mm.rend",
+    "is": "auto"
+   },
+   "existing": "absent",
+   "definitions": "value:mm.prec",
+   "why": "The definitions add Auto to the renderer and apply the TensorRT precision on Auto (the server picks TensorRT when the machine has it); the existing page shows the precision only on TensorRT.",
+   "question": 10
+  },
+  {
+   "id": "hm-scalar-decoder",
    "engines": [
     "heartmula"
    ],
-   "fields": [
-    "heartmulaScalarDecoderModel"
-   ],
-   "kind": "only the existing page sends it",
-   "why": "The concept's engine panel has no scalar decoder row on HeartMuLa, so no parameter carries the server's choice; the job then uses the scalar decoder selected when it runs, not when it was queued. Docs 08, question 9."
+   "field": "heartmulaScalarDecoderModel",
+   "existing": "HeartCodec-scalar-F16.gguf",
+   "definitions": "absent",
+   "why": "The existing page sends HeartMuLa's selected scalar decoder with every request, so a queued job keeps it; the concept's engine panel has no row for it.",
+   "question": 9
   },
   {
-   "engines": [
-    "heartmula"
-   ],
-   "fields": [
-    "heartmulaAdapter"
-   ],
-   "kind": "only the existing page sends it",
-   "why": "With Adapters off the desk nothing of it is sent, so a HeartMuLa job uses the adapter the engine has selected when it runs; the existing page freezes the selection into the job when it is queued. The two differ only if the selection changes while the job waits."
-  },
-  {
+   "id": "trigger-without-adapter",
    "engines": [
     "ace",
     "minimax-m3"
    ],
-   "fields": [
-    "caption",
-    "compose.loraTrigger"
+   "field": "caption",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.trigger"
    ],
-   "kind": "existing sends a value that does not apply",
-   "why": "The concept shows the trigger word only while an adapter is loaded, so a word typed for an adapter that is gone is not sent. The existing page puts a typed trigger word at the start of the caption with or without an adapter."
+   "existing": "prefix:ad.trigger",
+   "definitions": "sent",
+   "why": "The concept shows the trigger word only while an adapter is loaded, so a word typed for an adapter that is gone is not put in the caption. The existing page prepends a typed trigger word with or without an adapter.",
+   "question": 12
   },
   {
+   "id": "trigger-without-adapter-compose",
    "engines": [
-    "yue2"
+    "ace",
+    "minimax-m3"
    ],
-   "fields": [
-    "yue2Abc"
+   "field": "compose.loraTrigger",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.trigger"
    ],
-   "kind": "existing sends a value that does not apply",
-   "why": "The lead sheet applies while the Planner writes a score (Chain of Thought not off), as the concept has it; with the Planner writing nothing the concept shows the strip that says it needs a score. The existing page sends a typed lead sheet in every planner mode."
+   "existing": "value:ad.trigger",
+   "definitions": "",
+   "why": "As trigger-without-adapter, in the intent's compose block.",
+   "question": 12
   },
   {
+   "id": "beat-bars-without-beat-io",
+   "engines": [
+    "ace",
+    "minimax-m3",
+    "sa3"
+   ],
+   "field": "compose.introBars",
+   "when": {
+    "param": "tempo.beatio",
+    "is": false
+   },
+   "set": [
+    "tempo.beatbars"
+   ],
+   "existing": 2,
+   "definitions": "value:tempo.beatbars",
+   "why": "The concept shows the Beat I/O bars with Beat I/O off; the existing page shows them only with it on. The server reads the bars only with Beat I/O on (composeCreateCaption).",
+   "question": 13
+  },
+  {
+   "id": "retake-seed-without-variance",
+   "engines": [
+    "ace"
+   ],
+   "field": "retakeSeed",
+   "when": {
+    "not": {
+     "param": "samp.retake",
+     "above": 0
+    }
+   },
+   "set": [
+    "samp.rseed"
+   ],
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "The definitions send the retake seed only while there is retake variance, as the concept shows it; the existing page sends a typed retake seed always.",
+   "question": 13
+  },
+  {
+   "id": "mm3-rep-mode-gated",
    "engines": [
     "minimax-m3"
    ],
-   "fields": [
-    "mm3FlowShift"
+   "field": "mm3LmRepMode",
+   "when": {
+    "param": "mm.rep",
+    "is": 1
+   },
+   "set": [
+    "mm.repmode"
    ],
-   "kind": "existing sends a value that does not apply",
-   "why": "The concept shows the schedule shift only with Lua plugins on. The server also reads it, with plugins off, for low-step compensation under 30 steps (mapMinimaxSamplerPlugins); there the definitions leave the server's automatic shift."
+   "existing": "absent",
+   "definitions": "value:mm.repmode",
+   "why": "The server shows the repetition mode only with a penalty other than 1 (visible_when on mm3LmRepPenalty), and the existing page follows it; the concept shows it always and the definitions send it once set.",
+   "question": 13
   },
   {
-   "engines": "*",
-   "fields": [
-    "apgMomentum",
-    "apgNormThreshold",
-    "inferMethod",
-    "scheduler",
-    "guidanceMode",
-    "guidanceScale",
-    "retakeSeed",
-    "adapterStackBudget",
-    "adapterStackMode",
-    "adapterSectionAlignAt",
-    "adapterMergeLowVram",
-    "mm3LmMergeGpu",
-    "mm3DitPrecision",
-    "mm3HiddensName",
-    "mm3BaseHandoff",
-    "mm3KvQ8",
-    "heartmulaFlowShift",
-    "sa3LufsTarget",
-    "yue2WassTau",
-    "yue2WassSpectral",
-    "yue2WassRmsWeight",
-    "yue2WassRmsTarget",
-    "yue2WassGate",
-    "yue2WassIterations",
-    "yue2WassProject",
-    "yue2WassLatentRms",
-    "yue2EqGroup",
-    "yue2EqGain",
-    "yue2EqT1",
-    "yue2EqT2",
-    "yue2EqGains",
-    "yue2EqSection",
-    "yue2LieAmount",
-    "yue2LieCurve",
-    "yue2LieT1",
-    "yue2LieT2",
-    "yue2LieSections",
-    "yue2OdDrive",
-    "yue2OdShape",
-    "yue2OdBase",
-    "yue2OdPeriod",
-    "yue2HtKinetic",
-    "yue2HtDamping",
-    "yue2HtCritical",
-    "yue2HtIntensity",
-    "yue2HtWell",
-    "yue2HtFloor",
-    "yue2HtSnr",
-    "yue2HtPoly",
-    "yue2HtBlend",
-    "yue2HtSmooth",
-    "yue2HtDense",
-    "yue2HtShift"
+   "id": "mm3-rep-window-gated",
+   "engines": [
+    "minimax-m3"
    ],
-   "kind": "existing sends a value that does not apply",
-   "why": "Each is a setting the concept hides while its condition does not hold (the guidance, solver, plugin, renderer, mode or switch that reads it is not selected, or Lua plugins are off), so the definitions keep the value and send nothing. The existing page keeps sending what was set, and the engine does not read it in that state."
+   "field": "mm3LmRepWindow",
+   "when": {
+    "param": "mm.rep",
+    "is": 1
+   },
+   "set": [
+    "mm.win"
+   ],
+   "existing": "absent",
+   "definitions": "value:mm.win",
+   "why": "As mm3-rep-mode-gated, for the window.",
+   "question": 13
+  },
+  {
+   "id": "yue2-plan-cfg-from-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2PlanCfgT1",
+   "when": {
+    "param": "yue.pcfg",
+    "is": 1
+   },
+   "set": [
+    "yue.pcfg1"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.pcfg1",
+   "why": "The server shows the Plan CFG range only with a Plan CFG other than 1 (visible_when on yue2PlanCfg), and the existing page follows it; the concept shows it always.",
+   "question": 13
+  },
+  {
+   "id": "yue2-plan-cfg-to-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2PlanCfgT2",
+   "when": {
+    "param": "yue.pcfg",
+    "is": 1
+   },
+   "set": [
+    "yue.pcfg2"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.pcfg2",
+   "why": "As yue2-plan-cfg-from-gated.",
+   "question": 13
+  },
+  {
+   "id": "yue2-plan-cfg-rescale-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2PlanCfgRescale",
+   "when": {
+    "param": "yue.pcfg",
+    "is": 1
+   },
+   "set": [
+    "yue.pcfgr"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.pcfgr",
+   "why": "As yue2-plan-cfg-from-gated.",
+   "question": 13
+  },
+  {
+   "id": "yue2-plan-cfg-level-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2PlanCfgLevelMatch",
+   "when": {
+    "param": "yue.pcfg",
+    "is": 1
+   },
+   "set": [
+    "yue.pcfglm"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.pcfglm",
+   "why": "As yue2-plan-cfg-from-gated.",
+   "question": 13
+  },
+  {
+   "id": "yue2-cads-from-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2CadsT1",
+   "when": {
+    "param": "yue.cads",
+    "is": 0
+   },
+   "set": [
+    "yue.cads1"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.cads1",
+   "why": "The server shows CADS's range only with a CADS strength other than 0 (visible_when on yue2CadsStrength), and the existing page follows it; the concept shows it always.",
+   "question": 13
+  },
+  {
+   "id": "yue2-cads-to-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2CadsT2",
+   "when": {
+    "param": "yue.cads",
+    "is": 0
+   },
+   "set": [
+    "yue.cads2"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.cads2",
+   "why": "As yue2-cads-from-gated.",
+   "question": 13
+  },
+  {
+   "id": "yue2-cads-rescale-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2CadsRescale",
+   "when": {
+    "param": "yue.cads",
+    "is": 0
+   },
+   "set": [
+    "yue.cadsr"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.cadsr",
+   "why": "As yue2-cads-from-gated.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-strength",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScale",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "s0"
+   ],
+   "existing": "absent",
+   "definitions": "value:s0",
+   "why": "The concept keeps an adapter's dials set with no adapter loaded, and the definitions send them; the existing page shows them only with an adapter selected, and with none the engine has nothing to scale.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-mode",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterMode",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.mode"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.mode",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-attn",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScaleAttn",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.att"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.att",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-mlp",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScaleMlp",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.mlp"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.mlp",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-early",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScaleEarly",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.early"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.early",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-mid",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScaleMid",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.mid"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.mid",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-late",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScaleLate",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.late"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.late",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-plan",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterScalePlan",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.plan"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.plan",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-dial-without-adapter-gpu",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmMergeGpu",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.gpu"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.gpu",
+   "why": "As mm3-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-strength",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterStrength",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "s0"
+   ],
+   "existing": "absent",
+   "definitions": "value:s0",
+   "why": "As mm3-dial-without-adapter-strength, on HeartMuLa.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-attn",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterScaleAttn",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.att"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.att",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-mlp",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterScaleMlp",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.mlp"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.mlp",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-early",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterScaleEarly",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.early"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.early",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-mid",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterScaleMid",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.mid"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.mid",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-late",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterScaleLate",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.late"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.late",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "hm-dial-without-adapter-rebase",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaAdapterRebase",
+   "when": {
+    "not": {
+     "state": "adapters",
+     "atLeast": 1
+    }
+   },
+   "set": [
+    "ad.beta"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.beta",
+   "why": "As hm-dial-without-adapter-strength.",
+   "question": 13
+  },
+  {
+   "id": "mm3-low-step-shift",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3FlowShift",
+   "when": {
+    "param": "samp.plugins",
+    "is": false
+   },
+   "set": [
+    "samp.shift"
+   ],
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "The concept shows MiniMax-Music3's schedule shift only with Lua plugins on. The server also reads it with plugins off, for low-step compensation under 30 steps (mapMinimaxSamplerPlugins): the existing page sends the shift set there, the definitions leave the server's automatic shift.",
+   "question": 14
+  },
+  {
+   "id": "sa3-tiled-decoder",
+   "engines": [
+    "sa3"
+   ],
+   "field": "postprocessPlugin",
+   "when": {
+    "param": "pp.tile.on",
+    "is": true
+   },
+   "existing": "absent",
+   "definitions": "value:pp.tile.plugin",
+   "why": "The concept offers the tiled decoder on Stable Audio 3; the existing page shows it only on engines with ACE-Step's plugin registry (features.plugins), so it cannot be turned on there.",
+   "question": 15
+  },
+  {
+   "id": "schedule-shape-power",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "scheduler",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.sched",
+      "is": "power"
+     }
+    ]
+   },
+   "existing": "power",
+   "definitions": "sent",
+   "why": "On MiniMax-Music3, Stable Audio 3 and HeartMuLa the existing page's plugin picker sends the bare schedule id \"power\" and has no shape sliders; the definitions pack the concept's shape into it (\"power:...\"), as ACE-Step's page does.",
+   "question": 16
+  },
+  {
+   "id": "schedule-shape-beta",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "scheduler",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.sched",
+      "is": "beta"
+     }
+    ]
+   },
+   "existing": "beta",
+   "definitions": "sent",
+   "why": "On MiniMax-Music3, Stable Audio 3 and HeartMuLa the existing page's plugin picker sends the bare schedule id \"beta\" and has no shape sliders; the definitions pack the concept's shape into it (\"beta:...\"), as ACE-Step's page does.",
+   "question": 16
+  },
+  {
+   "id": "schedule-shape-composite",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "scheduler",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": true
+     },
+     {
+      "param": "samp.sched",
+      "is": "composite"
+     }
+    ]
+   },
+   "existing": "composite",
+   "definitions": "sent",
+   "why": "On MiniMax-Music3, Stable Audio 3 and HeartMuLa the existing page's plugin picker sends the bare schedule id \"composite\" and has no shape sliders; the definitions pack the concept's shape into it (\"composite:...\"), as ACE-Step's page does.",
+   "question": 16
+  },
+  {
+   "id": "apg-mom-without-control",
+   "engines": [
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgMomentum",
+   "when": {
+    "param": "samp.guide",
+    "is": "apg"
+   },
+   "set": [
+    "apg.mom"
+   ],
+   "existing": 0.75,
+   "definitions": "value:apg.mom",
+   "why": "The existing page shows APG's two settings only on ACE-Step's Generation panel; with APG picked on another engine it sends their defaults. The concept offers them there.",
+   "question": 3
+  },
+  {
+   "id": "apg-norm-without-control",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgNormThreshold",
+   "when": {
+    "param": "samp.guide",
+    "is": "apg"
+   },
+   "set": [
+    "apg.norm"
+   ],
+   "existing": 2.5,
+   "definitions": "value:apg.norm",
+   "why": "The existing page shows APG's two settings only on ACE-Step's Generation panel; with APG picked on another engine it sends their defaults. The concept offers them there.",
+   "question": 3
+  },
+  {
+   "id": "picks-without-plugins-inferMethod",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "inferMethod",
+   "when": {
+    "param": "samp.plugins",
+    "is": false
+   },
+   "set": [
+    "samp.solver"
+   ],
+   "existing": "value:samp.solver",
+   "definitions": "euler",
+   "why": "With Lua plugins off the engine runs its own loop and reads no solver, schedule or guidance. The existing page keeps sending what was picked; the definitions send nothing, and the server's resolver fills in its default.",
+   "question": 13
+  },
+  {
+   "id": "picks-without-plugins-scheduler",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "scheduler",
+   "when": {
+    "param": "samp.plugins",
+    "is": false
+   },
+   "set": [
+    "samp.sched"
+   ],
+   "existing": "value:samp.sched",
+   "definitions": "linear",
+   "why": "With Lua plugins off the engine runs its own loop and reads no solver, schedule or guidance. The existing page keeps sending what was picked; the definitions send nothing, and the server's resolver fills in its default.",
+   "question": 13
+  },
+  {
+   "id": "picks-without-plugins-guidanceMode",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "guidanceMode",
+   "when": {
+    "param": "samp.plugins",
+    "is": false
+   },
+   "set": [
+    "samp.guide"
+   ],
+   "existing": "value:samp.guide",
+   "definitions": "apg",
+   "why": "With Lua plugins off the engine runs its own loop and reads no solver, schedule or guidance. The existing page keeps sending what was picked; the definitions send nothing, and the server's resolver fills in its default.",
+   "question": 13
+  },
+  {
+   "id": "apg-without-plugins-apgMomentum",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgMomentum",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.guide",
+      "not": "apg"
+     }
+    ]
+   },
+   "set": [
+    "samp.guide"
+   ],
+   "existing": "absent",
+   "definitions": 0.75,
+   "why": "Follows from picks-without-plugins: the server's resolver adds APG's settings for its default APG, the existing page sends the picked guidance, which has none.",
+   "question": 13
+  },
+  {
+   "id": "apg-without-plugins-apgNormThreshold",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "apgNormThreshold",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.guide",
+      "not": "apg"
+     }
+    ]
+   },
+   "set": [
+    "samp.guide"
+   ],
+   "existing": "absent",
+   "definitions": 2.5,
+   "why": "Follows from picks-without-plugins: the server's resolver adds APG's settings for its default APG, the existing page sends the picked guidance, which has none.",
+   "question": 13
+  },
+  {
+   "id": "hm-flow-shift-gated",
+   "engines": [
+    "heartmula"
+   ],
+   "field": "heartmulaFlowShift",
+   "when": {
+    "param": "samp.plugins",
+    "is": false
+   },
+   "set": [
+    "samp.shift"
+   ],
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "The server shows HeartMuLa's schedule shift only with Lua plugins on (visible_when on samplerPluginsEnabled); the existing page keeps sending a shift set before they were turned off, the definitions send it only while they are on.",
+   "question": 13
+  },
+  {
+   "id": "sa3-lufs-target-gated",
+   "engines": [
+    "sa3"
+   ],
+   "field": "sa3LufsTarget",
+   "when": {
+    "param": "sa3.lufs",
+    "is": false
+   },
+   "set": [
+    "sa3.lufst"
+   ],
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "The server shows Stable Audio 3's loudness target only with loudness normalize on (visible_when on sa3LufsEnabled); the existing page keeps sending a target set before it was turned off.",
+   "question": 13
+  },
+  {
+   "id": "mm3-plan-name-gated",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3HiddensName",
+   "when": {
+    "param": "mm.savehid",
+    "is": false
+   },
+   "set": [
+    "mm.hidname"
+   ],
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "The server shows the plan name only while the next plan is saved (visible_when on mm3SaveHiddens); the existing page keeps sending a name typed before.",
+   "question": 13
+  },
+  {
+   "id": "mm3-trigger-to-caption",
+   "engines": [
+    "minimax-m3"
+   ],
+   "field": "mm3LmAdapterTrigger",
+   "set": [
+    "ad.trigcap"
+   ],
+   "existing": "absent",
+   "definitions": "value:ad.trigcap",
+   "why": "The existing page offers Add trigger to caption only for an adapter whose metadata has a trigger word, and sends nothing otherwise; the concept offers the switch with any adapter, and the definitions send it once set. The engine adds a trigger only when the adapter has one.",
+   "question": 13
+  },
+  {
+   "id": "seed-while-random",
+   "engines": [
+    "ace",
+    "minimax-m3",
+    "yue2",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "seed",
+   "unset": [
+    "seed.lock"
+   ],
+   "existing": 42,
+   "definitions": "sent",
+   "why": "The definitions send the seed on the desk while it is not kept; the existing page cannot type a seed while Random is on, so it sends its stored one. With randomSeed on the engine draws its own either way.",
+   "question": 13
+  },
+  {
+   "id": "section-align-without-directives",
+   "engines": [
+    "ace"
+   ],
+   "field": "adapterSectionAlignAt",
+   "when": {
+    "not": {
+     "state": "sectionDirectives"
+    }
+   },
+   "set": [
+    "ad.align"
+   ],
+   "existing": "value:ad.align",
+   "definitions": 0.55,
+   "why": "The concept shows the alignment timing only while the lyrics carry per-section adapter directives, which is when the engine reads it; the existing page shows it with any stack and sends what it is set to.",
+   "question": 13
+  },
+  {
+   "id": "refiner-overlap-without-window",
+   "engines": [
+    "ace",
+    "minimax-m3",
+    "yue2",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "mm3RefinerOverlapSeconds",
+   "when": {
+    "param": "pp.refiner.win",
+    "is": 0
+   },
+   "set": [
+    "pp.refiner.ov"
+   ],
+   "existing": 2,
+   "definitions": "value:pp.refiner.ov",
+   "why": "A window of 0 refines the whole song at once, so there is no overlap: the existing page disables the overlap field then and keeps its stored value; the concept keeps the overlap knob live and the definitions send what it is set to.",
+   "question": 13
+  },
+  {
+   "id": "solver-setting-without-plugins-storkSubsteps",
+   "engines": [
+    "minimax-m3",
+    "sa3",
+    "heartmula"
+   ],
+   "field": "storkSubsteps",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.solver",
+      "is": [
+       "stork2",
+       "stork4"
+      ]
+     }
+    ]
+   },
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "Follows from picks-without-plugins-inferMethod: the existing page sends the picked solver, and its resolver adds that solver's own setting; the definitions send no solver with plugins off.",
+   "question": 13
+  },
+  {
+   "id": "solver-setting-without-plugins-beatStability",
+   "engines": [
+    "sa3"
+   ],
+   "field": "beatStability",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.solver",
+      "is": [
+       "jkass_fast"
+      ]
+     }
+    ]
+   },
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "Follows from picks-without-plugins-inferMethod: the existing page sends the picked solver, and its resolver adds that solver's own setting; the definitions send no solver with plugins off.",
+   "question": 13
+  },
+  {
+   "id": "solver-setting-without-plugins-frequencyDamping",
+   "engines": [
+    "sa3"
+   ],
+   "field": "frequencyDamping",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.solver",
+      "is": [
+       "jkass_fast"
+      ]
+     }
+    ]
+   },
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "Follows from picks-without-plugins-inferMethod: the existing page sends the picked solver, and its resolver adds that solver's own setting; the definitions send no solver with plugins off.",
+   "question": 13
+  },
+  {
+   "id": "solver-setting-without-plugins-temporalSmoothing",
+   "engines": [
+    "sa3"
+   ],
+   "field": "temporalSmoothing",
+   "when": {
+    "all": [
+     {
+      "param": "samp.plugins",
+      "is": false
+     },
+     {
+      "param": "samp.solver",
+      "is": [
+       "jkass_fast"
+      ]
+     }
+    ]
+   },
+   "existing": "sent",
+   "definitions": "absent",
+   "why": "Follows from picks-without-plugins-inferMethod: the existing page sends the picked solver, and its resolver adds that solver's own setting; the definitions send no solver with plugins off.",
+   "question": 13
+  },
+  {
+   "id": "yue2-lyric-timing-gated",
+   "engines": [
+    "yue2"
+   ],
+   "field": "yue2LyricSchedule",
+   "when": {
+    "param": "lm.cotmode",
+    "is": "off"
+   },
+   "set": [
+    "yue.timing"
+   ],
+   "existing": "absent",
+   "definitions": "value:yue.timing",
+   "why": "The server shows the lyric timing only while Chain of Thought writes a score (visible_when on yue2Cot), and the existing page follows it; the concept keeps it with the lead sheet's other settings.",
+   "question": 13
   }
  ]
 }

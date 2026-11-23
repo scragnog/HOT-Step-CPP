@@ -21,22 +21,21 @@ const f2 = (v: unknown, d: number) => num(v, d).toFixed(2);
 
 export const TRANSFORMS = {
   int: {
-    doc: 'A whole number typed as text, sent as a number: the retake seed, StableStep\'s fixed seed.',
-    send: v => (typeof v === 'string' && /^-?\d+$/.test(v.trim()) ? Number(v.trim()) : undefined),
+    doc: 'A whole number, typed as text or kept as decimal text, sent as a number: the retake seed, StableStep\'s fixed seed, and the seed on engines that take a number (past 2^53 that is the nearest number, as the existing page sends it).',
+    send: v => (typeof v === 'number' && Number.isInteger(v) ? v : typeof v === 'string' && /^-?\d+$/.test(v.trim()) ? Number(v.trim()) : undefined),
     read: real => (typeof real === 'number' ? String(real) : undefined),
   },
   text: {
     doc: 'A number sent as its decimal text: YuE2\'s composer CFG is a text knob.',
-    send: v => (typeof v === 'number' ? String(v) : undefined),
+    send: v => String(v),
     read: real => (typeof real === 'string' && real.trim() !== '' && Number.isFinite(Number(real)) ? Number(real) : undefined),
   },
   scheduler: {
     doc: 'The schedule and its shape packed into the scheduler string the engine reads: "beta:<alpha>:<beta>", "power:<exponent>", "composite:<A>+<B>:<crossover>:<split>", or the schedule\'s id.',
     packs: ['samp.sched', 'sch.alpha', 'sch.beta', 'sch.exp', 'sch.a', 'sch.b', 'sch.x', 'sch.split'],
     send: v => {
-      const o = v as { [key: string]: Value | undefined };
-      const s = o['samp.sched'];
-      if (typeof s !== 'string') return undefined;
+      /* the schedule applies whenever a shape does, so it is always given */
+      const o = v as { [key: string]: Value | undefined }, s = o['samp.sched'] as string;
       if (s === 'beta') return `beta:${f2(o['sch.alpha'], 0.5)}:${f2(o['sch.beta'], 0.7)}`;
       if (s === 'power') return `power:${f2(o['sch.exp'], 2)}`;
       if (s === 'composite') return `composite:${o['sch.a'] ?? 'bong_tangent'}+${o['sch.b'] ?? 'linear'}:${f2(o['sch.x'], 0.5)}:${f2(o['sch.split'], 0.5)}`;
@@ -73,11 +72,12 @@ export const TRANSFORMS = {
     doc: 'MiniMax-Music3' + "'" + 's caption source, while tracks were handed over: { engine, customCaption, selection: { mode, selectedTitle }, tracks } (server/src/contracts/resolution.ts).',
     packs: ['cap.src', 'prompt.text', 'capTracks'],
     send: v => {
-      const o = v as { [key: string]: Json | undefined }, tracks = Array.isArray(o.capTracks) ? o.capTracks as { title?: string; bpm?: number; caption?: string }[] : [];
+      /* the source and the caption apply wherever tracks were handed over; a track has a title and a caption */
+      const o = v as { [key: string]: Json | undefined }, tracks = (o.capTracks ?? []) as { title: string; bpm?: number; caption: string }[];
       if (!tracks.length) return undefined;
-      const src = typeof o['cap.src'] === 'string' ? o['cap.src'] : 'custom', track = src !== 'custom' && src !== 'auto';
-      return { engine: 'minimax-m3', customCaption: String(o['prompt.text'] ?? ''), selection: track ? { mode: 'track', selectedTitle: src } : { mode: src },
-        tracks: tracks.map(t => ({ title: t.title ?? '', ...(typeof t.bpm === 'number' ? { bpm: t.bpm } : {}), caption: t.caption ?? '' })) };
+      const src = o['cap.src'] as string, track = src !== 'custom' && src !== 'auto';
+      return { engine: 'minimax-m3', customCaption: o['prompt.text'] as string, selection: track ? { mode: 'track', selectedTitle: src } : { mode: src },
+        tracks: tracks.map(t => ({ title: t.title, ...(typeof t.bpm === 'number' ? { bpm: t.bpm } : {}), caption: t.caption })) };
     },
     read: real => {
       const r = real as { selection?: { mode?: string; selectedTitle?: string }; customCaption?: string } | null;
@@ -88,10 +88,11 @@ export const TRANSFORMS = {
     doc: 'YuE2' + "'" + 's caption source, while its dataset has tracks: { engine, datasetId, adapterInForce, selection: { mode, selectedName } } (server/src/contracts/resolution.ts).',
     packs: ['cap.src', 'cap.ds', 'capTracks', 'slots'],
     send: v => {
-      const o = v as { [key: string]: Json | undefined }, tracks = Array.isArray(o.capTracks) ? o.capTracks : [];
+      /* the source and the dataset apply wherever the dataset has tracks */
+      const o = v as { [key: string]: Json | undefined }, tracks = (o.capTracks ?? []) as Json[];
       if (!tracks.length) return undefined;
-      const src = typeof o['cap.src'] === 'string' ? o['cap.src'] : 'custom', track = src !== 'custom' && src !== 'auto';
-      return { engine: 'yue2', datasetId: String(o['cap.ds'] ?? ''), adapterInForce: Array.isArray(o.slots) && o.slots.length > 0, selection: track ? { mode: 'track', selectedName: src } : { mode: src } };
+      const src = o['cap.src'] as string, track = src !== 'custom' && src !== 'auto';
+      return { engine: 'yue2', datasetId: o['cap.ds'] as string, adapterInForce: ((o.slots ?? []) as Json[]).length > 0, selection: track ? { mode: 'track', selectedName: src } : { mode: src } };
     },
     read: real => {
       const r = real as { datasetId?: string; selection?: { mode?: string; selectedName?: string } } | null;

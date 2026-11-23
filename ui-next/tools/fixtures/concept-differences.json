@@ -1,10 +1,16 @@
 {
- "note": "Where the core and the concept page disagree on purpose (tools/test-core.ts). Each entry names the derivation, a pattern the disagreement's description matches, and why the page is not followed. An entry nothing matches any more fails the test.",
+ "note": "Where the core and the concept page disagree on purpose (tools/test-core.ts). Each entry names the derivation, a pattern the case (its state and both outputs) matches, and, where the disagreement can be said exactly, `rewrite`: replacements that turn the page's output into the core's, which must then be equal; or `core`: a pattern the core's output must match. Then why the page is not followed. An entry nothing matches any more fails the test.",
  "differences": [
   {
    "derivation": "undo step names",
    "match": "tempo\\.dur",
-   "why": "The page's steps write a length as m:ss (0:10) while its ruler and read-out write 10 s. The definitions write a value one way everywhere: m:ss from a minute (docs/05, How a number is written)."
+   "why": "The page's steps write a length as m:ss (0:10) while its ruler and read-out write 10 s. The definitions write a value one way everywhere: m:ss from a minute (docs/05, How a number is written).",
+   "rewrite": [
+    [
+     "0:0?(\\d+)",
+     "$1 s"
+    ]
+   ]
   },
   {
    "derivation": "undo step names",
@@ -14,27 +20,58 @@
   {
    "derivation": "undo step names",
    "match": "Renderer GGML",
-   "why": "The definitions add Auto, the renderer the server uses when nothing is chosen (TensorRT when the machine has it, else GGML); the concept starts on GGML, which the server does not do (DG-02.1, docs 03)."
+   "why": "The definitions add Auto, the renderer the server uses when nothing is chosen (TensorRT when the machine has it, else GGML); the concept starts on GGML, which the server does not do (DG-02.1, docs 03).",
+   "rewrite": [
+    [
+     "GGML",
+     "Auto"
+    ]
+   ]
   },
   {
    "derivation": "undo step names",
    "match": "\"takes\\.n\":(9|2)",
-   "why": "A number of takes the engine cannot run: the server's batch.max is 8 on ACE-Step, 4 on MiniMax-Music3 and YuE2, 1 on Stable Audio 3 and HeartMuLa. The definitions' range stops there (DG-02.5); the collector tried the concept control's widest range."
+   "why": "A number of takes the engine cannot run: the server's batch.max is 8 on ACE-Step and 1 on Stable Audio 3 and HeartMuLa; MiniMax-Music3 renders up to 4 variations through mm3Takes (its batch.max is 1), and YuE2's limit is computed by the engine (declared as 1, raised at run time). The definitions' range stops there (DG-02.5); the collector tried the concept control's widest range.",
+   "core": "Takes per run [0-9]+ → [1-8]\""
   },
   {
    "derivation": "undo step names",
    "match": "\"rp\\.lyrics\"",
-   "why": "The page says \"Puts back the repaint lyrics as it was\": its plural rule knows only \"the lyrics\". The definitions say \"as they were\" for any undo name that is plural."
+   "why": "The page says \"Puts back the repaint lyrics as it was\": its plural rule knows only \"the lyrics\". The definitions say \"as they were\" for any undo name that is plural.",
+   "rewrite": [
+    [
+     "as it was",
+     "as they were"
+    ]
+   ]
   },
   {
    "derivation": "undo step names",
    "match": "\"yn\\.",
-   "why": "The page lists YuE2's plugin controls under no module (they are generated, not in the Sampler's keys), so it names them without the Sampler's name and keeps them for the song. The definitions put them in the Sampler, as the concept's own rule for sampler settings says (13-engine-state.js: a plugin's settings never follow you to another engine)."
+   "why": "The page lists YuE2's plugin controls under no module (they are generated, not in the Sampler's keys), so it names them without the Sampler's name and keeps them for the song. The definitions put them in the Sampler, as the concept's own rule for sampler settings says (13-engine-state.js: a plugin's settings never follow you to another engine).",
+   "core": "^\\{\"label\":\"Sampler [a-z]"
   },
   {
    "derivation": "undo step names",
-   "match": "\"(den|lss)\\.str\"",
-   "why": "The page names the denoiser's and LSS's strength alike (\"Latent & correction strength\"), so two different undo steps read the same (DG-04.2). Each has its own undo name here."
+   "match": "\"den\\.str\"",
+   "why": "The page names the denoiser's and LSS's strength alike (\"Latent & correction strength\"), so two different undo steps read the same (DG-04.2). Each has its own undo name here.",
+   "rewrite": [
+    [
+     "Latent & correction strength",
+     "Denoiser strength"
+    ]
+   ]
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"lss\\.str\"",
+   "why": "The page names the denoiser's and LSS's strength alike (\"Latent & correction strength\"), so two different undo steps read the same (DG-04.2). Each has its own undo name here.",
+   "rewrite": [
+    [
+     "Latent & correction strength",
+     "LSS strength"
+    ]
+   ]
   },
   {
    "derivation": "also set",
@@ -125,6 +162,70 @@
    "derivation": "tier contents",
    "match": "(sa3|heartmula) (studio|lab) tempo( loaded)?: only the page \\[\\], only the definitions \\[\"prompt.text\"\\]",
    "why": "The tempo and key chips add and take out items of the prompt; the page's chips carry no control key. prompt.text is the Prompt's parameter, so Tempo's Also set line is the same."
+  },
+  {
+   "derivation": "engine switch toast",
+   "match": "^lists differ: ",
+   "why": "The toast counts the changed settings only the engine left has, by the definitions' engine lists; the page counts by its own wider lists (it keeps lyrics, Avoid and some units on engines that do not use them) and skips a control with no label of its own. Its models and adapters must be the page's, and its count may differ from the page's by no more than the number of those settings."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^ace lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"ad\\.planner\",\"lyrics\\.text\"\\]$",
+   "why": "As in tier contents: the cartridges edit the lyrics through their section masks, and the planner adapter at Lab; the page's chips carry no control key."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^minimax-m3 lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"lyrics\\.text\"\\]$",
+   "why": "As above: the cartridges' section masks are written into the lyrics."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^ace quick adapters \\(2 adapters\\) .*: only the page \\[\"ad\\.adv\"\\], only the definitions \\[\\]$",
+   "why": "As in tier contents: at Quick the page's note \"N adapters, stacked\" carries the Stack control's key."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^(ace|minimax-m3|yue2) lab art null: only the page \\[\\], only the definitions \\[\"pp\\.art\\.subject\"\\]$",
+   "why": "The Cover art unit's subject is laid out at Lab with its other settings by the unit layout rule (docs 03); the page draws it only in the song info."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^(ace|minimax-m3|yue2|heartmula) lab ss .*: only the page \\[\"pp\\.ss\\.seed\"\\], only the definitions \\[\\]$",
+   "why": "StableStep's fixed seed stands beside its Follow the seed switch and applies only while the switch is off; the page draws its field with the switch on too, so the page counts it as shown."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^minimax-m3 lab flow .*: only the page \\[\\], only the definitions \\[\"mm\\.prec\"\\]$",
+   "why": "As in tier contents: the renderer starts on Auto here, under which TensorRT may run, so its precision applies."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^sa3 (studio|lab) tempo .*: only the page \\[\\], only the definitions \\[\"prompt\\.text\"\\]$",
+   "why": "As in tier contents: the tempo and key chips edit the prompt's text."
+  },
+  {
+   "derivation": "tier contents at other values",
+   "match": "^yue2 (studio|lab) tempo .*: only the page \\[\\], only the definitions \\[\"tempo\\.max\"\\]$",
+   "why": "As in tier contents (page fault): the page's ruler carries no control key."
+  },
+  {
+   "derivation": "also set",
+   "match": "pP-VAE|hF ext|x-over",
+   "rewrite": [
+    [
+     "pP-VAE",
+     "PP-VAE"
+    ],
+    [
+     "hF ext",
+     "HF ext"
+    ],
+    [
+     "x-over",
+     "X-over"
+    ]
+   ],
+   "why": "Inside a sentence a label's first letter is lower-cased unless the word is an acronym or has capitals inside, by one rule wherever it happens (messages.ts lowFirst); the page lower-cases any first letter in its Also set line (DH-23)."
   }
  ]
 }

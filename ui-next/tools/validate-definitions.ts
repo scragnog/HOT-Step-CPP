@@ -26,7 +26,7 @@ import type {
 } from '../src/definitions/types.ts';
 import { stepSays, stepChanges } from '../src/derive/steps.ts';
 import {
-  type Desk, type Index, SLOT, applies, cleanState, cleanValues, enginesOf, editsOf, factsOf, holds, indexOf, isEngineLine, nodeAt, realState, resolve,
+  type Desk, type Index, type TrialDesk, SLOT, applies, cleanState, cleanValues, enginesOf, editsOf, holds, indexOf, isEngineLine, nodeAt, realState, resolve,
   toOf, wiresOf, realDefaultsFrom,
 } from '../src/derive.ts';
 
@@ -38,6 +38,7 @@ const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 'rea
   reads: Record<string, string[]>; fields: Record<string, string[]>; plugins: Record<string, string[]>; buckets: Record<string, string[]>;
   sliders: Record<string, (number | null)[][]>; values: Record<string, string[]>; intent: { compose: string[] };
   core: Record<string, { batchMax: number | null; durationMax: number | null }>;
+  features: Record<string, Record<string, boolean>>;
 };
 const TIERS: Tier[] = ['quick', 'studio', 'lab'];
 /* --json <file>: a definition that arrives as JSON is checked as if it were in the index, every check included; it takes
@@ -137,6 +138,32 @@ for (const kind of ['module', 'pedal', 'unit'] as const) {
 }
 const itemIds = new Set(DEFINITIONS.map(d => d.id));
 
+/* ---- which engines a definition is on, against the subsystems each engine's server declares
+   (capabilities().features). A definition that is a server subsystem is on exactly the engines that have it, except
+   where docs/08 question 17 asks the maintainer and the definitions keep the concept's list meanwhile. */
+const FEATURE_OF: Record<string, string> = { ss: 'stableStep', wh: 'whisper', lrc: 'lyricTimestamps', fa: 'forcedAlignment' };
+const FEATURE_ASKED: Record<string, string[]> = { wh: ['sa3'] };
+for (const [id, feature] of Object.entries(FEATURE_OF)) {
+  const d = DEFINITIONS.find(x => x.id === id); if (!d) continue;
+  for (const { id: e } of ENGINES) {
+    const server = !!FIX.features[e]?.[feature], ours = d.engines.includes(e);
+    if (server !== ours && !(FEATURE_ASKED[id] ?? []).includes(e)) err(fileOf(d), `${ours ? 'is on' : 'is not on'} ${e}, where the server's capabilities().features.${feature} is ${server}: put it on exactly the engines that have it`);
+  }
+}
+
+/* ---- a definition put on an engine must say each parameter there: a parameter that lists its own engines and is on
+   every other engine of its definition is missing on this one by mistake (a Prompt on a new engine with no prompt
+   text), unless it is one of these, which are left off one engine on purpose */
+const ABSENT_ON: Record<string, string> = {
+  'wild.auto': 'heartmula', 'ad.trigger': 'sa3', 'ad.att': 'ace', 'ad.mlp': 'ace', 'ad.early': 'ace', 'ad.mid': 'ace', 'ad.late': 'ace',
+  'ad.beta': 'minimax-m3', 'samp.cfg': 'yue2', 'samp.guide': 'yue2', 'apg.mom': 'minimax-m3',
+};
+for (const d of DEFINITIONS) for (const p of d.params) {
+  if (!p.engines || d.engines.length < 3) continue;
+  const missing = d.engines.filter(e => !p.engines!.includes(e));
+  if (missing.length === 1 && ABSENT_ON[p.key] !== missing[0]) err(`${fileOf(d)} › ${p.key}`, `is on every engine of ${d.name} but ${missing[0]}: add ${missing[0]} to its engines with a line for it, or, if it is left off on purpose, say so in ABSENT_ON in tools/validate-definitions.ts`);
+}
+
 /* ================================================================ 3. conditions */
 
 type Ctx = { where: string; engines: readonly EngineId[]; own?: Definition };
@@ -214,7 +241,8 @@ function thresholds(c: Condition, acc: Map<string, Set<number>>): void {
   else if ('param' in c) { const s = acc.get(c.param) || new Set(); [c.above, c.below].forEach(b => { if (b !== undefined) [b - 1e-6, b, b + 1e-6].forEach(x => s.add(x)); }); [c.is, c.not].flat().forEach(v => { if (typeof v === 'number') s.add(v); }); acc.set(c.param, s); }
 }
 function deskWith(e: EngineId, vals: Record<string, Value>, auto: Record<string, boolean>, state: Record<string, Json>, on: Set<string>): Desk {
-  return { engine: e, tier: 'lab', vals, auto, state, facts: Object.fromEntries(Object.keys(DESK_FACTS).map(k => [k, (state[k] as number) ?? 0])), on };
+  const trial: TrialDesk = { engine: e, tier: 'lab', vals, auto, state, trialFacts: Object.fromEntries(Object.keys(DESK_FACTS).map(k => [k, (state[k] as number) ?? 0])), on };
+  return trial;
 }
 function leaves(c: Condition, pick: (c: Condition) => string | null): string[] {
   if ('all' in c) return c.all.flatMap(x => leaves(x, pick));
@@ -222,6 +250,7 @@ function leaves(c: Condition, pick: (c: Condition) => string | null): string[] {
   if ('not' in c && !('param' in c)) return leaves(c.not, pick);
   const v = pick(c); return v === null ? [] : [v];
 }
+const allOn = new Set(DEFINITIONS.map(d => d.id));
 /** Every combination of the values the conditions can tell apart, up to a few thousand. */
 function* combos(conds: Condition[], e: EngineId): Generator<Desk> {
   const keys = [...new Set(conds.flatMap(names))].filter(k => ix.params.has(k));
@@ -234,13 +263,14 @@ function* combos(conds: Condition[], e: EngineId): Generator<Desk> {
     ...keys.map((k, i) => ({ set: (o: any, v: unknown) => { o.vals[k] = v as Value; }, values: doms[i]! })),
     ...autos.map(k => ({ set: (o: any, v: unknown) => { o.auto[k] = v as boolean; }, values: [true, false] })),
     ...stateKeys.map(k => ({ set: (o: any, v: unknown) => { o.state[k] = v as Json; }, values: [0, 1, 2, 3] })),
-    ...desks.map(k => ({ set: (o: any, v: unknown) => { if (v) o.on.add(k); }, values: [true, false] })),
+    ...desks.map(k => ({ set: (o: any, v: unknown) => { if (!v) o.on.delete(k); }, values: [true, false] })),
   ];
   let count = 1; for (const a of axes) count *= Math.max(1, a.values.length);
   if (count > 20000) return;
   const idx = axes.map(() => 0);
   for (;;) {
-    const o = { vals: {} as Record<string, Value>, auto: {} as Record<string, boolean>, state: {} as Record<string, Json>, on: new Set<string>() };
+    /* everything is on the desk but what a condition asks about: a definition off the desk reads as its defaults */
+    const o = { vals: {} as Record<string, Value>, auto: {} as Record<string, boolean>, state: {} as Record<string, Json>, on: new Set<string>(allOn) };
     axes.forEach((a, i) => a.values.length && a.set(o, a.values[idx[i]!]));
     yield deskWith(e, o.vals, o.auto, o.state, o.on);
     let i = 0; for (; i < axes.length; i++) { idx[i]!++; if (idx[i]! < Math.max(1, axes[i]!.values.length)) break; idx[i] = 0; }
@@ -410,7 +440,7 @@ function checkWire(w: Wire, p: ParamDef, d: Definition, e: EngineId, at: string)
     const sl = FIX.sliders[name];
     if (sl) {
       const k = m.divide ? 1 / m.divide : m.scale ?? 1, mine = f.range.map(v => +(v * k).toFixed(6));
-      if (!sl.some(r => r[0] === mine[0] && r[1] === mine[1] && (r[2] === null || r[2] === mine[2]))) err(at, `range ${J(f.range)} differs from the existing UI's slider for ${name} (${sl.map(r => J(r)).join(' or ')}): follow it, or add 'range' to the wire's differs and say why in its note`);
+      if (!sl.some(r => r[0] === mine[0] && r[1] === mine[1] && (r[2] === null || r[2] === mine[2]))) err(at, `range ${J(f.range)}${k !== 1 ? `, sent as ${J(mine)},` : ''} differs from the existing UI's slider for ${name} (${sl.map(r => J(r)).join(' or ')}): follow it, or add 'range' to the wire's differs and say why in its note`);
     }
   }
   /* the values a field takes, where the real app spells them (tools/fixtures/real-app.json values) */
@@ -563,6 +593,21 @@ function checkNode(n: Node, cx: NodeCx): void {
     if (!n.when || everHolds(n.when, e)) (visibleOn.get(cx.d.id) ?? visibleOn.set(cx.d.id, new Set()).get(cx.d.id)!).add(e);
   }
   if (n.when && !engines.some(e => everHolds(n.when!, e))) err(`${where} when`, 'can never hold on the engines the node is on, so it is never shown');
+  /* a node shown by its own condition where none of the parameters it and its children edit applies draws controls for
+     nothing (the Power group shown on Cosine): its condition must imply one of theirs */
+  if (n.when) {
+    const subtree = (x: Node): string[] => [...editsOf(x), ...(x.children || []).flatMap(subtree)];
+    const keys = [...new Set(subtree(n))].filter(k => ix.params.has(k));
+    for (const e of engines) {
+      const here = keys.filter(k => has(k, e));
+      if (!here.length) continue;
+      const whens = here.map(k => resolve(ix.params.get(k)!.p, e).when).filter((c): c is Condition => !!c);
+      if (whens.length < here.length) continue;
+      for (const desk of combos([n.when, ...whens], e)) {
+        if (holds(ix, n.when, desk) && !here.some(k => applies(ix, k, desk))) { err(`${where} when`, `is shown on ${e} where none of ${here.join(', ')} applies (${J(desk.vals)}): make its condition imply theirs`); break; }
+      }
+    }
+  }
   const dims = variants.filter(v => v.n.dim);
   if (dims.length && !dims.some(v => everHolds(v.n.dim!.when, v.e))) err(`${where} dim`, 'can never hold on any engine the node is on, so it never stands back: drop it, or fix the condition');
   const seenVar = new Set<string>(), boundSomewhere = new Map<string, boolean>();
@@ -775,7 +820,6 @@ for (const f of fs.readdirSync(path.join(DEFDIR, 'thumbs'))) if (!drawn.has(f.re
 
 /* ================================================================ 7. what is sent */
 
-const allOn = new Set(DEFINITIONS.map(d => d.id));
 const fieldDefault = (f: string) => FIX.generationDefaults[f];
 for (const e of ENGINE_IDS) {
   /* one writer per field at a time */
@@ -801,7 +845,7 @@ for (const e of ENGINE_IDS) {
     }
   }
   /* at defaults, what is sent agrees with the real app's defaults, or says why */
-  const desk: Desk = { engine: e, tier: 'lab', vals: {}, auto: {}, state: {}, facts: {}, on: allOn };
+  const desk: Desk = { engine: e, tier: 'lab', vals: {}, auto: {}, state: {}, on: allOn };
   const rs = realState(ix, desk, fieldDefault, realDefaultsFrom(FIX.generationDefaults, FIX.extensions[e] ?? []));
   for (const [field, v] of Object.entries(rs.params)) {
     const real = FIX.generationDefaults[field];
@@ -868,10 +912,17 @@ for (const { p, d } of ix.params.values()) {
   if (q.p.staysBelow === p.key) err(`${fileOf(d)} › ${p.key}`, `stays below "${q.p.key}", which stays below it: one of them is the lower end`);
   for (const e of enginesOf(p, d)) { const a = resolve(p, e).default, b = resolve(q.p, e).default; if (typeof a === 'number' && typeof b === 'number' && !(a < b)) err(`${fileOf(d)} › ${p.key} [${e}]`, `stays below "${q.p.key}", and its default ${a} is not below that one's ${b}: put staysBelow on the lower end`); }
 }
-/* pedals read as a sequence of colours: each one's hue at least 15 degrees from its neighbours' in the chain (B11) */
+/* pedals read as a sequence of colours: each one's hue at least 15 degrees from its neighbours' in the chain, on every
+   engine (a pedal another engine lacks makes two others neighbours) (B11, DH-24) */
 {
-  const chain = DEFINITIONS.filter((x): x is Extract<Definition, { kind: 'pedal' }> => x.kind === 'pedal' && x.on !== null).sort((a, b) => a.at - b.at);
-  for (let i = 1; i < chain.length; i++) { const a = chain[i - 1]!, b = chain[i]!, dh = Math.min(Math.abs(a.hue - b.hue), 360 - Math.abs(a.hue - b.hue)); if (dh < 15) err(fileOf(b), `its hue ${b.hue} is ${dh} degrees from ${a.id}'s ${a.hue}, its neighbour in the chain: pick one at least 15 degrees away`); }
+  const said = new Set<string>();
+  for (const { id: e } of ENGINES) {
+    const chain = DEFINITIONS.filter((x): x is Extract<Definition, { kind: 'pedal' }> => x.kind === 'pedal' && x.on !== null && x.engines.includes(e)).sort((a, b) => a.at - b.at);
+    for (let i = 1; i < chain.length; i++) {
+      const a = chain[i - 1]!, b = chain[i]!, dh = Math.min(Math.abs(a.hue - b.hue), 360 - Math.abs(a.hue - b.hue));
+      if (dh < 15 && !said.has(a.id + b.id)) { said.add(a.id + b.id); err(fileOf(b), `its hue ${b.hue} is ${dh} degrees from ${a.id}'s ${a.hue}, its neighbour in the chain on ${e}: pick one at least 15 degrees away`); }
+    }
+  }
 }
 
 /* ================================================================ 8. factory workflows and revisions */
@@ -899,8 +950,8 @@ for (const r of FACTORY_REVISIONS) {
   for (const [k, s] of Object.entries(r.state || {})) { const hit = ix.states.get(k); if (!hit) err(at, `holds state "${k}", which no definition declares`); else if (hit.s.stored !== 'settings') err(at, `holds state "${k}", which a revision does not keep`); else if (J(cleanState(hit.s, s)) !== J(s)) err(at, `holds ${k} ${J(s)}, which is not a ${hit.s.kind}: loading it would drop it`); }
   const c = cleanValues(ix, r.vals, r.auto);
   for (const [k, v] of Object.entries(r.vals)) if (ix.params.has(k) && J(c.vals[k]) !== J(v)) err(at, `sets ${k} to ${J(v)}, which loading cleans to ${J(c.vals[k])}: write what it means`);
-  const rd: Desk = { engine: r.engine, tier: 'lab', vals: c.vals, auto: c.auto, state: (r.state || {}) as Record<string, Json>, facts: {}, on: new Set(itemIds) };
-  for (const k of Object.keys(r.vals)) if (ix.params.has(k) && has(k, r.engine) && !applies(ix, k, { ...rd, facts: factsOf(ix, rd) })) err(at, `sets ${k}, which does not apply in this revision (its condition does not hold), so it does nothing`);
+  const rd: Desk = { engine: r.engine, tier: 'lab', vals: c.vals, auto: c.auto, state: (r.state || {}) as Record<string, Json>, on: new Set(itemIds) };
+  for (const k of Object.keys(r.vals)) if (ix.params.has(k) && has(k, r.engine) && !applies(ix, k, rd)) err(at, `sets ${k}, which does not apply in this revision (its condition does not hold), so it does nothing`);
   for (const k of Object.keys(r.auto || {})) { const hit = ix.params.get(k); if (!hit || !resolve(hit.p, r.engine).auto) err(at, `sets the auto switch of "${k}", which has none on ${r.engine}`); }
 }
 
@@ -963,17 +1014,18 @@ const now: Shipped = {
 };
 for (const [what, former, retired] of [['keys', ix.former, RETIRED.keys], ['states', ix.formerStates, RETIRED.states], ['ids', ix.formerIds, RETIRED.ids]] as const) {
   for (const [k, was] of Object.entries(shipped[what])) {
-    if (k in now[what]) { if (now[what][k] !== was && !process.argv.includes('--docs')) err(`tools/fixtures/shipped.json › ${k}`, `was shipped as "${was}" and is now "${now[what][k]}": saved records keep it where it was kept then; if that is meant, run \`npm run docs\` to record it`); continue; }
+    if (k in now[what]) { if (now[what][k] !== was && !process.argv.includes('--ship')) err(`tools/fixtures/shipped.json › ${k}`, `was shipped as "${was}" and is now "${now[what][k]}": saved records keep it where it was kept then. If that is meant, the change needs a migration step (src/derive/records.ts) before the next release`); continue; }
     if (former.has(k) || retired.includes(k)) continue;
     err(`tools/fixtures/shipped.json › ${k}`, `saved data may hold ${what === 'ids' ? 'the id' : what === 'states' ? 'the state' : 'the key'} "${k}", which no definition has any more: list it in \`was\` where it went, or in src/definitions/retired.ts if it is gone`);
   }
   for (const k of retired) if (k in now[what]) err('src/definitions/retired.ts', `retires "${k}", which a definition still has`);
 }
-if (process.argv.includes('--docs')) {
+/* what a release ships is recorded on purpose, by `npm run ship` when a release goes out; nothing else writes it */
+if (process.argv.includes('--ship')) {
   const merged: Shipped = { keys: { ...shipped.keys, ...now.keys }, states: { ...shipped.states, ...now.states }, ids: { ...shipped.ids, ...now.ids } };
   /* a key no definition has stays listed: its going is said by `was` or retired.ts, never by forgetting it */
   const sort = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b)));
-  fs.writeFileSync(SHIPPED_FILE, JSON.stringify({ note: 'Every parameter key, state key and definition id the definitions ship with, and where each value is kept (definition, owner, stored). Written by npm run docs; the validator checks the definitions against it (docs/07).', keys: sort(merged.keys), states: sort(merged.states), ids: sort(merged.ids) }, null, 1).replace(/\n/g, '\r\n') + '\r\n');
+  fs.writeFileSync(SHIPPED_FILE, JSON.stringify({ note: 'Every parameter key, state key and definition id the definitions ship with, and where each value is kept (definition, owner, stored). Written by npm run ship when a release goes out, and by nothing else; the validator checks the definitions against it (docs/07).', keys: sort(merged.keys), states: sort(merged.states), ids: sort(merged.ids) }, null, 1).replace(/\n/g, '\r\n') + '\r\n');
 }
 
 const DOCS = path.join(ROOT, 'docs');

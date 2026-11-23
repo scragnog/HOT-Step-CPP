@@ -27,8 +27,11 @@ function defaultSettings() {
   return Function(`return (${m[1]});`)();
 }
 
-export const create = () => init => makeStore(init);
+/* create(init) and create()(init) */
+export const create = init => (typeof init === 'function' ? makeStore(init) : i => makeStore(i));
 export const z = chain();
 export const DEFAULT_SETTINGS = which === 'SettingsPanel' ? defaultSettings() : undefined;
-export const useBackendStore = { getState: () => globalThis.__realApp.backend, subscribe: () => () => {} };
+export const useBackendStore = Object.assign(sel => (sel ? sel(globalThis.__realApp.backend) : globalThis.__realApp.backend), { getState: () => globalThis.__realApp.backend, setState: () => {}, subscribe: () => () => {} });
+/* backendStore: a model choice not yet confirmed by the server: none */
+export const pendingSelection = () => ({});
 export const apiClient = { put: async () => undefined, get: async () => undefined, post: async () => undefined };

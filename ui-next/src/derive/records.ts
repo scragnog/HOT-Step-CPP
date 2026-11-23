@@ -3,10 +3,11 @@
 
 import type { Draft, EngineId, Json, Revision, SavedDesk, Tier, Value, Workflow } from '../definitions/types.ts';
 import { SAVED_VERSION } from '../definitions/types.ts';
-import { ENGINE_IDS } from '../definitions/engines.ts';
+import { ENGINE_IDS, engineName } from '../definitions/engines.ts';
 import { RETIRED } from '../definitions/retired.ts';
 import { type Desk, type Index, enginesOf, has, resolve } from './core.ts';
 import { cleanStates, cleanValues } from './values.ts';
+import { type Msg, msg } from './messages.ts';
 import type { EngineBook } from './engine.ts';
 
 const storedOf = (ix: Index, key: string) => { const h = ix.params.get(key)!; return h.p.stored ?? h.d.stored; };
@@ -43,10 +44,12 @@ export function workflowOf(ix: Index, desk: Desk, name: string): Workflow {
 
 /** Loading a revision: every parameter a revision keeps for its engine is reset, then its values (cleaned) applied;
  *  its state replaces the revision-kept state. `told` is what the toast says could not be used. */
-export function loadRevision(ix: Index, desk: Desk, rev: unknown): { desk: Desk; told: string } {
+export function loadRevision(ix: Index, desk: Desk, rev: unknown): { desk: Desk; told: Msg | null } {
   const r = migrate(rev);
-  if (!r || r.kind !== 'revision') return { desk, told: "That revision couldn't be read" };
+  if (!r || r.kind !== 'revision') return { desk, told: msg('load.unreadable') };
   const rec = r.record as Revision, e = rec.engine;
+  /* a revision is one engine's settings: on another engine's desk it is refused with a word, never applied */
+  if (e !== desk.engine) return { desk, told: msg('load.engine', { engine: ENGINE_IDS.includes(e) ? engineName(e) : String(e) }) };
   const out: Desk = { ...desk, vals: { ...desk.vals }, auto: { ...desk.auto }, state: { ...desk.state } };
   for (const { p } of ix.params.values()) {
     if (!has(ix, p.key, e) || ix.params.get(p.key)!.d.kind === 'module' && (ix.params.get(p.key)!.d as { source?: true }).source) continue;
@@ -58,7 +61,7 @@ export function loadRevision(ix: Index, desk: Desk, rev: unknown): { desk: Desk;
   for (const { s } of ix.states.values()) if (s.stored === 'settings') delete out.state[s.key];
   Object.assign(out.state, st.state);
   const n = c.dropped.length + st.dropped.length;
-  return { desk: out, told: n ? `${n} setting${n === 1 ? '' : 's'} could not be used` : '' };
+  return { desk: out, told: n ? msg('load.told', { n }) : null };
 }
 
 /** The desk autosave: everything, for a reload or another tab. */
@@ -70,7 +73,7 @@ export function savedDeskOf(ix: Index, desk: Desk, book: EngineBook): SavedDesk 
 
 /** Reading a saved desk: everything checked as it comes in, engine and tier included; held values with a number, a
  *  known engine and a parameter that has `held`. */
-export function readDesk(ix: Index, raw: unknown): { desk: Desk; book: EngineBook; told: string } | null {
+export function readDesk(ix: Index, raw: unknown): { desk: Desk; book: EngineBook; told: Msg | null } | null {
   const r = migrate(raw);
   if (!r || r.kind !== 'desk') return null;
   const x = r.record as SavedDesk;
@@ -92,7 +95,7 @@ export function readDesk(ix: Index, raw: unknown): { desk: Desk; book: EngineBoo
     if (p?.held && h && typeof h.value === 'number' && Number.isFinite(h.value) && typeof h.shown === 'number' && ENGINE_IDS.includes(h.from)) book.hold[k] = { value: h.value, shown: h.shown, from: h.from };
   }
   const n = c.dropped.length + st.dropped.length;
-  return { desk: { engine, tier, vals: c.vals, auto: c.auto, state: st.state, facts: {}, on }, book, told: n ? `${n} setting${n === 1 ? '' : 's'} could not be used` : '' };
+  return { desk: { engine, tier, vals: c.vals, auto: c.auto, state: st.state, on }, book, told: n ? msg('load.told', { n }) : null };
 }
 
 /* ---------------------------------------------------------------- migration

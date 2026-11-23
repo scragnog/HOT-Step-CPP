@@ -74,7 +74,7 @@ These have a real counterpart that differs in a way the request handles. Each is
   noise variations and batch size are declared with a maximum of 1 in the static manifest and raised by the engine.
   ACE-Step's takes go to 9 where `batch.max` is 8.
 - **Read but not declared**: MiniMax-Music3's adapter (`mm3LmAdapter`), its mode, scales and merge switch, the trigger
-  switch, the renderer and its TensorRT precision; YuE2's lead sheet (`yue2Abc`). A compact intent's `backendParams`
+  switch, the renderer and its TensorRT precision. A compact intent's `backendParams`
   cannot carry these ([08](08-open-questions.md) question 1).
 - **Not sent, by design** (`ui:`): vocal gender (Compose caption writes it), the LUFS preset, and Build by section's
   condition and plan strengths (`Yue2Build` settings; the real plan strength default is 0.6, the concept's 1).
@@ -283,7 +283,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 | --- | --- | --- | --- |
 | `samp.steps` | number | all | ace: `param:inferenceSteps`<br>mm3: `ext:mm3Steps`<br>yue2: `ext:yue2OdeSteps`<br>sa3: `ext:sa3Steps`<br>hm: `ext:heartmulaCodecSteps` |
 | `samp.cfg` | number | ace, mm3, sa3, hm | ace: `param:guidanceScale`<br>mm3: `ext:mm3CfgFlow`<br>sa3: `param:guidanceScale`. Read only with samplerPluginsEnabled and above 1: the default 1 adds no guidance, where the existing page carries ACE-Step's 9 here.<br>hm: `ext:heartmulaCodecGuidance` |
-| `samp.shift` | number | ace, mm3, hm | ace: `param:shift` (auto: -1). Auto is -1, as the existing slider's Auto button sets it: the engine then uses its own shift (3.0 on turbo models, 1.0 on base ones). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
+| `samp.shift` | number | ace, mm3, hm | ace: `param:shift` (auto: -1). Auto is -1, as the existing slider's Auto button sets it: the engine then works out a shift from the song's length and the step count (hot-step-server.cpp: 3 times a length factor and a steps factor, each 0.8 to 1.4, so about 1.9 to 5.9; 3.18 at 12 steps and 60 s). The concept starts on Auto; the existing page starts at 3.0 (docs/08, question 10).<br>mm3: `ext:mm3FlowShift`<br>hm: `ext:heartmulaFlowShift` |
 | `samp.solver` | choice | all | ace: `param:inferMethod`<br>mm3: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here.<br>yue2: `ext:yue2NarSolver`<br>sa3: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here.<br>hm: `param:inferMethod`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's euler here. |
 | `samp.sched` | choice | all | ace: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>mm3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>yue2: `ext:yue2NarScheduler`<br>sa3: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70".<br>hm: `param:scheduler` (via scheduler). The schedule and its shape, packed: "beta:0.50:0.70". |
 | `samp.guide` | choice | ace, mm3, sa3, hm | ace: `param:guidanceMode`<br>mm3: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here.<br>sa3: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here.<br>hm: `param:guidanceMode`. Native ("") sends no pick, so the engine runs its own loop; the existing page carries ACE-Step's APG here. |
@@ -377,7 +377,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 
 | Concept key | Type | Engines | Real name |
 | --- | --- | --- | --- |
-| `yue.abc` | text | yue2 | `ext:yue2Abc`. Read by backends/yue2/generate.ts as a lead sheet marker; not declared as an extension. |
+| `yue.abc` | text | yue2 | `ext:yue2Abc`. Declared by the YuE2 backend and read by backends/yue2/generate.ts as a lead sheet marker. |
 | `yue.timing` | choice | yue2 | `ext:yue2LyricSchedule` |
 
 ### Build by section (`build`, module)

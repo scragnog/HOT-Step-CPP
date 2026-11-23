@@ -23,7 +23,7 @@ export const score = {
       when: { param: 'lm.cotmode', not: 'off' },
       wire: {
         to: 'ext:yue2Abc',
-        note: 'Read by backends/yue2/generate.ts as a lead sheet marker; not declared as an extension.',
+        note: 'Declared by the YuE2 backend and read by backends/yue2/generate.ts as a lead sheet marker.',
       },
     },
     {

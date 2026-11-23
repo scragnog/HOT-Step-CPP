@@ -20,6 +20,7 @@
 // its stylesheet. Every definition can then name it. docs/06-how-to.md has the steps.
 
 import type { StateDef, ValueType, Tier, EngineId, Json, Value, Node, ParamFace } from './types.ts';
+import type { Slot } from '../derive/messages.ts';
 
 export type PartKind = 'control' | 'container' | 'readout' | 'bespoke';
 export type Drive = 'keys' | 'click' | 'choose' | 'type' | 'file';
@@ -380,7 +381,7 @@ export const PARTS = {
   splitFlap: {
     kind: 'bespoke', edits: ['boolean'], state: ['seed'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one. Roll once and Random each time.',
-    responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 4294967295), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
+    responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 2^64-1, kept as its decimal text past 2^53), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
   },
   savedSeeds: {
     kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'set'], drive: 'click', css: ['25-module-seed.css'],
@@ -467,8 +468,8 @@ export interface BoundParam {
   key: string;
   face: ParamFace;
   value: Value;
-  /** The value written as everywhere else. */
-  text: string;
+  /** The value written as everywhere else, as a message (src/derive/messages.ts say). */
+  text: Slot;
   changed: boolean;
   /** On auto, for a parameter with auto. */
   auto: boolean;
@@ -498,7 +499,7 @@ export interface BoundState {
 export interface ReadValue {
   key: string;
   value: Value | Json;
-  text: string;
+  text: Slot;
   auto: boolean;
   applies: boolean;
   onDesk: boolean;
@@ -568,11 +569,11 @@ export const OPTION_SOURCES = {
 } as const;
 export type OptionSourceName = keyof typeof OPTION_SOURCES;
 
-/** What a desk fact is worked out from: the values in force, the state, what is on the desk, and the engine. */
+/** What a desk fact is worked out from: the values and the state in force (a definition off the desk reads as its
+ *  defaults and holds no state: src/derive/core.ts, "the value in force"), and the engine. */
 export interface FactInput {
   value(key: string): Value | undefined;
-  state: { readonly [key: string]: Json };
-  on: ReadonlySet<string>;
+  state: { readonly [key: string]: Json | undefined };
   engine: EngineId;
 }
 const lines = (t: unknown) => String(t ?? '').split('\n');
@@ -593,8 +594,8 @@ export const DESK_FACTS = {
   sectionDirectives: { doc: 'The lyrics carry per-section adapter directives, with a stack of two or more.', of: directives },
   sectionTags: { doc: 'How many section tags ([Verse], [Chorus]) the lyrics hold (atLeast).', of: (f: FactInput) => lines(f.value('lyrics.text')).filter(l => /^\s*\[[^\]]+\]/.test(l)).length },
   customTimesteps: {
-    doc: 'Latent & correction is on the desk with two or more valid custom timesteps, which replace Steps and Schedule.',
-    of: (f: FactInput) => f.on.has('latent') && CHECKS.timesteps.test(String(f.value('lat.ts') ?? '')),
+    doc: 'Latent & correction holds two or more valid custom timesteps, which replace Steps and Schedule.',
+    of: (f: FactInput) => CHECKS.timesteps.test(String(f.value('lat.ts') ?? '')),
   },
   vstPlugins: { doc: 'How many VST3 plugins are in the chain (atLeast). Told by the plugin host.' },
 } as const satisfies Record<string, { doc: string; of?: (f: FactInput) => number | boolean }>;

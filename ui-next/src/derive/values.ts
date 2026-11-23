@@ -5,6 +5,8 @@
 import type { Definition, Json, ParamDef, StateDef, Value } from '../definitions/types.ts';
 import { CHECKS } from '../definitions/parts.ts';
 import { type Desk, type Index, enginesOf, has, resolve } from './core.ts';
+import { type Msg, msg } from './messages.ts';
+import { paramWords } from './strings.ts';
 
 /** A number whose step is whole on every engine it is on is a whole number: it is stored, set and sent whole. */
 export function isWhole(p: ParamDef, d: Definition): boolean {
@@ -52,7 +54,14 @@ export function cleanState(s: StateDef, raw: unknown): Json | undefined {
   if (raw === null) return null;
   switch (s.kind) {
     case 'file': return typeof raw === 'string' && raw.length <= 4096 ? raw : undefined;
-    case 'seed': return num(raw) && Number.isInteger(raw) && (raw as number) >= 0 && (raw as number) <= 4294967295 ? raw as number : undefined;
+    /* a seed is the application's: 0 to 2^64-1, a number while it is a safe integer, its decimal text beyond
+       (ui/src/utils/seed.ts); a seed that arrives as text within 2^53 is kept as the number */
+    case 'seed': {
+      if (num(raw)) return Number.isSafeInteger(raw) && (raw as number) >= 0 ? raw as number : undefined;
+      if (typeof raw !== 'string' || !/^\d{1,20}$/.test(raw.trim()) || BigInt(raw.trim()) > 18446744073709551615n) return undefined;
+      const big = BigInt(raw.trim());
+      return big <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(big) : big.toString();
+    }
     case 'span': {
       const r = raw as { start?: unknown; end?: unknown };
       return r && typeof r === 'object' && num(r.start) && num(r.end) && (r.start as number) >= 0 && (r.start as number) < (r.end as number) ? { start: r.start as number, end: r.end as number } : undefined;
@@ -139,7 +148,7 @@ export function cleanStates(ix: Index, state: unknown, retired: readonly string[
 /** Setting a value from a control, on the desk's engine: a number clamped to that engine's range and put on its step
  *  grid from the minimum (a control's own keys and drags make steps), a pair's end kept a step from the other. `said`
  *  is the one-time sentence when a typed number was out of range ("Steps: 1 to 64. Set to 64."). */
-export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { value: Value; said?: string } {
+export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { value: Value; said?: Msg } {
   const hit = ix.params.get(key);
   if (!hit || !has(ix, key, desk.engine)) throw new Error(`${key} is not on ${desk.engine}`);
   const f = resolve(hit.p, desk.engine);
@@ -148,6 +157,8 @@ export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { valu
     if (v === undefined) throw new Error(`${JSON.stringify(raw)} is not a value of ${key}`);
     return { value: v };
   }
+  /* a number that is no number (NaN, Infinity) is refused, as a string is */
+  if (!Number.isFinite(raw)) throw new Error(`${raw} is not a value of ${key}`);
   const [lo, hi, step] = f.range;
   let v = Math.min(hi, Math.max(lo, raw));
   v = +(lo + Math.round((v - lo) / step) * step).toFixed(10);
@@ -157,9 +168,8 @@ export function setValue(ix: Index, desk: Desk, key: string, raw: Value): { valu
     if (key === b) { const other = desk.vals[a] ?? resolve(ix.params.get(a)!.p, desk.engine).default; if (typeof other === 'number' && v < other + step) v = +(other + step).toFixed(10); }
   }
   if (raw < lo || raw > hi) {
-    const name = f.label;
     const w = (x: number) => (Number.isInteger(step) ? String(x) : x.toFixed(String(step).split('.')[1]?.length ?? 1));
-    return { value: v, said: `${name}: ${w(lo)} to ${w(hi)}. Set to ${w(v)}.` };
+    return { value: v, said: msg('set.said', { name: paramWords(ix, key, desk).label, lo: w(lo), hi: w(hi), v: w(v) }) };
   }
   return { value: v };
 }

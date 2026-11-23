@@ -32,7 +32,12 @@ export const seed = {
       steps: { set: '{noun} {from} → {to}' },
       owner: 'song',
       stored: 'none',
-      wire: 'param:seed',
+      /* the seed is kept to 2^64-1, as the application keeps it; ACE-Step, MiniMax-Music3 and Stable Audio 3 are sent a
+         number (the existing page's getGlobalParams sends Number(seed) there), YuE2 and HeartMuLa the decimal text */
+      wire: [
+        { engines: ['ace', 'minimax-m3', 'sa3'], wire: { to: 'param:seed', via: 'int' } },
+        { engines: ['yue2', 'heartmula'], wire: 'param:seed' },
+      ],
     },
     {
       key: 'stars',

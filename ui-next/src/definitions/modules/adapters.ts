@@ -49,7 +49,8 @@ export const adapters = {
       engines: ['ace', 'yue2'],
       wire: { none: 'Every engine says its own: see its line.' },
       per: [
-        { engines: ['ace'], range: [0, 4, 0.05], wire: 'param:adapterStack[1].scale', when: { param: 'ad.adv', is: 'advanced' } },
+        /* the second slot's strength applies while adapters are stacked and a second one is loaded */
+        { engines: ['ace'], range: [0, 4, 0.05], wire: 'param:adapterStack[1].scale', when: { all: [{ param: 'ad.adv', is: 'advanced' }, { state: 'adapters', atLeast: 2 }] } },
         { engines: ['yue2'], wire: 'model:yue2.nar.scales.global' },
       ],
     },
@@ -61,8 +62,8 @@ export const adapters = {
       range: [0, 4, 0.05],
       default: 1,
       engines: ['ace'],
-      /* the third slot is used while adapters are stacked (Single uses the first) */
-      when: { param: 'ad.adv', is: 'advanced' },
+      /* the third slot is used while adapters are stacked (Single uses the first) and a third one is loaded */
+      when: { all: [{ param: 'ad.adv', is: 'advanced' }, { state: 'adapters', atLeast: 3 }] },
       wire: 'param:adapterStack[2].scale',
     },
     {
@@ -279,7 +280,7 @@ export const adapters = {
       options: [
         { value: 'bf16', label: 'Full' },
         { value: 'q8_0', label: 'Q8 · ½ VRAM' },
-        { value: 'q4_k', label: 'Q4 · ¼ VRAM' },
+        { value: 'q4_0', label: 'Q4 · ¼ VRAM' },
       ],
       when: { any: [{ param: 'ad.mode', not: 'merge' }, { state: 'runtimeForced', set: true }] },
       engines: ['ace'],

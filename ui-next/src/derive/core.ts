@@ -8,7 +8,7 @@ import type {
   Value, WordsOverride,
 } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
-import { DESK_FACTS } from '../definitions/parts.ts';
+import { DESK_FACTS, type FactInput } from '../definitions/parts.ts';
 
 /* ---------------------------------------------------------------- the index */
 
@@ -71,8 +71,10 @@ export interface Desk {
   /** Auto switches, by parameter key. Absent: on auto. */
   auto: { [key: string]: boolean };
   state: { [key: string]: Json };
-  /** The desk facts (parts.ts DESK_FACTS) the page works out. */
-  facts: { [name: string]: number | boolean };
+  /** The two desk facts the page is told rather than works out (parts.ts DESK_FACTS without `of`): the plugin host's
+   *  count and the words for another engine's adapters. Every other fact is worked out when it is read (factOf), so
+   *  none can be stale. */
+  told?: { vstPlugins?: number; adaptersAway?: string };
   /** Modules, pedals and units on the desk. Built-in modules always are. */
   on: Set<string>;
   /** The models the server has selected, by `<engine>.<bucket>` (GET /api/backends/models): what a model choice
@@ -88,20 +90,41 @@ export const has = (ix: Index, key: string, e: EngineId): boolean => {
   return !!hit && hit.d.engines.includes(e) && enginesOf(hit.p, hit.d).includes(e);
 };
 
-export const isAuto = (ix: Index, key: string, desk: Desk): boolean => {
-  const hit = ix.params.get(key);
-  return !!hit && !!resolve(hit.p, desk.engine).auto && desk.auto[key] !== false;
+/* ---------------------------------------------------------------- the value in force
+   One answer, used by conditions, desk facts, words, the changed marker, summaries and the request alike: a value is
+   in force when its definition is on the desk (a built-in module always is; a module the tier hides is still on the
+   desk, and its settings still apply). A definition that is not on the desk reads as its defaults everywhere: its
+   values are kept for when it comes back, but nothing reads them, so the page and the request never describe two
+   different songs. A pedal's foot switch defaults to off (the validator checks it), so a pedal off the board is off. */
+
+/** Its values are in force: it is built in, or on the desk. */
+export const onDesk = (d: Definition, desk: Desk): boolean => (d.kind === 'module' && !!d.builtIn) || desk.on.has(d.id);
+/** The same desk with every definition on it: for what is about stored values whatever the desk shows (what an engine
+ *  switch puts aside and holds, what a revision saves). */
+export const everythingOn = (ix: Index, desk: Desk): Desk => ({ ...desk, on: new Set(ix.defs.map(d => d.id)) });
+/** The definition a parameter or a state belongs to is on the desk. */
+const keyOnDesk = (ix: Index, key: string, desk: Desk): boolean => {
+  const d = ix.params.get(key)?.d ?? ix.states.get(key)?.d;
+  return !!d && onDesk(d, desk);
 };
 
-/** The value in force on the desk's engine: the stored value when the engine can take it, else the engine's limit
- *  for a number (a held value), else the default. Reading never writes. Undefined when the engine lacks it. */
-export function valueOf(ix: Index, key: string, desk: Desk): Value | undefined {
+export const isAuto = (ix: Index, key: string, desk: Desk): boolean => {
+  const hit = ix.params.get(key);
+  return !!hit && !!resolve(hit.p, desk.engine).auto && (!onDesk(hit.d, desk) || desk.auto[key] !== false);
+};
+
+/** The stored value as the desk's engine takes it, whether or not its definition is on the desk: a number clamped to
+ *  the engine's range (a held value reads at the engine's limit), a choice the engine does not offer, or a value of the
+ *  wrong type, as the default. What a revision saves and a control shows. Undefined when the engine lacks the
+ *  parameter. Reading never writes. A number is put on the engine's step grid when it is set (values.ts setValue), not
+ *  when it is read: a value carried from another engine is sent as it was set, as the existing page sends it. */
+export function storedOn(ix: Index, key: string, desk: Desk): Value | undefined {
   const hit = ix.params.get(key);
   if (!hit || !has(ix, key, desk.engine)) return undefined;
   const f = resolve(hit.p, desk.engine), v = desk.vals[key];
   if (v === undefined) return f.default;
   if (hit.p.type === 'number') {
-    if (typeof v !== 'number' || !f.range) return f.default;
+    if (typeof v !== 'number' || !Number.isFinite(v) || !f.range) return f.default;
     return Math.min(f.range[1], Math.max(f.range[0], v));
   }
   if (hit.p.type === 'boolean') return typeof v === 'boolean' ? v : f.default;
@@ -111,6 +134,44 @@ export function valueOf(ix: Index, key: string, desk: Desk): Value | undefined {
   return typeof v === 'string' || typeof v === 'number' ? v : f.default;
 }
 
+/** The value in force on the desk's engine: the stored value as the engine takes it (storedOn) while its definition
+ *  is on the desk, else its default. Undefined when the engine lacks it. */
+export function valueOf(ix: Index, key: string, desk: Desk): Value | undefined {
+  const hit = ix.params.get(key);
+  if (!hit || !has(ix, key, desk.engine)) return undefined;
+  return onDesk(hit.d, desk) ? storedOn(ix, key, desk) : resolve(hit.p, desk.engine).default;
+}
+
+/** A state's value in force: what it holds while its definition is on the desk, else nothing (an adapter loaded in
+ *  an Adapters tile that was taken off the desk is not loaded). */
+export const stateOf = (ix: Index, key: string, desk: Desk): Json | undefined => (keyOnDesk(ix, key, desk) ? desk.state[key] : undefined);
+
+/** A desk fact's value: worked out from the values and state in force by its rule (parts.ts DESK_FACTS `of`), or as
+ *  the page was told it. Undefined when `name` is no fact. */
+export function factOf(ix: Index, name: string, desk: Desk): number | boolean | string | undefined {
+  const f = (DESK_FACTS as Record<string, { of?: (x: FactInput) => number | boolean }>)[name];
+  if (!f) return undefined;
+  /* the validator's finite evaluation tries each fact's values directly (TrialDesk); the page never passes these */
+  const trial = (desk as Partial<TrialDesk>).trialFacts;
+  if (trial && name in trial) return trial[name];
+  if (!f.of) return (desk.told as Record<string, number | string | undefined> | undefined)?.[name] ?? (name === 'adaptersAway' ? '' : 0);
+  const state = new Proxy(desk.state, { get: (_, k) => (typeof k === 'string' ? stateOf(ix, k, desk) : undefined) });
+  return f.of({ value: k => valueOf(ix, k, desk), state, engine: desk.engine });
+}
+/** A desk on which the validator tries desk facts' values directly instead of working them out, to ask whether a
+ *  condition can ever hold. Only tools/validate-definitions.ts makes one. */
+export interface TrialDesk extends Desk { trialFacts: { [name: string]: number | boolean | string } }
+
+/** Every desk fact, for a part's reads and for tools that print them. */
+export const factsOf = (ix: Index, desk: Desk): { [name: string]: number | boolean | string } =>
+  Object.fromEntries(Object.keys(DESK_FACTS).map(n => [n, factOf(ix, n, desk)!]));
+
+/** How many a state or a fact holds: a number as it is, a list by its length, anything else 1 or 0. */
+export function countOf(ix: Index, key: string, desk: Desk): number {
+  const v = key in DESK_FACTS ? factOf(ix, key, desk) : stateOf(ix, key, desk);
+  return typeof v === 'number' ? v : Array.isArray(v) ? v.length : v ? 1 : 0;
+}
+
 export function holds(ix: Index, c: Condition, desk: Desk): boolean {
   if ('all' in c) return c.all.every(x => holds(ix, x, desk));
   if ('any' in c) return c.any.some(x => holds(ix, x, desk));
@@ -118,8 +179,7 @@ export function holds(ix: Index, c: Condition, desk: Desk): boolean {
   if ('engine' in c) return c.engine.includes(desk.engine);
   if ('onDesk' in c) return desk.on.has(c.onDesk);
   if ('state' in c) {
-    const v = c.state in desk.facts ? desk.facts[c.state] : desk.state[c.state];
-    const n = typeof v === 'number' ? v : Array.isArray(v) ? v.length : v ? 1 : 0;
+    const n = countOf(ix, c.state, desk);
     if (c.atLeast !== undefined) return n >= c.atLeast;
     return c.set === undefined ? n > 0 : (n > 0) === c.set;
   }
@@ -131,14 +191,6 @@ export function holds(ix: Index, c: Condition, desk: Desk): boolean {
   if (c.above !== undefined && !(typeof v === 'number' && v > c.above)) return false;
   if (c.below !== undefined && !(typeof v === 'number' && v < c.below)) return false;
   return true;
-}
-
-/** The desk facts worked out from the desk (parts.ts DESK_FACTS, each one's `of`), over those the page was told. */
-export function factsOf(ix: Index, desk: Desk): Desk['facts'] {
-  const out = { ...desk.facts };
-  const input = { value: (k: string) => valueOf(ix, k, desk), state: desk.state, on: desk.on, engine: desk.engine };
-  for (const [name, f] of Object.entries(DESK_FACTS) as [string, { of?: (x: typeof input) => number | boolean }][]) if (f.of) out[name] = f.of(input);
-  return out;
 }
 
 /** It is on the engine and its own `when` holds: the concept's ok(k). */
@@ -186,7 +238,7 @@ export function textOf(ix: Index, key: string, desk: Desk): string {
 
 /* ---------------------------------------------------------------- words that name values (docs/05) */
 
-export const SLOT = /\{(engine|min|max|default|value:[\w.-]+|count:[\w.-]+|file:[\w.-]+(?:\|[^}]*)?)\}/g;
+export const SLOT = /\{(engine|min|max|default|value:[\w.-]+|count:[\w.-]+|say:[\w.-]+|file:[\w.-]+(?:\|[^}]*)?)\}/g;
 
 export function fill(ix: Index, text: string, desk: Desk, own?: ParamFace): string {
   return text.replace(SLOT, (m, slot: string) => {
@@ -195,10 +247,11 @@ export function fill(ix: Index, text: string, desk: Desk, own?: ParamFace): stri
     if (own && slot === 'default') return formatValue(own, own.default);
     const [kind, rest] = [slot.slice(0, slot.indexOf(':')), slot.slice(slot.indexOf(':') + 1)];
     if (kind === 'value') return ix.params.has(rest) && has(ix, rest, desk.engine) ? textOf(ix, rest, desk) : '';
-    if (kind === 'count') { const v = rest in desk.facts ? desk.facts[rest] : desk.state[rest]; return String(typeof v === 'number' ? v : Array.isArray(v) ? v.length : v ? 1 : 0); }
+    if (kind === 'count') return String(countOf(ix, rest, desk));
+    if (kind === 'say') return String(factOf(ix, rest, desk) ?? '');
     const [path, empty] = rest.split('|') as [string, string | undefined];
     const [key, at] = path.split('.') as [string, string | undefined];
-    let v: Json | undefined = desk.state[key];
+    let v: Json | undefined = stateOf(ix, key, desk);
     if (Array.isArray(v)) v = v[Number(at ?? 0)];
     if (v && typeof v === 'object' && !Array.isArray(v) && 'file' in v) v = (v as { file: Json }).file;
     return typeof v === 'string' && v ? v : empty ?? '';
@@ -246,25 +299,5 @@ export function editsAt(ix: Index, d: Definition, desk: Desk): Set<string> {
 /** The strip a module's tile is at the desk's tier, or null: the first of its strips that holds there. */
 export function stripOf(ix: Index, d: Definition, desk: Desk): NonNullable<Extract<Definition, { kind: 'module' }>['strip']>[number] | null {
   if (d.kind !== 'module') return null;
-  return (d.strip || []).find(s => (!s.tiers || s.tiers.includes(desk.tier)) && holds(ix, s.when, { ...desk, facts: factsOf(ix, desk) })) ?? null;
-}
-
-/** What a pedal's blanking plate says over the knobs its parameters' `when` hides on the desk (docs/01, "How a pedal
- *  and a side unit are laid out"): for knobs hidden by { param, is }, "with <that parameter's label>: <the labels of
- *  the values that show them, joined by or>". Null when nothing is hidden, or a hidden knob's condition is not of that
- *  form (the plate is then blank). */
-export function plateWords(ix: Index, d: Definition, desk: Desk): string | null {
-  const hidden = d.params.filter(p => p.type === 'number' && has(ix, p.key, desk.engine) && !applies(ix, p.key, desk));
-  if (!hidden.length) return null;
-  const by = new Map<string, Set<Value>>();
-  for (const p of hidden) {
-    const w = resolve(p, desk.engine).when as { param?: string; is?: Value | Value[] } | undefined;
-    if (!w || !w.param || w.is === undefined || Object.keys(w).length !== 2) return null;
-    const set = by.get(w.param) || new Set<Value>(); [w.is].flat().forEach(v => set.add(v)); by.set(w.param, set);
-  }
-  return 'with ' + [...by].map(([key, vals]) => {
-    const f = wordsOf(ix, ix.params.get(key)!.p, desk);
-    const labels = [...vals].map(v => formatValue(f, v));
-    return `${f.label}: ${labels.slice(0, -1).join(', ')}${labels.length > 1 ? ' or ' : ''}${labels[labels.length - 1]}`;
-  }).join('; ');
+  return (d.strip || []).find(s => (!s.tiers || s.tiers.includes(desk.tier)) && holds(ix, s.when, desk)) ?? null;
 }

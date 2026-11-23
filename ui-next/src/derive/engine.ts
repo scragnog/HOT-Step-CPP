@@ -3,7 +3,9 @@
 
 import type { EngineId, Json, Value } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, changed, enginesOf, formatValue, has, isAuto, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, applies, changed, enginesOf, everythingOn, formatValue, has, isAuto, resolve, valueOf } from './core.ts';
+import { type Msg, type Slot, list, msg } from './messages.ts';
+import { defName } from './steps.ts';
 
 /** What the desk keeps for the engines not in use. */
 export interface EngineBook {
@@ -19,20 +21,19 @@ export const emptyBook = (): EngineBook => ({ stash: {}, hold: {}, lastOn: {} })
 const ownerOf = (ix: Index, key: string) => { const h = ix.params.get(key)!; return h.p.owner ?? h.d.owner; };
 /** A model file choice: options the server lists from its model buckets. */
 const isModel = (ix: Index, key: string, e: EngineId) => { const o = resolve(ix.params.get(key)!.p, e).options; return !!o && !Array.isArray(o) && o.from === 'models'; };
-const and = (a: string[]) => (a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0] ?? '');
 const plural = (s: string) => /s$/.test(s);
-const fillSlots = (t: string, s: { [k: string]: string }) => t.replace(/\{(\w+)\}/g, (m, k: string) => s[k] ?? m);
 
-export interface Switched { desk: Desk; book: EngineBook; toast: string }
+export interface Switched { desk: Desk; book: EngineBook; toast: Msg }
 
 /** The desk moved from its engine to `to`, one undo step: every engine-owned value and state is put aside for the
  *  engine left and that engine's own come back (an engine reached for the first time starts on its defaults); song
  *  values stay; a held parameter reads at the new engine's limit and its value waits for an engine that can take it. */
-export function switchEngine(ix: Index, desk0: Desk, book0: EngineBook, to: EngineId): Switched {
-  const from = desk0.engine;
+export function switchEngine(ix: Index, deskIn: Desk, book0: EngineBook, to: EngineId): Switched {
+  /* what is put aside, counted and held is about the stored values, whatever the desk shows */
+  const desk0 = everythingOn(ix, deskIn), from = desk0.engine;
   const desk: Desk = { ...desk0, vals: { ...desk0.vals }, auto: { ...desk0.auto }, state: { ...desk0.state }, engine: to };
   const book: EngineBook = { stash: { ...book0.stash }, hold: { ...book0.hold }, lastOn: { ...book0.lastOn } };
-  if (from === to) return { desk: desk0, book: book0, toast: '' };
+  if (from === to) return { desk: deskIn, book: book0, toast: msg('switch.toast', { engine: engineName(to) }) };
   /* what stays behind: model files by name, adapters, and a count of the changed settings only the engine left uses */
   const own = [...new Set([...Object.keys(desk0.vals), ...Object.keys(desk0.auto)])].filter(k => ix.params.has(k) && ownerOf(ix, k) === 'engine');
   const mine = new Set([...own, ...[...new Set([...Object.keys(desk0.vals), ...Object.keys(desk0.auto)])].filter(k => ix.params.has(k) && has(ix, k, from) && !has(ix, k, to))]);
@@ -58,7 +59,7 @@ export function switchEngine(ix: Index, desk0: Desk, book0: EngineBook, to: Engi
   for (const k of heldKeys) {
     if (!has(ix, k, to)) continue;
     const r = resolve(ix.params.get(k)!.p, to).range!;
-    if (isAuto(ix, k, desk)) continue;
+    if (isAuto(ix, k, { ...desk, on: desk0.on })) continue;
     let h: EngineBook['hold'][string] | undefined = book.hold[k];
     if (h && desk.vals[k] !== h.shown) { delete book.hold[k]; h = undefined; } /* changed since it was held */
     const want = h ? h.value : typeof desk.vals[k] === 'number' ? desk.vals[k] as number : null;
@@ -69,33 +70,43 @@ export function switchEngine(ix: Index, desk0: Desk, book0: EngineBook, to: Engi
     if (!h || h.shown !== shown) held.push([k, want, shown, was]);
   }
   /* a source module (Repaint) the new engine does not have leaves the desk */
-  let removed = '';
-  for (const d of ix.defs) if (d.kind === 'module' && d.source && desk.on.has(d.id) && !d.engines.includes(to)) { desk.on = new Set([...desk.on].filter(x => x !== d.id)); removed = `${d.name} was removed: it needs ${and(d.engines.map(engineName))}`; }
+  desk.on = deskIn.on;
+  let removed: Msg | null = null;
+  for (const d of ix.defs) if (d.kind === 'module' && d.source && desk.on.has(d.id) && !d.engines.includes(to)) { desk.on = new Set([...desk.on].filter(x => x !== d.id)); removed = msg('switch.removed', { name: defName(d, deskIn), engines: list(d.engines.map(engineName)) }); }
   /* the toast: one sentence per thing that happened, in the order they matter */
-  const say: string[] = [];
+  const said: Slot[] = [];
   if (held.length) {
+    const heldMsg = (k: string, field: 'toast' | 'value', slots: { [k: string]: Slot }): Msg => {
+      const { p, d } = ix.params.get(k)!, text = field === 'toast' ? p.held!.toast : p.held!.value ?? '{value}';
+      return { id: `create.${d.id}.p.${k.replace(/\./g, '-')}.held.${field}`, en: text, slots };
+    };
+    /* the first is "Length capped at 4:00", those after it say only what (the template's " capped" is the first's) */
     const capped = held.map(([k, , shown], i) => {
-      const p = ix.params.get(k)!.p, t = fillSlots(p.held!.toast, { shown: formatValue(resolve(p, to), shown) });
-      return i ? t.replace(' capped', '') : t;
+      const t = heldMsg(k, 'toast', { shown: formatValue(resolve(ix.params.get(k)!.p, to), shown) });
+      return i ? { ...t, en: t.en!.replace(' capped', '') } : t;
     });
-    const wait = new Map<EngineId, string[]>();
+    const wait = new Map<EngineId, Msg[]>();
     for (const [k, v, , was] of held) {
       const p = ix.params.get(k)!.p, f = resolve(p, was) ?? resolve(p, enginesOf(p, ix.params.get(k)!.d)[0]!);
-      wait.set(was, [...(wait.get(was) || []), fillSlots(p.held!.value ?? '{value}', { value: formatValue(f, v) })]);
+      wait.set(was, [...(wait.get(was) || []), heldMsg(k, 'value', { value: formatValue(f, v) })]);
     }
-    say.push(`${and(capped)}; your ${[...wait].map(([e, a]) => `${and(a)} ${a.length > 1 || plural(a[0]!) ? 'wait' : 'waits'} on ${engineName(e)}`).join(', ')}`);
+    said.push(msg('switch.capped', { capped: list(capped), waits: list([...wait].map(([e, a]) => msg('switch.waits', { values: list(a), many: String(a.length > 1 || plural(a[0]!.en!)), engine: engineName(e) })), 'comma') }));
   }
-  const parts = [models.length ? `its model${models.length === 1 ? '' : 's'} (${models.join(', ')})` : '', slots ? `${slots} adapter${slots === 1 ? '' : 's'}` : '', sets ? `${sets} setting${sets === 1 ? '' : 's'}` : ''].filter(Boolean);
-  if (parts.length) say.push(`${engineName(from)} keeps ${and(parts)}`);
-  if (back) say.push(`${engineName(to)}'s own settings are back`);
-  if (removed) say.push(removed);
-  return { desk, book, toast: say.length ? `On ${engineName(to)}. ${say.join('. ')}.` : `On ${engineName(to)}.` };
+  const parts: Slot[] = [
+    ...(models.length ? [msg('switch.models', { n: models.length, names: list(models, 'comma') })] : []),
+    ...(slots ? [msg('switch.adapters', { n: slots })] : []),
+    ...(sets ? [msg('switch.settings', { n: sets })] : []),
+  ];
+  if (parts.length) said.push(msg('switch.keeps', { engine: engineName(from), parts: list(parts) }));
+  if (back) said.push(msg('switch.back', { engine: engineName(to) }));
+  if (removed) said.push(removed);
+  return { desk, book, toast: said.length ? msg('switch.toast.said', { engine: engineName(to), said: list(said, 'sentences') }) : msg('switch.toast', { engine: engineName(to) }) };
 }
 
 /** What a held parameter's control says while its value is held: its `held.note`, filled. */
-export function heldNote(ix: Index, key: string, desk: Desk, book: EngineBook): string {
+export function heldNote(ix: Index, key: string, desk: Desk, book: EngineBook): Msg | null {
   const h = book.hold[key], hit = ix.params.get(key);
-  if (!h || !hit?.p.held || desk.vals[key] !== h.shown) return '';
+  if (!h || !hit?.p.held || desk.vals[key] !== h.shown) return null;
   const f = resolve(hit.p, desk.engine), from = resolve(hit.p, h.from);
-  return fillSlots(hit.p.held.note, { shown: formatValue(f, h.shown), value: formatValue(from, h.value), engine: engineName(h.from) });
+  return { id: `create.${hit.d.id}.p.${key.replace(/\./g, '-')}.held.note`, en: hit.p.held.note, slots: { shown: formatValue(f, h.shown), value: formatValue(from, h.value), engine: engineName(h.from) } };
 }
