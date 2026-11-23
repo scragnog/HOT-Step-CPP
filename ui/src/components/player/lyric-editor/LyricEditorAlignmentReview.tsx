@@ -59,6 +59,31 @@ export interface LyricEditorAlignmentReviewProps {
   onDiscard: () => void;
 }
 
+/**
+ * The "what moves" part of the summary. Word times and line starts are counted
+ * apart: a song with line starts and no word times has wordsMoved 0 while its
+ * lines still change, so rows are the fallback. Once applied the rows are
+ * written, so the wording is past tense.
+ */
+export function moveSummary(
+  wordsMoved: number, changedRowCount: number, applied: boolean,
+  t: (key: string, fallback: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (wordsMoved > 0) {
+    return applied
+      ? t('lyrics.editor.reviewMovedApplied', '{{count}} moved', { count: wordsMoved })
+      : t('lyrics.editor.reviewMoved', '{{count}} would move', { count: wordsMoved });
+  }
+  if (changedRowCount > 0) {
+    return applied
+      ? t('lyrics.editor.reviewLinesMovedApplied', '{{count}} lines moved', { count: changedRowCount })
+      : t('lyrics.editor.reviewLinesMoved', '{{count}} lines would move', { count: changedRowCount });
+  }
+  return applied
+    ? t('lyrics.editor.reviewNothingMovedApplied', 'nothing moved')
+    : t('lyrics.editor.reviewNothingMoved', 'nothing would move');
+}
+
 export const LyricEditorAlignmentReview: React.FC<LyricEditorAlignmentReviewProps> = ({
   preview, current, applying, applied, onApplyNew, onApplyMix, onApplyLine, onJump, onJumpTime, onFocusLine,
   onDiscard,
@@ -90,9 +115,7 @@ export const LyricEditorAlignmentReview: React.FC<LyricEditorAlignmentReviewProp
   const summary = [
     `${result.lineCount} ${t('lyrics.editor.reviewLines', 'lines')}`,
     `${result.wordCount} ${t('lyrics.editor.reviewWords', 'words')}`,
-    result.wordsMoved > 0
-      ? t('lyrics.editor.reviewMoved', '{{count}} would move', { count: result.wordsMoved })
-      : t('lyrics.editor.reviewNothingMoved', 'nothing would move'),
+    moveSummary(result.wordsMoved, changedRows.length, !!applied, t),
     result.method,
     result.vocalsIsolated
       ? t('lyrics.editor.reviewOnStem', 'on the vocal stem')
