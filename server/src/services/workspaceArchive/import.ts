@@ -392,14 +392,15 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
 
   // Everything is built in a staging folder beside the target that only this
   // import creates, then renamed into place once the target is re-checked.
-  // Cleanup removes only the staging folder, or after the rename only the
-  // entries it moved in. Stored paths name the target, not the staging folder.
+  // A failure before the rename removes only the staging folder. The rename
+  // ends the import: a failed switch after it keeps the verified folder (its
+  // report says scheduled: false) and deletes nothing. Stored paths name the
+  // target, not the staging folder.
   const stage = path.join(path.dirname(target), `.${path.basename(target)}.hs-import-${crypto.randomBytes(4).toString('hex')}`);
   const inStage = (name: string) => path.join(stage, ...name.split('/'));
   let staged = false;
-  let moved: string[] | null = null;
-  let createdTarget = false;
   let restoreEmpty = false;
+  let report: ImportReport;
   try {
     pre = errorsNow();   // the target may have changed while the archive was read
     if (pre.length) throw new ImportError(pre.join('; '), 409, { errors: pre });
@@ -496,7 +497,7 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
     initLayout(l);
     if (env.text) fs.writeFileSync(l.envPath, env.text, { encoding: 'utf-8', flag: 'wx' });
 
-    const report: ImportReport = {
+    report = {
       importedAt: new Date().toISOString(), zipFile: o.zipFile, target,
       archive: { createdAt: manifest.createdAt, appVersion: manifest.appVersion, platform: manifest.platform, dataRoot: manifest.dataRoot, categories: manifest.categories },
       files: manifest.files.length, bytes: bytesTotal, integrity: hasDb ? 'ok' : 'no database',
@@ -505,7 +506,7 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
       env: { fromArchive: env.fromArchive, pointedHere: env.pointedHere, dropped: env.dropped },
       externals: manifest.externals.map(x => ({ ...x, existsHere: fs.existsSync(x.path) })),
       skipped: manifest.skipped.length + manifest.skippedNotListed,
-      scheduled: !!o.schedule,
+      scheduled: false,
     };
     writeJsonAtomic(path.join(stage, REPORT_NAME), report);
 
@@ -521,30 +522,32 @@ export async function importWorkspace(o: ImportOptions): Promise<ImportReport> {
     check();
     pre = errorsNow();
     if (pre.length) throw new ImportError(`the new folder was checked again before the switch: ${pre.join('; ')}`, 409, { errors: pre });
-    const names = fs.readdirSync(stage);
-    createdTarget = !fs.existsSync(target);
     // rmdir refuses a folder that gained an entry; rename refuses a target that reappeared.
-    if (!createdTarget) { fs.rmdirSync(target); restoreEmpty = true; }
+    if (fs.existsSync(target)) { fs.rmdirSync(target); restoreEmpty = true; }
     fs.renameSync(stage, target);
     staged = false;
-    moved = names;
-
-    o.schedule?.(target);
-    return report;
+    restoreEmpty = false;
   } catch (e) {
     zip.close();
     // Retries: Windows can hold a just-destroyed write stream's file for a moment.
     const rm = (p: string) => removeSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     try {
       if (staged) rm(stage);
-      if (moved) {
-        for (const n of moved) rm(path.join(target, n));
-        if (createdTarget && isEmptyDir(target)) fs.rmdirSync(target);
-      }
       if (restoreEmpty && !fs.existsSync(target)) fs.mkdirSync(target);
     } catch (c: any) {
-      if (e instanceof Error) e.message += `; the half-written folder ${staged ? stage : target} could not be removed (${c.message}): delete it by hand`;
+      if (e instanceof Error) e.message += `; the half-written folder ${stage} could not be removed (${c.message}): delete it by hand`;
     }
     throw e;
   }
+
+  // ── Switch ── The folder is complete and stays, whatever happens here.
+  if (o.schedule) {
+    try { o.schedule(target); } catch (e: any) {
+      throw new ImportError(`${target} is imported and verified, but switching to it failed (${e.message}). `
+        + 'Switch to it in Settings > Storage & Data with "use an existing data folder", or delete it.', e.status ?? 500, { report, errors: e.errors ?? [] });
+    }
+    report.scheduled = true;
+    writeJsonAtomic(path.join(target, REPORT_NAME), report);
+  }
+  return report;
 }

@@ -290,13 +290,16 @@ test('target checks: non-empty, inside the app, inside or around the current dat
   await refused(importWorkspace({ zipFile: zip, target: 'relative/path', here: w.here }), /absolute path/);
   await refused(importWorkspace({ zipFile: zip, target: path.join(w.dir, 'no', 'parent'), here: w.here }), /does not exist/);
   await refused(importWorkspace({ zipFile: zip, target: w.target, here: w.here, targetErrors: () => ['belongs to another HOT-Step install'] }), /another HOT-Step install/);
-  // An empty folder that already exists is used, and emptied again on failure.
+  // An empty folder that already exists is used, and left empty by a failure before the switch.
   fs.mkdirSync(w.target);
-  await assert.rejects(importWorkspace({ zipFile: zip, target: w.target, here: w.here, schedule: () => { throw new Error('pointer busy'); } }), /pointer busy/);
-  assert.deepEqual(fs.readdirSync(w.target), [], 'emptied, not removed');
+  hooks.afterFile = () => { throw new Error('disk full'); };
+  try {
+    await refused(importWorkspace({ zipFile: zip, target: w.target, here: w.here }), /disk full/);
+  } finally { hooks.afterFile = () => {}; }
+  assert.deepEqual(fs.readdirSync(w.target), [], 'still there, still empty');
 });
 
-test('cancel during extraction and a failing switch both remove the folder; the switch waits for running work', async () => {
+test('cancel during extraction removes the folder; a failing switch keeps the verified folder and deletes nothing; the switch waits for running work', async () => {
   const w = world();
   const zip = await exported(w);
   const ac = new AbortController();
@@ -306,8 +309,21 @@ test('cancel during extraction and a failing switch both remove the folder; the 
   } finally { hooks.afterFile = () => {}; }
   assert.ok(!fs.existsSync(w.target));
 
-  await assert.rejects(importWorkspace({ zipFile: zip, target: w.target, here: w.here, schedule: () => { throw new Error('scheduling failed'); } }), /scheduling failed/);
-  assert.ok(!fs.existsSync(w.target));
+  // A user file lands in the published library just before scheduling fails.
+  const userFile = path.join(w.target, 'library', 'audio', 'mine.wav');
+  await assert.rejects(importWorkspace({
+    zipFile: zip, target: w.target, here: w.here,
+    schedule: () => { fs.writeFileSync(userFile, 'user'); throw Object.assign(new Error('pointer busy'), { status: 409 }); },
+  }), (e: any) => {
+    assert.ok(e instanceof ImportError && e.status === 409);
+    assert.match(e.message, /is imported and verified, but switching to it failed \(pointer busy\)/);
+    assert.equal((e.extra.report as { scheduled: boolean }).scheduled, false);
+    return true;
+  });
+  assert.equal(fs.readFileSync(userFile, 'utf-8'), 'user', 'nothing deleted');
+  assert.ok(isDataLayout(w.target) && fs.existsSync(path.join(w.target, 'library', 'audio', 'a.wav')), 'the verified folder is kept');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(w.target, REPORT_NAME), 'utf-8')).scheduled, false);
+  fs.rmSync(w.target, { recursive: true });
 
   let busy = 2;
   const seen: string[][] = [];

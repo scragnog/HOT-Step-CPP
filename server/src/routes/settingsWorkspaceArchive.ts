@@ -62,7 +62,7 @@ export interface ImportJob {
   zipFile: string;
   target: string;
   progress: ImportProgress | null;
-  /** Set when done: the folder is complete and the switch is scheduled. */
+  /** Set when the folder is complete: done (switch scheduled), or failed while switching (folder kept, scheduled: false). */
   report: ImportReport | null;
   error: string | null;
   errors: string[];
@@ -254,7 +254,8 @@ export function createWorkspaceArchiveRouter(deps: Deps): Router {
       }).then(report => {
         Object.assign(mine, { state: 'done', report });
       }).catch((e: any) => {
-        Object.assign(mine, e instanceof ImportCancelled ? { state: 'cancelled' } : { state: 'failed', error: e.message, errors: e.extra?.errors ?? e.errors ?? [] });
+        // A failed switch keeps the verified folder: its report comes with the error.
+        Object.assign(mine, e instanceof ImportCancelled ? { state: 'cancelled' } : { state: 'failed', error: e.message, errors: e.extra?.errors ?? e.errors ?? [], report: e.extra?.report ?? null });
         if (!(e instanceof ImportCancelled)) console.error('[WorkspaceArchive] import failed:', e.message);
       }).finally(() => {
         mine.finishedAt = now().toISOString();
