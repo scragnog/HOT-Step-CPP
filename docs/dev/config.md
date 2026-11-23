@@ -69,6 +69,10 @@ the GPU list and the data-folder controls (handlers in `routes/settingsDataFolde
 | `POST /api/settings/workspace-archive/export` | Body `{ "destination", "categories"? }`. Holds writes (every other mutating request gets 503 `{ maintenance: { state: 'held' } }`), then answers 202 `{ job }` and zips in the background. 409 while an export runs, 400 on a bad destination or choice |
 | `GET /api/settings/workspace-archive/export` | `{ job }`: `state` (`holding`, `running`, `done`, `failed`, `cancelled`), `progress`, `outFile`, `bytes`, `error`. Null before the first export |
 | `POST /api/settings/workspace-archive/export/cancel` | Aborts the running export and drops the hold; allowed through the hold |
+| `POST /api/settings/workspace-archive/import/preview` | Body `{ "zip", "target"? }`, absolute paths. Reads the archive's manifest and returns the carried sources with sizes, `externals` (each with `existsHere`), skipped entries, the target's free space and errors, and the blockers. 400 on a bad archive |
+| `POST /api/settings/workspace-archive/import` | Body `{ "zip", "target" }`. Unpacks into the new folder, verifies, rewrites paths, schedules a `repoint` and restarts. 202 `{ job }`; 400 on target errors, 409 while work runs or an export or import is active |
+| `GET /api/settings/workspace-archive/import` | `{ job }`: `state` (`running`, `done`, `failed`, `cancelled`), `progress.phase` (`checking`, `extracting`, `rewriting`, `waiting`, `finishing`; `waiting` carries `blockers`), `report`, `error`. The job is in memory only; after the restart read `<target>/import-report.json` |
+| `POST /api/settings/workspace-archive/import/cancel` | Aborts the import and removes the half-written folder |
 
 The whitelist is `EXPOSED_ENV_KEYS` in `config.ts`. A key that is not on it can only be
 set by editing `.env` or the shell environment. Keys in `RESTART_REQUIRED_KEYS` are written

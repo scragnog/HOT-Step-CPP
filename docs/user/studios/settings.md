@@ -156,7 +156,21 @@ export: running or queued work, a destination inside a folder being exported, or
 little space. **Start export** stays disabled while any of these remain. While the export
 runs, every other change in the app is paused and the panel shows progress and a
 **Cancel export** button; playback and viewing keep working. A cancelled or failed export
-leaves no zip behind. Import is not in the panel yet.
+leaves no zip behind.
+
+The same panel imports an archive on the machine you want to move to. Enter the zip's full
+path and a new, empty data folder (outside the app folder and your current data folder),
+then click **Preview import**. The preview shows when and by which version the archive was
+made, size per category, free space in the new folder, and any paths the archive points at
+outside itself. Those are left as they are, and ones missing on this machine are marked.
+**Import and switch** unpacks into the new folder, checks every file, updates the stored
+paths, then restarts HOT-Step into it. Your old data folder is not touched, so it stays as
+your backup; go back with **Use existing folder** in the Data folder panel. The import
+refuses to start while work is running, and an export cannot run during an import. If the
+unpacking finishes while work is still running, the panel lists it and the switch waits;
+cancelling then removes the new folder. After the restart the import report is saved as
+`import-report.json` in the new folder. Archives only import onto the same kind of system
+they came from.
 
 | Control | What it does |
 |---|---|

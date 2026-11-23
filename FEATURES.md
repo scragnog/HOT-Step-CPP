@@ -437,7 +437,7 @@ Configuration for engine, server, providers, downloads and storage, with album-p
 | Settings and Lyric Studio backup | Export versioned JSON and preview a validated replacement before confirming import. [Details](docs/user/settings-backup.md). |
 | Storage cleanup | Stem storage counter and separate nukes for generations, written lyrics and profiles. |
 | Data folder | Release data persists outside the app across versions; the Data folder panel moves it, points at another folder, starts an empty library or imports a previous install. A development checkout can move and repoint its data too. See [Data folder and upgrades](docs/user/data-folder.md). |
-| Workspace archive | Settings > Storage & Data exports the library, and optionally training data, adapters, models and secrets, to one zip. Models and secrets are off by default. Other writes pause during the export, and it shows progress and can be cancelled. See [Settings](docs/user/studios/settings.md). |
+| Workspace archive | Settings > Storage & Data exports the library, and optionally training data, adapters, models and secrets, to one zip. Models and secrets are off by default. Other writes pause during the export, and it shows progress and can be cancelled. The same panel imports a zip into a new data folder, previews it first, and switches to it after a restart without touching the old folder. See [Settings](docs/user/studios/settings.md). |
 | Updates | Shows the installed build and compares it with the Release or Master feed on GitHub, at startup once a day or with Check now. It only tells you; the app does not update itself. |
 | Terminal, Restart and Quit | Live engine log with search and a VRAM badge; sidebar restart and clean shutdown. |
 

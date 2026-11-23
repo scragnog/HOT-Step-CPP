@@ -3,16 +3,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Archive, FolderOpen } from 'lucide-react';
 import { workspaceArchiveApi, type ArchiveCategoryId, type ArchiveChoice } from '../../services/workspaceArchiveApi';
-import { workspaceArchiveJobOptions, workspaceArchivePreviewOptions } from '../../queries/shell-queue/settings';
+import { workspaceArchiveImportJobOptions, workspaceArchiveJobOptions, workspaceArchivePreviewOptions } from '../../queries/shell-queue/settings';
 import { queryManager } from '../../queries/invalidation';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from './SettingsPrimitives';
+import { WorkspaceArchiveImport } from './WorkspaceArchiveImport';
 
 const CATEGORIES: ArchiveCategoryId[] = ['library', 'training', 'adapters', 'models', 'secrets'];
 const gb = (n: number) => `${(n / 1e9).toFixed(2)} GB`;
 
-/** Settings > Storage & Data: export the workspace to a zip. Import joins it once its contract lands. */
+/** Settings > Storage & Data: export the workspace to a zip, or import one into a new data folder. */
 export function WorkspaceArchivePanel() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -25,6 +26,8 @@ export function WorkspaceArchivePanel() {
   const jobQuery = useQuery(workspaceArchiveJobOptions());
   const job = jobQuery.data?.job ?? null;
   const running = job?.state === 'holding' || job?.state === 'running';
+  // The server answers 409 to an export while an import runs; disable it here too.
+  const importing = useQuery(workspaceArchiveImportJobOptions()).data?.job?.state === 'running';
   const previewQuery = useQuery(workspaceArchivePreviewOptions(checked));
   const preview = previewQuery.data ?? null;
   const picked = choice ?? preview?.defaults ?? null;
@@ -58,7 +61,7 @@ export function WorkspaceArchivePanel() {
   const free = dest?.freeBytes ?? null;
   const tooSmall = free !== null && needed > free;
   const problems = [...(preview?.blockers ?? []), ...(dest?.errors ?? []), ...(tooSmall ? [t('settings.workspaceArchive.noSpace')] : [])];
-  const canStart = !running && !startMut.isPending && !previewQuery.isFetching && !previewQuery.isError && !!picked && !!dest && checked === destination.trim() && problems.length === 0;
+  const canStart = !running && !importing && !startMut.isPending && !previewQuery.isFetching && !previewQuery.isError && !!picked && !!dest && checked === destination.trim() && problems.length === 0;
   const pct = job?.progress && job.progress.bytesTotal > 0 ? Math.min(100, Math.round(100 * job.progress.bytesDone / job.progress.bytesTotal)) : 0;
 
   return <section className="settings-section">
@@ -109,6 +112,7 @@ export function WorkspaceArchivePanel() {
         {problems.map((p, i) => <p key={i} role="alert" className="text-red-600 dark:text-red-400">{p}</p>)}
         <button type="button" className="settings-save-btn" disabled={!canStart} onClick={() => startMut.mutate()}>{t('settings.workspaceArchive.start')}</button>
       </>}
+      <WorkspaceArchiveImport exporting={running} />
     </div>
     <FileBrowserModal open={browsing} mode="folder" startPath={destination} title={t('settings.workspaceArchive.browse')}
       onClose={() => setBrowsing(false)} onSelect={p => { setBrowsing(false); setDestination(p); setChecked(p.trim()); }} />

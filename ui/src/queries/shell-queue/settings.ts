@@ -6,7 +6,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { adapterApi, healthApi, profileApi, reportLogsApi, settingsApi } from '../../services/api';
 import { audioQueueApi } from '../../services/audioQueueApi';
 import { dataFolderApi } from '../../services/dataFolderApi';
-import { workspaceArchiveApi, type ArchiveJob } from '../../services/workspaceArchiveApi';
+import { workspaceArchiveApi, type ArchiveImportJob, type ArchiveJob } from '../../services/workspaceArchiveApi';
 import { updatesApi, type UpdateRestartAttempt } from '../../services/updatesApi';
 import { completedUpdate, updatesViewState } from '../../stores/updatesViewState';
 import { getStemStats } from '../../services/stemStudioApi';
@@ -85,6 +85,14 @@ export const workspaceArchiveJobOptions = () => queryOptions({
   queryFn: ({ signal }) => workspaceArchiveApi.job({ signal }),
   staleTime: 0,
   refetchInterval: pollWhile<{ job: ArchiveJob | null }>(d => d?.job?.state === 'holding' || d?.job?.state === 'running', 1000),
+});
+
+/** The workspace import job; polled while it runs. The server restarts when it finishes, so the poll then fails and backs off. */
+export const workspaceArchiveImportJobOptions = () => queryOptions({
+  queryKey: serverKey('shell-queue/workspace-archive-import-job'),
+  queryFn: ({ signal }) => workspaceArchiveApi.importJob({ signal }),
+  staleTime: 0,
+  refetchInterval: pollWhile<{ job: ArchiveImportJob | null }>(d => d?.job?.state === 'running', 1000),
 });
 
 /** Bytes per category, blockers and (when given) the destination's checks. Fresh per ask. */

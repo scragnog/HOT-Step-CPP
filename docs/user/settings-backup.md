@@ -40,7 +40,9 @@ folder and are not in the JSON file. Treat a copy of the folder as secret.
 
 To move your workspace to another machine, use **Workspace archive** in Settings > Storage & Data
 instead of copying by hand: it writes one zip of the library and, if you choose, training data,
-adapters, models and secrets. Models and secrets are off by default.
+adapters, models and secrets. Models and secrets are off by default. On the other machine,
+the same panel imports the zip into a new folder and switches to it; your old folder is left
+untouched.
 
 Upgrading does not need a backup restore: extract the new version and start it. It finds
 the same data folder through your profile. See [Data folder and upgrades](data-folder.md).
