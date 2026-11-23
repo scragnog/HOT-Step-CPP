@@ -41,9 +41,10 @@ export function WorkflowsPanel({ open, set }: { open: boolean; set: (v: boolean)
     <aside {...useSide('left', open)} id="leftPanel" aria-label={say(ui('panel.workflows'))}>
       <button className="rail-btn" data-expand="left" onClick={() => { set(true); requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-collapse="left"]')?.focus({ preventScroll: true })); }}>{say(ui('panel.workflows'))}</button>
       <div className="side-head"><h2>{say(ui('panel.workflows'))}</h2>
-        <button className="small-btn" id="saveBtn" aria-controls="saveRow" aria-expanded="false"><Icon name="plus" size={13} />{say(ui('panel.save'))}</button>
+        <Slot name="panel.workflows.head" />
         <button className="icon-btn" data-collapse="left" aria-label={say(ui('panel.collapse'))} title={say(ui('panel.collapse.title'))} onClick={() => collapse('left', set)}><Icon name="chevL" size={15} /></button>
       </div>
+      <Slot name="panel.workflows.save" />
       <div className="side-body" id="presetList"><Slot name="panel.workflows" /></div>
     </aside>
   );

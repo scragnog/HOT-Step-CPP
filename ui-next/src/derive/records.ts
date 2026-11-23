@@ -59,9 +59,11 @@ export function loadRevision(ix: Index, desk: Desk, rev: unknown): { desk: Desk;
   for (const { p } of ix.params.values()) {
     if (!has(ix, p.key, e) || ix.params.get(p.key)!.d.kind === 'module' && (ix.params.get(p.key)!.d as { source?: true }).source) continue;
     const s = storedOf(ix, p.key);
-    if (s === 'settings' || (rec.withContent && s === 'content')) { delete out.vals[p.key]; delete out.auto[p.key]; }
+    /* content a revision holds as empty text replaces nothing: no saved lyrics or caption means yours stay */
+    if (s === 'settings' || (rec.withContent && s === 'content' && rec.vals[p.key] !== '')) { delete out.vals[p.key]; delete out.auto[p.key]; }
   }
   const c = cleanValues(ix, rec.vals, rec.auto, RETIRED.keys), st = cleanStates(ix, rec.state, RETIRED.states);
+  for (const k of Object.keys(c.vals)) if (c.vals[k] === '' && storedOf(ix, k) === 'content') delete c.vals[k];
   Object.assign(out.vals, c.vals); Object.assign(out.auto, c.auto);
   for (const { s } of ix.states.values()) if (s.stored === 'settings') delete out.state[s.key];
   Object.assign(out.state, st.state);
