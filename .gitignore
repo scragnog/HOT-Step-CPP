@@ -5,6 +5,7 @@ node_modules/
 ui/dist/
 server/dist/
 build/
+!ui/src/components/cover-studio/build/
 
 # Data (local, not committed)
 server/data/
