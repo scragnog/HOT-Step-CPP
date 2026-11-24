@@ -9,7 +9,7 @@ const helpers = async t => {
   await t.js(() => { window.A = '.tile[data-m="adapters"]'; window.ctls = () => [...new Set([...document.querySelectorAll('.tile[data-m="sampler"] [data-ctl]')].map(e => e.dataset.ctl))]; window.__d = {
     undo: () => (document.querySelector('#undoBtn').hidden ? '' : document.querySelector('#undoBtn span').textContent),
     toast: () => (document.querySelector('#toast').hidden ? '' : document.querySelector('#toast .toast-msg')?.textContent || ''),
-    text: s => document.querySelector(s)?.textContent.replace(/ /g, ' ').replace(/\s+/g, ' ').trim() ?? null,
+    text: s => document.querySelector(s)?.textContent.replace(/\s+/g, ' ').trim() ?? null,
     shown: s => { const e = document.querySelector(s); return !!e && !e.hidden && e.getBoundingClientRect().height > 0; },
     box: s => { const r = document.querySelector(s)?.getBoundingClientRect(); return r ? [Math.round(r.width), Math.round(r.height)] : null; },
   }; });
@@ -48,7 +48,7 @@ export default [
     await t.ok('and one chosen is the planner adapter', () => get('ad.planner') !== '' && !document.querySelector(`${A} .mod-strip`));
     for (const [e, n] of [['yue', 'AR · composer'], ['mm3', 'Planner LM'], ['hm', 'Global LM']]) {
       await engine(t, e);
-        await t.click(`${A} .mod-strip .sbtn`);
+      await t.click(`${A} .mod-strip .sbtn`);
       await t.ok(`${n}: the list opens (RD-01)`, () => __d.shown('#pop') && document.querySelectorAll('#pop .cartpick').length > 0);
       await t.click('#pop .cartpick');
       await t.ok(`${n}: the first adapter loads`, () => S.slots.length === 1 && /^Load /.test(__d.undo()));
