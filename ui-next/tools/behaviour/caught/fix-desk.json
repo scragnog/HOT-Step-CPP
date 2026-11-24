@@ -23,6 +23,14 @@
   "fix-desk: the lip's focus ring inside": ["37-fix-desk/side-unit-lip-focus-is-a-whole-ring"],
   "fix-desk: a resize keeps the widths": ["37-fix-desk/a-resize-at-the-same-width-keeps-the-desk"],
   "fix-desk: a pedal snaps again when it grows": ["37-fix-desk/a-pedal-that-grows-a-line-snaps-again"],
-  "fix-desk: a unit's text field holds its words": ["37-fix-desk/cover-art-subject-field-holds-its-words"]
+  "fix-desk: a unit's text field holds its words": ["37-fix-desk/cover-art-subject-field-holds-its-words"],
+  "fix-desk: a cleared file is said with Undo": ["02-dnd-panels/file-drops"],
+  "fix-desk: N more opens the rest": ["02-dnd-panels/file-drops"],
+  "fix-desk: the blend is a percent": ["17-undo-net/timbre-load-is-its-own-step"],
+  "fix-desk: a replaced file is said by its title": ["17-undo-net/timbre-load-is-its-own-step"],
+  "fix-desk: Add it carries its item": ["14-lab-desk/off-settings-show-at-once"],
+  "fix-desk: a link rings a file at its drop zone": ["20-lab-round5/pedals-with-nothing-to-run"],
+  "fix-desk: a click in a pad goes to the nearer control": ["11-engines/hit-areas-go-to-the-nearer-control"],
+  "fix-desk: one timestep is no schedule": ["14-lab-desk/timesteps-keep-what-was-typed"]
  }
 }
