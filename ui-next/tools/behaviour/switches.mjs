@@ -11,7 +11,7 @@
 // A switch is tried against the scenarios that can catch it, in turn, stopping at the first that catches it:
 //   1. recorded: the scenarios that caught it last time (caught/<package>.json, written by every run);
 //   2. own: the rest of its own package's acceptance (acceptance/<package>.json);
-//   3. rest: the rest of the whole acceptance.
+//   3. rest: the rest of the whole acceptance, one other package's acceptance file at a time.
 // A scenario counts as catching a switch only if it fails with the feature off and passes with it on (each scenario
 // that fails on the switched build is run once on the test build, dist-test/index.html, to know). A scenario waiting on a
 // later package catches nothing. Running fewer scenarios can only miss a catch, which the next stage then looks for,
@@ -21,9 +21,11 @@
 // its file, as the build applies it, which is what a merge most often breaks.
 // --package <regex> takes the switches of the packages whose file name matches (e.g. "^(slice|5-models)$").
 // --scenarios <regex> limits every stage to the acceptance's scenarios whose id matches.
+// --workers n is passed to run.mjs (default: half the machine's threads, 6 on 12; lower it to leave more).
 // --fresh ignores the record (each switch starts at its own package's acceptance); --no-record leaves caught/*.json
 // as they are.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +34,7 @@ import { ensureTestBuild, testPage } from '../test-build.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url)), repo = path.resolve(here, '..', '..');
 const args = process.argv.slice(2), opt = (k, d) => { const i = args.indexOf('--' + k); return i < 0 ? d : args[i + 1]; }, flag = k => args.includes('--' + k);
 const only = opt('only') ? new RegExp(opt('only')) : null, pkgRe = opt('package') ? new RegExp(opt('package')) : null;
-const scRe = opt('scenarios') ? new RegExp(opt('scenarios')) : null, workers = opt('workers', '2');
+const scRe = opt('scenarios') ? new RegExp(opt('scenarios')) : null, workers = opt('workers', String(Math.max(1, Math.floor(os.availableParallelism() / 2))));
 const json = f => JSON.parse(fs.readFileSync(f, 'utf8'));
 const sec = ms => { const s = Math.round(ms / 1000); return s < 60 ? s + ' s' : s < 3600 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s` : `${(s / 3600).toFixed(1)} h`; };
 
@@ -109,7 +111,7 @@ for (const { feature, pkg } of features) {
   if (b.status !== 0) row.stage = 'BUILD FAILED', row.error = (b.stderr || b.stdout).split('\n').filter(l => /error|switch/i.test(l)).slice(0, 2).join(' / ');
   else {
     const rec = flag('fresh') ? [] : (records[pkg][feature] || []).filter(id => ALL.includes(id));
-    const stages = whole ? [['whole', ALL]] : [['recorded', rec], ['own', OWN(pkg)], ['rest', ALL]];
+    const stages = whole ? [['whole', ALL]] : [['recorded', rec], ['own', OWN(pkg)], ...Object.keys(accs).filter(p => p !== pkg).map(p => ['rest', OWN(p)])];
     const tried = new Set();
     for (const [stage, list] of stages) {
       const ids = list.filter(id => !tried.has(id)); if (!ids.length) continue;

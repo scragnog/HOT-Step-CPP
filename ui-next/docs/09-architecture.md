@@ -858,11 +858,11 @@ runner. Then, on the package's branch and again on the tree after each merge:
 
 ```
 npm run check && npm run lint
-npm run build:test && npm run behaviour -- --slice   # the whole acceptance (about 6 minutes at 2 workers)
+npm run build:test && npm run behaviour -- --slice --workers 2   # the whole acceptance (about 6 minutes)
 npm run switches:apply                               # every switch still applies exactly once (a second; merges break this most)
 npm run visual:all                                   # every package's visual set, one line each (about 21 minutes at 2 workers)
-npm run visual:all -- --reuse-concept                # the same with the kept concept recordings (SWITCHES_REUSE)
-npm run switches                                     # every switch built and tried (SWITCHES_FULL)
+npm run visual:all -- --reuse-concept                # the same with the kept concept recordings (about 11 minutes)
+npm run switches                                     # every switch built and tried (about an hour once caught/ is filled)
 node tools/visual-baseline/gallery.mjs && node tools/visual-baseline/plants.mjs
 ```
 

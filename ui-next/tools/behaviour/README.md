@@ -98,7 +98,7 @@ tried in stages, stopping at the first that catches it:
 
 1. **recorded**: the scenarios that caught it the last time (`caught/<package>.json`, which every run writes);
 2. **own**: the rest of its own package's acceptance (`acceptance/<package>.json`);
-3. **rest**: the rest of the whole acceptance.
+3. **rest**: the rest of the whole acceptance, one other package's acceptance file at a time.
 
 A scenario counts as catching a switch only if it fails with the feature off **and passes with it on**: each scenario
 that fails on a switched build is run once on the test build (`dist-test/index.html`, built first when missing or
@@ -108,7 +108,8 @@ switch on to the next stage, so a switch is reported caught exactly when the who
 differs from `--whole` is only how many of its catching scenarios are listed. Every switch gets a line (caught or not,
 at which stage, by which scenarios, how many were run, how long it took), the summary counts the stages, and
 `out/switches-last.json` keeps every switch's full result. `--scenarios <regex>` limits every stage to some scenarios
-(and then nothing is recorded); `--no-record` leaves `caught/` as it is; `--workers` (default 2) is passed to `run.mjs`.
+(and then nothing is recorded); `--no-record` leaves `caught/` as it is; `--workers` is passed to `run.mjs` (default: half the machine's threads, 6 on a 12-thread machine; lower it to leave more
+for other work).
 
 `caught/<package>.json` is written only when what caught a switch changes; commit it with the package's work. A package
 that adds switches adds nothing else: a switch with no record starts at its own package's acceptance.

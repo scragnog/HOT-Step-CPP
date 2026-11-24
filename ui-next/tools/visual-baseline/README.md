@@ -59,6 +59,7 @@ npm run visual:all -- --only "^(models|overlays)$"   # some sets, by name
 npm run visual:all -- --list                         # the sets, their states, scopes and accepted files
 npm run visual:all -- --page some.html               # another build of the rebuild (default dist-test/index.html)
 npm run visual:all -- --concept <file>               # default $HOTSTEP_CONCEPT/hotstep-tiers.html, else HOT-Step-UI beside the repository
+npm run visual:all -- --workers 3                    # pages at once (default: half the machine's threads, 6 on 12)
 ```
 
 For each set it runs `vb.mjs capture` on the concept with the set's `--only` and `--scope`, `capture` on the rebuild

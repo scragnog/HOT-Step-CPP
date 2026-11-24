@@ -11,8 +11,10 @@
 //   and by what decides the recording (the set, its states' files, vb.mjs, page-lib.js, Playwright's version); with this
 //   option a kept recording of the same key is used instead of capturing the concept again.
 // --concept: the concept page (default: $HOTSTEP_CONCEPT/hotstep-tiers.html, else HOT-Step-UI beside the repository).
+// --workers: pages at once for each capture (default: half the machine's threads, 6 on 12; lower it to leave more).
 // --page: the rebuild page to compare (default dist-test/index.html, built first if missing or older than the sources).
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -23,7 +25,7 @@ import { ensureTestBuild, testPage } from '../test-build.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), repo = path.resolve(here, '..', '..'), OUT = path.join(here, 'out');
 const args = process.argv.slice(2), opt = (k, d) => { const i = args.indexOf('--' + k); return i < 0 ? d : args[i + 1]; }, flag = k => args.includes('--' + k);
-const only = opt('only') ? new RegExp(opt('only')) : null, workers = opt('workers', '2');
+const only = opt('only') ? new RegExp(opt('only')) : null, workers = opt('workers', String(Math.max(1, Math.floor(os.availableParallelism() / 2))));
 const concept = path.resolve(opt('concept') || path.join(process.env.HOTSTEP_CONCEPT || path.join(repo, '..', '..', 'HOT-Step-UI'), 'hotstep-tiers.html'));
 const sec = ms => { const s = Math.round(ms / 1000); return s < 60 ? s + ' s' : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`; };
 
