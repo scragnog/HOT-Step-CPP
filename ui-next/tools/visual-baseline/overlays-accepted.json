@@ -42,13 +42,6 @@
       "field": "^pixels$",
       "n": 1,
       "why": "The picker's shot: the wall, its filter, its count, its info line and its bar are the same; what differs is the page seen blurred through the scrim behind it, where the concept draws its prompt card (package 4) above the desk."
-    },
-    {
-      "state": "^ov8-pop-moves$",
-      "key": "^#bento>article:0>header:0>button:0$",
-      "field": "^sem:(data-tip-held|title)$",
-      "n": 2,
-      "why": "Since Latest fills the page below the desk (package 6, merged), the grip is pressed on a taller page: the concept's tooltip shows after the press and holds the grip's title (data-tip-held), the rebuild's tip (package 8) has not shown yet when the state is read, so the grip still carries its title. The same words either way; nothing drawn differs."
     }
   ]
 }
