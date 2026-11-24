@@ -10,7 +10,7 @@
   {
    "field": "^sem:type$",
    "key": "",
-   "n": 530,
+   "n": 1229,
    "why": "Deviation 11: every button and input carries its type (type=\"button\", type=\"text\"), the existing frontend's lint rule; there is no form on the page, so nothing behaves differently."
   },
   {
@@ -39,18 +39,11 @@
    "why": "The page below the desk is shorter until the generation package fills Latest, so a press near the foot of the page scrolls it 60px less, and the dropdown, pinned beside its button, stands 60px lower in the window."
   },
   {
-   "state": "^slice-(engine-toast|undo)$",
-   "key": "^#toast$",
-   "field": "^(top|bottom|inset-block-start|inset-block-end)$",
-   "n": 4,
-   "why": "The same shorter page: the go bar is not stuck to the window's foot, so the toast stands 24px from it instead of 16px above the go bar (placeToast is the concept's rule)."
-  },
-  {
-   "state": "^slice-(desk-ace-quick-light|desk-yue-studio-dark|changed-yue-studio)$",
+   "state": "^slice-desk-ace-quick-light$",
    "key": "^shot$",
    "field": "^pixels$",
-   "n": 3,
-   "why": "Three desk shots differ by 150 to 400 pixels at the edges of the hexagonal foot switches and of Avoid's note and tape, a level of anti-aliasing: no computed style, attribute or word differs there."
+   "n": 1,
+   "why": "One desk shot differs by about 150 pixels at the edges of the hexagonal foot switches and of Avoid's note and tape, a level of anti-aliasing: no computed style, attribute or word differs there (with the lyric sheet in place, package 4, the other two such shots are identical)."
   },
   {
    "state": "^slice-parts-mm3-lab",
@@ -71,6 +64,20 @@
    "key": ">span:\\d+>button:[02]",
    "n": 2028,
    "why": "Standards mode (SL-15): the LCD picker's arrow buttons take a line of no height (styles/rebuild/10-standards.css), so their icons sit where the concept's do in quirks mode; nothing else differs (the shots are equal)."
+  },
+  {
+   "state": "^slice-",
+   "key": "^#bento>article:0>div:1>div:2>span:1",
+   "field": "^sem:(role|name|aria-label|aria-hidden|title)$",
+   "n": 168,
+   "why": "Package 4: the lyric sheet's vocal gender (MiniMax-Music3, Studio and Lab) is the generic labelled pairing holding the segmented part, whose segments are the named group (deviation 6) where the concept names the pairing and hides its caps label; the pairing carries no tip (deviation 44; tools/visual-baseline/fields-accepted.json says the same of the package's own states)."
+  },
+  {
+   "state": "^slice-",
+   "key": "^#bento>article:0>div:1>div:2>span:1",
+   "field": "^sem:data-v$",
+   "n": 84,
+   "why": "Package 4, deviation 10: the vocal gender's segments name their value in data-v (\"female\"), the concept's their label (\"Female\")."
   }
  ]
 }
