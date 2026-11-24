@@ -144,6 +144,16 @@ container, its words at 3:1, the page's caps label, the changed mark, a choice t
 markup taking the shared label and mark, and every part's look as it was recorded (`tools/fixtures/gallery.json`;
 `--record` writes it, after the screenshots in `out/gallery/` have been looked at).
 
+## How it was shown to fail
+
+At the cutover (November 2026), against recordings approved on the same build: a one-line change to a stylesheet, the
+tile head's title from weight 600 to 700 (`styles/concept/20-tile.css`), made four sets differ (`slice` 363
+differences, `fields` 26, `overlays` 65, `instruments-3c` 1, each naming the element and `font-weight: "600" ->
+"700"`), and with the line put back every set was identical. A first try, the colour of an LED button that is on when
+it stands on paper (`styles/rebuild/15-parts.css`), changed no state of any set, since none shows that switch on there;
+the gallery caught it (its LED buttons on a row, a well, a foot and a labelled pairing, "its look is not what was
+recorded"). A change only a state the sets do not reach can show is the gallery's, or a new state's.
+
 ## Limits
 
 - `::-webkit-scrollbar`, `::selection` and `::marker` cannot be read through `getComputedStyle`; changes there show only in

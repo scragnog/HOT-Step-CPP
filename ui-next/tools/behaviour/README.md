@@ -176,4 +176,7 @@ layer (`src/app/testing/compat.ts` and `testing/compat/*.ts`).
 
 ## How it was shown to fail
 
-PLANTED
+At the cutover (November 2026), with the Undo button's click made to do nothing (`shell/Centre.tsx`, one line), the
+acceptance failed 29 checks in 14 scenarios (the slice's undo and redo by button, adding and removing with Undo, the
+field's and the page's Undo, renames undone, the desk bar with a Redo at four widths, two motion scenarios); with the
+line put back, all 466 passed.

@@ -4,7 +4,7 @@ The checks, run from `ui-next`. They need Node 22.18 or later (the tools run the
 `npm install` once (TypeScript, ESLint, Vite and React; the browser tools need Playwright with Chromium, below).
 
 ```
-npm run check      the everyday check (about 40 s): both type checks, the validator, the request comparison, every
+npm run check      the everyday check (about a minute): both type checks, the validator, the request comparison, every
                    tools/test-*.ts (the core's derivations against the concept, the view's selectors and each package's
                    core), the parts' contract in the lint, the code's contract with the definitions (test-code.ts: no
                    key, state or id named in the code; every part a definition names has a component and every action
@@ -21,9 +21,9 @@ The browser tools (Playwright with Chromium; `PLAYWRIGHT_MODULE` may point at an
 on the test build (`npm run build:test`):
 
 ```
-npm run behaviour                  the acceptance: every scenario of tools/behaviour/acceptance (about ACC_TIME)
-npm run visual:all                 every visual set against its approved recording (about VIS_TIME)
-npm run motion                     every motion against its approved samples, every 16ms of its run (about MOT_TIME)
+npm run behaviour                  the acceptance: every scenario of tools/behaviour/acceptance (about 4 minutes 20)
+npm run visual:all                 every visual set against its approved recording (about 7 minutes)
+npm run motion                     every motion against its approved samples, every 16ms of its run (about 15 seconds)
 npm run visual:approve -- --only "^<set>$"    after a deliberate change: approve that set's recording again
 npm run motion:approve -- --only "^<id>$"     after a deliberate change to a motion: approve its samples again
 node tools/visual-baseline/gallery.mjs   every part on every surface, both themes, every tier, against its record

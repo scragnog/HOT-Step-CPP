@@ -427,7 +427,14 @@ them fail, naming what changed; approving records the current build as the new r
    added to one) fails as "states changed since approved" until it is approved.
 5. Run `npm run visual:all` once more (every set `identical`), and commit `approved/` with the change.
 
-**For a module added (section 3)**, measured on the Dynamics module of section 3: STEPS_MEASURED
+**For a module added (section 3)**, measured with the Dynamics module of section 3 on a scratch tree: three sets of the
+thirteen differ, each for a reason the new module gives. `slice` and `overlays`: the Modules panel, which lists every
+module, is a card longer (`#browser grid-template-rows: "33.5px 2495px" -> "33.5px 2634px"`, 133 and 21
+differences); `workflows`: the factory workflow "Everything" holds one module more ("35 modules · Lab" -> "36 modules ·
+Lab", 13). The motions are unchanged. So: read those, then `npm run visual:approve -- --only
+"^(slice|workflows|overlays)$"` (about 3 minutes 20), and `npm run visual:all` again. A visual state that shows the new
+module itself is a state added to a file of `slice-states/` (or a file of its own with its set), approved the same
+way.
 
 ## Smaller jobs
 

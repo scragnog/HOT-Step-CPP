@@ -35,5 +35,10 @@ motion in which nothing moved fails too (the motion was not set off), but for on
 names, look at the steps (`--shots`), then approve that motion alone (`npm run motion:approve -- --only "^<id>$"`) and
 commit its `approved/<id>.json` with the change. A new motion in `motions.mjs` fails until it is approved.
 
+At the cutover (November 2026), with a tile's move eased linearly instead of `--e-out` (`features/motion.ts`, one
+line), the six motions in which tiles slide failed (`tile-arrives`, `tile-leaves`, `undo-brings-it-back`,
+`tile-moves-by-key`, `fold-opens`, `fold-folds`: the tiles that slide off by up to 347px at 80ms), and with the line put
+back all twenty matched.
+
 The motions were last compared with the concept page's at the tag `rebuild-parity`; since then the approved samples are
 the reference.

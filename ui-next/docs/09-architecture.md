@@ -822,17 +822,17 @@ runner. Then, on the package's branch and again on the tree after each merge:
 
 ```
 npm run check && npm run lint
-npm run build:test && npm run behaviour -- --workers 6   # the whole acceptance (about ACC_TIME)
+npm run build:test && npm run behaviour -- --workers 6   # the whole acceptance (about 4 minutes 20)
 npm run switches:apply                               # every switch still applies exactly once (a second; merges break this most)
-npm run visual:all                                   # every visual set against its approved recording (about VIS_TIME)
-npm run motion                                       # every motion against its approved samples (about MOT_TIME)
+npm run visual:all                                   # every visual set against its approved recording (about 7 minutes)
+npm run motion                                       # every motion against its approved samples (about 15 seconds)
 npm run switches                                     # every switch built and tried (about an hour once caught/ is filled)
 node tools/visual-baseline/gallery.mjs && node tools/visual-baseline/plants.mjs
 ```
 
 The times are at the tools' default of 6 workers (half of a 12-thread machine; `--workers` lowers it). A switch
 costs about 9 seconds once `caught/` names what catches it, about 16 seconds (more for a large package) when it starts
-from its own package's acceptance, and a whole acceptance run (about 2 minutes 40) when only another package's scenarios
+from its own package's acceptance, and a whole acceptance run (about 4 minutes 20) when only another package's scenarios
 catch it; the old way, the whole acceptance for every switch, would take about 18 hours for the 387 switches.
 
 `visual:all` prints each set's states and `identical`, or how many differences it has from its approved recording, and
