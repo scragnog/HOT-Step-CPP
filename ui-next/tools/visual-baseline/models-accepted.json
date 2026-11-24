@@ -23,13 +23,6 @@
    "why": "The model list's shot: the list is the same; what shows through at its rounded corners is the page behind it, where the concept has Latest's song art (package 6) and the rebuild its seam."
   },
   {
-   "state": "",
-   "key": "^#engPanel>div:1>button:4>span:0>svg:0>defs:0>linearGradient:0",
-   "field": "^only$",
-   "n": 126,
-   "why": "HeartMuLa's mark's gradient (id hmRainbow) in its card, the same markup on both pages: while HeartMuLa is not the engine in use, its id is unique on the rebuild's page, so the recorder keys it by its id, outside the scope's paths; on the concept's page a revision's engine mark in the Workflows panel (package 7) carries the same id, so it is keyed by its path."
-  },
-  {
    "state": "^models-dd-",
    "key": "^#dd>div:[0-9]+>span:1>button:[0-9]+$",
    "field": "^line-height$",

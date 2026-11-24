@@ -67,9 +67,9 @@
   {
    "state": "^cartridges-list$",
    "key": "#pop",
-   "field": "^animation-name$",
-   "n": 1,
-   "why": "The adapter list opens below its button where the concept's opened above it (the desk's layout puts the tile a few pixels higher here); placed by the same rule, its arrival animation follows the side."
+   "field": "^(animation-name|overflow-(block|inline|x|y)|overscroll-behavior-(block|inline|x|y))$",
+   "n": 9,
+   "why": "Where the list opens: the concept's desk stands under its prompt card, so the button is low (690px) and the list opens above it; here the prompt card (package 4) is not drawn yet, the button stands at 256px with the go bar's floor at 514px, and package 8's placement (the concept's placeFloat) opens it below, capped to that room with its own scroll. Its arrival animation follows the side. The same rule, other geometry."
   }
  ]
 }

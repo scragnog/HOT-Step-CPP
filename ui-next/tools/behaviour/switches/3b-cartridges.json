@@ -16,7 +16,7 @@
   {
    "feature": "carts art",
    "file": "src/app/parts/Cartridges.tsx",
-   "find": "<div className={`label-art${art.still ? ' still' : ''}`} data-adart={key} style={{ '--p': art.p, '--spin': art.spin } as CSSProperties}><CartArt a={art} /></div>",
+   "find": "<div className={`label-art${art.still ? ' still' : ''}`} data-adart={key} style={(art.spin ? { '--p': art.p, '--spin': art.spin } : { '--p': art.p }) as unknown as CSSProperties}><CartArt a={art} /></div>",
    "replace": "<div className=\"label-art\" data-adart={key}><CartArt a={art} /></div>"
   },
   {
@@ -202,14 +202,14 @@
   {
    "feature": "list keys",
    "file": "src/app/features/adapters.tsx",
-   "find": "      e.preventDefault(); all[Math.min(all.length - 1, Math.max(0, j))]!.focus();",
-   "replace": "      void j;"
+   "find": "    e.preventDefault(); all[Math.min(all.length - 1, Math.max(0, j))]!.focus();",
+   "replace": "    void j;"
   },
   {
-   "feature": "list escape",
+   "feature": "list closes",
    "file": "src/app/features/adapters.tsx",
-   "find": "      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }",
-   "replace": "      if (e.key === 'Escape') return;"
+   "find": "    closePop(false);",
+   "replace": "    void closePop;"
   },
   {
    "feature": "list load focus",
