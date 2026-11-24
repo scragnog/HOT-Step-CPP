@@ -6,6 +6,7 @@ import { useDesk } from '../store/desk.ts';
 import { usePanelStore } from '../store/panels.ts';
 import { ui } from '../i18n/index.ts';
 import { isMod, onKey } from '../register/keys.ts';
+import { onCreate } from '../shell/screens.ts';
 
 const redoKey = (e: KeyboardEvent) => isMod(e, 'z', true) || isMod(e, 'y', false);
 
@@ -15,8 +16,8 @@ onKey({
   run: e => {
     e.preventDefault();
     const s = useDesk.getState(), redo = redoKey(e);
-    /* on another page they do nothing (14-undo.js) */
-    if (document.getElementById('app')?.hidden) return;
+    /* on another page they take the key and do nothing (14-undo.js) */
+    if (!onCreate()) return;
     if (usePanelStore.getState().drawer) { s.showToast({ text: ui(redo ? 'undo.closeFirst.redo' : 'undo.closeFirst') }); return; }
     if (!(redo ? s.redo : s.undo).length) { s.showToast({ text: ui(redo ? 'undo.nothing.redo' : 'undo.nothing') }); return; }
     if (redo) s.runRedo(); else s.runUndo();

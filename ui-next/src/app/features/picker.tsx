@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { createPortal } from 'react-dom';
 import { engineName } from '../../definitions/engines.ts';
 import type { Definition } from '../../definitions/types.ts';
-import { categoryWord, defName, groupOf, msg, PICKER_CATS, PICKER_LEFT, PICKER_RIGHT, pickerCountMsg, pickerModel, type PickerCat, type PickerItem, type PickerModel } from '../../derive.ts';
+import { categoryWord, defDesc, defName, groupOf, msg, PICKER_CATS, PICKER_LEFT, PICKER_RIGHT, pickerCountMsg, pickerModel, type PickerCat, type PickerItem, type PickerModel } from '../../derive.ts';
 import { defOf, OFFERED } from '../model/index.ts';
 import { fill } from '../register/slots.ts';
 import { useDesk } from '../store/desk.ts';
@@ -60,7 +60,7 @@ function Snapshot({ it, d, rove, q }: { it: PickerItem; d: Definition; rove: boo
 }
 
 function Info({ m, byId }: { m: PickerModel; byId: Map<string, PickerItem> }) {
-  const say = useSay(), info = usePicker(s => s.info), engine = useDesk(s => s.desk.engine);
+  const say = useSay(), info = usePicker(s => s.info), desk = useDesk(s => s.desk), engine = desk.engine;
   const first = m.order[0], at = info.kind === 'first' ? (first ? { kind: 'item' as const, id: itemId(defOf(first)!) } : { kind: 'hint' as const }) : info;
   if (at.kind === 'hint') {
     const fit = m.fit ? byId.get(itemId(defOf(m.fit)!)) : undefined;
@@ -73,7 +73,7 @@ function Info({ m, byId }: { m: PickerModel; byId: Map<string, PickerItem> }) {
   }
   return (
     <>
-      <b>{say(it.name)}</b><span>{say({ id: `create.${d.id}.desc`, en: d.desc })}</span>
+      <b>{say(it.name)}</b><span>{say(defDesc(d, desk))}</span>
       {it.locked ? <button type="button" className="small-btn primary" data-labadd={at.id} onClick={() => labAdd(d.id)}>{say(ui('picker.labAdd'))}</button>
         : it.on ? <em>{say(ui(coarse() ? 'picker.onDesk.tap' : 'picker.onDesk'))}</em>
         : it.notHere ? <em className="warn">{say(ui('picker.notUsed', { engine: engineName(engine) }))}</em> : null}
@@ -87,7 +87,7 @@ function Wall() {
   const say = useSay(), st = usePicker(), desk = useDesk(s => s.desk);
   const left = useRef<HTMLDivElement>(null), right = useRef<HTMLDivElement>(null);
   useEdgeFade(left); useEdgeFade(right);
-  const m = pickerModel(OFFERED, desk, st.q, st.cat, d => ({ name: sayNow(defName(d, desk)), desc: sayNow({ id: `create.${d.id}.desc`, en: d.desc }), group: sayNow(categoryWord(groupOf(d))) }));
+  const m = pickerModel(OFFERED, desk, st.q, st.cat, d => ({ name: sayNow(defName(d, desk)), desc: sayNow(defDesc(d, desk)), group: sayNow(categoryWord(groupOf(d))) }));
   const byId = new Map(m.items.map(x => [itemId(defOf(x.id)!), x]));
   /* the one Tab stop: the drawing the keys stand on, else the first shown (the first match while a filter is typed) */
   const shownIds = m.order.map(id => itemId(defOf(id)!)), stop = st.rove && shownIds.includes(st.rove) ? st.rove : shownIds[0] ?? null;

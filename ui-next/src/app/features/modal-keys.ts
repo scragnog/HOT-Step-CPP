@@ -9,7 +9,7 @@ import { usePanelStore } from '../store/panels.ts';
 import { topLayer } from './layers.ts';
 
 onKey({
-  id: 'modal-waits', order: 6,
+  id: 'modal-waits', order: 6, create: true,
   when: e => e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^Digit[123]$/.test(e.code) && (!!topLayer()?.modal || !!usePanelStore.getState().drawer),
   run: e => e.preventDefault(),
 });

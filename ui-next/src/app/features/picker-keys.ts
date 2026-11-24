@@ -122,7 +122,7 @@ document.addEventListener('keydown', e => {
 /* F9 opens and closes it, and opens it again while it is closing (F-29); not over a modal layer or an open drawer;
    over a non-modal layer (a popover, a dropdown) it closes that first (C-14) */
 onKey({
-  id: 'picker-f9', order: 20,
+  id: 'picker-f9', order: 20, create: true,
   when: e => e.key === 'F9' && !e.ctrlKey && !e.altKey && !e.metaKey,
   run: e => {
     e.preventDefault();

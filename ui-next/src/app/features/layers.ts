@@ -69,7 +69,7 @@ onKey({
 /* the page's Undo and Redo wait under a layer, and say why (14-undo.js); a field inside the layer keeps its own Ctrl+Z
    while it has steps of its own (store/fields.ts), and once it has none the keys still wait (19-field-undo.js) */
 onKey({
-  id: 'layer-undo', order: 5,
+  id: 'layer-undo', order: 5, create: true,
   when: e => (isMod(e, 'z') || isMod(e, 'y', false)) && !!topLayer() && !topLayer()!.undo && !(isField(document.activeElement) && topLayer()!.el.contains(document.activeElement) && canStep(document.activeElement, isMod(e, 'z', true) || isMod(e, 'y', false))),
   run: e => { e.preventDefault(); useDesk.getState().showToast({ text: ui(isMod(e, 'z', true) || isMod(e, 'y', false) ? 'undo.closeFirst.redo' : 'undo.closeFirst') }); },
 });

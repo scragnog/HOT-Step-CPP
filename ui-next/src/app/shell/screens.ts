@@ -9,6 +9,8 @@ export const NAV = [['create', 'create'], ['Library', 'library'], ['Studios', 's
 export const pageWord = (name: string): string => `nav.${NAV.find(([n]) => n === name)?.[1] ?? 'create'}`;
 
 export const useScreen = create<{ name: string }>(() => ({ name: 'create' }));
+/** Create is the page showing: its keys (register/keys.ts `create`) do nothing on another page. */
+export const onCreate = (): boolean => useScreen.getState().name === 'create';
 
 /** Shows a page: Create, or the stand-in for `name`; the top bar's button for it is the current one. */
 export function showScreen(name: string): void {

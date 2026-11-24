@@ -8,7 +8,7 @@ import { create } from 'zustand';
 import type { Definition, EngineId, Tier, Value } from '../../definitions/types.ts';
 import {
   addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, leavesWith, newOn, onOf as coreOnOf, paramSetter, readDesk, removeFrom, removedWords, savedDeskOf,
-  stepWords, switchEngine, msg, type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
+  stepWords, switchEngine, msg, keptWords, type Change, type DeskPath, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
 } from '../../derive.ts';
 import { defOf, ix } from '../model/index.ts';
 import { undoables } from '../register/undoable.ts';
@@ -178,19 +178,26 @@ export const useDesk = create<DeskStore>()((set, get) => {
     return entry;
   };
   const parts = (): Parts => { const s = get(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
-  /** Moves the desk across an entry, path by path: a path changed since stays as it is. */
-  const cross = (e: Entry, from: Flat, to: Flat): boolean => {
-    const now = flatOf(parts()), paths = new Set([...from.keys(), ...to.keys()]), out = new Map(now);
+  /** Moves the desk across an entry, path by path: a path changed since stays as it is, and the note says so (the core's
+   *  keptWords). `moved` is false when nothing of the step was left to move: it is spent (F-24). */
+  const cross = (from: Flat, to: Flat): { moved: boolean; note: Slot | null } => {
+    const now = flatOf(parts()), paths = new Set([...from.keys(), ...to.keys()]), out = new Map(now), kept: string[] = [];
     let moved = false;
     for (const p of paths) {
       if (from.get(p) === to.get(p)) continue;
-      if (now.get(p) !== from.get(p)) continue;
+      if (now.get(p) !== from.get(p)) { if (now.get(p) !== to.get(p)) kept.push(p); continue; }
       const v = to.get(p); if (v === undefined) out.delete(p); else out.set(p, v);
       moved = true;
     }
     if (moved) set(unflat(parts(), out));
-    void e;
-    return moved;
+    const of = (pre: string) => kept.filter(p => p.startsWith(pre)).map(p => p.slice(2));
+    return { moved, note: keptWords(ix, { keys: [...of('v:'), ...of('a:')], state: of('s:'), parts: kept.filter((p): p is DeskPath => /^(mods|board|engine|tier)$/.test(p)) }, get().desk, !moved) };
+  };
+  /** What an Undo or Redo says: done, with what it left alone; or nothing to do, and why. */
+  const crossed = (e: Entry, way: 'undone' | 'redone', r: { moved: boolean; note: Slot | null }): Slot => {
+    if (!r.moved) return { id: `ui.${way}.nothing${r.note ? '.kept' : ''}`, slots: { what: e.words.label, ...(r.note ? { kept: r.note } : {}) } };
+    const said: Slot = { id: `ui.${way}`, slots: { what: e.words[way] ?? e.words.label } };
+    return r.note ? { list: [said, r.note], join: 'sentences' } : said;
   };
   return {
     ...start, undo: [], redo: [], gesture: null, toast: start.told ? { text: start.told } : null, said: null, focus: null, gone: {}, flash: null,
@@ -259,19 +266,17 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const s = get(), e = entry ?? s.undo[s.undo.length - 1]; if (!e) return;
       const i = s.undo.indexOf(e); if (i < 0) return;
       set({ undo: s.undo.filter(x => x !== e), gesture: null });
-      const note = e.run ? e.run.undo() : (cross(e, e.after, e.before), undefined);
+      const r = e.run ? { moved: true, note: e.run.undo() ?? null } : cross(e.after, e.before);
       set({ redo: [...get().redo, e], focus: e.back ? [e.back] : null });
-      const said: Slot = { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } };
-      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
+      get().showToast({ text: crossed(e, 'undone', r), action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
     },
     runRedo(entry) {
       const s = get(), e = entry ?? s.redo[s.redo.length - 1]; if (!e) return;
       const i = s.redo.indexOf(e); if (i < 0) return;
       set({ redo: s.redo.filter(x => x !== e), gesture: null });
-      const note = e.run ? e.run.redo() : (cross(e, e.before, e.after), undefined);
+      const r = e.run ? { moved: true, note: e.run.redo() ?? null } : cross(e.before, e.after);
       set({ undo: [...get().undo, e], ...(e.forth ? { focus: [e.forth] } : {}) });
-      const said: Slot = { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } };
-      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
+      get().showToast({ text: crossed(e, 'redone', r), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
     },
     deskStep(words, fn) {
       const prev = parts(), before = flatOf(prev); fn();

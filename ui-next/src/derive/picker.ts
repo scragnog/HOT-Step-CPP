@@ -6,6 +6,7 @@
 import type { Definition } from '../definitions/types.ts';
 import type { Desk } from './core.ts';
 import { cardModel, type CardModel } from './models.ts';
+import { defDesc } from './steps.ts';
 import { tileName, usedHere } from './desk.ts';
 import { engineName } from '../definitions/engines.ts';
 import { list, msg, type Msg, type Slot } from './messages.ts';
@@ -64,7 +65,7 @@ export function pickerModel(defs: readonly Definition[], desk: Desk, query: stri
     const c = cardModel(d, desk, q, words(d)), pgroup = pickerGroupOf(d), left = d.kind === 'module';
     const inCat = pgroup === cat;
     const gone = (left && leftOn && !inCat) || (!left && rightOn && !inCat), dim = cat !== 'All' && (left ? rightOn : leftOn);
-    const says: Slot = c.notHere ? msg('card.notUsed', { engine: engineName(desk.engine), engines: list(d.engines.map(engineName)) }) : c.locked ? msg('ui.picker.lab') : c.on ? msg('ui.picker.on') : { id: `create.${d.id}.desc`, en: d.desc };
+    const says: Slot = c.notHere ? msg('card.notUsed', { engine: engineName(desk.engine), engines: list(d.engines.map(engineName)) }) : c.locked ? msg('ui.picker.lab') : c.on ? msg('ui.picker.on') : defDesc(d, desk);
     return { ...c, rank: q ? c.rank : 0, pgroup, left, pedal: d.kind === 'pedal', gone, dim, nomatch: !!q && !c.rank, says };
   });
   const shown = items.filter(x => !x.gone && !x.nomatch);

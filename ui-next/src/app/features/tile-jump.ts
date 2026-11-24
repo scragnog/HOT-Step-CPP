@@ -25,7 +25,7 @@ function jump(dir: 1 | -1): boolean {
 }
 
 onKey({
-  id: 'tile-jump', order: 30,
+  id: 'tile-jump', order: 30, create: true,
   when: e => !e.defaultPrevented && !topLayer() && ((e.key === 'F6' && !e.ctrlKey && !e.altKey && !e.metaKey)
     || (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && !isTextField(e.target as Element))),
   run: e => { if (jump(e.key === 'ArrowUp' || (e.key === 'F6' && e.shiftKey) ? -1 : 1)) e.preventDefault(); },

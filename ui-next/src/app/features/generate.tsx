@@ -5,6 +5,7 @@
 import { fill } from '../register/slots.ts';
 import { enterIsOwn, onKey, isTextField } from '../register/keys.ts';
 import { topLayer } from './layers.ts';
+import { onCreate } from '../shell/screens.ts';
 import { GoBarFill } from '../generate/Live.tsx';
 import { Latest } from '../generate/Latest.tsx';
 import { generate } from '../generate/actions.ts';
@@ -15,7 +16,7 @@ fill('centre.latest', Latest);
 void bootGenerate();
 
 /** A layer open over Create (features/layers.ts: the engine panel is one), under which no page shortcut acts. */
-const layerOpen = () => !!topLayer() || !!document.getElementById('app')?.hidden;
+const layerOpen = () => !!topLayer() || !onCreate();
 
 /* Ctrl+Enter is Generate from every focus position on Create with no layer open, a workflow row, a revision row and a
    Modules card included: it is heard before any row's or card's own Enter (F-07); a held key queues once. A field
@@ -30,7 +31,7 @@ addEventListener('keydown', e => {
 /* Space plays and pauses from anywhere on the page that does not use Space itself: not a text field, a button, a
    control that takes keys, and not under a layer (C-27) */
 onKey({
-  id: 'player-space',
+  id: 'player-space', create: true,
   when: e => {
     if (e.key !== ' ' || e.repeat || !useGen.getState().playing || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || layerOpen()) return false;
     const t = e.target as Element | null;
