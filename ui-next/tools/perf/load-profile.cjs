@@ -1,5 +1,5 @@
 // Where the load's time goes, on the instrumented build: a CPU profile from navigation to 3 s after, mapped to the
-// source, with the layout counters. npx vite build --mode file --config tools/perf/vite.instr.ts; PERF_BUILD=tools/perf/results/instr node tools/perf/load-profile.cjs [desk]
+// source, with the layout counters. npx vite build --mode file --config tools/perf/vite.instr.mjs; PERF_BUILD=tools/perf/results/instr node tools/perf/load-profile.cjs [desk]
 const fs = require('fs'), path = require('path');
 const { launch, openWith } = require('./lib.cjs');
 const { digest } = require('./prof-lib.cjs');

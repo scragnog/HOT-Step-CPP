@@ -34,7 +34,7 @@ Playwright is found as the other tools find it (`npm install`, or `PLAYWRIGHT_MO
 | `idle.cjs` | main-thread time and renderer CPU at rest, after a click, and during a run of the simulated engine |
 | `memory.cjs` | the heap, nodes and listeners over a mixed session of every action (`--no-generate` leaves out the songs, which the page keeps on purpose) |
 | `trace.cjs`, `layout-detail.cjs` | what an action laid out and restyled, and which script forced it |
-| `profile.cjs`, `load-profile.cjs` | where an action's (or the load's) time goes, by source line, with the page's counters and React's renders, on the instrumented build: `npx vite build --mode file --config tools/perf/vite.instr.ts`, then `PERF_BUILD=tools/perf/results/instr` |
+| `profile.cjs`, `load-profile.cjs` | where an action's (or the load's) time goes, by source line, with the page's counters and React's renders, on the instrumented build: `npx vite build --mode file --config tools/perf/vite.instr.mjs`, then `PERF_BUILD=tools/perf/results/instr` |
 | `solve-bench.ts` | the desk's layout solver on the recorded desks (`node tools/perf/solve-bench.ts`) |
 | `make-desks.cjs` | writes `desks/*.json`, the saved desks the others open (from the test build) |
 | `../motion/cost.mjs` | what each motion costs the main thread (package 9's) |

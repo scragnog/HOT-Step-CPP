@@ -1,11 +1,11 @@
-// Finds where an action's time goes, on the instrumented build (tools/perf/vite.instr.ts: unminified, source-mapped,
+// Finds where an action's time goes, on the instrumented build (tools/perf/vite.instr.mjs: unminified, source-mapped,
 // React's profiling build, the page's counters on):
 //   - a CPU profile of the action (V8 sampling, 50 us), self and total time by function, mapped to the source file and
 //     line through the build's source map;
 //   - the page's counters (src/app/tally.ts): models asked again, packs, tiles measured, layouts solved;
 //   - React: commits, and the components that rendered, by name, with their own render time.
 //
-//   npx vite build --mode file --config tools/perf/vite.instr.ts
+//   npx vite build --mode file --config tools/perf/vite.instr.mjs
 //   PERF_BUILD=tools/perf/results/instr node tools/perf/profile.cjs [--desks full] [--only knob-keys,remove] [--top 25]
 const fs = require('fs'), path = require('path');
 const { launch, chromium, openWith, ROOT, BUILD } = require('./lib.cjs');
