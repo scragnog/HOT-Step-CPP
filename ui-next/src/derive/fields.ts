@@ -13,6 +13,7 @@ import { optionFaces, songTempo, type OptionFace } from './controls.ts';
 import { applyChange, type Change } from './parts.ts';
 import { stepWords } from './steps.ts';
 import { setValue } from './values.ts';
+import { boxWord } from './workflows.ts';
 
 /* ---------------------------------------------------------------- the main box's word on each engine (S-05) */
 
@@ -21,8 +22,8 @@ import { setValue } from './values.ts';
  *  holds tags, and its examples are tags. */
 const BOX: { [engine: string]: { w: string; tags?: boolean } } = { 'minimax-m3': { w: 'caption' }, sa3: { w: 'prompt' }, heartmula: { w: 'tags', tags: true } };
 const boxKey = (desk: Desk) => BOX[desk.engine]?.w ?? 'description';
-/** The box's word ("caption"), with its article ("a caption", "some tags"), and whether it is a plural. */
-export const boxWord = (desk: Desk): Msg => msg(`box.${boxKey(desk)}`);
+/** The box's word with its article ("a caption", "some tags"), and whether it is a plural; the word itself is
+ *  workflows.ts boxWord, the one statement of it. */
 export const boxA = (desk: Desk): Msg => msg(`box.${boxKey(desk)}.a`);
 const boxPl = (desk: Desk): boolean => boxKey(desk) === 'tags';
 
@@ -114,7 +115,7 @@ export function sheetModel(ix: Index, node: Node, desk: Desk): SheetModel | unde
   const lang = (node.params ?? []).find(k => own(ix, k)?.p.type === 'choice'), wildKey = (node.params ?? []).find(k => own(ix, k)?.p.type === 'boolean');
   const secs = sections(text), lines = secs.reduce((a, s) => a + s.n, 0);
   const t = estimateTempo(ix, desk, bpmKey, boxKey_), bpm = t.bpm ?? 120;
-  const stat: Slot = instr || !lines ? '' : msg('lyrics.stat', { n: lines, time: mmss(lines * 8 * 60 / bpm), bpm, how: t.from ?? 'guess', box: boxWord(desk) });
+  const stat: Slot = instr || !lines ? '' : msg('lyrics.stat', { n: lines, time: mmss(lines * 8 * 60 / bpm), bpm, how: t.from ?? 'guess', box: boxWord(ix, desk) });
   const ph = paramWords(ix, key, desk), labels = stripLabels(secs.map(s => s.name));
   return {
     lab, instr,
@@ -151,7 +152,7 @@ export function lyricsPlace(ix: Index, desk: Desk): { here: boolean; note: Msg |
   const key = (d?.face ?? []).find(n => n.part === 'lyricSheet')?.param;
   if (!d || !key) return { here: false, note: null };
   const here_ = d.engines.includes(desk.engine);
-  return { here: here_, note: here_ ? null : msg('lyrics.none', { engine: engineName(desk.engine), box: boxWord(desk), kept: String(!!str(desk.vals[key]).trim()) }) };
+  return { here: here_, note: here_ ? null : msg('lyrics.none', { engine: engineName(desk.engine), box: boxWord(ix, desk), kept: String(!!str(desk.vals[key]).trim()) }) };
 }
 
 /* ---------------------------------------------------------------- the prompt card */
@@ -222,7 +223,7 @@ const trackText = (desk: Desk, t: Track) => (desk.engine === STRUCTURED && t.str
 const srcWords = (ix: Index, desk: Desk): Slot => { const o = optionsOf(ix, KEYS.src, desk).find(x => x.value === valueOf(ix, KEYS.src, desk)); return o?.label ?? str(valueOf(ix, KEYS.src, desk)); };
 /** The one sentence for a supplied caption, in the control's own noun (E-31): "… Edit a copy to change it." */
 export const lockedMsg = (ix: Index, desk: Desk, what: 'change' | 'write' | 'reuse' = 'change'): Msg =>
-  msg('prompt.locked', { box: boxWord(desk), label: paramWords(ix, KEYS.src, desk).label, src: srcWords(ix, desk), what });
+  msg('prompt.locked', { box: boxWord(ix, desk), label: paramWords(ix, KEYS.src, desk).label, src: srcWords(ix, desk), what });
 
 /** The prompt card on the desk: `key` is its box's parameter. */
 export function promptModel(ix: Index, key: string, desk: Desk): PromptModel {
@@ -237,7 +238,7 @@ export function promptModel(ix: Index, key: string, desk: Desk): PromptModel {
     const autoHere = has(ix, KEYS.wild, desk.engine) && applies(ix, KEYS.wild, desk), on = autoHere && valueOf(ix, KEYS.wild, desk) === true;
     sug.push({ kind: 'wild', lead: msg('sg.wild', { n: w.length }), items: [...w], tail: !autoHere ? msg('sg.wild.never', { engine: engineName(desk.engine) }) : on ? msg('sg.wild.each') : msg('sg.wild.asWritten'), ...(!autoHere ? { link: msg('sg.wild.now') } : {}) });
   }
-  if (STRUCT.test(shown) && !structured) sug.push({ kind: 'plain', lead: msg('sg.plain', { engine: engineName(desk.engine) }), bold: msg('sg.plain.b', { box: boxWord(desk), pl: String(boxPl(desk)) }) });
+  if (STRUCT.test(shown) && !structured) sug.push({ kind: 'plain', lead: msg('sg.plain', { engine: engineName(desk.engine) }), bold: msg('sg.plain.b', { box: boxWord(ix, desk), pl: String(boxPl(desk)) }) });
   const ds = has(ix, KEYS.src, desk.engine) ? datasetOf(desk, str(read(ix, KEYS.ds, desk))) : null;
   const latent = desk.state.latent;
   return {
@@ -257,7 +258,7 @@ export function promptModel(ix: Index, key: string, desk: Desk): PromptModel {
     },
     sourceTip: has(ix, KEYS.src, desk.engine) ? msg('prompt.srcTip', { label: paramWords(ix, KEYS.src, desk).label, src: srcWords(ix, desk), track: tr && valueOf(ix, KEYS.src, desk) === 'auto' ? msg('prompt.srcTip.auto', { track: tr.track.title.split(' · ')[0]!, bpm: tr.track.bpm }) : '' }) : null,
     tags: ds ? ds.set.tags.map(t => ({ tag: t, on: hasItem(shown, t) })) : [],
-    tagsTip: msg('prompt.tagsTip', { box: boxWord(desk) }),
+    tagsTip: msg('prompt.tagsTip', { box: boxWord(ix, desk) }),
     info: { any: KEYS.info.some(k => !!str(read(ix, k, desk))), art: !!own(ix, KEYS.art) && here(ix, KEYS.art, desk) && applies(ix, KEYS.art, desk) && (() => { const u = own(ix, KEYS.art)!.d; return u.kind !== 'module' && !!u.on && valueOf(ix, u.on, desk) === true; })() },
     latent: typeof latent === 'string' && latent && latentHere(ix, desk) ? latent : null,
   };
@@ -292,13 +293,13 @@ export function writeForMe(ix: Index, key: string, desk: Desk, replace = false):
   const cap = !replace && !text.trim() && !locked, lyr = lyrOk && (!hadLyr || replace);
   if (!cap && !lyr) {
     if (hadLyr && !locked) return { ask: msg('write.ask') };
-    return { says: locked ? lockedMsg(ix, desk, 'write') : msg('write.full', { box: boxWord(desk), pl: String(boxPl(desk)), why: has(ix, KEYS.lyrics, desk.engine) ? 'instr' : 'none', engine: engineName(desk.engine) }) };
+    return { says: locked ? lockedMsg(ix, desk, 'write') : msg('write.full', { box: boxWord(ix, desk), pl: String(boxPl(desk)), why: has(ix, KEYS.lyrics, desk.engine) ? 'instr' : 'none', engine: engineName(desk.engine) }) };
   }
   const vals: { [k: string]: Value } = { [key]: cap ? WRITTEN[BOX[desk.engine]?.tags ? 'tags' : 'words'] : text };
   if (lyr) vals[KEYS.lyrics] = LYRICS_WRITTEN;
   const change = named(ix, desk, key, 'write', vals);
-  const what = desk.engine === STRUCTURED ? msg('write.plain') : boxPl(desk) ? boxWord(desk) : boxA(desk);
-  return change ? { change, undo: true, said: msg('write.said', { what, kind: cap && lyr ? 'both' : cap ? 'box' : replace ? 'new' : 'lyrics' }) } : { says: msg('write.full', { box: boxWord(desk), pl: String(boxPl(desk)), why: 'instr', engine: engineName(desk.engine) }) };
+  const what = desk.engine === STRUCTURED ? msg('write.plain') : boxPl(desk) ? boxWord(ix, desk) : boxA(desk);
+  return change ? { change, undo: true, said: msg('write.said', { what, kind: cap && lyr ? 'both' : cap ? 'box' : replace ? 'new' : 'lyrics' }) } : { says: msg('write.full', { box: boxWord(ix, desk), pl: String(boxPl(desk)), why: 'instr', engine: engineName(desk.engine) }) };
 }
 
 /** Compose caption (MiniMax-Music3): a Structured Caption built on the box's first words, the BPM and key when the
@@ -321,9 +322,9 @@ export function composeCaption(ix: Index, key: string, desk: Desk): ToolStep | {
 /** Expand wildcards in the box or the lyrics: one option of each; with none, it says so. */
 export function expandStep(ix: Index, key: string, desk: Desk, where: 'prompt' | 'lyrics', rnd: () => number): ToolStep | { says: Msg } {
   const k = where === 'lyrics' ? KEYS.lyrics : key, src = str(read(ix, k, desk)), out = expandWild(src, rnd);
-  if (out === src) return { says: msg('wild.none', { where, box: boxWord(desk) }) };
+  if (out === src) return { says: msg('wild.none', { where, box: boxWord(ix, desk) }) };
   const change = named(ix, desk, key, 'expand', { [k]: out });
-  return change ? { change, undo: true, said: msg('wild.done') } : { says: msg('wild.none', { where, box: boxWord(desk) }) };
+  return change ? { change, undo: true, said: msg('wild.done') } : { says: msg('wild.none', { where, box: boxWord(ix, desk) }) };
 }
 
 /** Move to lyrics: from the first [ on, under any lyrics already there; the box keeps what came before it. */
@@ -349,21 +350,21 @@ export function tempoStep(ix: Index, key: string, desk: Desk): { vals: Change['v
 /** A Structured Caption on another engine, as plain words. */
 export function plainStep(ix: Index, key: string, desk: Desk): ToolStep | null {
   const p = str(valueOf(ix, key, desk)), change = named(ix, desk, key, 'plain', { [key]: plainCaption(p) }, {}, undefined);
-  return change ? { change, undo: true, said: msg('sg.plain.said', { box: boxWord(desk), pl: String(boxPl(desk)) }) } : null;
+  return change ? { change, undo: true, said: msg('sg.plain.said', { box: boxWord(ix, desk), pl: String(boxPl(desk)) }) } : null;
 }
 
 /** Edit a copy (E-06): the supplied caption becomes the box's text, and the source Custom, in one step. */
 export function copyStep(ix: Index, key: string, desk: Desk): ToolStep | null {
   const tr = trackNow(ix, desk); if (!tr) return null;
   const change = named(ix, desk, key, 'copy', { [key]: trackText(desk, tr.track), [KEYS.src]: 'custom' });
-  return change ? { change, undo: true, said: msg('prompt.copied', { box: boxWord(desk) }) } : null;
+  return change ? { change, undo: true, said: msg('prompt.copied', { box: boxWord(ix, desk) }) } : null;
 }
 
 /** A dataset tag pressed: in or out of the box's items; on a supplied caption it edits a copy first, in the same step. */
 export function tagStep(ix: Index, key: string, desk: Desk, tag: string): ToolStep | null {
   const tr = trackNow(ix, desk), text = tr ? trackText(desk, tr.track) : str(valueOf(ix, key, desk)), out = hasItem(text, tag);
   const change = named(ix, desk, key, out ? 'removeTag' : 'addTag', { [key]: toggleItem(text, tag), ...(tr ? { [KEYS.src]: 'custom' } : {}) }, {}, { tag });
-  return change ? { change, undo: true, said: tr ? msg('prompt.tagCopy', { box: boxWord(desk), tag, out: String(out) }) : null } : null;
+  return change ? { change, undo: true, said: tr ? msg('prompt.tagCopy', { box: boxWord(ix, desk), tag, out: String(out) }) : null } : null;
 }
 
 /** A dataset chosen: a dataset that does not hold the chosen track leaves the source on Custom for good, in the same
@@ -375,7 +376,7 @@ export function datasetStep(ix: Index, desk: Desk, ds: string): ToolStep | null 
   const vals: Change['vals'] = { [KEYS.ds]: setValue(ix, desk, KEYS.ds, ds).value, ...(drops ? { [KEYS.src]: 'custom' } : {}) };
   const after = applyChange(desk, { vals, auto: {}, state: {}, words: { label: msg(''), put: msg('') } });
   const words = stepWords(ix, desk, after); if (!words) return null;
-  return { change: { vals, auto: {}, state: {}, words }, undo: false, said: drops ? msg('prompt.dsDrops', { src, ds: set!.name, box: boxWord(desk), label: paramWords(ix, KEYS.src, desk).label }) : null };
+  return { change: { vals, auto: {}, state: {}, words }, undo: false, said: drops ? msg('prompt.dsDrops', { src, ds: set!.name, box: boxWord(ix, desk), label: paramWords(ix, KEYS.src, desk).label }) : null };
 }
 
 /** The tracks the caption source lists (the server's list 'caption.sources'): those of the dataset in force. `ds` names
@@ -407,6 +408,28 @@ export function latentClear(ix: Index, desk: Desk): ToolStep | null {
   return words ? { change: { vals: {}, auto: {}, state: { latent: null }, words }, undo: true, said: msg('latent.cleared') } : null;
 }
 
+/** Presets & genres (33-prompt.js PRESETS, GENRES): style presets that replace the box, and genres that go in or out of
+ *  its items (C-20). The words are content the engine reads, in its words. */
+export const STYLE_PRESETS = ['Acoustic guitar, upright bass and brushed drums, warm and intimate', 'Analog synths, gated drums and a pulsing bassline, nocturnal', 'String quartet with felt piano, slow and cinematic', 'Distorted guitars, live drums and gang vocals, high energy', 'Rhodes, muted trumpet and a lazy swing groove, smoky', '808s, sub bass and airy pads, late-night'];
+export const GENRES = ['indie folk', 'synthwave', 'lo-fi hip hop', 'post-rock', 'drum and bass', 'city pop', 'shoegaze', 'afrobeats', 'bossa nova', 'metalcore', 'ambient', 'trap', 'gospel', 'UK garage'];
+/** A style preset chosen: the box's text replaced, one step; said with its Undo when it replaced words. A supplied
+ *  caption is not replaced, and says why. */
+export function presetStep(ix: Index, key: string, desk: Desk, preset: string): ToolStep | { says: Msg } | null {
+  if (trackNow(ix, desk)) return { says: lockedMsg(ix, desk) };
+  const had = !!str(valueOf(ix, key, desk)).trim(), change = named(ix, desk, key, 'preset', { [key]: preset });
+  return change ? { change, undo: true, said: had ? msg('prompt.replaced', { box: boxWord(ix, desk) }) : null } : null;
+}
+/** A genre pressed: in the box's items, or out again (C-20); typing in the box, as the concept's is. */
+export function genreChange(ix: Index, key: string, desk: Desk, genre: string): Change | { says: Msg } | null {
+  if (trackNow(ix, desk)) return { says: lockedMsg(ix, desk) };
+  const text = str(valueOf(ix, key, desk)), next = hasItem(text, genre) ? toggleItem(text, genre) : text.trimEnd().replace(/[,.]$/, '') + (text.trim() ? ', ' : '') + genre;
+  const vals = { [key]: setValue(ix, desk, key, next).value }, after = applyChange(desk, { vals, auto: {}, state: {}, words: { label: msg(''), put: msg('') } });
+  const words = stepWords(ix, desk, after);
+  return words ? { vals, auto: {}, state: {}, words } : null;
+}
+/** Which genres the box holds now. */
+export const genresIn = (ix: Index, key: string, desk: Desk): boolean[] => GENRES.map(g => hasItem(str(valueOf(ix, key, desk)), g));
+
 /** The definition and node of the part that edits a key (for the page, which binds it). */
 export function nodeOf(ix: Index, part: string): { d: Definition; node: Node } | null {
   for (const d of ix.defs) for (const n of 'face' in d ? d.face ?? [] : []) if (n.part === part) return { d, node: n };
@@ -416,10 +439,10 @@ export function nodeOf(ix: Index, part: string): { d: Definition; node: Node } |
 /* ---------------------------------------------------------------- the words */
 
 Object.assign(EN, {
-  'box.description': 'description', 'box.description.a': 'a description',
-  'box.caption': 'caption', 'box.caption.a': 'a caption',
-  'box.prompt': 'prompt', 'box.prompt.a': 'a prompt',
-  'box.tags': 'tags', 'box.tags.a': 'some tags',
+  'box.description.a': 'a description',
+  'box.caption.a': 'a caption',
+  'box.prompt.a': 'a prompt',
+  'box.tags.a': 'some tags',
   'lyrics.stat': '{n, plural, one {# line} other {# lines}} · ≈ {time} at {how, select, guess {about {bpm} BPM} box {{bpm} BPM (from your {box})} other {{bpm} BPM}}',
   'lyrics.tabs': 'Insert a section tag',
   'lyrics.tab.tip': 'Insert {tag}',
@@ -463,6 +486,9 @@ Object.assign(EN, {
   'prompt.srcTip': '{label}: {src}{track}',
   'prompt.srcTip.auto': ', {track} · {bpm} BPM',
   'prompt.tagsTip': 'Click a tag to add it to the {box} or take it out. On a supplied {box} that edits a copy.',
+  'prompt.replaced': 'Replaced the {box}',
+  'presets.title': 'Style presets',
+  'presets.genres': 'Add a genre',
   'prompt.copied': 'The {box} is yours to edit; the dataset\'s is behind Undo',
   'prompt.tagCopy': 'Editing a copy of the dataset\'s {box}, with "{tag}" {out, select, true {taken out} other {added}}',
   'prompt.dsDrops': '{src} isn\'t in {ds}, so the {box} is yours again ({label}: Custom)',

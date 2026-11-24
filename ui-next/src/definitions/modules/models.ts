@@ -1,4 +1,5 @@
-// Module "Models". Concept: src/js/34-engine-panel.js and src/css/30-engine-panel.css.
+// Module "Models". Concept: src/js/34-engine-panel.js and src/css/30-engine-panel.css. Drawn in the engine panel
+// (src/app/features/engine-panel.tsx), not on the desk.
 
 import type { ModuleDef } from '../types.ts';
 
@@ -19,9 +20,10 @@ export const models = {
       key: 'model.var',
       type: 'choice',
       label: 'Variant',
+      short: 'Variant',
       undoName: 'Model variant',
       default: '',
-      options: { from: 'models', bucket: 'variant', include: [{ value: '', label: 'Engine default' }] },
+      options: { from: 'models', bucket: 'variant', include: [{ value: '', label: 'Engine default' }], loaded: true },
       engines: ['heartmula'],
       wire: [
         'model:heartmula.variant',
@@ -35,8 +37,9 @@ export const models = {
       key: 'model.dit',
       type: 'choice',
       label: 'DiT model',
+      short: 'Sound',
       default: '',
-      options: { from: 'models', bucket: 'dit', include: [{ value: '', label: 'Engine default' }] },
+      options: { from: 'models', bucket: 'dit', include: [{ value: '', label: 'Engine default' }], loaded: true },
       engines: ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula'],
       wire: 'param:ditModel',
       per: [
@@ -45,7 +48,7 @@ export const models = {
         {
           engines: ['yue2'],
           label: 'Language model (AR + NAR)',
-          options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }] },
+          options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }], loaded: true },
           wire: 'model:yue2.lm',
           undoName: 'Sound model',
         },
@@ -53,7 +56,8 @@ export const models = {
         {
           engines: ['heartmula'],
           label: 'Global LM',
-          options: { from: 'models', bucket: 'global', include: [{ value: '', label: 'Engine default' }] },
+          short: 'Language',
+          options: { from: 'models', bucket: 'global', include: [{ value: '', label: 'Engine default' }], loaded: true },
           wire: [
             'model:heartmula.global',
             {
@@ -69,8 +73,9 @@ export const models = {
       key: 'model.lm',
       type: 'choice',
       label: 'LM model',
+      short: 'Planner',
       default: '',
-      options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }] },
+      options: { from: 'models', bucket: 'lm', include: [{ value: '', label: 'Engine default' }], loaded: true },
       engines: ['ace', 'minimax-m3', 'heartmula'],
       wire: 'param:lmModel',
       per: [
@@ -79,7 +84,8 @@ export const models = {
         {
           engines: ['heartmula'],
           label: 'Local decoder',
-          options: { from: 'models', bucket: 'local', include: [{ value: '', label: 'Engine default' }] },
+          short: 'Decoder',
+          options: { from: 'models', bucket: 'local', include: [{ value: '', label: 'Engine default' }], loaded: true },
           wire: [
             'model:heartmula.local',
             {
@@ -95,8 +101,9 @@ export const models = {
       key: 'model.x',
       type: 'choice',
       label: 'Depth decoder',
+      short: 'Detail',
       default: '',
-      options: { from: 'models', bucket: 'depth', include: [{ value: '', label: 'Engine default' }] },
+      options: { from: 'models', bucket: 'depth', include: [{ value: '', label: 'Engine default' }], loaded: true },
       engines: ['minimax-m3', 'heartmula'],
       wire: 'model:minimax-m3.depth',
       per: [
@@ -104,7 +111,8 @@ export const models = {
         {
           engines: ['heartmula'],
           label: 'Codec flow',
-          options: { from: 'models', bucket: 'flow', include: [{ value: '', label: 'Engine default' }] },
+          short: 'Codec',
+          options: { from: 'models', bucket: 'flow', include: [{ value: '', label: 'Engine default' }], loaded: true },
           wire: [
             'model:heartmula.flow',
             {
@@ -120,15 +128,19 @@ export const models = {
       key: 'model.vae',
       type: 'choice',
       label: 'VAE decoder',
+      short: 'Decoder',
       undoName: 'Decoder model',
       default: '',
-      options: { from: 'models', bucket: 'vae', include: [{ value: '', label: 'Engine default' }] },
+      options: { from: 'models', bucket: 'vae', include: [{ value: '', label: 'Engine default' }], loaded: true },
       engines: ['ace', 'yue2'],
       wire: 'param:vaeModel',
       per: [{ engines: ['yue2'], label: 'VAE', wire: 'model:yue2.vae' }],
     },
   ],
+  /* each model is named by its role (short: Sound, Planner, Decoder), as the panel heads it; Quick shows the sound model
+     (and HeartMuLa's variant) only, Studio and Lab every component (34-engine-panel.js fillEngine) */
   face: [
-    { part: 'modelPicker', params: ['model.var', 'model.dit', 'model.lm', 'model.x', 'model.vae'] },
+    { part: 'modelPicker', params: ['model.var', 'model.dit'] },
+    { part: 'modelPicker', params: ['model.lm', 'model.x', 'model.vae'], tiers: ['studio', 'lab'] },
   ],
 } satisfies ModuleDef;

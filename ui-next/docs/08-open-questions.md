@@ -83,6 +83,10 @@ Solvers, schedules, guidance modes and models come from the server. The definiti
 `''` for "Native" (the engine's own sampling) where plugins are optional, and for "Engine default" on the model rows.
 Is `''` right for both, and are the plugin ids stable enough to save?
 
+Meanwhile (package 5): a model the engine loads (its options' `loaded`) left at `''` is drawn as the file the server
+has selected for its bucket, which is what the request sends; choosing that file stores `''`, so the page shows no
+"Engine default" row while the server lists the selected file, and nothing is marked changed on it.
+
 ## 6. Engine state and undo
 
 Picking a YuE2 adapter or a model is a `POST` that evicts and reloads weights. The concept makes it an undo step like any

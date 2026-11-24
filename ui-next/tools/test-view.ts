@@ -69,7 +69,9 @@ const ace = (tier: Tier, on: string[], vals: Desk['vals'] = {}) => desk('ace', t
 {
   const g = def('guidance') as Extract<Definition, { kind: 'module' }>;
   const row = g.face.find(n => n.part === 'row')!, pad = g.face.find(n => n.part === 'xyPad')!;
-  ok('the minimax-m3 row is drawn on minimax-m3', nodeShown(ix, row, desk('minimax-m3', 'lab', ['guidance'])));
+  ok('the minimax-m3 row is drawn on minimax-m3 with APG', nodeShown(ix, row, desk('minimax-m3', 'lab', ['guidance', 'sampler'], { 'samp.plugins': true, 'samp.guide': 'apg' })));
+  /* a control none of whose parameters applies is not drawn, as the concept's ok() leaves it out (package 2) */
+  ok('the minimax-m3 row is not drawn while its knob does not apply (no APG)', !nodeShown(ix, row, desk('minimax-m3', 'lab', ['guidance'])));
   ok('the minimax-m3 row is not drawn on ace', !nodeShown(ix, row, ace('lab', ['guidance'])));
   ok('the APG pad is drawn on ace', nodeShown(ix, pad, ace('lab', ['guidance'])));
   ok('a row whose only knob is on no engine it is shown on is not drawn', !nodeShown(ix, { part: 'row', children: [{ part: 'knob', param: 'apg.mom' }] } as Node, desk('minimax-m3', 'lab', ['guidance'])));

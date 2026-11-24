@@ -41,13 +41,24 @@ export const perf = {
     },
   ],
   face: [
+    /* the pad, and beside it the gauge over the LM cut knob (25-module-perf.js .padrow, .padside) */
     {
-      part: 'xyPad',
-      params: ['perf.cfgcut', 'perf.cache'],
-      opts: { look: 'heat', xl: 'CFG cutoff', yl: 'step cache', corners: ['fastest', '', '', 'most faithful'] },
+      part: 'row',
+      children: [
+        {
+          part: 'xyPad',
+          params: ['perf.cfgcut', 'perf.cache'],
+          opts: { look: 'heat', xl: 'CFG cutoff', yl: 'step cache', corners: ['fastest', '', '', 'most faithful'] },
+        },
+        {
+          part: 'row',
+          children: [
+            { part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
+            { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },
+          ],
+        },
+      ],
     },
-    { part: 'speedGauge', reads: ['perf.cfgcut', 'perf.cache', 'perf.lmcut'] },
-    { part: 'knob', param: 'perf.lmcut', label: 'LM cut' },
   ],
   thumb: { file: 'perf' },
 } satisfies ModuleDef;

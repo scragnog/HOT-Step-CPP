@@ -20,14 +20,14 @@ const desk = () => store().desk;
 /* the tools' steps are their own, never merged into a gesture another part has open */
 const FROM = 'prompt-tools';
 
-const tell = (text: Msg) => store().showToast({ text });
+export const tell = (text: Msg) => store().showToast({ text });
 /** Says what the newest step did, with its Undo. */
 function withUndo(text: Msg): void {
   const e = store().undo[store().undo.length - 1];
   store().showToast(e ? { text, action: { label: ui('undo'), run: () => store().runUndo(e) } } : { text });
 }
 /** Applies a tool's step and says it; false when it changed nothing. */
-function apply(r: ToolStep | null, from = FROM): boolean {
+export function apply(r: ToolStep | null, from = FROM): boolean {
   if (!r) return false;
   const n = store().undo.length;
   flushSync(() => store().commit(r.change, from));

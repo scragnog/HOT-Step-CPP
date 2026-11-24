@@ -10,9 +10,10 @@ import { liveDefs } from './request.ts';
 import { cleanState, setValue } from './values.ts';
 import { type Msg, msg } from './messages.ts';
 import { checkText, paramWords, textMsg } from './strings.ts';
-import { stepChanges, stepWords, type StepWords } from './steps.ts';
+import { stepChanges, stepWords, type NamedStep, type StepWords } from './steps.ts';
 import { fractionValue, keyStep, parseTyped } from './models.ts';
 import { autoEstimate, rulerSnap, scrubValue } from './controls.ts';
+import { FILE_STEPS } from './steps.ts';
 
 /** One undo step: what it changes, and its words. The store applies it and records it. */
 export interface Change {
@@ -22,6 +23,8 @@ export interface Change {
   words: StepWords;
   /** The one-time sentence a typed number out of range gets ("Steps: 1 to 64. Set to 64."). */
   said?: Msg;
+  /** The named step it took, so a gesture of several (a region dragged) is named by it from its first desk to its last. */
+  named?: NamedStep;
 }
 
 /** Applies a change to a desk (null removes a value: back to its default). */
@@ -52,7 +55,7 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
   const finish = (b: NonNullable<typeof batch>) => {
     const after = applyChange(b.at, { ...b, words: { label: msg(''), put: msg('') } });
     const words = stepWords(ix, b.at, after, b.named ? { named: b.named } : undefined);
-    if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}) });
+    if (words) commit({ vals: b.vals, auto: b.auto, state: b.state, words, ...(b.said ? { said: b.said } : {}), ...(b.named ? { named: b.named } : {}) });
     /* a typed value already at the end it was put at changes nothing, and is still said (21-knob.js) */
     else if (b.said) tell?.(b.said);
   };
@@ -67,9 +70,10 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
     const at = now(); if (!bindable(at, k)) return;
     const b = { at, vals: {}, auto: {}, state: {} }; fn(b, at); finish(b);
   };
-  const stepOf = (owner: { key: string; steps?: StateDef['steps'] }, step: string) => {
-    const s = owner.steps?.[step];
-    if (!s) throw new Error(`${owner.key} has no step "${step}": name it in the definition's steps`);
+  const stepOf = (owner: { key: string; kind?: StateDef['kind']; steps?: StateDef['steps'] }, step: string) => {
+    /* a file loads and clears without saying (docs/05, "Undo step names"): steps.ts names those */
+    const s = owner.steps?.[step] ?? (owner.kind === 'file' && FILE_STEPS.includes(step) ? '' : undefined);
+    if (s === undefined) throw new Error(`${owner.key} has no step "${step}": name it in the definition's steps`);
     return s;
   };
   const allowed = (keys: string[], extra: string[], k: string) => {

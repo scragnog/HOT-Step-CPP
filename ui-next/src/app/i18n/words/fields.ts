@@ -12,5 +12,4 @@ export const WORDS: { [id: string]: string } = {
   'ui.prompt.trigger.aria': 'Adapter trigger word, up to 24 characters',
   'ui.lyrics.wildAuto': 'Expand on Generate',
   'ui.lyrics.builtIn': 'built in',
-  'ui.action.stylePresets': 'Presets & genres open in the popover, which a later package builds',
 };

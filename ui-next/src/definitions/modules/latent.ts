@@ -184,7 +184,7 @@ export const latent = {
               part: 'row',
               children: [
                 { part: 'knob', param: 'den.str' },
-                { part: 'knob', param: 'den.smooth', label: 'Smooth' },
+                { part: 'knob', param: 'den.smooth', label: 'Smooth', tip: 'Smoothing' },
                 { part: 'knob', param: 'den.mix' },
               ],
             },

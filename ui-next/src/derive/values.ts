@@ -4,7 +4,7 @@
 
 import type { Definition, Json, ParamDef, StateDef, Value } from '../definitions/types.ts';
 import { CHECKS } from '../definitions/parts.ts';
-import { type Desk, type Index, enginesOf, has, resolve } from './core.ts';
+import { type Desk, type Index, enginesOf, has, modelDefault, resolve } from './core.ts';
 import { type Msg, msg } from './messages.ts';
 import { paramWords } from './strings.ts';
 
@@ -152,6 +152,8 @@ export function setValue(ix: Index, desk: Desk, key: string, raw: Value, typed =
   const hit = ix.params.get(key);
   if (!hit || !has(ix, key, desk.engine)) throw new Error(`${key} is not on ${desk.engine}`);
   const f = resolve(hit.p, desk.engine);
+  /* a model file the server has selected is the engine's default, "" (the request sends it either way) */
+  if (raw !== '' && raw === modelDefault(ix, key, desk)) return { value: '' };
   if (hit.p.type !== 'number' || typeof raw !== 'number' || !f.range) {
     const v = cleanValue(hit.p, hit.d, raw);
     if (v === undefined) throw new Error(`${JSON.stringify(raw)} is not a value of ${key}`);

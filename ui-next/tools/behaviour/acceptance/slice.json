@@ -10,7 +10,7 @@
     { "id": "08-persistence-cables/cables", "why": "The board's cables: one per link, on the jacks, redrawn as pedals come and go." },
     { "id": "10-desk-modules/offline-fonts-keep-the-layout", "why": "The desk lays out the same without the web fonts." },
     { "id": "10-desk-modules/focus-after-pedal-removal-and-undo", "why": "Taking a pedal off moves focus to the next pedal; Undo brings it back with focus on it (SL-05)." },
-    { "id": "10-desk-modules/undo-covers-structure", "why": "Undo with nothing to undo says so; a run of moves on one grip is one step; undo puts back a move and an add.", "waiting": { "package": 3, "because": "Its second move of Tempo is a visible step only at the concept's tile heights, which Tempo reaches when package 3 draws its LCD rows and key wheel (placeholders until then)." } },
+    { "id": "10-desk-modules/undo-covers-structure", "why": "Undo with nothing to undo says so; a run of moves on one grip is one step; undo puts back a move and an add." },
     { "id": "12-desk-layout/arrow-keys-move-one-visible-step", "why": "A tile's grip: an arrow moves it one visible step, a refused move is said and changes nothing." },
     { "id": "12-desk-layout/layout-is-a-function-of-the-order", "why": "The same tiles in the same order give the same desk." },
     { "id": "13-quick-studio/tier-switch-stays-under-the-pointer", "why": "The tier switch does not move under the pointer as the tier changes." },

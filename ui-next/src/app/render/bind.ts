@@ -5,7 +5,7 @@
 
 import { useMemo } from 'react';
 import type { Action, Definition, Node } from '../../definitions/types.ts';
-import { actionWords, applyChoice, bindPart, checkText, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
+import { actionWords, applyChoice, bindPart, checkText, fileRefused, partAct, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { runNamed } from '../register/actions.ts';
@@ -56,8 +56,23 @@ function actionsOf(def: Definition, node: Node, key: string) {
     along: (k: string, f: number, span: number, px: number) => param(k)?.along(f, span, px),
     check: (k: string, t: string) => checkText(ix, k, desk(), t),
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
-    run: (i: number, arg?: string) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from, arg); },
+    run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
+    apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
+    load: (k: string, name: string, type: string) => { const no = fileRefused(name, type); if (no) tell(no); else bound()?.state[k]?.apply('load', name, undefined, { file: name }); },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
+    /* a bespoke part's hand (src/derive/instruments.ts): what it says may offer to undo the step it just took. A hand
+       that needs the shell (a step that brings a module, a question answered from the toast, the live region, focus in
+       another part) is a named action its node lists: the feature that builds it runs it, given what the hand chose and
+       this part, whose gesture its change joins (the prompt card's and the lyric sheet's tools) */
+    act: (name: string, arg?: unknown) => {
+      const named = actionWords(ix, node, desk(), key).find(w => w.action.do === 'bespoke' && w.action.name === name)?.action;
+      if (named) { dispatch(def, named, node, from, arg === undefined ? undefined : String(arg)); return true; }
+      const b = bound(); if (!b) return false;
+      return partAct(ix, b.node, b, desk(), name, arg, (m, undo) => {
+        const e = undo ? useDesk.getState().undo.at(-1) : undefined, s = useDesk.getState();
+        s.showToast({ text: m, ...(e ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } } : {}) });
+      });
+    },
     gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
   };
 }
@@ -77,5 +92,6 @@ function assemble(m: PartModel, a: ReturnType<typeof actionsOf>): PartView {
     press: (k, shift) => a.press(p.key, k, shift), typed: t => a.typed(p.key, t), toFraction: f => a.toFraction(p.key, f), check: t => a.check(p.key, t),
     scrub: (from, px, shift) => a.scrub(p.key, from, px, shift), along: (f, span, px) => a.along(p.key, f, span, px),
   }));
-  return { ...m, params, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
+  const state = (m.state ?? []).map(st => ({ ...st, apply: (step: string, next: unknown, slots?: { [slot: string]: string | number }) => a.apply(st.key, step, next, slots), load: (name: string, type: string) => a.load(st.key, name, type) }));
+  return { ...m, params, state, choose: a.choose, run: a.run, batch: a.batch, act: a.act, gesture: a.gesture };
 }

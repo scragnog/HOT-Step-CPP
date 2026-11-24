@@ -19,7 +19,7 @@ const LINE = 26;
 export function LyricSheet(v: PartView) {
   const say = useSay(), ta = useRef<HTMLTextAreaElement>(null), strip = useRef<HTMLDivElement>(null), s = v.sheet, p = v.params[0];
   const lang = v.params.find(x => x.options && x !== p), wild = v.params.find(x => typeof x.value === 'boolean');
-  const act = (name: string, arg?: string) => { const i = v.actions.findIndex(a => a.name === name); if (i >= 0) v.run(i, arg); };
+  const act = (name: string, arg?: string) => { v.act(name, arg); };
   const words = (name: string) => v.actions.find(a => a.name === name);
   const text = String(p?.value ?? '');
   const g = useGrow(ta, CAP, text);

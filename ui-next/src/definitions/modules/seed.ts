@@ -44,20 +44,26 @@ export const seed = {
       key: 'stars',
       kind: 'list',
       noun: 'the saved seeds',
-      steps: { save: 'Save seed {seed}', update: 'Update seed {seed}', delete: 'Delete seed {seed}' },
+      steps: { save: 'Save seed {seed}', update: 'Update seed {seed}', delete: 'Delete seed {seed}', star: 'Star {seed}', unstar: 'Unstar {seed}' },
       owner: 'song',
       stored: 'none',
       wire: { none: 'The page\'s own list of saved seeds.' },
     },
   ],
   face: [
+    /* the flaps with the lock beside them, then the LM seed's link under them (it reads the LM's switch), then Roll once
+       and Random each time */
     {
       part: 'splitFlap',
       param: 'seed.lock',
       state: ['seed'],
-      children: [{ part: 'lockButton', param: 'seed.lock', tiers: ['studio', 'lab'] }],
+      reads: ['lm.seedlock'],
+      children: [
+        { part: 'lockButton', param: 'seed.lock', tiers: ['studio', 'lab'] },
+        /* the planner's switch: it works while the planner is on the desk, as every value does */
+        { part: 'pill', param: 'lm.seedlock', label: 'LM seed follows', engines: ['ace'], tiers: ['lab'], when: { onDesk: 'planner' } },
+      ],
     },
-    { part: 'pill', param: 'lm.seedlock', label: 'LM seed follows', engines: ['ace'], tiers: ['lab'] },
     { part: 'savedSeeds', param: 'seed.lock', state: ['stars', 'seed'], tiers: ['studio', 'lab'] },
   ],
   thumb: { file: 'seed' },

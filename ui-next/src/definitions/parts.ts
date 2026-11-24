@@ -255,7 +255,10 @@ export const PARTS = {
   group: {
     kind: 'container', css: ['25-module-adhere.css', '25-module-latent.css'],
     doc: 'A rack group: a boxed set of controls with a header that may carry its power switch; a group switched off stands back.',
-    opts: { title: { type: 'text', doc: 'Its caps heading when it has no power switch.' } },
+    opts: {
+      title: { type: 'text', doc: 'Its caps heading when it has no power switch.' },
+      look: { type: ['rack', 'strip', 'plugin'], doc: 'rack (default): a boxed group, its switch or heading on top; strip: an inset strip with its caps heading (the Sampler\'s schedule controls); plugin: a plugin\'s controls under its name, "experimental" and its Reset action.' },
+    },
   },
   foot: {
     kind: 'container', css: ['20-tile.css'],
@@ -263,7 +266,8 @@ export const PARTS = {
   },
   labelled: {
     kind: 'container', css: ['15-controls.css'],
-    doc: 'A caps label beside one small control (the foot-ctl and lcdsel pairing).',
+    doc: 'A caps label beside one small control (the foot-ctl and lcdsel pairing). Where it stands and what it holds give it the pairing the concept draws there: above a text field, a strip of switches or dice; in a rack group the pair of a token; in a deck a row of its two columns.',
+    opts: { look: { type: ['strip'], doc: 'strip: an inset strip, its caption first and what it holds after it on one line (Retake seed in the Sampler).' } },
   },
   deck: {
     kind: 'container', css: ['25-module-plans.css'],
@@ -331,7 +335,7 @@ export const PARTS = {
   },
   beatPulse: {
     kind: 'readout', reads: ['number'], css: ['25-module-tempo.css'],
-    doc: 'Lamps that pulse on the beat at the BPM it reads, one per beat of the bar.',
+    doc: 'Lamps that pulse on the beat at the BPM it reads, one per beat of the bar (the time signature it reads next; four without one).',
   },
   flowWindows: {
     kind: 'readout', reads: ['number'], css: ['25-module-flow.css'],
@@ -347,7 +351,8 @@ export const PARTS = {
   },
   planText: {
     kind: 'readout', reads: true, css: ['25-module-planner.css'],
-    doc: 'The plan the planner will start from, as terminal text: caption, tempo, key, form, and whose each value is. On MiniMax-Music3 its first line also says whether a saved plan is replayed or the plan cache is on.',
+    doc: 'The plan the planner will start from, as terminal text: caption, tempo, key, form, and whose each value is.',
+    opts: { look: { type: ['plan', 'prose', 'compose', 'tags'], doc: 'plan: caption, tempo, key and form, reading the caption, the lyrics, the BPM, the key, the planner switch and its chain of thought; prose: tempo and key come from the caption (the caption, the lyrics); compose: the score the chain of thought writes (the caption, the lyrics, its mode); tags: the tags, the sections of the lyrics and the length (the caption, the lyrics, the length).' } },
   },
   lrcPreview: {
     kind: 'readout', reads: ['text'], css: ['28-side-units.css'],
@@ -366,7 +371,7 @@ export const PARTS = {
   },
   keyWheel: {
     kind: 'bespoke', edits: ['choice'], drive: 'choose', css: ['25-module-tempo.css'],
-    doc: 'The circle of fifths: majors outside, minors inside, Auto in the middle, a radio group driven by the arrows.',
+    doc: 'The circle of fifths: majors outside, minors inside, Auto in the middle, a radio group driven by the arrows. It stands beside the LCD it holds as its child (.tempo); with nothing to edit (Quick, an engine without a key) the LCD stands alone.',
     responsible: 'Drawing the two rings from its param\'s options, spelling keys as a musician does (B♭, F♯), the arrow-key walk around and between rings, and the selection nudge.',
   },
   tapTempo: {
@@ -385,12 +390,12 @@ export const PARTS = {
     responsible: 'Drawing as many reels as its param\'s maximum, the hover preview, the reel spin, and the VRAM cost line from the loaded models. The LCD reads the value as its format writes it, then the node\'s label.',
   },
   splitFlap: {
-    kind: 'bespoke', edits: ['boolean'], state: ['seed'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['seed'], reads: ['boolean'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one. Roll once and Random each time.',
     responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 2^64-1, kept as its decimal text past 2^53), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
   },
   savedSeeds: {
-    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'set'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'star', 'unstar', 'set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The saved seeds list: search, star, name, describe, tag, load, delete, random from saved.',
     responsible: 'The list (its `list` state) and its search; loading a saved seed sets the seed and its lock in the seed state\'s `set` step; every list action is the list state\'s step of that name.',
   },

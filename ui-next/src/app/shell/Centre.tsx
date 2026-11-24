@@ -63,7 +63,7 @@ export function Centre() {
         </div>
         <Tiers />
         <div className="deskbar-end">
-          <span className="save-state" id="saveState" title={say(ui('saved.title'))}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><span>{say(ui('saved'))}</span></span>
+          <Slot name="centre.saveState" />
           <UndoRedo />
         </div>
       </div>
@@ -78,7 +78,7 @@ export function Centre() {
       {/* the go bar's frame: the generation package fills the meter, Drafts and Generate */}
       <div className="gobar">
         <div className="meter" id="meter" />
-        <button className="tool drafts-btn" id="draftsBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title={say(ui('drafts.title'))}>{say(ui('drafts'))}</button>
+        <Slot name="centre.drafts" />
         <button className="go" id="go" title={say(ui('generate.title'))} aria-keyshortcuts="Control+Enter"><i className="go-fill" aria-hidden="true" /><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z" /></svg><span id="goLabel">{say(ui('generate'))}</span></button>
       </div>
       <section className="latest" aria-label={say(ui('latest.songs'))}><div className="res-head"><h2>{say(ui('latest'))}</h2><span className="lbl" id="songCount" /><button className="linkbtn" data-goto="Library">{say(ui('latest.library'))}</button></div><div className="songgrid" id="latest" /></section>

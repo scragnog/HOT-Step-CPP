@@ -4,6 +4,7 @@
     { "id": "33-fields/field-undo-and-page-undo", "why": "Each text field's own Ctrl+Z (F-22): the field's own texts first, then on into what the page put there (Expand), Redo the same way, a value set without telling is a step of its own, Ctrl+Z in another field never touches the box." },
     { "id": "33-fields/field-undo-never-moves-forward", "why": "F-06: Ctrl+Z in the box takes back its last typing and moves the page's step that wrote it, so Ctrl+Z outside goes on back to the setting, never the words again." },
     { "id": "33-fields/lyrics-keep-their-history-on-another-tier", "why": "Typing in the sheet is one step named for the lyrics; the sheet drawn again at Quick keeps its own history; once back at empty, Ctrl+Z goes on to the page and never puts the words back." },
+    { "id": "33-fields/ctrl-z-under-the-picker-edits-nothing", "why": "F-04: Ctrl+Z under a layer (the picker) leaves the box as it is and says why, a field in the layer with nothing of its own included; back in the box its own Ctrl+Z works." },
     { "id": "33-fields/what-the-page-wrote-is-a-step-of-the-field", "why": "A page write into a field no one was in (Write it for me into the lyrics) is a step of that field's own: its Ctrl+Z goes back through it to the empty sheet (F-22)." },
     { "id": "33-fields/lyrics-tags-strip-instrumental-wildcards", "why": "lyricSheet: the Lab tabs insert at a line boundary, the strip and a segment's caret, Instrumental read-only and the tabs refused, Expand with Undo and with none, Expand on Generate, the vocal gender, an engine with no lyrics (05-modules/lyrics)." },
     { "id": "33-fields/lyric-sheet-grows-then-scrolls-with-a-marker", "why": "The sheet grows a ruled line at a time, stops at its cap and scrolls with a marker on the margin and a fade at the end there is more (A-28, Q-28)." },
@@ -25,14 +26,14 @@
     { "id": "12-desk-layout/tab-order-is-reading-order-lab-1280", "why": "Same at Lab, 1280 wide." },
     { "id": "21-chrome-round5/focus-after-moving-lyrics", "why": "Pending (F-13) in the concept, right here: Move them to the lyrics sheet puts focus in the lyrics it filled." },
     { "id": "23-sa3-hm-round5/one-tempo-for-every-estimate", "why": "Pending (S-07) in the concept, right here: the line count's estimate takes a BPM written in HeartMuLa's tags (src/derive/controls.ts songTempo, src/derive/fields.ts estimateTempo)." },
-    { "id": "06-prompt-generate/prompt-tools", "why": "Wildcards, Expand, Write it for me and Song info (all pass), and Presets & genres.", "waiting": { "package": 8, "because": "Presets & genres open in the popover (#pop), which package 8 builds; the prompt card runs its named action stylePresets, which then has its content to show." } },
-    { "id": "06-prompt-generate/field-undo-and-page-undo", "why": "Each field's own Ctrl+Z with the page's Undo (F-22); the same in 33-fields/field-undo-and-page-undo.", "waiting": { "package": 8, "because": "Its page step is a style preset chosen in the popover (#pop), which package 8 builds." } },
-    { "id": "15-other-engines/lyric-length-uses-the-tempo", "why": "The line count's estimate on auto says it guesses (passes), and takes a BPM typed on YuE2.", "waiting": { "package": 2, "because": "The BPM is typed into Tempo's LCD row (lcdRow holding lcdNumber), which package 2 draws." } },
-    { "id": "22-engines-round5/automatic-source-follows-the-tempo", "why": "Pending (E-06) in the concept: Automatic follows the BPM at once; the lock line follows the tempo field in the core (src/derive/fields.ts trackNow).", "waiting": { "package": 2, "because": "Its BPM is typed into Tempo's LCD row (lcdRow holding lcdNumber), which package 2 draws." } },
-    { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06) in the concept: the ruler's note follows a BPM typed in the box (passes) and a BPM chip.", "waiting": { "package": 3, "because": "Its first change is a BPM chip on the Length tile (capChips), which package 3 draws." } },
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes, the picker or another page leaves the box as it is (F-04).", "waiting": { "package": 8, "because": "The Concept notes and the picker are package 8's layers; the page's Undo holds off while a layer it does not know of yet is open." } }
+    { "id": "06-prompt-generate/prompt-tools", "why": "Wildcards, Expand, Write it for me and Song info (all pass), and Presets & genres." },
+    { "id": "06-prompt-generate/field-undo-and-page-undo", "why": "Each field's own Ctrl+Z with the page's Undo (F-22); the same in 33-fields/field-undo-and-page-undo." },
+    { "id": "15-other-engines/lyric-length-uses-the-tempo", "why": "The line count's estimate on auto says it guesses (passes), and takes a BPM typed on YuE2." },
+    { "id": "22-engines-round5/automatic-source-follows-the-tempo", "why": "Pending (E-06) in the concept: Automatic follows the BPM at once; the lock line follows the tempo field in the core (src/derive/fields.ts trackNow)." },
+    { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06) in the concept: the ruler's note follows a BPM typed in the box (passes) and a BPM chip." }
   ],
   "excluded": [
+    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "It opens the Concept notes, which no package draws; the same rule under the picker (a layer) is 33-fields/ctrl-z-under-the-picker-edits-nothing." },
     { "id": "05-modules/lyrics", "why": "Its vocal gender is found by data-v=\"Duet\", the option's label (deviation 10: the rebuild's data-v is the value). Every check of it is in 33-fields/lyrics-tags-strip-instrumental-wildcards." },
     { "id": "06-prompt-generate/minimax-caption", "why": "Its Automatic is found by data-opt=\"Automatic\" (deviation 10). Every check of it is in 33-fields/minimax-caption-and-the-caption-source." },
     { "id": "18-tips-touch/language-stamp-stays-put", "why": "Its French is found by data-opt=\"French\" (deviation 10). Its check is in 33-fields/language-stamp-stays-put." },
@@ -43,8 +44,6 @@
     { "id": "21-chrome-round5/short-window-lab-shows-hardware", "why": "It opens a factory workflow (findPreset, package 7); the one-line empty card on a short window is the concept's CSS, which applies to the same markup." },
     { "id": "23-sa3-hm-round5/sa3-calls-its-box-a-prompt", "why": "Its box checks pass (Write it for me says a prompt, the box is named Prompt); the rest are the engine panel's words (package 5), the Length tile's (package 3) and Drafts (package 7)." },
     { "id": "16-engines-sizes-input/text-and-prompt-chips-are-steps", "why": "Its subject is the Length tile's prompt chips (capChips, package 3)." },
-    { "id": "22-engines-round5/mm3-quick-tempo-says-where-tempo-goes", "why": "Its subject is Tempo at Quick (package 3); the Compose caption it runs is this package's named action composeCaption, ready for the tile's button." },
-    { "id": "11-engines/prompt-chips-and-ranges", "why": "The prompt chips and the ranges are package 3's." },
     { "id": "22-engines-round5/reuse-gives-back-the-source-text", "why": "Reuse is the song menu's (package 6)." },
     { "id": "08-persistence-cables/reload-keeps-the-desk", "why": "It needs the whole desk (Repaint, workflows, seeds, the source song) of later packages; the box's text and the latent are in the desk record here." }
   ]

@@ -5,7 +5,7 @@
 import type { CSSProperties } from 'react';
 
 /** An option's face as the core gives it (OptionFace). */
-export interface Face { n?: number; sym?: string; family?: string; hue?: number; file?: string; curve?: number[]; name?: string; quant?: string; qc?: string; gb?: number; gbText?: string; mem?: number; native?: string; ink?: string }
+export interface Face { n?: number; sym?: string; family?: string; hue?: number; file?: string; curve?: number[]; name?: string; quant?: string; qc?: string; gb?: number; gbText?: string; mem?: number; title?: string; native?: string; ink?: string }
 
 /** A plugin's tile: its symbol on its family's colour, its place in the list in the corner. */
 export const El = ({ f }: { f: Face }) => <span className="el" style={{ '--hue': f.hue ?? 200 } as CSSProperties} aria-hidden="true"><small>{f.n}</small>{f.sym}</span>;

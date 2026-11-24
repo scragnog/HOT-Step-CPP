@@ -8,10 +8,11 @@ import { create } from 'zustand';
 import type { Definition, EngineId, Tier, Value } from '../../definitions/types.ts';
 import {
   addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, newOn, readDesk, removeFrom, removedWords, savedDeskOf, stepWords, switchEngine,
-  type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
+  msg, type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
 } from '../../derive.ts';
 import { BUILT_IN, defOf, ix } from '../model/index.ts';
 import { undoables } from '../register/undoable.ts';
+import { keepAside, tellOnBoot, writeStored } from './stored.ts';
 
 /** Where the desk is kept between visits. */
 export const DESK_KEY = 'hotstep.create.desk';
@@ -61,6 +62,9 @@ export interface Entry {
   at: number;
   /** Where focus goes when the step is undone (a selector). */
   back?: string;
+  /** A step that is no change to the desk (a saved record replaced, renamed or deleted: store/workflows.ts) undoes and
+   *  redoes itself, by name, on the records as they are then; either may say what it left alone. */
+  run?: { undo(): Slot | void; redo(): Slot | void };
 }
 
 export interface Toast { text: Slot; action?: { label: Slot; run: () => void } }
@@ -99,8 +103,11 @@ export interface DeskStore extends Parts {
   setFocus(sel: string | string[] | null): void;
   /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
   deskStep(words: StepWords, fn: () => void): void;
-  /** What the engine told the page: its lists, the selected models, the plugin host's count. */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number }): void;
+  /** A step that undoes and redoes itself (Entry.run): a saved record's replacement, rename or deletion. */
+  recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
+  /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
+   *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -108,9 +115,11 @@ let gestures = 0;
 
 function initial(): Parts & { told: Msg | null } {
   const empty: Desk = emptyDesk(ix);
-  let raw: unknown = null;
-  try { const s = localStorage.getItem(DESK_KEY); raw = s ? JSON.parse(s) : null; } catch { raw = null; }
+  let raw: unknown = null, text: string | null = null;
+  try { text = localStorage.getItem(DESK_KEY); raw = text ? JSON.parse(text) : null; } catch { raw = null; }
   const r = raw ? readDesk(ix, raw) : null;
+  /* a desk that cannot be used is copied aside before the next autosave writes over it, and said once (F-16) */
+  if (!r && text) { keepAside(DESK_KEY, text); tellOnBoot(msg('store.desk')); }
   if (!r) return { desk: empty, book: emptyBook(), mods: [], board: [], told: null };
   const ids = [...r.desk.on];
   const mods = ids.filter(id => { const d = defOf(id); return d?.kind === 'module' && !d.builtIn; });
@@ -123,12 +132,12 @@ export const useDesk = create<DeskStore>()((set, get) => {
   seeEngine(start.desk.engine);
   let saying = false;
   /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string) => {
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named']) => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
     /* the gesture in progress is this change's when the change comes from the part that began it */
     const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
     if (g && last && last.gesture === g) {
-      const merged = stepWords(ix, last.first, next.desk) ?? words;
+      const merged = stepWords(ix, last.first, next.desk, named ? { named } : undefined) ?? words;
       const undo = [...s.undo.slice(0, -1), { ...last, after, words: merged, at: Date.now() }];
       set({ ...next, undo, redo: [] });
       return;
@@ -156,7 +165,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
 
     commit(c, from) {
       const prev = parts(), desk = applyChange(prev.desk, c);
-      record(prev, { ...prev, desk }, c.words, undefined, from);
+      record(prev, { ...prev, desk }, c.words, undefined, from, c.named);
       if (c.said) get().showToast({ text: c.said });
     },
     beginGesture(tag) { const g = get().gesture; if (!g || !g.startsWith(tag + '#')) set({ gesture: `${tag}#${++gestures}` }); },
@@ -216,23 +225,30 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const s = get(), e = entry ?? s.undo[s.undo.length - 1]; if (!e) return;
       const i = s.undo.indexOf(e); if (i < 0) return;
       set({ undo: s.undo.filter(x => x !== e), gesture: null });
-      cross(e, e.after, e.before);
+      const note = e.run ? e.run.undo() : (cross(e, e.after, e.before), undefined);
       set({ redo: [...get().redo, e], focus: e.back ? [e.back] : null });
-      get().showToast({ text: { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } }, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
+      const said: Slot = { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } };
+      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
     },
     runRedo(entry) {
       const s = get(), e = entry ?? s.redo[s.redo.length - 1]; if (!e) return;
       const i = s.redo.indexOf(e); if (i < 0) return;
       set({ redo: s.redo.filter(x => x !== e), gesture: null });
-      cross(e, e.before, e.after);
+      const note = e.run ? e.run.redo() : (cross(e, e.before, e.after), undefined);
       set({ undo: [...get().undo, e] });
-      get().showToast({ text: { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } }, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
+      const said: Slot = { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } };
+      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
     },
     deskStep(words, fn) {
       const prev = parts(), before = flatOf(prev); fn();
       const s = get(), after = flatOf(parts());
       if ([...after].every(([k, v]) => before.get(k) === v)) return;
       set({ undo: [...s.undo, { words, first: prev.desk, before, after, gesture: null, at: Date.now() }].slice(-UNDO_MAX), redo: [] });
+    },
+    recordStep(words, run, back) {
+      const s = get(), f = flatOf(parts()), e: Entry = { words, first: s.desk, before: f, after: f, gesture: null, at: Date.now(), run, ...(back ? { back } : {}) };
+      set({ undo: [...s.undo, e].slice(-UNDO_MAX), redo: [] });
+      return e;
     },
     showToast(t) { set({ toast: t }); if (t) get().say(t.text); },
     say(text) {
@@ -243,7 +259,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: o.lists } : {}), ...(o.selection ? { selection: o.selection } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
     },
   };
 });
@@ -256,8 +272,9 @@ useDesk.subscribe((s, prev) => {
   if (s.desk === prev.desk && s.book === prev.book) return;
   const rec = savedDeskOf(ix, s.desk, s.book), text = JSON.stringify(rec);
   if (text === written) return;
-  written = text;
-  try { localStorage.setItem(DESK_KEY, text); } catch { /* storage full or off: the desk lives while the tab is open */ }
+  /* a refused write (storage full or off) is reported (store/stored.ts): the read-out says Not saved, and the desk
+     lives while the tab is open; it is written again with the next change */
+  if (writeStored(DESK_KEY, text)) written = text;
 });
 
 /** The definitions of the modules on the desk, in the user's order. */

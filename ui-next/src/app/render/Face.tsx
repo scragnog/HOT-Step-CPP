@@ -8,23 +8,20 @@ import { createElement, memo, useMemo, type ReactNode } from 'react';
 import type { Definition, Node } from '../../definitions/types.ts';
 import { nodeKeys, type CellWords, type Surface } from '../../derive.ts';
 import { ui, useSay } from '../i18n/index.ts';
-import { partView } from '../kit/define.ts';
+import { drawsDim, drawsKidsDim, partView, surfaceOf } from '../kit/define.ts';
 import { usePartView } from './bind.ts';
 
-/** The surface a container gives its children: a rack, a tile's foot, a well and an LCD are surfaces of their own;
- *  every other container passes its own surface on. */
-const SURFACE: Record<string, Surface> = { rack: 'rack', foot: 'foot', well: 'well', lcd: 'lcd' };
-
-interface NodeProps { def: Definition; node: Node; nodeKey: string; keys: Map<Node, string>; surface: Surface; cell?: CellWords }
+interface NodeProps { def: Definition; node: Node; nodeKey: string; keys: Map<Node, string>; surface: Surface; cell?: CellWords; bare?: boolean }
 
 /** One node: its part, bound, with its children. */
-export const NodeView = memo(function NodeView({ def, node, nodeKey, keys, surface, cell }: NodeProps): ReactNode {
+export const NodeView = memo(function NodeView({ def, node, nodeKey, keys, surface, cell, bare }: NodeProps): ReactNode {
   const say = useSay(), view = usePartView(def, node, nodeKey, surface, cell);
   if (!view) return null;
-  const View = partView(node.part), inner = SURFACE[node.part] ?? surface;
-  const kids = (node.children ?? []).map((c, i) => <NodeView key={i} def={def} node={c} nodeKey={keys.get(c) ?? ''} keys={keys} surface={inner} />);
+  /* the surface a container gives its children is its own to say (definePart); every other passes its surface on */
+  const View = partView(node.part), inner = surfaceOf(node.part, view.opts) ?? surface;
+  const kids = (node.children ?? []).map((c, i) => <NodeView key={i} def={def} node={c} nodeKey={keys.get(c) ?? ''} keys={keys} surface={inner} bare={drawsKidsDim(node.part)} />);
   const body = View ? createElement(View, view, kids) : <span className="lbl" data-seam={node.part}>{say(ui('later'))}</span>;
-  return view.dim ? <span className="dimmed" title={say(view.dim)}>{body}</span> : body;
+  return view.dim && !drawsDim(node.part) && !bare ? <span className="dimmed" title={say(view.dim)}>{body}</span> : body;
 });
 
 /** A definition's face: every top-level node in order, on a surface. */

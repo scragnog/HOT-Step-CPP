@@ -62,6 +62,16 @@ export default [
     await t.press('Control+z');
     await t.eq('and Ctrl+Z after that goes on to the page, never putting the words back (F-06)', () => [document.querySelector('#quickLyrics [data-bind="lyrics.text"]').value, get('lyrics.text')], ['', '']);
   } },
+  /* 17-undo-net/ctrl-z-under-an-overlay-edits-nothing, with the picker as the layer (no package draws the Concept notes) */
+  { id: 'ctrl-z-under-the-picker-edits-nothing', run: async t => {
+    await t.click('#prompt'); await t.type('alpha beta gamma');
+    await t.press('F9'); await t.press('Control+z');
+    await t.eq('under the picker the description stays (F-04)', () => document.querySelector('#prompt').value, 'alpha beta gamma');
+    await t.ok('and says why', () => /Close this first/.test(document.querySelector('#toast .toast-msg')?.textContent || ''));
+    await t.press('Escape');
+    await t.click('#prompt'); await t.press('Control+z');
+    await t.ok('back in the box, its own Ctrl+Z takes back its typing', () => document.querySelector('#prompt').value !== 'alpha beta gamma');
+  } },
   { id: 'what-the-page-wrote-is-a-step-of-the-field', run: async t => {
     await desk('studio', [])(t);
     await t.click('#aiBtn');

@@ -3,7 +3,10 @@
 // mark) and hands back where the hand or the key took it; the value, its cleaning and the step are the core's.
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
-import { definePart, onValueKey, onValueKeyUp, onWheelStep, useSay, type ParamView, type PartView } from '../kit/index.ts';
+import { definePart, onValueKey, onValueKeyUp, onWheelStep, ui, useSay, type ParamView, type PartView } from '../kit/index.ts';
+
+/* a label that is one symbol (α, β) is printed as it is written, not in capitals (20-controls.js SYM) */
+const SYM = /^[Ͱ-Ͽ∀-⋿]$/;
 
 export function Knob(v: PartView) {
   const say = useSay(), p = v.params[0];
@@ -48,15 +51,19 @@ export function Knob(v: PartView) {
   const out = p.bare
     ? <output data-out={p.key} data-bare="" data-unit={p.bare.unit} hidden={typing} onClick={() => setTyping(true)}>{say(p.bare.text)}</output>
     : <output data-out={p.key} hidden={typing} onClick={() => setTyping(true)}>{say(p.text)}</output>;
+  const label = say(v.label), sym = SYM.test(label);
+  /* a value that can be automatic shows the auto pill beside its label, lit while automatic (A-11), and while automatic
+     the knob stands at the value auto stands for, in the auto colour (L-11) */
+  const auto = p.canAuto ? <button type="button" className={`auto kn-auto${p.auto ? ' on' : ''}`} data-auto={p.key} aria-pressed={p.auto} aria-label={say(ui('auto.label', { label: p.label }))} title={say(ui('auto.knob', { label: p.label }))} onClick={() => p.setAuto(!p.auto)}>{say(ui('auto'))}</button> : null;
   return (
-    <div className={`kn${p.changed ? ' changed' : ''}`} data-ctl={p.key} title={say(v.title)}>
-      <div ref={knobEl} className={`knob${v.small ? ' sm' : ''}`} role="slider" tabIndex={0} data-knob={p.key}
-        aria-label={say(v.aria)} aria-valuemin={p.range[0]} aria-valuemax={p.range[1]} aria-valuenow={p.value as number} aria-valuetext={say(p.text)}
+    <div className={`kn${p.changed ? ' changed' : ''}${p.canAuto ? ' has-auto' : ''}`} data-ctl={p.key} title={say(v.title)}>
+      <div ref={knobEl} className={`knob${v.small ? ' sm' : ''}${p.canAuto && p.auto ? ' is-auto' : ''}`} role="slider" tabIndex={0} data-knob={p.key}
+        aria-label={sym ? say(p.label) : say(v.aria)} aria-valuemin={p.range[0]} aria-valuemax={p.range[1]} aria-valuenow={p.value as number} aria-valuetext={say(p.text)}
         style={{ '--p': String(p.at) } as CSSProperties}
         onPointerDown={down} onPointerMove={moveTo} onPointerUp={up} onPointerCancel={up} onKeyDown={key} onKeyUp={() => onValueKeyUp(v.gesture)} onDoubleClick={reset}>
         {p.detent !== undefined ? <span className="det" style={{ '--d': p.detent.toFixed(4) } as CSSProperties} /> : null}<i />
       </div>
-      <span className="kl">{say(v.label)}</span>
+      <span className={`kl${sym ? ' sym' : ''}`}>{label}{auto}</span>
       {out}
       {typing ? <TypeIn p={p} done={() => { setTyping(false); knobEl.current?.focus({ preventScroll: true }); }} /> : null}
     </div>

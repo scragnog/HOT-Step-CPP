@@ -52,6 +52,9 @@ export function install(): void {
     setVal(key: string, v: unknown) {
       const s = useDesk.getState(), x = fromConcept(key, v, s.desk.engine), hit = ix.params.get(key);
       if (x === undefined || !hit || !has(ix, key, s.desk.engine)) return;
+      /* the values one script sets at once (one t.do) are one step, as the concept's gesture of its own merges them */
+      const s0 = useDesk.getState();
+      if (!s0.gesture?.startsWith('script|')) { s0.beginGesture('script|'); queueMicrotask(() => useDesk.getState().endGesture('script|')); }
       flushSync(() => bindPart(ix, hit.d, { part: 'knob', param: key } as Node, () => useDesk.getState().desk, c => useDesk.getState().commit(c, 'script')).params[key]?.set(x));
     },
     paintPromptTools() { take(written()); },

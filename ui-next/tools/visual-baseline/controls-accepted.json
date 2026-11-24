@@ -2,11 +2,11 @@
  "about": "Package 1's accepted differences between the concept's page and the rebuild's in its states (slice-states/10-controls.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
  "accepted": [
   {
-   "state": "^controls-dd-",
-   "key": "^#dd",
-   "field": "^--ddw$",
-   "n": 302,
-   "why": "A plugin list is as wide as its button at least (--ddw, set on #dd and inherited by everything in it); the button stands in the Sampler's row, which is laid out around the parts later packages build (its scope, a seam here), so it has another width. The list's own width rule is the concept's."
+   "state": "^controls-dd-solvers$",
+   "key": "^#dd>div:1$",
+   "field": "^mask-image$",
+   "n": 1,
+   "why": "The prompt card (package 4) is not drawn yet, so the Sampler stands 142px higher than on the concept's page and its solver list opens below its button, where the window cuts it by 15px: the list's edge fade (package 1's) says so. On the concept's page it opens above, whole. (The list's width now matches: the Sampler's scope is drawn, package 3a.)"
   },
   {
    "state": "^controls-dd-solvers$",

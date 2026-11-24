@@ -183,6 +183,7 @@ export const planner = {
       type: 'text',
       label: 'LM negative prompt',
       default: 'NO USER INPUT',
+      placeholder: 'empty',
       engines: ['ace'],
       wire: 'param:lmNegativePrompt',
     },
@@ -404,20 +405,39 @@ export const planner = {
         {
           part: 'termBar',
           children: [
-            { part: 'powerButton', param: 'lm.on', label: 'planner', opts: { look: 'term' }, engines: ['ace'] },
+            { part: 'powerButton', param: 'lm.on', label: 'planner', tip: 'Turn the planner on or off', opts: { look: 'term' }, engines: ['ace'] },
             { part: 'flag', param: 'lm.cot', label: '--cot', engines: ['ace'] },
             { part: 'termChips', param: 'lm.cotmode', engines: ['yue2'] },
             { part: 'flag', param: 'lm.preview', label: '--preview-score', engines: ['yue2'] },
             {
               part: 'button',
               engines: ['yue2'],
-              actions: [{ do: 'bespoke', name: 'scorePreview', label: 'score preview' }],
+              actions: [{ do: 'bespoke', name: 'scorePreview', label: '▶ score preview' }],
             },
             { part: 'note', text: '3B global LM · writes the song as it goes', engines: ['heartmula'] },
-            { part: 'note', text: '8B planner', engines: ['minimax-m3'] },
+            /* what Plans & endings set: a replay, the plan cache, or none (E-15); off the desk it reads as its defaults */
+            {
+              part: 'note',
+              text: '8B planner · plan cache {value:mm.reuse}',
+              engines: ['minimax-m3'],
+              per: [
+                { when: { param: 'mm.hidpath', not: '' }, text: '8B planner · replaying {value:mm.hidpath}' },
+                { when: { param: 'mm.plank', not: '' }, text: '8B planner · replaying {value:mm.plank}' },
+              ],
+            },
           ],
         },
-        { part: 'planText' },
+        /* the plan the planner starts from: what it reads, and how it is laid out, per engine */
+        {
+          part: 'planText',
+          opts: { look: 'plan' },
+          reads: ['prompt.text', 'lyrics.text', 'tempo.bpm', 'tempo.key', 'lm.on', 'lm.cot'],
+          per: [
+            { engines: ['minimax-m3'], opts: { look: 'prose' }, reads: ['prompt.text', 'lyrics.text'] },
+            { engines: ['yue2'], opts: { look: 'compose' }, reads: ['prompt.text', 'lyrics.text', 'lm.cotmode'] },
+            { engines: ['heartmula'], opts: { look: 'tags' }, reads: ['prompt.text', 'lyrics.text', 'tempo.dur'] },
+          ],
+        },
         {
           part: 'termLine',
           opts: { command: 'sample' },
@@ -458,23 +478,18 @@ export const planner = {
             { part: 'token', param: 'hm.cfg', label: '--cfg' },
           ],
         },
-        {
-          part: 'termLine',
-          opts: { command: 'composer' },
-          engines: ['yue2'],
-          children: [{ part: 'token', param: 'yue.cfg', label: '--cfg' }],
-        },
+        /* the composer's line: its CFG, and at Lab its sampling after it on the same line */
         {
           part: 'termLine',
           opts: { command: 'composer' },
           engines: ['yue2'],
           children: [
-            { part: 'token', param: 'yc.temp', label: '--temp' },
-            { part: 'token', param: 'yc.topp', label: '--top-p' },
-            { part: 'token', param: 'yc.topk', label: '--top-k' },
-            { part: 'token', param: 'yc.minp', label: '--min-p' },
+            { part: 'token', param: 'yue.cfg', label: '--cfg' },
+            { part: 'token', param: 'yc.temp', label: '--temp', tiers: ['lab'] },
+            { part: 'token', param: 'yc.topp', label: '--top-p', tiers: ['lab'] },
+            { part: 'token', param: 'yc.topk', label: '--top-k', tiers: ['lab'] },
+            { part: 'token', param: 'yc.minp', label: '--min-p', tiers: ['lab'] },
           ],
-          tiers: ['lab'],
         },
         {
           part: 'termLine',
@@ -485,8 +500,8 @@ export const planner = {
             { part: 'token', param: 'lm.minp', label: '--min-p' },
             { part: 'token', param: 'lm.plaus', label: '--cfg-plausibility' },
             { part: 'token', param: 'lm.resc', label: '--cfg-rescale' },
-            { part: 'token', param: 'lm.codes', label: '--codes-strength' },
-            { part: 'token', param: 'lm.codesteps', label: '--codes-steps' },
+            { part: 'token', param: 'lm.codes', label: '--codes-strength', when: { param: 'lm.codesmode', is: 'ratio' } },
+            { part: 'token', param: 'lm.codesteps', label: '--codes-steps', when: { param: 'lm.codesmode', is: 'steps' } },
           ],
           tiers: ['lab'],
         },

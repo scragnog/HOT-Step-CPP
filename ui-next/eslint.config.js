@@ -17,7 +17,7 @@ import { ENGINES } from './src/definitions/engines.ts'
    anything else; with no import there is no name to reach the store by (the test build's compatibility globals are
    test-only, and tools/test-parts-contract.mjs plants a part that tries both and must fail this lint). */
 const PART_ONLY = [
-  { group: ['../*', '../**', '!../kit', '!../kit/**', '!../services/**', '../../*', '../../**'], message: 'A part imports only ../kit (its props and helpers), react, its sibling parts and ../services. It is given its values and setters: docs/09, "How a part is written".' },
+  { group: ['../*', '../**', '!../kit', '!../kit/**', '!../services', '!../services/**', '../../*', '../../**'], message: 'A part imports only ../kit (its props and helpers), react, its sibling parts and ../services. It is given its values and setters: docs/09, "How a part is written".' },
   { group: ['zustand', 'zustand/**', 'i18next', 'react-i18next'], message: 'A part has no store and no translation of its own: it says words with useSay from ../kit.' },
 ]
 
@@ -52,7 +52,7 @@ const NO_VALUE_FUNCTIONS = { name: '../../derive.ts', importNames: VALUE_FUNCTIO
 const VALUE_FILES = ['src/app/store/**', 'src/app/render/bind.ts', 'src/app/testing/**', 'src/app/model/**', 'src/app/i18n/**', 'src/app/services/**']
 /* drawing: coordinates and sizes read from the page (parseFloat of a computed style) and key names, not values; the
    engines' marks and colours and the definitions' drawings, which are per engine by what they are */
-const DRAWING = ['src/app/board/cables.ts', 'src/app/parts/xyMotion.ts', 'src/app/desk/layout.ts', 'src/app/desk/ring.ts', 'src/app/register/keys.ts']
+const DRAWING = ['src/app/board/cables.ts', 'src/app/parts/xyMotion.ts', 'src/app/parts/motion.ts', 'src/app/desk/layout.ts', 'src/app/desk/ring.ts', 'src/app/register/keys.ts']
 const IDENTITY = ['src/app/shell/engines.ts', 'src/app/thumbs/**']
 
 export default defineConfig([

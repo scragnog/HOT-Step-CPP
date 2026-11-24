@@ -1,0 +1,107 @@
+{
+  "about": "Package 5's features, each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+  "switches": [
+    {
+      "feature": "model rows",
+      "file": "src/app/parts/ModelPicker.tsx",
+      "find": "{(v.models ?? []).map(r => {",
+      "replace": "{([] as NonNullable<typeof v.models>).map(r => {"
+    },
+    {
+      "feature": "panel models",
+      "file": "src/app/features/engine-panel.tsx",
+      "find": "fill('engine.panel', EngineModels);",
+      "replace": "void fill; void EngineModels;"
+    },
+    {
+      "feature": "models service",
+      "file": "src/app/features/engine-panel.tsx",
+      "find": "void tell();",
+      "replace": "void tell;"
+    },
+    {
+      "feature": "fixed parts",
+      "file": "src/derive/vram.ts",
+      "find": "  for (const f of fig?.fixed ?? []) parts.push({ name: f.name, gb: f.gb });",
+      "replace": ""
+    },
+    {
+      "feature": "take cost",
+      "file": "src/derive/vram.ts",
+      "find": "each = !t || (t.when && !valueOf(ix, t.when, desk)) ? 0 : t.gb;",
+      "replace": "each = 0 * (t?.gb ?? 0);"
+    },
+    {
+      "feature": "refused run",
+      "file": "src/derive/vram.ts",
+      "find": "const refuses = fig?.over === 'refuse' && need > card;",
+      "replace": "const refuses = false as boolean;"
+    },
+    {
+      "feature": "selected file",
+      "file": "src/derive/core.ts",
+      "find": "  return s !== undefined && (desk.lists?.[listKey(from, desk.engine)] ?? []).some(x => x.value === s) ? s : undefined;",
+      "replace": "  return void s;"
+    },
+    {
+      "feature": "model roles",
+      "file": "src/derive/vram.ts",
+      "find": "const w = paramWords(ix, k, desk), role = w.short ?? w.label;",
+      "replace": "const w = paramWords(ix, k, desk), role = w.label;"
+    },
+    {
+      "feature": "card words",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "<b>{c.name}</b><small>{say(c.tag[0])}<br />{say(c.tag[1])}</small>",
+      "replace": "<b>{c.name}</b>"
+    },
+    {
+      "feature": "card specs",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "<span className=\"ep-specs\"><i title={say(c.rateTip)}>{say(c.rate)}</i><i title={say(c.takesTip)}>{say(c.takes)}</i></span>",
+      "replace": ""
+    },
+    {
+      "feature": "list keeps panel",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "!t.closest('#engPanel, #engBtn, #dd')",
+      "replace": "!t.closest('#engPanel, #engBtn')"
+    },
+    {
+      "feature": "panel key guard",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "const card = (ev.target as Element).closest<HTMLElement>('.ep-card'); if (!card) return;",
+      "replace": "const card = (ev.target as Element).closest<HTMLElement>('.ep-card, .pk'); if (!card) return;"
+    },
+    {
+      "feature": "meter leds",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "const leds = meterLeds(cur, m.est, m.card, EM_N);",
+      "replace": "const leds = meterLeds(0 * cur, m.est, m.card, EM_N);"
+    },
+    {
+      "feature": "meter read",
+      "file": "src/derive/vram.ts",
+      "find": "read: gb1(v.refuses || v.tight ? v.need : v.models),",
+      "replace": "read: gb1(v.models),"
+    },
+    {
+      "feature": "quick models",
+      "file": "src/definitions/modules/models.ts",
+      "find": "{ part: 'modelPicker', params: ['model.lm', 'model.x', 'model.vae'], tiers: ['studio', 'lab'] },",
+      "replace": "{ part: 'modelPicker', params: ['model.lm', 'model.x', 'model.vae'] },"
+    },
+    {
+      "feature": "narrow strip",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "if (cs && sel && cs.scrollWidth > cs.clientWidth) cs.scrollLeft = sel.offsetLeft - cs.offsetLeft - 8;",
+      "replace": "void cs;"
+    },
+    {
+      "feature": "model names whole",
+      "file": "src/derive/engine.ts",
+      "find": ".replace(/ · /g, ' ')); else sets++;",
+      "replace": "); else sets++;"
+    }
+  ]
+}

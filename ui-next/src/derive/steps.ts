@@ -4,7 +4,7 @@
 // what changed. Every name is a message (messages.ts), so it reads in any locale.
 
 import type { Definition, Json, ParamDef, Step, Text, Value } from '../definitions/types.ts';
-import { type Desk, type Index, has, isAuto, nameOn, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, has, isAuto, mmss, nameOn, resolve, valueOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { fillMsg, formatMsg, paramWords, stateWords, stepKey } from './strings.ts';
 
@@ -87,8 +87,11 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
   const { keys, state } = changesOf(ix, before, after);
   if (!keys.length && !state.length) return null;
   const put = msg('step.put', { what: pathNames(ix, keys, state, before) });
-  if (hint?.named) {
+  /* the seed's own step is named as every change of the seed is (below): random or the number kept */
+  if (hint?.named && ix.states.get(hint.named.key)?.s.kind !== 'seed') {
     const n = hint.named, own = ix.params.get(n.key)?.p ?? ix.states.get(n.key)?.s;
+    const file = fileStep(ix, n, before, after);
+    if (file) return file;
     const def = own && (own as { steps?: { [k: string]: Step } }).steps?.[n.step];
     if (!def) throw new Error(`${n.key} has no step "${n.step}"`);
     const slots: { [k: string]: Slot } = { ...n.slots };
@@ -141,6 +144,22 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
   return { label: msg('step.change', { what }), put: msg('step.put', { what }) };
 }
 
+/** The steps a file has without saying. */
+export const FILE_STEPS = ['load', 'clear'];
+/** A file's own steps, as the concept names them (13-files.js fileStep): loaded into an empty place, its definition's
+ *  `load` words ("Load kick.wav as the timbre reference"); replacing one, from the one to the other; cleared, "Clear"
+ *  and the state's noun. Null for any other step, or a load the definition names itself when the place was empty. */
+function fileStep(ix: Index, n: NamedStep, before: Desk, after: Desk): StepWords | null {
+  const hit = ix.states.get(n.key);
+  if (!hit || hit.s.kind !== 'file' || !FILE_STEPS.includes(n.step)) return null;
+  const x = String(before.state[n.key] ?? ''), y = String(after.state[n.key] ?? ''), noun = stateWords(ix, n.key).noun;
+  if (!y) return { label: msg('step.file.clear', { noun }), undone: msg('step.file.back', { file: x }), redone: msg('step.file.cleared', { file: x }), put: msg('step.file.putBack', { file: x }) };
+  if (x) return { label: msg('step.file.replace', { noun, from: x, to: y }), put: msg('step.file.putBack', { file: x }) };
+  const def = hit.s.steps?.load;
+  if (def) return null;
+  return { label: msg('step.file.load', { file: y, noun }), undone: msg('step.file.out', { file: y }), redone: msg('step.file.loaded', { file: y }), put: msg('step.file.takeOut', { file: y }) };
+}
+
 /** The word a Quick row shows for the desk: the choice whose values are all in force, or none (choiceOf, tiers.ts). */
 export function rowWord(ix: Index, row: RowStep, desk: Desk): Slot {
   const inForce = (v: Value | { [k: string]: Value }) => (typeof v === 'object' ? Object.entries(v).every(([k, x]) => valueOf(ix, k, desk) === x) : valueOf(ix, row.key, desk) === v);
@@ -160,6 +179,9 @@ function stateText(ix: Index, key: string, desk: Desk): Slot {
   const v = desk.state[key] as Json | undefined, w = stateWords(ix, key);
   if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) return w.empty ?? 'none';
   if (typeof v === 'string' || typeof v === 'number') return String(v);
+  /* a span in seconds, in the song's times (the repaint region, Q-24) */
+  const sp = v as { start?: unknown; end?: unknown };
+  if (typeof sp === 'object' && !Array.isArray(sp) && typeof sp.start === 'number' && typeof sp.end === 'number') return `${mmss(Math.min(sp.start, sp.end))}–${mmss(Math.max(sp.start, sp.end))}`;
   return w.noun;
 }
 

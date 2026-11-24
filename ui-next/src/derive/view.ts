@@ -63,7 +63,8 @@ export function boardNodes(ix: Index, d: Definition, desk: Desk): { units: 1 | 2
   if (d.kind === 'module') throw new Error(`${d.id} is a module: its tile is its face`);
   const on = d.engines.includes(desk.engine) ? d.params.filter(p => has(ix, p.key, desk.engine)) : [];
   const numbers = on.filter(p => p.type === 'number'), units = pedalUnits(numbers.length);
-  const face = (t: Tier) => (d.face || []).map(n => nodeAt(ix, n, { ...desk, tier: t })).filter((n): n is Node => !!n);
+  /* the nodes as the definition writes them (the renderer resolves each, and finds its words by it) */
+  const face = (t: Tier) => (d.face || []).filter(n => !!nodeAt(ix, n, { ...desk, tier: t }));
   const sw = d.on ? [{ part: 'ledButton' as const, param: d.on, shown: true }] : [];
   if (desk.tier === 'quick') return { units, cells: d.kind === 'unit' ? [...face('quick').map(n => ({ part: 'node' as const, node: n, shown: true })), ...sw] : sw };
   if (desk.tier === 'studio') {

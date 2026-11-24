@@ -34,8 +34,10 @@ const OUT = path.join(here, 'out', 'gallery'); fs.mkdirSync(OUT, { recursive: tr
 const serve = file => new Promise(res => { const body = fs.readFileSync(file); const s = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(body); }); s.listen(0, '127.0.0.1', () => res({ url: `http://127.0.0.1:${s.address().port}/p.html`, close: () => s.close() })); });
 
 /* a part's root on the page, by its markup */
-const ROOTS = { newPart: '.zz-new', knob: '.kn', ledButton: '.led-btn', segmented: '.seg', pick: '.pk-lcdwrap', choiceRow: '.qchoice', textField: 'input[data-bind]', meter: '.vu', note: '.lbl:not([data-seam]), .pnote', lcdValue: '.bigval', button: '.pbtn', powerButton: '.master', textArea: 'textarea', xyPad: '.xy', labelled: '.foot-ctl, .lcdsel' };
-const SURFACES = { 'zz-g-tile': 'tile', 'zz-g-row': 'row', 'zz-g-rack': 'rack', 'zz-g-well': 'well', 'zz-g-lcd': 'lcd', 'zz-g-foot': 'foot', 'zz-g-labelled': 'labelled' };
+const ROOTS = { newPart: '.zz-new', knob: '.kn', ledButton: '.led-btn', segmented: '.seg', pick: '.pk-lcdwrap', choiceRow: '.qchoice', textField: 'input[data-bind]', meter: '.vu', note: '.lbl:not([data-seam]), .pnote', lcdValue: '.bigval', button: '.pbtn', powerButton: '.master', textArea: 'textarea', xyPad: '.xy', labelled: '.foot-ctl, .lcdsel, .ts, .dice-cap, .endings, .tk-pair, .ad-foot, .pc-i' };
+const SURFACES = { 'zz-g-tile': 'tile', 'zz-g-row': 'row', 'zz-g-rack': 'rack', 'zz-g-well': 'well', 'zz-g-lcd': 'lcd', 'zz-g-foot': 'foot', 'zz-g-labelled': 'labelled',
+  /* package 2's containers */
+  'zz-g-term': 'term', 'zz-g-termbar': 'termbar', 'zz-g-lcdrow': 'lcdrow', 'zz-g-group': 'group', 'zz-g-strip': 'strip', 'zz-g-plugin': 'plugin', 'zz-g-deck': 'deck' };
 
 /* in the page: every part's facts */
 const MEASURE = `(() => {
@@ -53,7 +55,7 @@ const MEASURE = `(() => {
   const marked = el => [el, ...el.querySelectorAll('*')].some(x => { const a = getComputedStyle(x, '::after'); return a.content !== 'none' && a.width === '5px' && a.height === '5px' && a.backgroundColor !== 'rgba(0, 0, 0, 0)'; });
   const out = [];
   /* a new part, by its markup alone, on each surface */
-  for (const c of document.querySelectorAll('[data-m^="zz-g"] :is(.tile-body, .knobs, .rackrow, .samp-strip, .lcd, .tile-foot), .pedal[data-pid^="zz-g"], .pedal[data-xid^="zz-g"] .u-ctls')) { if (c.querySelector(':scope > .zz-new')) continue; const n = document.createElement('div'); n.className = 'zz-new changed'; n.dataset.ctl = 'zz.new'; n.innerHTML = '<span class="kl">New</span>'; c.appendChild(n); }
+  for (const c of document.querySelectorAll('[data-m^="zz-g"] :is(.tile-body, .knobs, .rackrow, .samp-strip, .lcd, .tile-foot, .tline, .term-bar, .lcd-row, .ad-g, .schctl, .pc-grid, .deck-c), .pedal[data-pid^="zz-g"], .pedal[data-xid^="zz-g"] .u-ctls')) { if (c.querySelector(':scope > .zz-new')) continue; const n = document.createElement('div'); n.className = 'zz-new changed'; n.dataset.ctl = 'zz.new'; n.innerHTML = '<span class="kl">New</span>'; c.appendChild(n); }
   const hosts = [...document.querySelectorAll('#bento > .tile[data-m^="zz-g"]')].map(t => [t.dataset.m, t]).concat([...document.querySelectorAll('.pedal[data-pid^="zz-g"], .pedal[data-xid^="zz-g"]')].map(p => [p.dataset.pid ? 'pedal' : 'unit', p]));
   const seen = new Set();
   /* every part the map below names, then any other control (a part a package adds: its root carries data-ctl) */
@@ -67,7 +69,7 @@ const MEASURE = `(() => {
     const c = el.matches('[data-ctl]') ? el : el.querySelector('[data-ctl]') || el.closest('[data-ctl]'), ctl = c ? c.dataset.ctl + ':' + (c.classList[0] || c.tagName.toLowerCase()) : '';
     out.push({ host, part, ctl, drawn: r.width > 0 && r.height > 0, inside: r.left >= hb.left - 1 && r.right <= hb.right + 1 && r.top >= hb.top - 1 && r.bottom <= hb.bottom + 1,
       pressed: el.matches('.seg') ? el.querySelectorAll('[aria-pressed="true"]').length : el.matches('.qchoice') ? el.querySelectorAll('[aria-checked="true"]').length : null,
-      contrast: words && words.textContent.trim() ? contrast(words) : null, textArea: !!el.querySelector('textarea'), label: sig(label), words: sig(words), face: face(el), changed: el.classList.contains('changed') || !!el.querySelector('.changed'), marked: marked(el.closest('.foot-ctl, .lcdsel') || el.closest('[data-ctl]') || el) });
+      contrast: words && words.textContent.trim() ? contrast(words) : null, textArea: !!el.querySelector('textarea'), label: sig(label), words: sig(words), face: face(el), changed: el.classList.contains('changed') || !!el.querySelector('.changed'), marked: marked(el.closest('.foot-ctl, .lcdsel, .ad-foot') || el.closest('[data-ctl]') || el) });
   }
   return out;
 })()`;
@@ -106,11 +108,11 @@ async function run() {
       const ctx = await browser.newContext({ viewport: { width: 1600, height: 1080 }, colorScheme: scheme }); await ctx.route(u => !u.href.startsWith(page.url.replace(/p\.html$/, '')), r => r.abort());
       const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to load/.test(m.text())) errs.push(m.text()); });
       await p.goto(page.url); await p.waitForTimeout(300);
-      await p.evaluate(([tier, mods]) => {
+      await p.evaluate(([tier, mods, names]) => {
         S.backend = 'ace'; S.tier = tier; S.mods = [...mods, 'post']; S.pedals = ['zz-g-pedal', 'zz-g-unit'];
-        for (const x of ['tile', 'row', 'rack', 'well', 'lcd', 'foot', 'labelled', 'pedal', 'unit']) Object.assign(S.vals, { [`zzg.${x}.n1`]: 7, [`zzg.${x}.c`]: 'hard', [`zzg.${x}.b`]: true, [`zzg.${x}.t`]: 'x' });
+        for (const x of [...names, 'pedal', 'unit']) Object.assign(S.vals, { [`zzg.${x}.n1`]: 7, [`zzg.${x}.c`]: 'hard', [`zzg.${x}.b`]: true, [`zzg.${x}.t`]: 'x' });
         render();
-      }, [tier, Object.keys(SURFACES)]);
+      }, [tier, Object.keys(SURFACES), Object.values(SURFACES)]);
       await p.waitForTimeout(700);
       await p.screenshot({ path: path.join(OUT, `${scheme}-${tier}.png`), fullPage: true });
       const got = await p.evaluate(MEASURE);
@@ -130,7 +132,7 @@ async function run() {
   else if (fs.existsSync(FIX)) { const kept = JSON.parse(fs.readFileSync(FIX, 'utf8')); for (const [k, v] of Object.entries(kept)) if (look[k] !== v) fails.push(`${k.replace(/\|/g, ' ')}: its look is not what was recorded (${look[k] ? 'changed' : 'gone'}): ${(look[k] ?? '').slice(0, 160)}`); for (const k of Object.keys(look)) if (!(k in kept)) fails.push(`${k}: new since the last record`); }
   for (const r of rows) {
     if (r.error) { fails.push(`${r.scheme} ${r.tier}: page error ${r.error}`); continue; }
-    const at = `${r.scheme} ${r.tier} ${r.part} on ${r.surface}`;
+    const at = `${r.scheme} ${r.tier} ${r.part}${r.part === 'control' || r.part === 'note' ? ` (${r.ctl})` : ''} on ${r.surface}`;
     seen.set(`${r.part}|${r.surface}`, (seen.get(`${r.part}|${r.surface}`) || 0) + 1);
     if (!r.drawn) fails.push(`${at}: not drawn`);
     else if (!r.inside) fails.push(`${at}: stands outside its ${r.surface === 'pedal' || r.surface === 'unit' ? r.surface : 'tile'}`);
@@ -138,7 +140,9 @@ async function run() {
     if (r.label && (r.label.transform !== 'uppercase' || !/mono|Mono/.test(r.label.family) && !/var|Geist/.test(r.label.family))) { if (r.label.transform !== 'uppercase' && r.part !== 'knob') fails.push(`${at}: its label is not the page's caps label (${JSON.stringify(r.label)})`); }
     /* a text area's words are its change (the concept marks Avoid's note no other way) */
     if (r.pressed !== null && r.pressed !== undefined && r.pressed !== 1) fails.push(`${at}: ${r.pressed} of its options say they are chosen (want 1)`);
-    if (r.changed && !r.marked && !(r.part === 'textArea' || (r.part === 'labelled' && r.textArea))) fails.push(`${at}: changed, and no changed mark`);
+    /* a look-back strip in a terminal is unmarked, as the concept's (its window's token on the line carries the mark) */
+    const unmarked = r.part === 'textArea' || (r.part === 'labelled' && r.textArea) || (/:codes$/.test(r.ctl) && (r.surface === 'term' || r.surface === 'termbar'));
+    if (r.changed && !r.marked && !unmarked) fails.push(`${at}: changed, and no changed mark`);
     const surfaceKind = Object.entries(SURFACE_OF).find(([, ss]) => ss.includes(r.surface))?.[0] ?? r.surface;
     const ref = refs[`${r.scheme}|${r.part}|${surfaceKind}`];
     if (ref && r.tier === 'lab') {
@@ -154,6 +158,6 @@ async function run() {
   if (missing.length) console.log(`not drawn on (by the definition or the tier; checked where drawn): ${missing.join(', ')}`);
   console.log(`screenshots: ${path.relative(repo, OUT)}`);
   const uniq = [...new Set(fails)];
-  if (uniq.length) { console.log(`\n${uniq.length} failed:`); uniq.slice(0, 80).forEach(f => console.log('  ' + f)); process.exitCode = 1; } else console.log('RESULT: every part reads right wherever it stands');
+  if (uniq.length) { console.log(`\n${uniq.length} failed:`); uniq.slice(0, Number(process.env.GALLERY_MAX || 80)).forEach(f => console.log('  ' + f)); process.exitCode = 1; } else console.log('RESULT: every part reads right wherever it stands');
 }
 await run();

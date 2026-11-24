@@ -28,7 +28,7 @@ const LOCK = (
 export function PromptBox(v: PartView) {
   const say = useSay(), ta = useRef<HTMLTextAreaElement>(null), info = useRef<HTMLDivElement>(null), m = v.prompt, box = v.params[0];
   const of = (k: string) => v.params.find(p => p.key === k);
-  const act = (name: string, arg?: string) => { const i = v.actions.findIndex(a => a.name === name); if (i >= 0) v.run(i, arg); };
+  const act = (name: string, arg?: string) => { v.act(name, arg); };
   const words = (name: string) => v.actions.find(a => a.name === name);
   const [ph, setPh] = useState(0), [ping, setPing] = useState(0);
   const any = !!m?.info.any, seen = useRef(any), [open, setOpen] = useState(false);

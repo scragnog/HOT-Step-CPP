@@ -1,0 +1,82 @@
+{
+ "about": "Package 3a's accepted differences between the concept's page and the rebuild's in its states (slice-states/30-instruments.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+ "accepted": [
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:type$",
+   "n": 74,
+   "why": "Deviation 11 (slice-accepted.json): every button and input carries its type."
+  },
+  {
+   "state": "^instruments-takes-ace",
+   "key": "",
+   "field": "^(only|--cols|sem:aria-valuemax)$",
+   "n": 6,
+   "why": "Eight takes on ACE-Step, the server's batch.max, where the concept offers nine (docs/03, Takes; deviation 34): a reel fewer; the eight keep the concept's three-a-row footprint, so the tile is as tall as the concept's."
+  },
+  {
+   "state": "^instruments-tempo-",
+   "key": "[.]tempo>div:0>div:0>",
+   "field": "^only$",
+   "n": 186,
+   "why": "In Tempo's top row the big number's pieces stand inside package 1's .lcd-numw (display: contents, so they stand in the row as the concept's do: containers-accepted.json counts the same); TAP stands with AUTO in its buttons, as the concept's."
+  },
+  {
+   "state": "^instruments-tempo-",
+   "key": "div:[02]>span:[02]>button:0$",
+   "field": "^sem:(name|aria-label)$",
+   "n": 12,
+   "why": "Deviation 15 (package 1): an LCD's lit word names its parameter to a screen reader (\"Beat intro and outro (DJ bars)\" for BEAT I/O)."
+  },
+  {
+   "state": "^instruments-tempo-",
+   "key": "",
+   "field": "^line-height$",
+   "n": 16,
+   "why": "The LCD picker's arrows (.cyc) in standards mode (styles/rebuild/10-standards.css, the slice's): line-height 0 keeps them where the concept's quirks-mode page draws them."
+  },
+  {
+   "state": "^instruments-tempo-",
+   "key": "circle:48$",
+   "field": "^sem:data-key$",
+   "n": 4,
+   "why": "Deviation 10: the wheel's Auto names its value (\"\", the option Auto stores), the concept's its word."
+  },
+  {
+   "state": "^instruments-tempo-mm3",
+   "key": "",
+   "field": "^sem:data-capuse$",
+   "n": 1,
+   "why": "Deviation 10: the concept's paint hook on COMPOSE CAPTION USES THIS; the rebuild's note is the definition's, shown by its condition."
+  },
+  {
+   "state": "^instruments-seed-",
+   "key": "button:0$",
+   "field": "^sem:data-(prev|shown)$",
+   "n": 6,
+   "why": "The concept keeps the cells it showed on the button (data-shown, data-prev) to roll from; the rebuild's split-flap keeps them in the part."
+  },
+  {
+   "state": "^instruments-seed-",
+   "key": "button:2>svg:0$",
+   "field": "^sem:aria-hidden$",
+   "n": 2,
+   "why": "Package 1's lock hides its padlock drawing from a screen reader; its name is the button's."
+  },
+  {
+   "state": "^instruments-repaint-",
+   "key": "rp-ctl|span:1>span:0",
+   "field": "^sem:(role|name|aria-label|data-v)$",
+   "n": 6,
+   "why": "Deviations 6 and 10: a segmented choice is a named group, and its buttons' hooks name their values."
+  },
+  {
+   "state": "^instruments-scope-",
+   "key": "scope-link|span:0>span:0>button:[0-9]$",
+   "field": "^sem:data-(showmod|tier|ring)$",
+   "n": 6,
+   "why": "Deviation 10: the read-out's link runs its node's action (a tier to go to and what to ring there), not the concept's [data-showmod] hook."
+  }
+ ]
+}

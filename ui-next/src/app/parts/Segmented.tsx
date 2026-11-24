@@ -6,10 +6,12 @@ import { definePart, useSay, type PartView } from '../kit/index.ts';
 export function Segmented(v: PartView) {
   const say = useSay(), p = v.params[0];
   if (!p?.options) return null;
+  /* the compact row says each option short, its full words in its tip (25-module-latent.js) */
+  const sm = v.opts.size === 'sm';
   return (
-    <span className={`seg${v.opts.size === 'sm' ? ' sm' : ''}${p.changed ? ' changed' : ''}`} data-ctl={p.key} role="group" aria-label={say(p.label)}>
+    <span className={`seg${sm ? ' sm' : ''}${p.changed ? ' changed' : ''}`} data-ctl={p.key} role="group" aria-label={say(p.label)}>
       {p.options.map(o => (
-        <button key={String(o.value)} type="button" data-seg={p.key} data-v={String(o.value)} aria-pressed={o.on} onClick={() => p.set(o.value)}>{say(o.label)}</button>
+        <button key={String(o.value)} type="button" data-seg={p.key} data-v={String(o.value)} aria-pressed={o.on} title={sm && o.short ? say(o.label) : undefined} onClick={() => p.set(o.value)}>{say(sm ? o.short ?? o.label : o.label)}</button>
       ))}
     </span>
   );

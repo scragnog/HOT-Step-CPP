@@ -4,8 +4,8 @@
 // rather than restating them. Nothing here has a branch for any one module.
 
 import type {
-  Condition, Definition, EngineId, EngineOverride, Json, Node, NodeOverride, ParamDef, ParamFace, StateDef, Tier,
-  Value, WordsOverride,
+  Condition, Definition, EngineId, EngineOverride, Json, Node, NodeOverride, Option, OptionsFrom, ParamDef, ParamFace,
+  StateDef, Tier, Value, WordsOverride,
 } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
 import { DESK_FACTS, type FactInput } from '../definitions/parts.ts';
@@ -81,9 +81,57 @@ export interface Desk {
    *  left at "" (the engine's default) stands for. */
   selection?: { [bucket: string]: string };
   /** The lists the server gives for server-listed choices (parts.ts OPTION_SOURCES), with their words, so a value
-   *  from one is written by its name ("DPM++ 3M" for dpm3m). */
-  lists?: { [source: string]: { value: string | number; label: string; data?: Json }[] };
+   *  from one is written by its name ("DPM++ 3M" for dpm3m). A model bucket's list is the engine's own, under
+   *  `models.<engine>.<bucket>` (listKey), and each file carries its size in GB; a caption dataset carries its tracks and tags (`data`). */
+  lists?: { [source: string]: { value: string | number; label: string; gb?: number; data?: Json }[] };
+  /** What the VRAM figures are worked out from beside the model files' sizes (derive/vram.ts): the card, and what
+   *  each engine loads besides its model files and costs per take. Told by the models service. */
+  vram?: VramFigures;
 }
+
+/** The VRAM figures the server tells the page (the models service): the card's size, and for each engine the parts it
+ *  always loads (encoders, working memory), what each adapter it can load adds and how many it can load, and what
+ *  each take adds: `gb` a take, only while the switch `when` is on, the first take included or not (`first`), and
+ *  what happens when a run does not fit the card (`over`: planned in passes, refused before anything loads, or just
+ *  tight). */
+export interface VramFigures {
+  card: number;
+  engines: { [e in EngineId]?: {
+    fixed: { name: string; gb: number }[];
+    adapters?: { gb: number; most: number };
+    take: { gb: number; when?: string; first: boolean };
+    over: 'passes' | 'refuse' | 'tight';
+  } };
+}
+
+/** The key of the server's list a choice draws from in `desk.lists`: its source, or for a model bucket the engine's
+ *  own (`models.ace.dit`), since each engine lists its own files. */
+export const listKey = (from: OptionsFrom, e: EngineId): string => (from.from === 'models' && from.bucket ? `models.${e}.${from.bucket}` : from.from);
+/** Where the server's selected file of an engine's model bucket is kept in `desk.selection` (`ace.dit`). */
+export const selectionKey = (e: EngineId, bucket: string): string => `${e}.${bucket}`;
+/** A choice's options in two parts: those the definition lists itself (`include`, or its own list) and those the
+ *  server lists for it, without a value twice and only the values it names (`only`). A model choice left at ""
+ *  (the engine's default) stands for the file the server has selected for its bucket (modelDefault): while that file is
+ *  listed, "" is not offered apart from it. */
+export function choiceLists(f: ParamFace, desk: Desk, e: EngineId = desk.engine): { fixed: Option[]; listed: { value: string | number; label: string; gb?: number }[] } {
+  const own = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
+  const from = !Array.isArray(f.options) && f.options ? f.options : null;
+  const listed = from ? (desk.lists?.[listKey(from, e)] ?? []).filter(x => !own.some(o => o.value === x.value) && (!from.only || from.only.includes(String(x.value)))) : [];
+  const stands = from?.loaded && from.bucket ? desk.selection?.[selectionKey(e, from.bucket)] : undefined;
+  const folded = stands !== undefined && listed.some(x => x.value === stands);
+  return { fixed: folded ? own.filter(o => o.value !== '') : own, listed };
+}
+/** The file a loaded model's "" (the engine's default) stands for: the one the server has selected for its bucket,
+ *  when the server lists it; undefined for any other choice (docs/05, "What is sent": the request sends the same). */
+export function modelDefault(ix: Index, key: string, desk: Desk): string | undefined {
+  const hit = ix.params.get(key); if (!hit || !has(ix, key, desk.engine)) return undefined;
+  const f = resolve(hit.p, desk.engine), from = !Array.isArray(f.options) && f.options ? f.options : null;
+  if (from?.from !== 'models' || !from.loaded || !from.bucket) return undefined;
+  const s = desk.selection?.[selectionKey(desk.engine, from.bucket)];
+  return s !== undefined && (desk.lists?.[listKey(from, desk.engine)] ?? []).some(x => x.value === s) ? s : undefined;
+}
+/** The value a choice shows as chosen: a model choice's "" is the file it stands for. */
+export const shownValue = (ix: Index, key: string, desk: Desk, v: Value): Value => (v === '' ? modelDefault(ix, key, desk) ?? v : v);
 
 export const has = (ix: Index, key: string, e: EngineId): boolean => {
   const hit = ix.params.get(key);
@@ -213,13 +261,13 @@ const minus = (s: string) => s.replace(/^-/, '−');
 export const mmss = (s: number) => { const t = Math.max(0, Math.round(s)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 export const seconds = (v: number) => (v >= 60 ? mmss(v) : `${v.toFixed(v < 10 ? 1 : 0)} s`);
 
-export function formatValue(f: ParamFace, v: Value, lists?: Desk['lists']): string {
+export function formatValue(f: ParamFace, v: Value, lists?: Desk['lists'], e?: EngineId): string {
   const fm = f.format || {};
   const word = (fm.words || []).find(w => w.value === v);
   if (word) return word.text;
   if (typeof v === 'boolean') return v ? 'on' : 'off';
   if (typeof v === 'string') {
-    const o = (Array.isArray(f.options) ? f.options : [...(f.options?.include ?? []), ...(f.options ? lists?.[f.options.from] ?? [] : [])]).find(x => x.value === v);
+    const o = (Array.isArray(f.options) ? f.options : [...(f.options?.include ?? []), ...(f.options ? lists?.[e ? listKey(f.options, e) : f.options.from] ?? [] : [])]).find(x => x.value === v);
     return o ? o.label : v;
   }
   const step = f.range?.[2] ?? 1;
@@ -233,7 +281,7 @@ export function formatValue(f: ParamFace, v: Value, lists?: Desk['lists']): stri
 export function textOf(ix: Index, key: string, desk: Desk): string {
   const hit = ix.params.get(key)!, f = wordsOf(ix, hit.p, desk);
   if (isAuto(ix, key, desk)) return fill(ix, (f.auto && f.auto.says) || `≈ ${formatValue(f, f.default)}`, desk, f);
-  return formatValue(f, valueOf(ix, key, desk)!, desk.lists);
+  return formatValue(f, valueOf(ix, key, desk)!, desk.lists, desk.engine);
 }
 
 /* ---------------------------------------------------------------- words that name values (docs/05) */

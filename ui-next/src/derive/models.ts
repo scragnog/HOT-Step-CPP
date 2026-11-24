@@ -11,17 +11,23 @@
 import { CATEGORIES, type Definition, type EngineId, type ModuleDef, type Node, type PedalDef, type Tier, type UnitDef, type Value } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, stripOf, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, shownValue, stripOf, valueOf, wordsOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
 import {
-  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stripWords, textMsg,
+  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stateWords, stripWords, textMsg,
   wordKey,
 } from './strings.ts';
 import { alsoLinkWords, alsoSet } from './tiers.ts';
 import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
-import { controlModel, type ControlModel } from './controls.ts';
+import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
+import { kidsOf, type KidModel } from './containers.ts';
+import { readoutModel, type ReadoutModel } from './readouts.ts';
+import { instrumentModel, type InstrumentModel } from './instruments.ts';
+import { stateOf } from './core.ts';
+import type { Json } from '../definitions/types.ts';
+import { modelRows, type ModelRow } from './vram.ts';
 import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
 
 /* ---------------------------------------------------------------- a part's model */
@@ -29,7 +35,9 @@ import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fi
 /** Where a part stands: the surface its container gives it. A part draws the housing the concept gives it there
  *  (a labelled control is a foot pairing on a tile and an LCD selector on a pedal), and the rebuild's stylesheets give
  *  every part a look on every surface (styles/rebuild/). */
-export type Surface = 'tile' | 'quick' | 'rack' | 'foot' | 'well' | 'lcd' | 'pedal' | 'unit';
+export type Surface = 'tile' | 'quick' | 'rack' | 'foot' | 'well' | 'lcd' | 'pedal' | 'unit'
+  /* the containers' own (package 2): a terminal's lines, a rack group, a plugin's controls, a deck, an LCD's row */
+  | 'term' | 'group' | 'plugin' | 'deck' | 'lcdrow';
 
 /** How the shell places a laid-out cell (a pedal's knob): the core's words for it, not the view's. */
 export interface CellWords {
@@ -73,9 +81,15 @@ export interface ParamModel {
   autoTip?: Slot;
   /** A field that keeps invalid text: what it says is in force meanwhile, and whether there is a value to put back. */
   kept?: { says: Slot; back: boolean };
+  /** It can be automatic (a knob draws its auto pill). */
+  canAuto?: true;
+  /** Presses within this many milliseconds are one step (taps on TAP, keys on the key wheel). */
+  run?: number;
 }
 
-export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean }
+/** What a node reads; `changed` when a parameter it reads is changed (an LCD's word carries the changed mark of what it
+ *  shows: Tempo's KEY). */
+export interface ReadModel { key: string; value: unknown; text: Slot; lcd: Slot; onDesk: boolean; changed?: boolean }
 
 export interface PartModel {
   part: string;
@@ -109,10 +123,26 @@ export interface PartModel {
   /** What a shared control draws beyond its parameters (src/derive/controls.ts): a box's text, a ruler, a fader, a
    *  look-back strip, a power chip, a row's value between its choices, a picker's option faces. */
   control?: ControlModel;
+  /** The engine panel's model rows (a modelPicker): each model's role, words and option faces (derive/vram.ts). */
+  models?: ModelRow[];
   /** Why the node stands back, when it does. */
   dim: Slot | null;
   small: boolean;
+  /** What the node says when it stands back, whether or not it does now (a guard's "guard off", drawn hidden until it
+   *  holds); absent for a node that never stands back. */
+  dimWords?: Slot;
+  /** A container: its children, in the order they are drawn (src/derive/containers.ts). */
+  kids?: KidModel[];
+  /** A read-out: what it shows, worked out from what it reads (src/derive/readouts.ts). */
+  readout?: ReadoutModel;
+  /** The state its node names (a drop zone's file), and whether another definition only lends it to this node. */
+  state?: StateModel[];
+  /** A bespoke instrument: what it draws, worked out from what it binds and reads (src/derive/instruments.ts). */
+  instrument?: InstrumentModel;
 }
+
+/** A state a node names, as a part draws it. */
+export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot }
 
 
 /** A parameter on the desk as a part draws it. */
@@ -124,7 +154,9 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
     ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}),
   };
   if (p.type === 'number' && f.range) {
-    const [lo, hi] = f.range, n = typeof v === 'number' ? v : lo, d = typeof f.default === 'number' ? f.default : lo;
+    /* while automatic, a number stands at the value auto stands for (L-11) */
+    const est = out.auto ? autoEstimate(ix, key, desk) : null;
+    const [lo, hi] = f.range, n = est ?? (typeof v === 'number' ? v : lo), d = typeof f.default === 'number' ? f.default : lo;
     out.range = f.range; out.at = (n - lo) / (hi - lo); out.detent = Math.min(1, Math.max(0, (d - lo) / (hi - lo)));
     out.typeName = msg('knob.type', { label: w.label, min: lo, max: hi });
     out.bare = cell?.bare ? bareText(ix, key, desk) : null;
@@ -133,12 +165,16 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
     const [, , step] = f.range, steps = Math.round((hi - lo) / step);
     if (steps <= 12) out.options = Array.from({ length: steps + 1 }, (_, i) => { const x = +(lo + i * step).toFixed(10), w = formatMsg(ix, key, desk, x); return { value: x, label: w, lcd: w, pick: w, on: x === v }; });
   }
-  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === v }));
+  /* a model choice's "" is shown as the file it stands for */
+  const shown = shownValue(ix, key, desk, v);
+  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === shown }));
   if (f.placeholder) out.placeholder = fillMsg(ix, wordKey(ix, key, desk, 'placeholder'), f.placeholder, desk);
   if (f.maxLength) out.maxLength = f.maxLength;
   if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
   const kept = p.type === 'text' ? keptMsg(ix, key, desk) : undefined;
   if (kept) out.kept = kept;
+  if (f.auto) out.canAuto = true;
+  if (p.run) out.run = p.run;
   return out;
 }
 
@@ -153,6 +189,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (key) {
     for (const f of ['tip', 'text', 'between'] as const) { const m = nodeWord(ix, node, desk, key, f); if (m) words[f] = m; }
     for (const [o, s] of Object.entries(spec?.opts ?? {})) if (s.type === 'text') { const m = nodeOptWord(ix, node, desk, key, o); if (m) words[o] = m; }
+    /* a list of words (an XY pad's corners): each by its place, `corners.0` ... */
+    else if (s.type === 'texts') ((node.opts as Record<string, unknown> | undefined)?.[o] as string[] | undefined ?? []).forEach((_, i) => { const m = nodeOptWord(ix, node, desk, key, o, i); if (m) words[`${o}.${i}`] = m; });
   }
   const nodeLabel = key ? nodeWord(ix, node, desk, key, 'label') : undefined;
   const label = cell?.label ?? nodeLabel ?? params[0]?.label;
@@ -178,7 +216,15 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
     const ctl = controlModel(ix, node, desk, words, label);
     if (ctl) m.control = ctl;
   }
+  if (node.dim && key) m.dimWords = m.dim ?? fillMsg(ix, `${key}.dim`, node.dim.says, desk);
+  if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);
+  const ro = readoutModel(ix, node, desk);
+  if (ro) m.readout = ro;
+  const ins = instrumentModel(ix, node, desk, key);
+  if (ins) m.instrument = ins;
+  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
+  if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
   /* the lyric sheet and the prompt card (src/derive/fields.ts) */
   if (node.part === 'lyricSheet') { const s = sheetModel(ix, node, desk); if (s) m.sheet = s; }
@@ -187,7 +233,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
 }
 
 function readModel(ix: Index, k: string, desk: Desk): ReadModel {
-  if (ix.params.has(k)) { const on = has(ix, k, desk.engine); return { key: k, value: on ? valueOf(ix, k, desk) ?? null : null, text: on ? textMsg(ix, k, desk) : '', lcd: on ? lcdMsg(ix, k, desk) : '', onDesk: true }; }
+  if (ix.params.has(k)) { const on = has(ix, k, desk.engine); return { key: k, value: on ? valueOf(ix, k, desk) ?? null : null, text: on ? textMsg(ix, k, desk) : '', lcd: on ? lcdMsg(ix, k, desk) : '', onDesk: true, ...(on && changed(ix, k, desk) ? { changed: true } : {}) }; }
   return { key: k, value: desk.state[k] ?? null, text: '', lcd: '', onDesk: true };
 }
 

@@ -4,7 +4,8 @@
 //   chip    a pill with its label and the value (the prompt's caption source)
 //   model   the role, the name, the quantisation badge, the size and a bar of the card it takes
 //   stamp   an ink stamp in the language's own name (the lyric language)
-// The options, their words, what each face shows and the list's heading (the node's `title`) are the core's; the
+// The options, their words, what each face shows and the list's heading (the node's `title`) are the core's (a model
+// row's role, heading, accessible name and the card under its list are the engine panel's: words `aria` and `note`); the
 // dropdown is the shared one (Dropdown.tsx, 30-dropdown.css). ArrowDown or ArrowUp on the button opens it.
 
 import { useCallback, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
@@ -22,10 +23,10 @@ export function Pick(v: PartView) {
   const i = opts.findIndex(o => o.on), faces = (v.control?.faces ?? []) as Face[], f: Face = faces[i] ?? {};
   const ch = p.changed ? ' changed' : '';
   const keys = (e: KeyboardEvent<HTMLButtonElement>) => { if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !open) { e.preventDefault(); setOpen(true); } };
-  const list = open ? <Dropdown anchor={btn} p={p} variant={variant} faces={faces} title={v.words.title} close={close} /> : null;
+  const list = open ? <Dropdown anchor={btn} p={p} variant={variant} faces={faces} title={v.words.title} note={v.words.note} close={close} /> : null;
   const button = (cls: string, face: ReactNode, extra: Record<string, unknown> = {}) => (
     <button ref={btn} type="button" className={`pk pk-${variant} ${cls}`} data-pick={p.key} data-variant={variant} aria-haspopup="listbox" aria-expanded={open}
-      aria-label={say({ id: 'ui.pick.label', slots: { label: p.label, value: p.text } })} onClick={() => setOpen(o => !o)} onKeyDown={keys} {...extra}>
+      aria-label={say(v.words.aria ?? { id: 'ui.pick.label', slots: { label: p.label, value: p.text } })} onClick={() => setOpen(o => !o)} onKeyDown={keys} {...extra}>
       {face}
     </button>
   );
