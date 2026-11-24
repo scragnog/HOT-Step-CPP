@@ -16,8 +16,6 @@
     { "id": "09-undo-storage/undo-not-under-overlays", "why": "Ctrl+Z under the presets popover and under the Concept notes changes nothing." }
   ],
   "excluded": [
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes leaves the description and says why, and under the picker (both pass since package 4); its last part presses Ctrl+Z on another page, whose navigation no package of this branch builds (P6-11), so the page's Undo answers on Create. The rule for another page is not built." },
-    { "id": "04-controls/dropdowns", "why": "Its last check reads the engine log's #logEngine after a model choice, and passes; the scenario fails on its LCD picker and the knobs a schedule brings (packages 1 and 2, acceptance/1-controls.json). The log following a model choice is in 36-notes-logs/the-log-says-what-the-engine-holds." },
     { "id": "21-chrome-round5/toast-reachable-under-the-picker", "why": "F-18 for the picker, package 8's (acceptance/8-overlays.json); for the notes it is 36-notes-logs/a-toast-joins-the-notes-tab-cycle." },
     { "id": "18-tips-touch/tips-keep-every-digit", "why": "The VRAM meter's tip (\"Click for the engine log.\"): the tooltips' package (8)." },
     { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "The keyboard tip on the VRAM meter: the tooltips' package (8)." },

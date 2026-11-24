@@ -28,11 +28,6 @@
   ],
   "excluded": [
     { "id": "04-controls/number-boxes", "why": "Its BPM box is Tempo's lcdNumber inside an LCD row (lcdRow, package 2). Its number-box checks are in 31-controls/number-box-types-steps-and-scrubs; the lcdNumber's in 32-controls-gallery/lcd-number-types-and-steps." },
-    { "id": "04-controls/dropdowns", "why": "Its LCD picker and the knobs a schedule brings are in rack groups (group, package 2), its time signature in an LCD row (package 2), its model picker in the engine panel (package 5); and it finds options by data-opt as their label (deviation 10). Its plugin checks are in 31-controls/plugin-picker-table-grid-and-filter." },
-    { "id": "04-controls/language-stamp", "why": "The stamp is on the lyric sheet (package 4), and it reads the concept's storage key hs3-lang-recent (deviation 5: the page keeps hotstep.create.langRecent). The stamp's list is in 32-controls-gallery/chip-model-and-stamp-pickers." },
-    { "id": "04-controls/typed-checks-examples", "why": "The planner seed is a terminal field (terminal, package 2); Insert example and the scope are package 3's. Its kept-field checks are in 31-controls/checked-text-keeps-or-refuses." },
-    { "id": "04-controls/toggles-segments-auto", "why": "Its LED switch and segments are in the planner's terminal (package 2), its AUTO in Tempo's LCD row (package 2), and it inserts the concept's ctlHTML markup, which the rebuild has no counterpart for." },
-    { "id": "04-controls/xy-ivl-codes", "why": "Its look-back strip is in the repetition guard's terminal (package 2) and its CFG handles the Sampler scope's (package 3)." },
     { "id": "23-sa3-hm-round5/topk-scrub-scales-with-the-value", "why": "Pending (S-28): the token's scrub moves with the value (src/derive/controls.ts scrubValue); the token it drags is in the planner's terminal (package 2), which then makes it runnable." },
     { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06): the ruler's markers read the tempo the song will have (src/derive/controls.ts songTempo, S-07); the scenario presses the BPM chips (capChips, package 3) and types in the prompt (package 4)." }
   ]

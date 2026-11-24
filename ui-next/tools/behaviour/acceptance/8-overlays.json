@@ -47,8 +47,6 @@
     { "id": "33-overlays/f6-walks-the-desk", "why": "F6 enters the desk, walks it in reading order, Shift+F6 back; not while the picker is open (S-33)." }
   ],
   "excluded": [
-    { "id": "01-desk/quick-more-parked-empty", "why": "Only its last check (Open the picker from the empty desk) is this package's, and it passes; the rest needs Quick's fold of modules and the concept's defineModule, which the rebuild has no counterpart for. The picker's button is in 33-overlays/picker-opens-filters-walks-and-adds." },
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes and the picker passes; its last part presses Ctrl+Z on another page, whose navigation no package builds (acceptance/11-notes-logs.json). The same rule under the picker is in 33-overlays/picker-opens-filters-walks-and-adds." },
     { "id": "09-undo-storage/undo-not-under-overlays", "why": "It loads a workflow (package 7) and opens the presets popover (package 4) and the notes." },
     { "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast", "why": "Pending (S-17): the toast's claim on Tab (the toast's package, 6) inside the drafts popover (package 6 or 7)." },
     { "id": "07-overlays-keys/notes-logs-escape", "why": "The Concept notes and the engine log are not this package's; Escape closing only the top layer is in 33-overlays/lab-offer-popover-keys and the picker's scenarios." }

@@ -1,0 +1,6 @@
+{
+ "about": "The scenarios that caught each switch of switches/7-workflows.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "wf load a revision": ["03-workflows/revisions","09-undo-storage/revision-revert-keeps-the-desk","23-sa3-hm-round5/revision-without-adapters-unloads-them","33-workflows/rename-delete-menu","33-workflows/revision-holds-the-guard"]
+ }
+}

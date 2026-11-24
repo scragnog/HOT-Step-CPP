@@ -1,0 +1,7 @@
+{
+ "about": "The scenarios that caught each switch of switches/8-overlays.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "picker lab offer": ["07-overlays-keys/picker","33-overlays/picker-opens-filters-walks-and-adds"],
+  "lab offer": ["01-desk/lab-modules","33-overlays/lab-offer-popover-keys"]
+ }
+}

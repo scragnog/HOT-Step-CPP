@@ -54,6 +54,14 @@ promote it: remove its `pending` field, and every normal run keeps it passing fr
 The rebuild is expected to make them pass (and then promote them), as well as every normal scenario. Their `right`
 sentence is the specification; the checks say exactly how it is measured.
 
+## Every concept scenario is in a list
+
+`run.mjs --slice` refuses to run while a scenario of the concept's suite (the files numbered below 30) is in no
+acceptance file's `scenarios` and no file's `excluded`: each is run, or left out with the reason that is true today (a
+deviation, a hook or a global of the concept's script the test layer does not give, a defect named with who owns it).
+A reason that names a package or a finding is re-read when that lands (`acceptance/fix-core.json` holds the round
+after the merge's re-reading).
+
 ## Waiting scenarios: right, but not passable until a later package lands
 
 In the rebuild's acceptance (`acceptance/*.json`, `run.mjs --slice`), an entry may say it is waiting on a later work

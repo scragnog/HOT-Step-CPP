@@ -21,13 +21,6 @@
     { "id": "04-controls/ruler-fader-scrub", "why": "A cartridge's fader follows the pointer and Home, the art stills at 0 (package 1 excluded it for the cartridges)." }
   ],
   "excluded": [
-    { "id": "05-modules/adapters", "why": "It clicks the concept's value hooks ([data-seg=\"ad.adv\"][data-v=\"Advanced\"], [data-setq=\"s0|1.5\"]; deviation 10) and types into the prompt card's trigger word tape (#trigTape, package 4). Every cartridge check it makes is in 36-cartridges (load, stack, masks, forced Runtime, phase, remove with Undo, the planner adapter, Quick's strength)." },
-    { "id": "14-lab-desk/adapters-take-the-room-they-need", "why": "Its first check finds the empty tile's buttons by [data-cartadd] and [data-plannerpick]: here the empty tile is the definition's strip, drawn by the tile with its named actions and no concept hooks (deviation 10). Its second check is in 36-cartridges/planner-adapter-from-its-own-list." },
-    { "id": "22-engines-round5/yue-adapter-strength-is-one-control", "why": "It sets the strength through Quick's [data-setq=\"s0|1.5\"] hook (package 1's choice row; deviation 10). The pair it checks is in 36-cartridges/yue-pair-and-hm-one-column." },
-    { "id": "15-other-engines/guard-strips-and-top-p-rail", "why": "It reads the concept's control catalogue C (package 2 excluded it for that too). Its rail checks are in 36-cartridges/xy-off-rail-and-planner-off, its guard checks in 33-containers/guard-says-when-it-is-off." },
-    { "id": "11-engines/engine-switch-there-and-back-loses-nothing", "why": "It types into the prompt card (#prompt, package 4) and loads an adapter from the empty tile's [data-cartadd] (the strip's button, deviation 10); what another engine keeps is in 36-cartridges/adapters-another-engine-keeps." },
-    { "id": "23-sa3-hm-round5/revision-without-adapters-unloads-them", "why": "It opens a factory revision ([data-wfopen], package 7's Workflows panel)." },
-    { "id": "14-lab-desk/off-settings-show-at-once", "why": "Its last check finds the Mastering pedal's offer to add Timbre by the concept's [data-additem] hook (deviation 10; package 2 excluded it for that); the rest is packages 2's and 3a's." },
-    { "id": "20-lab-round5/lab-controls-round5", "why": "It reads the concept's C and optsOf (package 3a excluded it for that)." }
+    { "id": "23-sa3-hm-round5/revision-without-adapters-unloads-them", "why": "It opens a factory revision ([data-wfopen], package 7's Workflows panel)." }
   ]
 }

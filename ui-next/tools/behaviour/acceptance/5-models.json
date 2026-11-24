@@ -16,19 +16,11 @@
   ],
   "excluded": [
     { "id": "01-desk/engines-panel", "why": "The slice's (acceptance/slice.json): the cards, arrows, Enter, Escape, a click outside; it still passes with the cards' new contents." },
-    { "id": "04-controls/dropdowns", "why": "Its last check reads the engine log's #logEngine (the log is the overlays' package); its other checks are package 1's and package 2's. Its model list checks are in 35-models/choosing-a-model-from-its-list." },
     { "id": "07-overlays-keys/notes-logs-escape", "why": "The notes drawer, the engine log, the go bar and the save row are other packages'. Its engine panel checks (Escape closes the model list, then the panel) are in 35-models/the-panels-keys-with-a-model-row-in-it." },
     { "id": "18-tips-touch/tips-keep-every-digit", "why": "It reads the tooltip's tipSentences and #tip (package 8). The meter's title naming the 31.8 GB card is checked in 35-models/the-vram-meter-adds-up-the-engine." },
     { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "Pending (F-19) about the tooltip opened on the VRAM meter by the keyboard: the tooltips' package (8)." },
-    { "id": "11-engines/engine-switch-there-and-back-loses-nothing", "why": "It types into the prompt card (package 4), loads adapters (package 3) and reads the takes; its model check (each engine keeps its own choice, B-19) is in 35-models/the-panel-follows-an-engine-switch." },
-    { "id": "01-desk/engine-switch-effects", "why": "Takes held and Repaint removed by a switch: the core's and packages 3's; it only uses the panel's cards." },
-    { "id": "15-other-engines/held-takes-leave-a-trace", "why": "The Takes tile's held note (package 3); it only uses the panel's cards." },
     { "id": "23-sa3-hm-round5/lua-switch-stays-with-its-engine", "why": "The Sampler's Lua switch (package 3); it only uses the panel's cards." },
-    { "id": "06-prompt-generate/generate-engines", "why": "Generation (package 6), with model choices set by setVal." },
     { "id": "05-modules/takes", "why": "The Takes tile and its VRAM line (package 3), which can read the core's vramNeed (src/derive/vram.ts)." },
-    { "id": "21-chrome-round5/generate-does-not-queue-a-certain-refusal", "why": "Pending, generation's (package 6): a run the meter shows as refused is not queued; vramNeed gives it `refuses`." },
-    { "id": "22-engines-round5/takes-tile-follows-retry", "why": "Pending, the Takes tile and a retry (packages 3 and 6)." },
-    { "id": "21-chrome-round5/focus-after-cancel-retry-dismiss", "why": "Pending, Latest's error card (package 6)." },
-    { "id": "23-sa3-hm-round5/switch-toast-says-when-length-changes-meaning", "why": "Pending (S-37), the engine switch toast about a length: the core's engine switch, not this package's." }
+    { "id": "21-chrome-round5/generate-does-not-queue-a-certain-refusal", "why": "Pending, generation's (package 6): a run the meter shows as refused is not queued; vramNeed gives it `refuses`." }
   ]
 }
