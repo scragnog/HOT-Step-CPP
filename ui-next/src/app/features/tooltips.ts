@@ -144,7 +144,10 @@ document.addEventListener('pointerout', e => {
    touch screen, and lifting presses the control as it would have anyway (S-01) */
 document.addEventListener('pointerdown', e => {
   hideTip();
-  if (e.pointerType !== 'touch') { const t = host; if (t) armTip(t, 400, () => host === t); return; }
+  /* a press gives the title back until the tip shows again (armTip holds it then): the control's title is its
+     explanation, and a press is when the page or a reader looks at it again (the concept's controls are redrawn by a
+     press, title and all) */
+  if (e.pointerType !== 'touch') { const t = host; if (t) { giveTitle(t); armTip(t, 400, () => host === t); } return; }
   const x = e.clientX, y = e.clientY, el = e.target as HTMLElement;
   timer = window.setTimeout(() => { showTip(el); timer = window.setTimeout(hideTip, 2600); }, 500);
   const cancel = (ev: PointerEvent) => {
