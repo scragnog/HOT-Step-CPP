@@ -64,7 +64,9 @@ onKey({
 document.addEventListener('keydown', e => {
   if (e.key !== 'Tab') return;
   const l = topLayer(); if (!l || l.el.id === 'pickerWrap') return;
-  const f = focusables(l.el), a = document.activeElement as HTMLElement | null, i = a ? f.indexOf(a) : -1;
+  /* a toast raised while a modal layer is open joins its cycle while it shows (F-18; the picker's keys do the same) */
+  const toast = document.getElementById('toast'), joins = l.modal && toast && !toast.hidden ? focusables(toast) : [];
+  const f = [...focusables(l.el), ...joins], a = document.activeElement as HTMLElement | null, i = a ? f.indexOf(a) : -1;
   if (l.modal) {
     if (!f.length) { e.preventDefault(); return; }
     if (i < 0) { e.preventDefault(); f[0]!.focus(); } else if (e.shiftKey && i === 0) { e.preventDefault(); f[f.length - 1]!.focus(); } else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0]!.focus(); }
