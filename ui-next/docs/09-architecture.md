@@ -369,11 +369,12 @@ An acceptance entry may wait on a later package (`"waiting": { "package", "becau
 `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
 decide the tile heights their moves need).
 
-**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (39 scenarios: 20 of the
-concept's suite, three of them pending there: F-17, F-36, S-17; 12 of `scenarios/33-workflows.mjs`, six of which hold
+**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 20 of the
+concept's suite, three of them pending there: F-17, F-36, S-17; 13 of `scenarios/33-workflows.mjs`, eight of which hold
 on the concept page too; and 7 waiting on packages 2, 3, 4 and 8, each with what it needs), `switches/7-workflows.json`
 (38 features), `slice-states/70-workflows.mjs` (17 states of the Workflows panel, the row menu and the Drafts list,
-compared with `workflows-accepted.json`) and `tools/test-workflows.ts`. Its store is `store/workflows.ts` (the lists, the
+compared with `workflows-accepted.json`: `vb.mjs compare concept-workflows rebuild-workflows --accept
+tools/visual-baseline/workflows-accepted.json`) and `tools/test-workflows.ts` (68 checks, in `npm run check`). Its store is `store/workflows.ts` (the lists, the
 open workflow and revision, registered as the undoable `workflow`) and `store/stored.ts` (every store's reads and
 writes: what cannot be read is copied aside before anything writes over it, and a refused write is reported, so the
 read-out says Not saved). Opening a workflow, loading a revision or a draft is a desk step (`deskStep`); replacing,

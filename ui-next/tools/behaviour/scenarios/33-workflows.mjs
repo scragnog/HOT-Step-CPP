@@ -1,12 +1,12 @@
 // Workflows, revisions, drafts and storage (package 7): the concept's claims where its own scenarios reach for
 // something the rebuild does differently or does not have yet, stated so they hold on the rebuild.
 //
-// - Six hold on the concept page too (run them there with --page): rename-delete-menu and row-heights-hold are the
+// - Eight hold on the concept page too (run them there with --page): rename-delete-menu and row-heights-hold are the
 //   concept's 03-workflows/rename-delete-menu and 09-undo-storage/row-heights-hold with the Sampler on the workflow's
 //   desk, since the rebuild's setVal changes a value only through a control on the desk, as a person can (the concept's
 //   sets a module's value with the module off the desk, which the rebuild refuses: docs/09, "How a part is written");
-//   opening-undone-leaves-later-work, saved-says-only-what-was-saved, escape-in-the-save-row and export-then-import
-//   state the concept's claims without the prompt card.
+//   opening-undone-leaves-later-work, saved-says-only-what-was-saved, escape-in-the-save-row, export-then-import,
+//   the-open-workflow-is-kept and a-save-keeps-what-storage-holds state the concept's claims without the prompt card.
 // - The rest run on the rebuild only: they set the description with setVal('prompt.text', ...) where the concept's type
 //   into #prompt (the prompt card is package 4's; once it lands, the concept's own scenarios, listed as waiting in
 //   acceptance/7-workflows.json, take over), or they seed the page's own keys (deviation 5: the desk is kept under
