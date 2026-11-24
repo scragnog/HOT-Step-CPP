@@ -473,7 +473,7 @@ they are then and say what they left alone; C-02, C-07). The shell gained four s
 its score preview, and the Flow renderer's row)** adds `acceptance/3c-instruments.json` (25 entries: 12 of
 `scenarios/36-instruments-3c.mjs`, ten of which hold on the concept page too, the other two being its pending E-46 and
 E-47 stated in full; 11 of the concept's suite, five of them pending there: E-09, E-23, E-24, E-46, E-47; and 2 waiting on
-packages 4 and 6), `switches/3c-instruments.json` (48 features), `slice-states/32-instruments-3c.mjs` (24 states,
+packages 4 and 6), `switches/3c-instruments.json` (46 features), `slice-states/32-instruments-3c.mjs` (24 states,
 compared with `instruments-3c-accepted.json`) and `tools/test-instruments-3c.ts` (in `npm run check`). Its parts are
 `parts/Build.tsx` (buildBoard), `Recording.tsx` (recordingSpan), `Score.tsx` (abcFoot); the build session is a service
 (`services/build.ts`, server-owned: the takes as they land and the section looked at, told to the desk by
