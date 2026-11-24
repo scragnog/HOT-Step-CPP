@@ -1,0 +1,8 @@
+{
+  "about": "The fix round around the desk (review-r2 RC-01 to RC-18, review-r3 RA-04): each defect fixed has a scenario that fails without the fix, reached the way a user reaches it (scenarios/37-fix-chrome.mjs).",
+  "scenarios": [
+    { "id": "37-fix-chrome/rc02-delete-and-rename-a-saved-revision-stick", "why": "RC-02: a revision saved here, deleted or renamed, stays so in the list, in storage and after a reload; Undo and Redo say nothing is taken." },
+    { "id": "37-fix-chrome/rc02-an-imported-revision-deletes", "why": "RC-02: a revision exported, deleted, imported, renamed and deleted stays deleted." },
+    { "id": "37-fix-chrome/rc02-two-tabs-delete-and-rename", "why": "RC-02 and C-09: deletes, renames and saves in two tabs, in both orders, reach the other tab and never bring back a record." }
+  ]
+}

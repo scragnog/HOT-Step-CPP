@@ -1,0 +1,7 @@
+{
+  "about": "The fix round's fixes around the desk, each switched off by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of acceptance/fix-chrome.json fail. A feature with two entries is one fix made in two places that each cover it alone today (RC-02: records written as they read back, and the merge comparing the kept form).",
+  "switches": [
+    {"feature": "fix rc02 a record merges as storage gives it back", "file": "src/app/store/workflows.ts", "find": "ours = keptSaved(ix, useWf.getState().saved);", "replace": "ours = useWf.getState().saved;"},
+    {"feature": "fix rc02 a record merges as storage gives it back", "file": "src/derive/values.ts", "find": "return !c || text === r.default || CHECKS", "replace": "return !c || CHECKS"}
+  ]
+}
