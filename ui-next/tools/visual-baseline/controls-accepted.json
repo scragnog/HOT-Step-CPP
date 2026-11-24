@@ -49,13 +49,6 @@
    "field": "^(opacity|transition-(duration|property|timing-function))$",
    "n": 4,
    "why": "With the planner off the concept stands its tile's planner-only parts back (25-module-planner.js lm-off, a class on the Planner's tile): the Planner tile's own state, which its package builds; the row itself is the same."
-  },
-  {
-   "state": "^controls-build-tokens",
-   "key": "\\.tok",
-   "field": "^(font-size|line-height)$",
-   "n": 8,
-   "why": "A token takes the type of the row it stands in; the concept's Build foot is Build's own row (14px), here the shared tile foot (13px), the Build module's package's to match."
   }
  ]
 }
