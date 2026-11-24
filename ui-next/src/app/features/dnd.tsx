@@ -14,7 +14,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { ModuleDef } from '../../definitions/types.ts';
 import { deskModel } from '../../derive.ts';
-import { BOARD, defOf, ix } from '../model/index.ts';
+import { BOARD, LEAD, defOf, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { usePicker } from '../store/overlays.ts';
 import { Tile } from '../render/Tile.tsx';
@@ -24,6 +24,7 @@ import { sayNow } from '../i18n/index.ts';
 import { defName } from '../../derive.ts';
 import { closePicker } from './picker-keys.ts';
 import { sayParked } from './adding.ts';
+import { reduced } from '../kit/motion.ts';
 
 type Place = { k: number; x: number; y: number; w: number; h: number };
 let dragId: string | null = null, ghost: HTMLElement | null = null, ghostKey: string | null = null;
@@ -31,14 +32,13 @@ let dropBefore: { k: number; m: string | null } | null = null, dragRects: Place[
 /** Every place the dragged tile could take, as the preview chooses among them (the test layer reads it). */
 export const currentDragRects = (): Place[] | null => dragRects;
 
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const bento = () => document.getElementById('bento');
 const centre = () => document.getElementById('centre');
 const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods).make}|${innerWidth}`; };
 const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 const dragKey = () => (dragId?.startsWith('move:') ? dragId.slice(5) : dragId);
 /** The tiles on the desk in order (not the lyric sheet, not the one travelling). */
-const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving') && !t.classList.contains('ghost')).map(t => t.dataset.m!);
+const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== LEAD?.id && !t.classList.contains('moving') && !t.classList.contains('ghost')).map(t => t.dataset.m!);
 /** The module the tile goes before, to stand at place k among `list` (null: the end; past the last shown tile, before
  *  the next module that is not shown here). */
 function beforeAt(list: string[], k: number): string | null {
@@ -180,12 +180,12 @@ document.addEventListener('drop', e => {
     return;
   }
   const d = defOfItem(id); if (!d) return;
-  let r: string = 'there';
+  let r: ReturnType<typeof s.add> = { did: 'there', step: null };
   flushSync(() => { r = s.add(d.id, before); });
   packNow(make());
-  if (r !== 'added') return;
-  sayParked(d.id);
+  if (r.did !== 'added') return;
+  sayParked(d.id, r.step);
   const sel = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
   /* what arrived is brought into view by the shortest scroll, as the concept's flash does (30-desk.js) */
-  requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(sel); el?.focus({ preventScroll: true }); el?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
+  requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(sel); el?.focus({ preventScroll: true }); el?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' }); });
 });

@@ -1,10 +1,15 @@
 # Checking that the format is sound
 
 The checks, run from `ui-next`. They need Node 22.18 or later (the tools run the TypeScript sources directly) and
-`npm install` once (TypeScript is the only dependency).
+`npm install` once (TypeScript, ESLint, Vite and React; the browser tools need Playwright with Chromium, below).
 
 ```
-npm run check      the everyday check: type check, validator, request comparison, core's tests (about 15 s)
+npm run check      the everyday check (about 40 s): both type checks, the validator, the request comparison, every
+                   tools/test-*.ts (the core's derivations against the concept, the view's selectors and each package's
+                   core), the parts' contract in the lint, the code's contract with the definitions (test-code.ts: no
+                   key, state or id named in the code; every part a definition names has a component and every action
+                   a runner), and that every switch and planted defect still applies once (switches.mjs --applies)
+npm run lint       the React layer's lint (eslint.config.js: the two rules the design rests on, and one boundary)
 npm test           before a merge: the planted mistakes, then the request comparison driven live (about 10 min)
 npm run docs       rewrites the generated parts of these pages
 npm run record     drives the existing Create page over the value space and records what it sends
@@ -13,6 +18,20 @@ npm run fixtures   reads what the real application declares into tools/fixtures/
 npm run concept    collects what the concept page does into tools/fixtures/concept.json (needs Playwright);
                    tools/concept/collect-tiers.cjs collects tools/fixtures/concept-tiers.json the same way
 ```
+
+The browser tools (Playwright with Chromium; `PLAYWRIGHT_MODULE` may point at an installed `node_modules/playwright`),
+on the test build (`npm run build:test`):
+
+```
+node tools/behaviour/run.mjs --page dist-test/index.html --slice    the acceptance: every file of tools/behaviour/acceptance
+npm run visual:all                 every package's visual set against the concept, with its accepted differences
+node tools/visual-baseline/gallery.mjs   every part on every surface, both themes, every tier, against its record
+npm run switches                   each feature switched off makes a scenario fail (slow: a build per switch)
+npm run switches:apply             each switch's and planted defect's text is still in its file, once (in npm run check)
+node tools/visual-baseline/plants.mjs    each planted visual defect is caught
+```
+
+[09](09-architecture.md), "The test layer", says what each covers.
 
 ## The type check
 

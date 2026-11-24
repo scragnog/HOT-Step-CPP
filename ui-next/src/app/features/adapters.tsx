@@ -11,7 +11,7 @@
 import type { KeyboardEvent } from 'react';
 import type { Definition, Node } from '../../definitions/types.ts';
 import { ENGINES } from '../../definitions/engines.ts';
-import { adapterLists, adaptersAway, bindPart, instrumentModel, nodeAt, nodeKeys, partAct, type Desk } from '../../derive.ts';
+import { adapterLists, adaptersAway, roleKey, bindPart, instrumentModel, nodeAt, nodeKeys, partAct, type Desk } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { useSay } from '../i18n/index.ts';
@@ -19,7 +19,10 @@ import { defineAction } from '../register/actions.ts';
 import { openPop, closePop } from './pop.ts';
 import { useModel } from '../render/useModel.ts';
 import { CartArt } from '../parts/CartArt.tsx';
-import { adapters } from '../services/adapters.ts';
+import { service } from '../register/services.ts';
+
+/** The adapters loaded, by their role (definitions/roles.ts). */
+const SLOTS = roleKey(ix, 'adapters') ?? '';
 
 /** The definition and node that draw cartridges: the one whose face holds the part. */
 function findCarts(): { def: Definition; node: Node; key: string } | null {
@@ -100,8 +103,8 @@ export function AdapterList({ which }: { which: 'slot' | 'planner' }) {
 /** The installed adapters of every engine, and the planner LM adapters, told to the page once it loads. */
 async function tell(): Promise<void> {
   await Promise.all([
-    adapters.planner().then(p => useDesk.getState().told({ lists: adapterLists('', [], p) })),
-    ...ENGINES.map(e => adapters.slots(e.id).then(s => useDesk.getState().told({ lists: adapterLists(e.id, s) }))),
+    service('adapters').planner().then(p => useDesk.getState().told({ lists: adapterLists('', [], p) })),
+    ...ENGINES.map(e => service('adapters').slots(e.id).then(s => useDesk.getState().told({ lists: adapterLists(e.id, s) }))),
   ])
     .catch(() => { /* the lists stay as they were told; the real adapter says why it failed */ });
 }
@@ -111,6 +114,6 @@ void tell();
    engine changes (B-02) */
 useDesk.subscribe((st, prev) => {
   if (st.book === prev.book && st.desk.engine === prev.desk.engine) return;
-  st.told({ adaptersAway: adaptersAway(st.book, st.desk.engine) });
+  st.told({ adaptersAway: adaptersAway(st.book, st.desk.engine, SLOTS) });
 });
-useDesk.getState().told({ adaptersAway: adaptersAway(useDesk.getState().book, useDesk.getState().desk.engine) });
+useDesk.getState().told({ adaptersAway: adaptersAway(useDesk.getState().book, useDesk.getState().desk.engine, SLOTS) });

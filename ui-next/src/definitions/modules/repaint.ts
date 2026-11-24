@@ -51,6 +51,7 @@ export const repaint = {
   state: [
     {
       key: 'source',
+      role: 'repaintSource',
       kind: 'record',
       noun: 'the song to repaint',
       steps: { pick: 'Repaint {title}' },
@@ -60,6 +61,7 @@ export const repaint = {
     },
     {
       key: 'region',
+      role: 'repaintRegion',
       kind: 'span',
       noun: 'Repaint region',
       steps: { move: '{noun} {from} → {to}' },

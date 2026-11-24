@@ -13,6 +13,7 @@ import {
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
 import type { ModuleDef } from '../src/definitions/types.ts';
+import { need, section, skips } from './lib/sections.ts';
 
 const ix = indexOf(DEFINITIONS);
 const J = (x: unknown) => JSON.stringify(x);
@@ -23,7 +24,7 @@ const ACE = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
 const LISTS = { ...adapterLists('ace', [ACE, ACE, ACE]), ...adapterLists('yue2', [[{ file: 'folk-voice-ar', type: 'LoRA' }, { file: 'ar-dora', type: 'DoRA' }]]), ...adapterLists('', [], [{ file: 'folk-voice-planner', type: 'LoRA' }]) };
 const desk = (engine: EngineId, tier: Tier, vals: Desk['vals'] = {}, slots: unknown[] = [], more: Partial<Desk> = {}): Desk =>
   ({ engine, tier, vals, auto: {}, state: { slots: slots as never }, lists: LISTS, on: new Set([...DEFINITIONS.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id), 'adapters', 'planner']), ...more });
-const def = (id: string) => DEFINITIONS.find(d => d.id === id)!;
+const def = (id: string) => need(DEFINITIONS.find(d => d.id === id), id);
 const s = (m: unknown) => say(m as Msg);
 const node = (id: string, part: string): Node => (def(id) as ModuleDef).face.find(x => x.part === part)!;
 const CN = node('adapters', 'cartridges'), KEY = nodeKeys(def('adapters')).get(CN) ?? '';
@@ -37,7 +38,7 @@ function act(d0: Desk, name: string, arg?: unknown) {
 const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type: 'LoKr' }];
 
 /* ---- section directives (25-module-adapters.js sectionDirectives, setDirective, dropDirectiveSlot) */
-{
+section(() => {
   const t = '[Verse]\na\n[Chorus]{#1=0.5; #2=1}\nb';
   ok('a directive reads as each slot\'s weight; a section without one reads null', J(directivesOf(t)) === J([null, { 0: 0.5, 1: 1 }]));
   ok('setting a weight writes the section\'s directive', setDirective(t, 0, 1, 0, 2) === '[Verse]{#1=1; #2=0}\na\n[Chorus]{#1=0.5; #2=1}\nb');
@@ -45,18 +46,18 @@ const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
   ok('removing a slot renumbers the later ones', dropDirectiveSlot('[V]{#1=0.5; #2=0}\nx', 0) === '[V]{#1=0}\nx');
   ok('and drops a directive left at full', dropDirectiveSlot('[V]{#1=0; #2=1}\nx', 0) === '[V]\nx');
   ok('nothing to renumber is null', dropDirectiveSlot('[V]\nx', 0) === null);
-}
+});
 
 /* ---- phase windows (phaseHTML's keys and setPhase) */
-{
+section(() => {
   ok('a key steps 5%, a handle never closer than 5% to the other', J(phaseMove([0, 100], 0, { key: 'ArrowRight' })) === J([5, 100]) && J(phaseMove([90, 95], 0, { key: 'PageUp' })) === J([90, 95]));
   ok('Home and End go to the ends of the handle\'s own range', J(phaseMove([20, 80], 1, { key: 'Home' })) === J([20, 25]) && J(phaseMove([20, 80], 0, { key: 'End' })) === J([75, 80]));
   ok('a hand snaps to 5%', J(phaseMove([0, 100], 1, { f: 0.71 })) === J([0, 70]));
   ok('a key that moves nothing is null', phaseMove([0, 100], 0, { key: 'a' }) === null);
-}
+});
 
 /* ---- the model */
-{
+section(() => {
   const q = carts(desk('ace', 'quick', { 'ad.adv': 'advanced' }, [{ file: 'synthwave-80s.safetensors', type: 'DoRA' }, TWO[0]]));
   ok('Quick lays the first flat, its name without its extension, the rest said once (Q-18)', q.look === 'flat' && q.carts.length === 1 && q.carts[0]!.name.join('') === 'synthwave-80s' && s(q.more) === '2 adapters, stacked.', q.carts[0]?.name);
   ok('a DoRA\'s art is a vector, its head from its name', q.carts[0]!.art.kind === 'vec' && !!q.carts[0]!.art.head);
@@ -73,11 +74,11 @@ const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
   ok('a planner housing is never offered a DoRA (B-02)', carts(desk('yue2', 'lab', {}, [])).list!.items.every(x => x.type !== 'DoRA'));
   const pl = carts(desk('ace', 'lab', { 'ad.planner': 'folk-voice-planner' }, [TWO[0]]));
   ok('the planner adapter as its cartridge, its note where a fader would be', !!pl.planner && 'cart' in pl.planner && s(pl.planner.cart.note) === 'Shapes the plan, not the sound' && pl.planner.cart.housing === 'plan');
-  ok('another engine\'s adapters, said from the book', adaptersAway({ stash: { ace: { state: { slots: TWO } } } } as never, 'yue2') === ' · ACE-Step 1.5 keeps its 2 adapters for when you switch back');
-}
+  ok('another engine\'s adapters, said from the book', adaptersAway({ stash: { ace: { state: { slots: TWO } } } } as never, 'yue2', 'slots') === ' · ACE-Step 1.5 keeps its 2 adapters for when you switch back');
+});
 
 /* ---- the hands */
-{
+section(() => {
   const l = act(desk('ace', 'studio', {}, [TWO[0]]), 'load', { file: 'folk-voice', type: 'LoKr' });
   ok('a second adapter loaded while Stack is Single stacks them, one step named for the file (L-22)', l.steps.length === 1 && s(l.steps[0]!.words.label) === 'Load folk-voice' && l.desk.vals['ad.adv'] === 'advanced', l.steps.map(x => x.words));
   const r = act(desk('ace', 'lab', { 'ad.adv': 'advanced', s1: 1.5, 'lyrics.text': '[V]{#1=0.5; #2=0}\nx' }, TWO), 'remove', 0);
@@ -88,10 +89,10 @@ const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
   ok('a mask chip writes the lyrics, a step named for its section and adapter (L-09)', m.desk.vals['lyrics.text'] === '[Verse]\na\n[Chorus]{#1=0.5; #2=1}\nb' && s(m.steps[0]?.words.label) === 'Chorus: tape-lofi-v2 full → half', m.steps.map(x => x.words));
   const mm = act(desk('ace', 'lab', { 'ad.adv': 'advanced', 'lyrics.text': '[Verse]{#1=1; #2=0.5}\na\n[Chorus]\nb' }, TWO), 'mask', { i: 1, j: 1, w: 0.5, from: '[Verse]\na\n[Chorus]\nb' });
   ok('a drag across chips is named for them all', s(mm.steps[0]?.words.label) === 'Section masks of folk-voice', mm.steps.map(x => x.words));
-}
+});
 
 /* ---- a choice run at another value (A-30), a fader's name and tape, the narrow tile */
-{
+section(() => {
   const d = desk('ace', 'lab', { 'ad.adv': 'advanced', 'ad.mode': 'merge', 'lyrics.text': '[V]{#1=0.5; #2=1}\nx' }, TWO);
   const foot = ((CN.children ?? []).find(x => x.label === 'Apply as')!.children ?? [])[0]!;
   const pm = partModel(ix, def('adapters'), foot, d, 'k', 'foot')!.params[0]!;
@@ -101,14 +102,14 @@ const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
   ok('a bank fader is named in full with its strength, its short tape carrying the full name (V-01)', s(f.name) === 'Self-Attn strength' && s(f.tape) === 'Self-Attn');
   const tile = (dd: Desk) => tileModel(ix, def('adapters') as ModuleDef, dd).cls;
   ok('the tile is one column at Quick and Studio with one cartridge, two in a stack and at Lab', !/w2/.test(tile(desk('ace', 'studio', {}, [TWO[0]]))) && /w2/.test(tile(desk('ace', 'studio', { 'ad.adv': 'advanced' }, TWO))) && /w2/.test(tile(desk('ace', 'lab', {}, [TWO[0]]))));
-}
+});
 
 /* ---- the XY pad's off rail (21-xy-pad.js yFrac, yVal and its keys) */
-{
+section(() => {
   ok('off stands on the rail; the plot starts a step above it', J(xyRail(0, 1, 0.01, 0)) === J({ off: true, at: 1 }) && J(xyRail(0, 1, 0.01, 0.01)) === J({ off: false, at: 0 }));
   ok('a hand over the rail is off, on the plot a step above it at least', xyRailValue(0, 1, 0.01, 1.2, true) === 0 && xyRailValue(0, 1, 0.01, 0, false) === 0.01 && xyRailValue(0, 1, 0.01, 1, false) === 1);
   ok('keys: off goes down to the widest, up from the widest is off, a step otherwise', xyRailKey(0, 1, 0.01, 0, 'ArrowDown', false) === 1 && xyRailKey(0, 1, 0.01, 1, 'ArrowUp', false) === 0 && xyRailKey(0, 1, 0.01, 0.5, 'ArrowDown', true) === 0.4 && xyRailKey(0, 1, 0.01, 0.5, 'ArrowLeft', false) === null);
-}
+});
 
-console.log(fails.length ? `\n${fails.length} failed:\n  ${fails.join('\n  ')}` : `cartridges: ${n} checks of the cartridges' core: ok`);
+console.log(fails.length ? `\n${fails.length} failed:\n  ${fails.join('\n  ')}` : `cartridges: ${n} checks of the cartridges' core: ok${skips()}`);
 process.exitCode = fails.length ? 1 : 0;

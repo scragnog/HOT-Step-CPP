@@ -2,6 +2,7 @@
 // stretched along its direction of travel, leaving a short faint trail; the read-outs it comes near fade back. Drawing
 // and motion only; the pad's values are its parameters'.
 
+import { reduced } from '../kit/motion.ts';
 const XYIN = 18;
 export interface Motion {
   cur: { x: number; y: number } | null;
@@ -58,7 +59,7 @@ function step(el: HTMLElement, m: Motion, t: number): void {
  *  elsewhere is drawn where it is, as the concept draws a pad it has just rebuilt). */
 export function toTarget(el: HTMLElement, m: Motion, x: number, y: number): void {
   m.tgt = { x, y };
-  if (!m.cur || matchMedia('(prefers-reduced-motion: reduce)').matches || !m.live) {
+  if (!m.cur || reduced() || !m.live) {
     cancelAnimationFrame(m.anim); m.anim = 0; m.cur = { ...m.tgt }; el.style.removeProperty('--ang'); applyXY(el, m, 0, 0);
   } else if (!m.anim) { m.last = performance.now(); m.anim = requestAnimationFrame(t => step(el, m, t)); }
 }

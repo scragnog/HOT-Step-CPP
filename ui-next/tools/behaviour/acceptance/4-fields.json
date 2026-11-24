@@ -34,18 +34,6 @@
     { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06) in the concept: the ruler's note follows a BPM typed in the box (passes) and a BPM chip." }
   ],
   "excluded": [
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes and the picker passes; its last part presses Ctrl+Z on another page, whose navigation no package builds (acceptance/11-notes-logs.json). The same rule under the picker is 33-fields/ctrl-z-under-the-picker-edits-nothing." },
-    { "id": "05-modules/lyrics", "why": "Its vocal gender is found by data-v=\"Duet\", the option's label (deviation 10: the rebuild's data-v is the value). Every check of it is in 33-fields/lyrics-tags-strip-instrumental-wildcards." },
-    { "id": "06-prompt-generate/minimax-caption", "why": "Its Automatic is found by data-opt=\"Automatic\" (deviation 10). Every check of it is in 33-fields/minimax-caption-and-the-caption-source." },
-    { "id": "18-tips-touch/language-stamp-stays-put", "why": "Its French is found by data-opt=\"French\" (deviation 10). Its check is in 33-fields/language-stamp-stays-put." },
-    { "id": "04-controls/language-stamp", "why": "It reads the concept's storage key hs3-lang-recent (deviation 17). The stamp's list is in 32-controls-gallery/chip-model-and-stamp-pickers, the stamp on the sheet in 33-fields/language-stamp-stays-put." },
-    { "id": "17-undo-net/field-undo-never-moves-forward", "why": "Its setting is Takes' while Takes is not on the desk, which the rebuild does not hold in force (the slice's rule of the value in force). The same checks with Takes on the desk: 33-fields/field-undo-never-moves-forward." },
-    { "id": "09-undo-storage/undo-keeps-a-later-edit-of-the-same-thing", "why": "Write it for me, the typing after it and Undo from its toast all pass; its last check wants the Undo toast to say what was left (\"The description changed since, so it was left as it is\"), which the store's Undo (store/desk.ts, the slice's) does not say yet. Flagged for the coordinator." },
-    { "id": "15-other-engines/prompt-truth-yue-mm3", "why": "Its wildcard line and Expand on Generate pass; the rest checks the song Generate makes (package 6)." },
-    { "id": "21-chrome-round5/short-window-lab-shows-hardware", "why": "It opens a factory workflow (findPreset, package 7); the one-line empty card on a short window is the concept's CSS, which applies to the same markup." },
-    { "id": "23-sa3-hm-round5/sa3-calls-its-box-a-prompt", "why": "Its box checks pass (Write it for me says a prompt, the box is named Prompt); the rest are the engine panel's words (package 5), the Length tile's (package 3) and Drafts (package 7)." },
-    { "id": "16-engines-sizes-input/text-and-prompt-chips-are-steps", "why": "Its subject is the Length tile's prompt chips (capChips, package 3)." },
-    { "id": "22-engines-round5/reuse-gives-back-the-source-text", "why": "Reuse is the song menu's (package 6)." },
-    { "id": "08-persistence-cables/reload-keeps-the-desk", "why": "It needs the whole desk (Repaint, workflows, seeds, the source song) of later packages; the box's text and the latent are in the desk record here." }
+    { "id": "22-engines-round5/reuse-gives-back-the-source-text", "why": "Reuse is the song menu's (package 6)." }
   ]
 }

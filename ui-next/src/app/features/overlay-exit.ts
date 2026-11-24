@@ -5,7 +5,7 @@
 // while it plays (as a drag's preview, deviation 39). With reduced motion every exit is a short fade. Any overlay may
 // use it: call `ovOut(el, kind)` just before hiding `el`. Drawing only.
 
-import { motionVar, mtime, reduced } from '../parts/motion.ts';
+import { motionVar, mtime, reduced } from '../kit/motion.ts';
 
 export type ExitKind = 'drop' | 'drawer' | 'fade' | 'toast' | 'sheet' | 'modal';
 

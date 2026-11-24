@@ -1,6 +1,29 @@
 {
  "about": "The scenarios that caught each switch of switches/6-generate.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
  "caught": {
-  "menu outside": ["36-generate/the-song-menu"]
+  "menu outside": [
+   "36-generate/the-song-menu"
+  ],
+  "takes cards": [
+   "36-generate/a-refusal-the-server-makes",
+   "36-generate/a-run-ends-as-cards",
+   "36-generate/a-run-that-stops-part-way",
+   "36-generate/cancel-one-and-all-with-undo",
+   "36-generate/generate-queues-one-card-per-take",
+   "36-generate/the-cards-in-every-state",
+   "36-generate/the-engine-log-says-the-queue"
+  ],
+  "queue head": [
+   "36-generate/cancel-one-and-all-with-undo"
+  ],
+  "stages": [
+   "36-generate/generate-queues-one-card-per-take"
+  ],
+  "server refusal": [
+   "36-generate/a-refusal-the-server-makes"
+  ],
+  "repaint label": [
+   "36-generate/repaint-from-the-song-menu"
+  ]
  }
 }

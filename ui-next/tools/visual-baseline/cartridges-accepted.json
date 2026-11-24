@@ -6,7 +6,7 @@
    "key": "",
    "field": "^sem:type$",
    "n": 108,
-   "why": "Deviation 11 (slice-accepted.json): every button and input carries its type."
+   "why": "Deviation 6 (slice-accepted.json): every button and input carries its type."
   },
   {
    "state": "",

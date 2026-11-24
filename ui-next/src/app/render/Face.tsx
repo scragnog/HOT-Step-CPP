@@ -7,7 +7,7 @@
 import { createElement, memo, useMemo, type ReactNode } from 'react';
 import type { Definition, Node } from '../../definitions/types.ts';
 import { nodeKeys, type CellWords, type Surface } from '../../derive.ts';
-import { ui, useSay } from '../i18n/index.ts';
+import { useSay } from '../i18n/index.ts';
 import { drawsDim, drawsKidsDim, partView, surfaceOf } from '../kit/define.ts';
 import { usePartView } from './bind.ts';
 
@@ -20,7 +20,9 @@ export const NodeView = memo(function NodeView({ def, node, nodeKey, keys, surfa
   /* the surface a container gives its children is its own to say (definePart); every other passes its surface on */
   const View = partView(node.part), inner = surfaceOf(node.part, view.opts) ?? surface;
   const kids = (node.children ?? []).map((c, i) => <NodeView key={i} def={def} node={c} nodeKey={keys.get(c) ?? ''} keys={keys} surface={inner} bare={drawsKidsDim(node.part)} />);
-  const body = View ? createElement(View, view, kids) : <span className="lbl" data-seam={node.part}>{say(ui('later'))}</span>;
+  /* every part a definition names has a component (tools/test-code.ts fails until it does) */
+  if (!View) return null;
+  const body = createElement(View, view, kids);
   return view.dim && !drawsDim(node.part) && !bare ? <span className="dimmed" title={say(view.dim)}>{body}</span> : body;
 });
 

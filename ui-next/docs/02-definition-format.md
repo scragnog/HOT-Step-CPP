@@ -405,7 +405,74 @@ state: [
 named steps, as a parameter's: the part asks for a step by name and the words come from here; a file has `load` and
 `clear` without saying. Loading an adapter is `{ says: 'Load {file}', changes: ['ad.adv'] }`, because loading a second
 one while Stack is Single stacks them. `was` lists keys it was saved under before. `wire` is a wire, or a list of
-`{ engines, wire }` when it differs per engine.
+`{ engines, wire }` when it differs per engine. `tells` lists the steps the page says in a toast with Undo when the
+part takes them (loading a recording to continue from); every other step is said by Undo and Redo only.
+
+### Roles
+
+Where the page needs one parameter or state in particular (the main box Generate reads, the takes count the VRAM
+figures multiply, the song a repaint works on), the definition says so with a `role`, and the page asks for the role,
+never the key:
+
+```ts
+{ key: 'takes.n', role: 'takes', type: 'number', ... }
+{ key: 'source', role: 'repaintSource', kind: 'record', ... }
+```
+
+The roles are listed once, in `src/definitions/roles.ts`, each with what it is (a parameter or a state, its type), whether
+several may play it, whether the page cannot do without it, and what the page does with it and without it. So:
+
+- **renaming a key** the documented way (the new key and `was`, [06](06-how-to.md) 8b) keeps its role, and the page
+  keeps working;
+- **removing what plays a role** is named by the validator: a role nothing plays is an error when the page needs it,
+  otherwise a note saying what the page then does without it;
+- **giving a role to the wrong thing** (a text where a number is wanted, two takes counts on one engine) is an error
+  naming both;
+- the core and the view never name a key, a state or a definition's id in their code (`tools/test-code.ts`, in
+  `npm run check`, names the file and line); a new need is a new role in `roles.ts`, given to what plays it.
+
+Today's roles and what plays them:
+
+<!-- generated: roles (npm run docs) -->
+| Role | Played by | What the page does with it |
+| --- | --- | --- |
+| `prompt` (needed) | `prompt.text` (prompt) | The main box: what a run is made from (Generate refuses an empty one), what Reuse puts back, what names a draft and a revision's content. |
+| `lyrics` | `lyrics.text` (lyrics) | The lyric sheet's text: where suggestions move lyrics to, what Write it for me fills, what a draft and a revision say they hold. Without it the page has no lyrics anywhere. |
+| `instrumental` | `lyrics.instr` (lyrics) | Instrumental: the lyrics stand back, and Generate on ACE-Step needs no lyrics. Without it, never instrumental. |
+| `songArtist` | `song.artist` (prompt) | Song info's artist: the card's line names it. Without it Song info has no artist field. |
+| `songTitle` | `song.title` (prompt) | Song info's title: a song's title when it is set. Without it every title comes from the words. |
+| `songSubject` | `song.subject` (prompt) | Song info's subject field. Without it Song info has no subject field. |
+| `coverSubject` | `pp.art.subject` (art) | The cover art's subject, shown in Song info while its unit is on. Without it Song info shows no cover field. |
+| `wildcards` | `wild.auto` (prompt) | Expand wildcards on each run: Generate picks one of each {a\|b} group. Without it wildcards are sent as typed. |
+| `trigger` | `ad.trigger` (prompt) | The adapter's trigger word, its chip on the prompt card. Without it the card has no trigger chip. |
+| `captionSource` | `cap.src` (prompt) | Where the caption comes from (Custom, Automatic, a dataset's track): the box locks on a supplied caption. Without it the box is always the user's. |
+| `captionDataset` | `cap.ds` (prompt) | The caption dataset whose tracks and tags the card offers. Without it the card offers none. |
+| `bpm` | `tempo.bpm` (tempo) | The song's tempo field: "Set the BPM" from the words, a composed caption's BPM, the lyric sheet's estimate. Without it the words' BPM is offered nowhere. |
+| `key` | `tempo.key` (tempo) | The song's key, written into a composed caption. Without it the caption names no key. |
+| `vocalGender` | `lyrics.gender` (lyrics) | The vocal's gender, written into a composed caption. Without it the caption names none. |
+| `language` | `lyrics.lang` (lyrics) | The lyrics' language, written into a composed caption when changed. Without it the caption names none. |
+| `takes` | `takes.n` (takes) | How many songs one Generate makes, and what they cost the card (the meter, the go bar, the Takes tile). Without it every run makes one song. |
+| `steps` | `samp.steps` (sampler) | The sampler's step count, which the run's stage line counts. Without it the line counts 12. |
+| `length` | `tempo.dur` (tempo) | The song's exact length, where the engine takes one. Without it the engine ends each song itself. |
+| `longest` | `tempo.max` (tempo) | The longest a song may run where the engine ends it itself. Without it, as long as the engine runs. |
+| `planner` | `lm.on` (planner) | The planner is on: what each take costs the card while it plans (the VRAM figures' `take.when`). Without it a take's cost always counts. |
+| `scorePreview` | `lm.preview` (planner) | Preview the score first: Generate opens the score preview before a run while the lead sheet is empty. Without it, never. |
+| `leadSheet` | `yue.abc` (score) | The lead sheet's text: a pasted score needs no preview. Without it every preview plans. |
+| `stream` | `mm.stream` (flow) | Play while rendering: a take can be played as it renders. Without it, only once it is done. |
+| `replan` | `yue.replan` (replan) | Re-plan runaway scores: the dice light up as a run tries again. Without it a run never re-plans. |
+| `replanTries` | `yue.tries` (replan) | How many tries re-planning has. Without it, one. |
+| `variant` | `model.var` (models) | The engine's model variant: the first model the log's head names. Without it the head starts at the sound model. |
+| `soundModel` | `model.dit` (models) | The sound model, which the log's head names. Without it the head names the models line only. |
+| `plannerModel` | `model.lm` (models) | The planner's model, which the log's head names after the sound model. |
+| `repaintSource` | `source` (repaint) | The song a repaint works on, which the song menu's "Repaint a region" writes: Generate repaints it, as one song. Its module is the one that repaints; without it the song menu offers no repaint. |
+| `repaintRegion` | `region` (repaint) | The region of the song a repaint works on, written with its song. |
+| `latent` | `latent` (prompt) | The latent a run continues from, which the start toast names. Without it Import latent has nowhere to go. |
+| `recording` | `contFile` (cont) | The recording a run continues from: the start toast names it, a build cannot run beside it, its length is told. Its module is the one that continues. |
+| `recordingPart` | `contSel` (cont) | The part of the recording continued from, named in the start toast. |
+| `build` | `build` (build) | A build by section: Generate refuses to run it beside a recording, its rendered songs join Latest. Its module is the one that builds. |
+| `adapters` | `slots` (adapters) | The adapters loaded: counted on the card's VRAM and in the go bar's changes. Without it no adapter is ever loaded. |
+| `reference` (several) | `timbreFile` (timbre), `masterRef` (master) | A reference track a drop zone takes: remembered among the recent references. Without any, nothing is remembered. |
+<!-- end generated -->
 
 ## Saved data
 

@@ -11,6 +11,7 @@
 // docs/02-definition-format.md explains each field with an example from a real definition.
 
 import type { OptsOf, PartName, UnitName, CheckName, OptionSourceName, ActionName } from './parts.ts';
+import type { Role } from './roles.ts';
 import type { TransformName } from './transforms.ts';
 import type { EngineId } from './engines.ts';
 
@@ -211,6 +212,9 @@ export type Step = Text | { says: Text; changes: string[] };
 export interface ParamDef extends ParamFace {
   key: string;
   type: ValueType;
+  /** What the page needs it for, when it needs this one in particular (roles.ts: the main box, the takes count). The
+   *  page asks for the role, never the key, so a rename keeps it working. */
+  role?: Role;
   /** Keys this parameter was saved under before, read as this one when saved data is loaded. */
   was?: string[];
   /** Which engines have it. Default: the definition's. Required when `per` gives engine lines. */
@@ -242,6 +246,8 @@ export type Stored = 'settings' | 'content' | 'none';
 /** Something a module keeps that is not a setting: a file, the seed, a selection, its adapters, a list. */
 export interface StateDef {
   key: string;
+  /** What the page needs it for, when it needs this one in particular (roles.ts: the song a repaint works on). */
+  role?: Role;
   /** Keys it was saved under before (docs/05, "Saved data"). */
   was?: string[];
   kind: 'file' | 'seed' | 'span' | 'slots' | 'record' | 'list';
@@ -253,6 +259,9 @@ export interface StateDef {
    *  Slots: {file}, {from}, {to}, and any the step's caller fills ({n}, {section}). A file has `load` and `clear`
    *  without saying (docs/05, "Undo step names"). */
   steps?: { [step: string]: Step };
+  /** The steps the page says in a toast with Undo when the part takes them (E-23: a recording loaded to continue
+   *  from); every other step is said only by Undo and Redo. */
+  tells?: string[];
   owner: Owner;
   stored: Stored;
   wire: Wire | { engines: EngineId[]; wire: Wire }[];

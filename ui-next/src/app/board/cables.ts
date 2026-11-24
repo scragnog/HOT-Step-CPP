@@ -3,8 +3,8 @@
 // measured on screen so they land on the jacks, each link a <g data-k="a>b"> updated in place (fixCables). How things
 // are drawn and move; nothing here is about a value.
 
+import { reduced } from '../kit/motion.ts';
 const PED_STEP = 32, JACKY = 36, PLUGW = 10, CABR = 10;
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function snapPedals(board: HTMLElement | null, lab: boolean): void {
   const pd = board?.querySelector<HTMLElement>('[data-pedals]'); if (!pd) return;

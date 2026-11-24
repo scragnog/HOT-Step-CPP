@@ -20,15 +20,18 @@ export const cont = {
   state: [
     {
       key: 'contFile',
+      role: 'recording',
       kind: 'file',
       noun: 'the recording',
       steps: { load: 'Load {file} to continue from' },
+      tells: ['load'],
       owner: 'song',
       stored: 'none',
       wire: { to: 'content:yue2Continuation', via: 'continuation' },
     },
     {
       key: 'contSel',
+      role: 'recordingPart',
       kind: 'span',
       noun: 'Part to continue from',
       /* a recording's part is its first 20 seconds until it is moved */

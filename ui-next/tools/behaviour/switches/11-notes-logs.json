@@ -1,12 +1,12 @@
 {
   "about":"Package 11's features (the Concept notes and the engine log), each switched off by one small change to its source (tools/behaviour/switches.mjs builds the test page once per feature and runs the acceptance): each must make at least one scenario fail.",
   "switches": [
-    {"feature":"notes button","file":"src/app/features/notes.tsx","find":"if (t.closest?.('#notesBtn')) openNotes(); else","replace":"if (t.closest?.('#notesBtn')) void openNotes; else"},
+    {"feature":"notes button","file": "src/app/shell/TopBar.tsx","find": "        <button className=\"pill-btn\" id=\"notesBtn\" onClick={() => openNotes()}>{say(ui('notes'))}</button>","replace": "        <button className=\"pill-btn\" id=\"notesBtn\" onClick={() => void openNotes}>{say(ui('notes'))}</button>"},
     {"feature":"notes modal layer","file":"src/app/features/notes-open.ts","find":"  layerOpen(n, { trigger: document.getElementById('notesBtn'), modal: true, close: closeNotes });","replace":"  void layerOpen;"},
     {"feature":"notes focus in","file":"src/app/features/notes-open.ts","find":"  document.getElementById('notesClose')?.focus({ preventScroll: true });","replace":""},
     {"feature":"notes focus back","file":"src/app/features/notes-open.ts","find":"  layerClosed(n);","replace":"  layerClosed(n, false);"},
     {"feature":"notes scrim","file":"src/app/features/notes.tsx","find":"n.hidden = !open; sc.hidden = !open;","replace":"n.hidden = !open; sc.hidden = true;"},
-    {"feature":"notes scrim closes","file":"src/app/features/notes.tsx","find":"else if (t === notesScrim()) closeNotes();","replace":"else if (t === notesScrim()) void closeNotes;"},
+    {"feature":"notes scrim closes","file":"src/app/features/notes.tsx","find": "if (e.target === notesScrim()) closeNotes(); };","replace": "if (e.target === notesScrim()) void closeNotes; };"},
     {"feature":"notes close button","file":"src/app/features/notes.tsx","find":"aria-label={say(ui('notes.close'))} onClick={closeNotes}>","replace":"aria-label={say(ui('notes.close'))} onClick={() => {}}>"},
     {"feature":"notes exit","file":"src/app/features/notes-open.ts","find":"  ovOut(n, 'drawer'); ovOut(notesScrim(), 'fade');","replace":"  void ovOut;"},
     {"feature":"notes named","file":"src/app/features/notes.tsx","find":"n.setAttribute('aria-labelledby', 'notesTitle'); ","replace":""},
@@ -15,7 +15,7 @@
     {"feature":"notes edge fade","file":"src/app/features/notes.tsx","find":"  useEdgeFade(ref);","replace":"  void useEdgeFade; void ref;"},
     {"feature":"notes tier keys wait","file":"src/app/features/modal-keys.ts","find":"id: 'modal-waits', order: 6,","replace":"id: 'modal-waits', order: 60,"},
     {"feature":"notes toast tab","file":"src/app/features/layers.ts","find":"const joins = toastJoins(l.el);","replace":"const joins: HTMLElement[] = [];"},
-    {"feature":"log meter opens","file":"src/app/features/logs.tsx","find":"if ((e.target as Element).closest?.('#engMeter')) toggleLogs();","replace":"if ((e.target as Element).closest?.('#engMeter')) void toggleLogs;"},
+    {"feature":"log meter opens","file": "src/app/shell/TopBar.tsx","find": "aria-describedby=\"emRead\" onClick={() => toggleLogs()}","replace": "aria-describedby=\"emRead\" onClick={() => void toggleLogs}"},
     {"feature":"log expanded","file":"src/app/features/logs.tsx","find":"    vramMeter()?.setAttribute('aria-expanded', String(open));","replace":"    void vramMeter;"},
     {"feature":"log named","file":"src/app/features/logs.tsx","find":"l.setAttribute('aria-label', say(ui('log.label')));","replace":""},
     {"feature":"log focus in","file":"src/app/features/logs-dock.ts","find":"    document.getElementById('logsClose')?.focus({ preventScroll: true });","replace":""},
@@ -27,7 +27,7 @@
     {"feature":"log exit","file":"src/app/features/logs-dock.ts","find":"    ovOut(l, 'sheet');","replace":"    void ovOut;"},
     {"feature":"log toast above","file":"src/app/shell/placeToast.ts","find":": 24 + dockH();","replace":": 24;"},
     {"feature":"log lines","file":"src/derive/logs.ts","find":"  return { head, lines: [server, models, plugins, vram, q] };","replace":"  void models; return { head, lines: [server, plugins, vram, q] };"},
-    {"feature":"log head models","file":"src/derive/logs.ts","find":"models: list(HEAD.filter(k => used.includes(k))","replace":"models: list(HEAD.filter(k => used.includes(k)).slice(0, 1)"},
+    {"feature":"log head models","file":"src/derive/logs.ts","find": "models: list(HEAD.map(r => roleKey(ix, r, desk.engine)).filter((k): k is string => !!k && used.includes(k))","replace": "models: list(HEAD.map(r => roleKey(ix, r, desk.engine)).filter((k): k is string => !!k && used.includes(k)).slice(0, 1)"},
     {"feature":"log tag column","file":"src/derive/logs.ts","find":"pad: ' '.repeat(Math.max(1, 10 - tag.length - 2))","replace":"pad: ' '"},
     {"feature":"log server status","file":"src/app/features/logs.tsx","find":".status().then(status => useNotesLogs.setState({ status }),","replace":".status().then(status => useNotesLogs.setState({ status: status && null }),"},
     {"feature":"log follows the desk","file":"src/app/features/logs.tsx","find":"engineLogModel(ix, s.desk, status, queue)","replace":"engineLogModel(ix, { ...s.desk, vals: {}, engine: 'ace' }, status, queue)"}

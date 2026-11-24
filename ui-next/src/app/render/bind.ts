@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import type { Action, Definition, Node } from '../../definitions/types.ts';
 import { actionWords, applyChoice, bindPart, checkText, fileRefused, partAct, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
 import { ix } from '../model/index.ts';
-import { useDesk } from '../store/desk.ts';
+import { useDesk, type Entry } from '../store/desk.ts';
 import { runNamed } from '../register/actions.ts';
 import { setTierFromView } from '../shell/tier.ts';
 import type { ParamView, PartView } from '../kit/types.ts';
@@ -32,13 +32,15 @@ export function runStrip(d: Definition, i: number): void {
 }
 /** Sets a pedal's or a side unit's switch (its foot switch, its power) as any control sets it: one step, named. */
 export function setSwitch(d: Definition, key: string, on: boolean): void {
-  try { bindPart(ix, d, { part: 'ledButton', param: key } as Node, desk, c => useDesk.getState().commit(c)).params[key]?.set(on); } catch { /* not on the board any more */ }
+  if (ix.params.get(key)?.d === d) useDesk.getState().setValue(key, on);
 }
 
 /** A node's actions: stable for the node, each acting on the desk in force. */
 function actionsOf(def: Definition, node: Node, key: string) {
   const from = `${def.id}:${key || (node.param ?? '')}`;
-  const commit = (c: Change) => useDesk.getState().commit(c, from);
+  /* the step this node's own setters took last: what a hand's toast offers to undo (RA-09) */
+  let took: Entry | null = null;
+  const commit = (c: Change) => { took = useDesk.getState().commit(c, from); };
   const tell = (m: Msg) => useDesk.getState().showToast({ text: m });
   let open: ReturnType<typeof bindPart> | null = null;
   /* bound now: the node as the desk shows it now; null when it is not shown any more */
@@ -58,7 +60,14 @@ function actionsOf(def: Definition, node: Node, key: string) {
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
     run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
     apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
-    load: (k: string, name: string, type: string) => { const no = fileRefused(name, type); if (no) tell(no); else bound()?.state[k]?.apply('load', name, undefined, { file: name }); },
+    /* a file whose state says its load (`tells`) is said with the step's words and Undo (E-23: a recording to continue
+       from); any other loads without a toast */
+    load: (k: string, name: string, type: string) => {
+      const no = fileRefused(name, type); if (no) { tell(no); return; }
+      took = null; bound()?.state[k]?.apply('load', name, undefined, { file: name });
+      const e = took as Entry | null;
+      if (e && ix.states.get(k)?.s.tells?.includes('load')) useDesk.getState().showToast({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });
+    },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
     /* a bespoke part's hand (src/derive/instruments.ts): what it says may offer to undo the step it just took. A hand
        that needs the shell (a step that brings a module, a question answered from the toast, the live region, focus in
@@ -68,10 +77,11 @@ function actionsOf(def: Definition, node: Node, key: string) {
       const named = actionWords(ix, node, desk(), key).find(w => w.action.do === 'bespoke' && w.action.name === name)?.action;
       if (named) { dispatch(def, named, node, from, arg === undefined ? undefined : String(arg)); return true; }
       const b = bound(); if (!b) return false;
+      took = null;
       return partAct(ix, b.node, b, desk(), name, arg, (m, undo) => {
         /* said in the live region only, as the concept's say() (package 3c) */
         if (undo === 'say') { useDesk.getState().say(m); return; }
-        const e = undo ? useDesk.getState().undo.at(-1) : undefined, s = useDesk.getState();
+        const e = undo ? took : null, s = useDesk.getState();
         s.showToast({ text: m, ...(e ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } } : {}) });
       });
     },

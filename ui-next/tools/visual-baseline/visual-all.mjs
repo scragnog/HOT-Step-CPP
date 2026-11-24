@@ -39,6 +39,13 @@ if (flag('list')) {
   if (orphans.length) console.log(`${orphans.length} states in no set: ${orphans.join(', ')}`);
   process.exit(orphans.length ? 1 : 0);
 }
+/* a state no set compares is a hole, not a note: it fails at once, before anything is captured, naming what to do */
+if (orphans.length) {
+  console.log(`FAIL ${orphans.length} states belong to no visual set, so nothing compares them: ${orphans.slice(0, 12).join(', ')}${orphans.length > 12 ? ', ...' : ''}`);
+  console.log(`     give the file that adds them its set (export const VISUAL_SET = { name, only, scope?, accept }), or widen an existing set's \`only\` (README.md, "Every set at once")`);
+  process.exit(1);
+}
+if (twice.length) { console.log(`FAIL ${twice.length} states belong to two sets, compared twice with two lists of accepted differences: ${twice.slice(0, 12).join(', ')}`); process.exit(1); }
 if (!chosen.length) throw new Error(`no set matches ${opt('only')}: ${sets.map(s => s.name).join(', ')}`);
 if (!fs.existsSync(concept)) throw new Error(`no concept page at ${concept} (--concept <file>, or HOTSTEP_CONCEPT=<folder>)`);
 
@@ -58,8 +65,6 @@ const vb = (log, ...a) => { const fd = fs.openSync(path.join(logs, log), 'w'); c
 const complete = (dir, ids) => { try { const m = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); return JSON.stringify(m.states) === JSON.stringify(ids) && ids.every(id => fs.existsSync(path.join(dir, id + '.json.gz'))); } catch (e) { return false; } };
 
 console.log(`visual sets: ${chosen.length} of ${sets.length} (${chosen.map(s => s.name).join(', ')}); concept ${path.basename(concept)} ${conceptHash}; rebuild ${path.relative(repo, page)}; ${workers} workers`);
-if (orphans.length) console.log(`  ${orphans.length} states belong to no set, and are compared by none: ${orphans.slice(0, 8).join(', ')}${orphans.length > 8 ? ', ...' : ''}`);
-if (twice.length) console.log(`  ${twice.length} states belong to two sets: ${twice.slice(0, 8).join(', ')}`);
 const t0 = Date.now(), rows = [];
 for (const s of chosen) {
   const t1 = Date.now(), key = keyOf(s), cname = `all-concept-${s.name}-${key}`, rname = `all-rebuild-${s.name}`, cdir = path.join(OUT, cname);
@@ -89,5 +94,5 @@ for (const s of chosen) {
   for (const l of detail) console.log('       ' + l.trim().slice(0, 220));
 }
 const bad = rows.filter(r => r[2] !== 'identical');
-console.log(`\n${bad.length ? `RESULT: ${bad.length} of ${rows.length} sets differ (${bad.map(r => r[0]).join(', ')})` : `RESULT: every set identical with its accepted differences (${rows.length} sets, ${rows.reduce((a, r) => a + +r[1], 0)} states)`}${orphans.length ? `; ${orphans.length} states in no set` : ''}, in ${sec(Date.now() - t0)}`);
-process.exitCode = bad.length || orphans.length ? 1 : 0;
+console.log(`\n${bad.length ? `RESULT: ${bad.length} of ${rows.length} sets differ (${bad.map(r => r[0]).join(', ')})` : `RESULT: every set identical with its accepted differences (${rows.length} sets, ${rows.reduce((a, r) => a + +r[1], 0)} states)`}, in ${sec(Date.now() - t0)}`);
+process.exitCode = bad.length ? 1 : 0;

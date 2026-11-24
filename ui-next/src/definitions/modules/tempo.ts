@@ -52,6 +52,7 @@ export const tempo = {
   params: [
     {
       key: 'tempo.bpm',
+      role: 'bpm',
       type: 'number',
       label: 'BPM',
       range: [1, 240, 1],
@@ -67,6 +68,7 @@ export const tempo = {
     },
     {
       key: 'tempo.key',
+      role: 'key',
       type: 'choice',
       label: 'Key',
       default: '',
@@ -121,6 +123,7 @@ export const tempo = {
     },
     {
       key: 'tempo.dur',
+      role: 'length',
       type: 'number',
       label: 'Length',
       range: [10, 600, 5],
@@ -143,6 +146,7 @@ export const tempo = {
     },
     {
       key: 'tempo.max',
+      role: 'longest',
       type: 'number',
       label: 'Longest it may run',
       range: [60, 900, 30],

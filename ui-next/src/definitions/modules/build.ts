@@ -62,6 +62,7 @@ export const build = {
   state: [
     {
       key: 'build',
+      role: 'build',
       kind: 'record',
       noun: 'the build',
       owner: 'song',

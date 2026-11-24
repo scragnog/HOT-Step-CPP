@@ -1,14 +1,17 @@
-// What a work package asks the server for beyond the page's Engine (services/engine.ts): the build session, the
-// planner's runs, a model's figures. A package defines its service in a file of its own (the mock beside it, the real
-// adapter in package 10) and registers it here; main.tsx chooses mock or real for every service at once.
+// The server boundary's registry (services/index.ts): each service is registered once, by name, with the interface the
+// Services map gives that name, and asked for by name. main.tsx registers every one before the page loads (the
+// simulated server, services/mock/index.ts; package 10's real adapters in its place). A consumer asks with service(name)
+// and never imports an implementation.
 
-const SERVICES = new Map<string, unknown>();
+import type { Services } from '../services/index.ts';
 
-export function defineService<T>(name: string, impl: T): T {
+const SERVICES = new Map<keyof Services, unknown>();
+
+export function defineService<K extends keyof Services>(name: K, impl: Services[K]): Services[K] {
   if (SERVICES.has(name)) throw new Error(`the service "${name}" is defined twice`);
   SERVICES.set(name, impl); return impl;
 }
-export function service<T>(name: string): T {
-  const s = SERVICES.get(name); if (!s) throw new Error(`no service "${name}": its package registers it`);
-  return s as T;
+export function service<K extends keyof Services>(name: K): Services[K] {
+  const s = SERVICES.get(name); if (!s) throw new Error(`no service "${name}": main.tsx registers every service before the page loads`);
+  return s as Services[K];
 }

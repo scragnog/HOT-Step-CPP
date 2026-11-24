@@ -8,8 +8,9 @@ import type { Json, Node } from '../../../definitions/types.ts';
 import { buildAt, scoreLayout } from '../../../derive.ts';
 import { defOf, ix } from '../../model/index.ts';
 import { useDesk } from '../../store/desk.ts';
-import { buildSession, type Take } from '../../services/build.ts';
-import { recordings } from '../../services/recording.ts';
+import { buildSession } from '../../services/mock/build.ts';
+import type { Take } from '../../services/build.ts';
+import { recordings } from '../../services/mock/recording.ts';
 import { close, open, scoreShown } from '../../score/state.ts';
 import { asScene, expose, onMirror, onScene, type Scene } from '../compat.ts';
 

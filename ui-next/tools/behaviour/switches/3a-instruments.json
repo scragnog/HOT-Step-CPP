@@ -106,8 +106,8 @@
   {
    "feature": "takes cost",
    "file": "src/derive/instruments.ts",
-   "find": "  const extra = e.each === 'all' ? n * each : Math.max(0, n - 1) * each, need = models + extra;",
-   "replace": "  const extra = 0, need = models + extra;"
+   "find": "  const v = vramNeed(ix, desk, n), gb = (x: number) => x.toFixed(1), card = +v.card.toFixed(1);",
+   "replace": "  const v = vramNeed(ix, desk, 1), gb = (x: number) => x.toFixed(1), card = +v.card.toFixed(1);"
   },
   {
    "feature": "scope curve",

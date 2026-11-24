@@ -7,8 +7,8 @@ import { isTextField, onKey } from '../register/keys.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui } from '../i18n/index.ts';
 import { topLayer } from './layers.ts';
+import { reduced } from '../kit/motion.ts';
 
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const stops = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.getClientRects().length);
 
 function jump(dir: 1 | -1): boolean {

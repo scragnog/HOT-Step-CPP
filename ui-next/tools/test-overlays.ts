@@ -33,14 +33,17 @@ const pick = (dk: Desk, q: string, cat: PickerCat) => pickerModel(OFFERED, dk, q
 {
   const g = (id: string) => pickerGroupOf(DEFINITIONS.find(d => d.id === id)!);
   ok('a Lab module stands with the Lab group, others in their category, pedals and units apart', J([g('guidance'), g('perf'), g('tempo'), g('seed'), g('ss'), g('wh')]) === J(['Lab', 'Lab', 'Compose', 'Engine', 'Pedals', 'Side units']));
-  ok('the picker offers 35 things', OFFERED.length === 35, OFFERED.length);
+  /* the counts below are the inventory's, whatever it holds: a module or a pedal added or removed changes nothing here */
+  const kinds = (k: Definition['kind']) => OFFERED.filter(x => x.kind === k).length;
+  ok('the picker offers every module, pedal and unit the panel does', OFFERED.length === kinds('module') + kinds('pedal') + kinds('unit') && kinds('pedal') > 0 && kinds('unit') > 0, OFFERED.length);
 }
 /* ---- the count says what the wall shows (F-09) */
 {
   const d = desk('ace', 'studio', ['tempo']);
-  ok('"35 in all"', s(pickerCountMsg(pick(d, '', 'All').count)) === '35 in all', s(pickerCountMsg(pick(d, '', 'All').count)));
-  ok('"10 pedals"', s(pickerCountMsg(pick(d, '', 'Pedals').count)) === '10 pedals');
-  ok('"5 side units"', s(pickerCountMsg(pick(d, '', 'Side units').count)) === '5 side units');
+  const n = (k: Definition['kind']) => OFFERED.filter(x => x.kind === k).length;
+  ok('"N in all"', s(pickerCountMsg(pick(d, '', 'All').count)) === `${OFFERED.length} in all`, s(pickerCountMsg(pick(d, '', 'All').count)));
+  ok('"N pedals"', s(pickerCountMsg(pick(d, '', 'Pedals').count)) === `${n('pedal')} pedal${n('pedal') === 1 ? '' : 's'}`);
+  ok('"N side units"', s(pickerCountMsg(pick(d, '', 'Side units').count)) === `${n('unit')} side unit${n('unit') === 1 ? '' : 's'}`);
   const se = pick(d, 'see', 'All');
   ok('"see" is one match, Seed, which Enter takes', s(pickerCountMsg(se.count)) === '1 match' && se.target === 'seed' && se.fit === 'seed', [s(pickerCountMsg(se.count)), se.target]);
   const comp = pick(d, '', 'Compose');

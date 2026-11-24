@@ -27,11 +27,6 @@
     { "id": "22-engines-round5/lead-sheet-follows-the-planner", "why": "abcFoot with Chain of Thought off and the way back focusing the preview (E-12), a full lead sheet's chord symbols and its capitalised title, Melody only without chords, text that is not ABC said (E-26)." }
   ],
   "excluded": [
-    { "id": "05-modules/lead-sheet", "why": "Every check passes but its last: it presses Soft by data-v=\"Soft\", the option's label, where the rebuild's data-v is the value (\"bias\", deviation 10). The lyric-timing line for Soft is checked in 36-instruments-3c/lyric-timing-says-what-it-needs; it waited on package 4 (#prompt) until now." },
-    { "id": "05-modules/build-by-section", "why": "It clicks the tile strip's [data-tag] and [data-bcot] hooks and the planner's [data-seg=\"lm.cotmode\"][data-v=\"Off\"] (deviation 10: the rebuild's strip buttons and choices run their own actions), and reads the rendered song from S.songs (package 6). Its build checks are in 36-instruments-3c (build-strip-offers-the-way-on, build-render-keeps-the-build, build-follows-new-lyrics) and 15-other-engines/build-replan-and-locks; its reload check passes here up to S.songs." },
-    { "id": "11-engines/lyric-timing-follows-composer-cfg", "why": "Its first check also needs the planner's composer CFG token painted .clash by the lead sheet (the concept's cross-module paint hook, paintCfgClash; deviation 10), which is not built (notes); the line, its warning and its fix are checked in 36-instruments-3c/lyric-timing-says-what-it-needs." },
-    { "id": "15-other-engines/play-while-rendering", "why": "The Flow renderer's Play while rendering is a run's (package 6: the rendering card and the player); the switch itself is drawn." },
-    { "id": "22-engines-round5/plans-say-one-thing", "why": "Package 2's exclusion stands: it reads the concept's [data-mmcache] paint hook (deviation 10) and the Endings switches' tips (the LED switch's tip, package 3b)." },
-    { "id": "05-modules/yue-plugins-replan", "why": "Package 2's exclusion stands: it picks a YuE2 solver by its label (data-opt, deviation 10) and switches Plan adherence's groups by the concept's [data-adpow]/[data-adg] hooks; the groups' power chips are in 33-containers/rack-groups-switch-and-stand-back." }
+    { "id": "15-other-engines/play-while-rendering", "why": "The Flow renderer's Play while rendering is a run's (package 6: the rendering card and the player); the switch itself is drawn." }
   ]
 }

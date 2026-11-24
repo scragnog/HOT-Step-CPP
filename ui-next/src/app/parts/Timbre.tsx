@@ -2,7 +2,7 @@
 //
 //   recentRefs   the recent references under their label: the two latest and a way to the rest, never a ragged stack
 //                of chips (L-21, Q-28); one loads it as the timbre reference (its file state's `load` step). The list is
-//                the server's reference tracks (services/references.ts)
+//                the server's reference tracks, told to the desk (features/references.ts) and given in its model
 //   timbreBlend  the reference blend as two overlapping circles: the reference dragged into your sound, sideways or
 //                with the value contract's keys; it stands back with its reason while there is no track to blend
 //
@@ -10,10 +10,9 @@
 
 import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { definePart, onValueKey, onValueKeyUp, ui, useSay, type PartView } from '../kit/index.ts';
-import { useReferences } from '../services/references.ts';
 
 export function RecentRefs(v: PartView) {
-  const say = useSay(), refs = useReferences(), file = v.state.find(s => s.kind === 'file');
+  const say = useSay(), refs = v.instrument?.refs ?? [], file = v.state.find(s => s.kind === 'file');
   if (!refs.length || !file) return null;
   /* the two latest and "N more…" when there are more than three */
   const shown = refs.length > 3 ? refs.slice(0, 2) : refs;

@@ -65,7 +65,8 @@ ui-next/
       model/               the core indexed once (ix; the test build adds the parts gallery), definitions by id
       store/desk.ts        the desk store: desk, engines' book, modules and board order, undo/redo, autosave
       store/panels.ts      which side panels stand open, which drawer is open
-      services/            engine.ts (the boundary), mockEngine.ts (the concept's simulation)
+      services/            index.ts (the boundary: every service by name), one interface a file; mock/ (the simulated
+                         server, registered by main.tsx in one line)
       i18n/                i18next on an instance of its own; words/*.ts: the page's own words, one file per package
       styles/              concept/ (the concept's stylesheets, unchanged), index.ts (their order), rebuild/*.css (the
                            rebuild's own, loaded after: parts on every surface, the shared part states, standards mode)
@@ -81,8 +82,10 @@ ui-next/
     test-parts-contract.mjs  the parts' contract in the lint: the review's planted part refused
 ```
 
-`npm run check` runs both type checks, the validator, the request comparison, the core's tests, tools/test-view.ts and
-tools/test-parts-contract.mjs. `npm run dev` serves the page; `npm run build:file` writes the file the owner publishes;
+`npm run check` runs both type checks, the validator, the request comparison, every `tools/test-*.ts` file (the
+core's, the view's and each package's), the parts' contract (`tools/test-parts-contract.mjs`), the code's contract with
+the definitions (`tools/test-code.ts`: no key or id named in the code, every part and action built) and that every
+switch and planted defect still applies (`switches.mjs --applies`); [07](07-checking.md) lists them. `npm run dev` serves the page; `npm run build:file` writes the file the owner publishes;
 `npm run build:test` the file the tools drive; `npm run lint` lints the React layer.
 
 ## Styles
@@ -149,12 +152,22 @@ nothing about a value:
 
 ## The service boundary
 
-`services/engine.ts` is the one interface between the page and the server, grouped as the existing frontend's API layer
-groups it (`ui/src/services/api.ts`: songs, generate, models, plus the option lists and the VST3 chain). `generate`
-takes the Create intent the core builds (`createIntent()`), never anything the view assembles. `mockEngine.ts` is the
-concept's simulation. A package that needs more of the server (the build session, the planner's runs) defines a service
-of its own in its own file and registers it (`register/services.ts defineService`), its mock beside it; the real
-adapters are package 10's.
+Every call the page makes to the server is a method of a named service, and the services are listed in one place,
+`services/index.ts` (`Services`: `lists`, `models`, `generate`, `adapters`, `references`, `logs`, `recording`, `score`,
+`build`), each interface in a file of its own beside it, grouped as the existing frontend's API layer groups the routes
+(`ui/src/services/api.ts`). A consumer asks for a service by name, `service('models')` (`register/services.ts`, typed
+by `Services`), and never imports an implementation: the lint refuses an import of `services/mock` anywhere but
+`main.tsx` and the test layer. `main.tsx` registers one implementation of every service before anything asks for one;
+today that is the simulated server, `services/mock/index.ts` (the concept's catalogue, queue, sessions and lists), and
+package 10's real adapters take its place there: one import, nothing else changes. What is sent is built by the core,
+never here: `generate.submit` takes the run the core worked out (`derive/generate.ts runOf`) and its request is
+`createIntent(ix, spec.desk, real)` (`derive/request.ts`) with the application's own resolver and content builder, the
+one request the comparison verifies over the value space ([07](07-checking.md)); the simulated server sends nothing.
+(The round found that a second request function, `pageIntent`, the desk in real names without the application's
+resolver, differed from the verified one in 650 fields once the server resolved it, RA-20; it is gone.) What the server decides about a run's
+songs (a title from the words, a length where the engine ends the song, the art's colour) is the service's `draft`, not
+the core's. A bespoke part responsible for its own conversation with the server (Build by section's session, `PARTS`
+`responsible`) reaches the boundary through the kit's `service`.
 
 ## How a part is written
 
@@ -386,7 +399,7 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
 - `derive/generate.ts` (package 6): what a press of Generate makes of the desk (`refusalOf`: an empty box per engine,
   a score to preview, two modules that cannot run together, a run certain not to fit, F-21; `runOf`: the run as it is
   started, its engine and desk kept with it, one song per take with its title, card line, length and colour, the
-  pedals that run, play while rendering, the re-planning tries; `pageIntent`: the request, the desk in real names), what
+  pedals that run, play while rendering, the re-planning tries; its request is `createIntent`, built by the service), what
   a run says while it renders (`stageOf`, `takeProgress`, `readyOf`, `attemptsAt`, `queueStage`), the server's refusal
   (`refusedWords`), the go bar's line (`goLine`, `changedKeys`, `changesUnmarked`), Generate and Cancel (`goModel`,
   `docTitle`), cancelling (`cancelWords`, `cancelBack`), Latest (`latestShown`: whole rows, the fold, the count;
@@ -422,6 +435,27 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   where the face edits it, strip or not (E-25; `core.ts editsAt(..., strips)`). `desk.ts nodeShown`: a control with a
   `dim` stays and stands back, as the rule's comment always said. `core.ts WORD_FIELDS` and `WordsOverride`: a word line
   may change a placeholder. `containers.ts KidModel.look`. Tested by `tools/test-instruments-3c.ts` (in `npm run check`).
+
+- The consolidation round (review r3; one rule in one place, after eleven packages met):
+  - **Roles** (`src/definitions/roles.ts`, a `role` on a parameter or a state; `core.ts roleKey`, `roleKeys`,
+    `roleOwner`, `roleOn`; `ParamModel.role`): what the core and the view need in particular is found by its role,
+    never its key, and a module by the role its values play (`roleOn(ix, 'repaintSource', desk)`: the repaint module
+    is on the desk) or by what it holds (`model/index.ts LEAD`, `BOARD`, `MODELS`). The validator checks every role;
+    `tools/test-code.ts` refuses a key, a state or an id named in the code.
+  - **Engine facts** (`engines.ts ENGINE_FACTS`): the box's word, lyrics alone, the tempo field reaching the song, a
+    structured caption, how a length is taken; the core reads them, and branches on no engine id.
+  - **One VRAM figure** (`vramNeed`, with `first` and `fits`): the Takes tile, the go bar, the meter, the refusal and
+    "Use N takes" read it.
+  - **One undo-step identity**: `commit`, `deskStep`, `setValue` and `add` return the step they took (`Entry`), and a
+    toast's Undo is that step, never "the newest" in the history.
+  - **One way in**: what is on the desk is `core.ts onOf` (the store's `applyDesk` sets it from the modules and the
+    board); a value set for the user from outside a part is the store's `setValue` (the core's `paramSetter`); a text
+    field's Undo amends its step through `amendStep`; a server session is told (`told({ sessions })`).
+  - **One instrument registry**: every bespoke part, package 3a's too, registers through `defineInstrument`.
+  - **A run's songs are the server's**: `runOf` gives what the page knows of each (`SongAsk`), the generation service's
+    `draft` says the rest (`services/mock/songs.ts` for the simulated server).
+  - **One motion helper, one icon set, one convenience store**: `kit/motion.ts` (`reduced`, `mtime`, `motionVar`,
+    `easing`), `kit/icons.tsx`, `kit/storage.ts` (`readPref`, `writePref`; the records stay `store/stored.ts`'s).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -612,7 +646,15 @@ What the user decides about a build is the module's record state `build` (its se
 the songs it rendered), changed only by the board's hands through the core, each a step; a section looked at and a take
 arriving are none. The score preview is `features/score-preview.tsx` with its state in `score/state.ts`, drawn into
 `#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
-`kit/glyphs.tsx` holds three more icons (play, stop, the padlock) in a file of its own.
+The play, stop and padlock icons are the kit's (`kit/icons.tsx`, the one icon set).
+
+**The consolidation round's core share (review r3)** adds `acceptance/fix-core.json` (the defects it fixed, driven as a
+user reaches them, `scenarios/37-fix-core.mjs`, and every concept scenario no package ran after the merge, re-read: those
+that pass are listed, the rest excluded with today's reason; `run.mjs --slice` now refuses a concept scenario in no
+list), `switches/fix-core.json`, and `tools/test-code.ts` (in `npm run check`: no key, state or id named in the code;
+every part a definition names has a component and every action a runner). `npm run check` ends with
+`switches.mjs --applies`; `visual-all.mjs` fails on a state that belongs to no set; an accepted screenshot difference
+says how many pixels it accepts.
 
 - The desk's fix round (review r1's RD- findings and RA-23, `notes` of the round): `derive/desk.ts nodeShown` keeps a
   control with a `dim` only while the dim's condition holds (RD-02) and draws a bespoke housing that binds and reads
@@ -719,8 +761,8 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
 33. **The recent references are the server's reference tracks** (`services/references.ts`, as the existing frontend's
     `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
     `recentRefs` state stays declared and holds nothing.
-34. **The Takes tile's VRAM line counts the engines' default models** until the engine panel's package gives the loaded
-    models' figures; ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
+34. **(The VRAM half closed in the consolidation round, RA-01: the Takes tile's line is `vramNeed`'s, the meter's and the
+    go bar's one figure, for the models chosen.)** ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
     rule would put eight in two rows of four, a shorter tile, and the desk would pack differently from the concept's).
 35. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
 36. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a
@@ -772,8 +814,9 @@ Package 11's (the Concept notes and the engine log):
 - P11-6. **(Closed by package 6, which tells the queue as runs come and go: `store/generate.ts`.)** The log's queue line said idle until the generation package told the queue (`tellQueue`); the concept's
   counts its songs rendering and waiting.
 - P11-7. **The notes' × and the log's Close say their type** (deviation 6). The notes button and the VRAM meter open
-  their overlays through a delegated click, the meter's `aria-expanded` set by the log as it opens and closes, so the top
-  bar (package 5's) is not edited; the same markup and behaviour as the concept's.
+  their overlays with their own click (`shell/TopBar.tsx`: `openNotes`, `toggleLogs`; the delegated listeners of the
+  package's time went in the consolidation round, RA-13), the meter's `aria-expanded` set by the log as it opens and
+  closes; the same markup and behaviour as the concept's.
 
 43. **The empty Adapters tile is its definition's strip**, drawn by the tile: its buttons run the named actions and carry
     none of the concept's hooks (`data-cartadd`, `data-plannerpick` on the strip; deviation 10). The cartridges' own
@@ -816,8 +859,8 @@ Package 6's (numbered P6 so that packages built at the same time do not collide)
   (choices, counted here).
 - P6-9. **Ctrl+Enter is heard on the window in the capture phase**, before any row's or card's own Enter (F-07, pending
   in the concept), not through `onKey` (which the page dispatches after its controls').
-- P6-10. **The request is `pageIntent`** (the desk in the real application's names, request.ts realState), not
-  `createIntent` with the application's resolver, which needs the real application (package 10).
+- P6-10. **(Closed in the consolidation round, RA-20.)** The request is `createIntent`, which the generation service's
+  real adapter builds with the application's resolver (package 10); the simulated server sends none.
 - P6-11. **(Closed in the fix round: RC-01.)** The top bar's pages, the brand and "Open the Library" show the
   concept's stand-in for each other page (`shell/screens.ts`, `features/screens.tsx`).
 
@@ -899,16 +942,21 @@ the two boxes that would move (the engine caret and the LCD picker's arrows) whe
 
 ## Adding from the how-to, on a copy
 
-On a scratch copy of `ui-next`, following [06](06-how-to.md) as it is (the trials are in the revision's notes), each
-with `npm run check` and `npm run lint` passing and looked at in both themes at every tier:
+Re-measured in the consolidation round (review r3, RA-03) on a scratch copy of the merged branch, following
+[06](06-how-to.md) as it now is, with `npm run check` and `npm run lint` after each and the browser acceptance after
+the additions and after the removal:
 
-| Job | Files written by hand | Lines | Besides |
+| Job | Files written by hand | Lines | Besides (what 06 says to run) |
 |---|---|---|---|
-| Add a parameter (APG eta on two engines) | 1 (`guidance.ts`) | 11 | `npm run docs` (2 generated docs) |
-| Add a pedal (a stereo widener) | 2 (its definition, the index) | 55 + 2 | its drawing (13 lines), written by `node tools/thumb.ts widener`; docs |
-| Add a module of existing parts, a face per tier (Dynamics) | 4 (definition, a unit in `parts.ts`, index, drawing) | 37 + 1 + 2 + 17 | docs |
-| Add a part (a stepped slider) used by two definitions | 5 (`PARTS`, component, stylesheet, the two definitions) | 4 + 24 + 17 + 1 + 1 | `gallery.mjs --record` once it looks right; docs |
-| Remove a module (Avoid) | 4 (its file deleted, index, `retired.ts`, the factory workflow naming it) | 31 deleted; 2 + 2 + 2 | docs. The slice's own browser checks add Avoid (`30-slice.mjs`, `00-slice.mjs`): removing a slice module means giving them another, as 06 says |
+| Add a parameter (YuE2's plan token limit, 06 section 1) | 1 (`planner.ts`) | 10 | `npm run docs`; the request comparison lists its field as new (question 19) |
+| Add a pedal with a knob, a choice and a switch (a stereo widener) | 2 (its definition, the index) | 24 + 2 | its drawing, written by `node tools/thumb.ts widener`; docs. The picker's counts follow (the tests count the inventory) |
+| Add a module of existing parts, a face per tier, a Quick row (Dynamics) | 4 (definition, a unit in `parts.ts`, index, drawing) | 28 + 1 + 2 + a drawing | docs; and its id in `factory.ts ORDER`, which the layout scenarios asked for ("Everything" left a hole) |
+| Add a bespoke instrument (a loudness gauge in Dynamics, 06 section 4b) | 6 (`PARTS` row, core file, the line in `src/derive.ts`, component, stylesheet, the node) | 5 + 19 + 1 + 16 + 2 + 1 | docs |
+| Remove a module (Timbre reference) | 4 (its file deleted, index, `retired.ts`, the two Mastering notes the validator named) | 84 deleted; 2 + 3 + 19 deleted | docs; `npm run core -- --recount` (took one entry out); 12 acceptance scenarios that use Timbre fail naming it, to be excluded as 06 says; one test section skipped and said |
+
+All four additions together left `npm run check`, `npm run lint` and the whole acceptance passing, but for the layout
+scenarios' hole, which the `ORDER` line closed. Not re-measured in this round: a new part's gallery run (06 section 4
+gives its numbers from the first measurement).
 
 A new part is checked on every surface by the gallery with no line written there; until its looks are recorded the
 gallery fails on it alone.

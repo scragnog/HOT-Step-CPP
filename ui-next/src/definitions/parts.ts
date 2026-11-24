@@ -7,7 +7,7 @@
 //   readout    shows something, edits nothing
 //   bespoke    a part written for one module because what it draws or does cannot be said as data. It edits only
 //              what its node binds (param, params, state), reads only what its node lists in `reads`, and names no
-//              undo step of its own: PartProps below is all it is given.
+//              undo step of its own: its PartView (src/app/kit/types.ts) is all it is given, built on PartProps below.
 //
 // `edits` lists the value types a node's `param`/`params` may have ('pair' is two numbers in `params`), `state` the
 // kinds of state its node's `state` may name, `reads` whether it takes a `reads` list, `drive` how the generated
@@ -16,7 +16,8 @@
 // concept's stylesheets (C:\Users\sneth\misc\HOT-Step-UI\src\css) that hold its look; the first is its own file.
 // Every part also takes 35-changed.css, 35-states.css and 35-labels.css where it has a label.
 //
-// To add a part: add an entry here, write its React component under the name (it receives PartProps), and give it
+// To add a part: add an entry here, write its React component under the name (it receives a PartView: its model and
+// setters, src/app/kit/types.ts), and give it
 // its stylesheet. Every definition can then name it. docs/06-how-to.md has the steps.
 
 import type { StateDef, ValueType, Tier, EngineId, Json, Value, Node, ParamFace } from './types.ts';
@@ -330,8 +331,8 @@ export const PARTS = {
     kind: 'readout', reads: true, css: ['27-pedals.css'],
     doc: 'A printed meter with a needle: the first of `reads` on its scale, or a level the engine reports when it reads nothing (the Mastering pedal\'s VU meter).',
     opts: {
-      min: { type: 'number', doc: 'The scale\'s left end.' },
-      max: { type: 'number', doc: 'Its right end.' },
+      min: { type: 'number', doc: 'The scale\'s left end, for a meter that reads no number: one that reads a number is on that number\'s range.' },
+      max: { type: 'number', doc: 'Its right end, likewise.' },
       red: { type: 'number', doc: 'Where the scale turns red.' },
     },
   },
@@ -478,7 +479,8 @@ export type OptsOf<P extends PartName> = SpecOf<P> extends { opts: infer O }
 export type NodeOf<P extends PartName> = { part: P; opts?: OptsOf<P> };
 
 /* ---------------------------------------------------------------- what a part is given
-   A part's component receives PartProps and nothing else (src/derive/parts.ts bindPart builds them). The only way it
+   A part's component receives a PartView (its model and these setters, src/app/kit/types.ts); a bespoke part's hands
+   in the core (partAct) receive PartProps (src/derive/parts.ts bindPart builds them). The only way either
    changes the desk is a setter here, and there is one for exactly what its node binds: `param` and `params`, the
    state in its node's `state`, and the parameters a named step it takes lists in `changes`. It never names an undo
    step: a setter's change is named by the core from the definition (src/derive/steps.ts), or the part asks for one of

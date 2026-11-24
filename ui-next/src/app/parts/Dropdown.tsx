@@ -20,6 +20,7 @@ import { createPortal } from 'react-dom';
 import { LcdFace, ui, useSay, type ParamView, type Slot } from '../kit/index.ts';
 import { El, Spark, type Face } from './PickFaces.tsx';
 import { nbHyphen, useListFade } from './pickText.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 const host = () => document.getElementById('dd');
 type Opt = NonNullable<ParamView['options']>[number];
@@ -27,8 +28,8 @@ export type Variant = 'lcd' | 'plugin' | 'chip' | 'model' | 'stamp';
 
 /** The languages chosen last, newest first: the page's own memory (deviation 5 of docs/09: the page's own keys). */
 const RECENT = 'hotstep.create.langRecent';
-const recentLangs = (): string[] => { try { const a: unknown = JSON.parse(localStorage.getItem(RECENT) ?? '[]'); return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : []; } catch { return []; } };
-const remember = (v: string) => { try { localStorage.setItem(RECENT, JSON.stringify([v, ...recentLangs().filter(x => x !== v)].slice(0, 6))); } catch { /* storage off: nothing is remembered */ } };
+const recentLangs = (): string[] => readPref<string[]>(RECENT, [], (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined));
+const remember = (v: string) => writePref(RECENT, [v, ...recentLangs().filter(x => x !== v)].slice(0, 6));
 
 /** The next (or previous) control in the page's tab order from an element (23-dropdown.js tabFrom). */
 function tabFrom(el: HTMLElement, dir: number) {

@@ -162,6 +162,12 @@ async function run() {
   if (missing.length) console.log(`not drawn on (by the definition or the tier; checked where drawn): ${missing.join(', ')}`);
   console.log(`screenshots: ${path.relative(repo, OUT)}`);
   const uniq = [...new Set(fails)];
-  if (uniq.length) { console.log(`\n${uniq.length} failed:`); uniq.slice(0, Number(process.env.GALLERY_MAX || 80)).forEach(f => console.log('  ' + f)); process.exitCode = 1; } else console.log('RESULT: every part reads right wherever it stands');
+  if (uniq.length) {
+    const max = Number(process.env.GALLERY_MAX || 80), fresh = uniq.filter(f => f.endsWith(': new since the last record')).length;
+    console.log(`\n${uniq.length} failed${fresh ? ` (${fresh} of them new since the last record: a new part, once its screenshots look right, is kept with --record)` : ''}:`);
+    uniq.slice(0, max).forEach(f => console.log('  ' + f));
+    if (uniq.length > max) console.log(`  ... and ${uniq.length - max} more (GALLERY_MAX=${uniq.length} prints them all)`);
+    process.exitCode = 1;
+  } else console.log('RESULT: every part reads right wherever it stands');
 }
 await run();

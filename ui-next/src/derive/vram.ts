@@ -6,13 +6,11 @@
 
 import type { EngineId, Node, Tier } from '../definitions/types.ts';
 import { ENGINES, engineName } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, countOf, has, listKey, modelDefault, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, applies, countOf, has, listKey, modelDefault, resolve, roleKey, valueOf } from './core.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
 import { paramWords, textMsg } from './strings.ts';
 import { CARD_GB, optionFaces, type OptionFace } from './controls.ts';
 
-/** How many songs one Generate makes at most on an engine: the takes count's range there (the definitions'). */
-const TAKES = 'takes.n';
 
 /** A model the engine loads (OptionsFrom `loaded`): its options are a bucket of the server's model files. */
 const bucketOf = (ix: Index, key: string, e: EngineId) => {
@@ -37,8 +35,10 @@ export interface VramNeed {
   models: number;
   /** What the next Generate needs: that, and what its takes add. */
   need: number;
-  /** What each take adds. */
-  each: number;
+  /** What each take adds, and whether the first take adds it too (else only the takes after the first). */
+  each: number; first: boolean;
+  /** How many takes fit on the card at once (what "Use N takes" and "Try N takes" offer). */
+  fits: number;
   /** In how many passes it runs to fit the card (1: at once). */
   passes: number;
   /** The engine refuses it before loading anything. */
@@ -55,14 +55,16 @@ export function vramNeed(ix: Index, desk: Desk, takes?: number): VramNeed {
   const e = desk.engine, card = desk.vram?.card ?? CARD_GB, fig = desk.vram?.engines[e];
   const parts: VramNeed['parts'] = modelKeys(ix, e).filter(k => applies(ix, k, desk)).map(k => ({ name: paramWords(ix, k, desk).short ?? paramWords(ix, k, desk).label, gb: modelGb(ix, k, desk) })).filter(x => x.gb > 0);
   for (const f of fig?.fixed ?? []) parts.push({ name: f.name, gb: f.gb });
-  const ads = fig?.adapters ? Math.min(countOf(ix, 'slots', desk), fig.adapters.most) : 0;
+  const slots = roleKey(ix, 'adapters'), ads = fig?.adapters && slots ? Math.min(countOf(ix, slots, desk), fig.adapters.most) : 0;
   if (ads) parts.push({ name: msg('vram.adapters'), gb: ads * fig!.adapters!.gb });
-  const n = takes ?? (has(ix, TAKES, e) ? Number(valueOf(ix, TAKES, desk) ?? 1) : 1);
-  const t = fig?.take, each = !t || (t.when && !valueOf(ix, t.when, desk)) ? 0 : t.gb;
+  const tk = roleKey(ix, 'takes', e), n = takes ?? (tk ? Number(valueOf(ix, tk, desk) ?? 1) : 1);
+  /* a take's cost counts while what it is for plays (the figures name its role: the planner, on ACE-Step) */
+  const t = fig?.take, when = t?.when ? roleKey(ix, t.when, e) : undefined, each = !t || (t.when && !(when && valueOf(ix, when, desk))) ? 0 : t.gb;
   const models = parts.reduce((a, x) => a + x.gb, 0), extra = t?.first ? n * each : Math.max(0, n - 1) * each, need = models + extra;
   const passes = fig?.over === 'passes' && need > card && each ? Math.ceil(extra / Math.max(each, card - models)) : 1;
   const refuses = fig?.over === 'refuse' && need > card;
-  return { card, models, need, each, passes, refuses, tight: !refuses && need > card, parts };
+  const fits = Math.max(1, Math.floor((card - models) / (each || 1)) + 1);
+  return { card, models, need, each, first: !!t?.first, fits, passes, refuses, tight: !refuses && need > card, parts };
 }
 
 /** A number of GB as the meter writes it ("13.3"); the card as the page names it ("31.8"). */
@@ -129,7 +131,7 @@ export function enginePanelModel(ix: Index, tier: Tier, engine: EngineId): Engin
   const me = ENGINES.find(x => x.id === engine)!;
   return {
     cards: ENGINES.map(e => {
-      const most = has(ix, TAKES, e.id) ? resolve(ix.params.get(TAKES)!.p, e.id).range?.[1] ?? 1 : 1;
+      const tk = roleKey(ix, 'takes', e.id), most = tk ? resolve(ix.params.get(tk)!.p, e.id).range?.[1] ?? 1 : 1;
       return {
         id: e.id, name: e.name,
         tag: [{ id: `engine.${e.id}.tag1`, en: e.tagline[0] }, { id: `engine.${e.id}.tag2`, en: e.tagline[1] }],

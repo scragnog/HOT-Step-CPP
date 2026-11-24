@@ -4,8 +4,8 @@
   {
    "feature": "3c plan lands",
    "file": "src/app/parts/Build.tsx",
-   "find": "    void buildSession.plan(m.plan.sections).then(r => { v.act('planned', r); });",
-   "replace": "    void buildSession.plan(m.plan.sections).then(r => { void r; });"
+   "find": "    void service('build').plan(m.plan.sections).then(r => { v.act('planned', r); });",
+   "replace": "    void service('build').plan(m.plan.sections).then(r => { void r; });"
   },
   {
    "feature": "3c plan focus",
@@ -16,13 +16,13 @@
   {
    "feature": "3c takes asked",
    "file": "src/app/parts/Build.tsx",
-   "find": "          <button type=\"button\" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake=\"\" onClick={() => { keep('[data-btake]'); buildSession.takes(session, cur.make.ask.section, cur.make.ask.words, cur.make.ask.n, cur.make.ask.ownChords); }}>{say(cur.make.label)}</button>",
+   "find": "          <button type=\"button\" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake=\"\" onClick={() => { keep('[data-btake]'); service('build').takes(session, cur.make.ask.section, cur.make.ask.words, cur.make.ask.n, cur.make.ask.ownChords); }}>{say(cur.make.label)}</button>",
    "replace": "          <button type=\"button\" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake=\"\" onClick={() => { keep('[data-btake]');  }}>{say(cur.make.label)}</button>"
   },
   {
    "feature": "3c section looked",
    "file": "src/app/parts/Build.tsx",
-   "find": "  useEffect(() => { if (sess && curId && looked !== curId) buildSession.look(sess, curId); }, [sess, curId, looked]);",
+   "find": "  useEffect(() => { if (sess && curId && looked !== curId) service('build').look(sess, curId); }, [sess, curId, looked]);",
    "replace": "  useEffect(() => { if (sess && curId && looked !== curId) void looked; }, [sess, curId, looked]);"
   },
   {
@@ -40,8 +40,8 @@
   {
    "feature": "3c render asked",
    "file": "src/app/parts/Build.tsx",
-   "find": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });",
-   "replace": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); void r; });"
+   "find": "    void service('build').render(session, { title: say(m.render.title), style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: say(m.render!.title) }); });",
+   "replace": "    void service('build').render(session, { title: say(m.render.title), style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); void r; });"
   },
   {
    "feature": "3c library songs",
@@ -154,8 +154,8 @@
   {
    "feature": "3c span play",
    "file": "src/app/parts/Recording.tsx",
-   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>",
-   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>"
+   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>",
+   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>"
   },
   {
    "feature": "3c span words",
@@ -165,9 +165,9 @@
   },
   {
    "feature": "3c load told",
-   "file": "src/app/features/instruments-3c.ts",
-   "find": "  s.showToast({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });",
-   "replace": "  void ({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });"
+   "file": "src/app/render/bind.ts",
+   "find": "if (e && ix.states.get(k)?.s.tells?.includes('load')) useDesk",
+   "replace": "if (e && !ix.states.get(k)?.s.tells?.includes('load')) useDesk"
   },
   {
    "feature": "3c file length",
@@ -280,8 +280,8 @@
   {
    "feature": "3c sessions told",
    "file": "src/app/store/build.ts",
-   "find": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, build, recording } } });",
-   "replace": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, recording } } });"
+   "find": "  s.told({ sessions: { build, recording } });",
+   "replace": "  s.told({ sessions: { recording } });"
   }
  ]
 }

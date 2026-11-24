@@ -5,7 +5,7 @@ import type { Draft, EngineId, Json, Revision, SavedDesk, Tier, Value, Workflow 
 import { SAVED_VERSION } from '../definitions/types.ts';
 import { ENGINE_IDS, engineName } from '../definitions/engines.ts';
 import { RETIRED } from '../definitions/retired.ts';
-import { type Desk, type Index, enginesOf, has, resolve } from './core.ts';
+import { type Desk, type Index, enginesOf, has, onOf, resolve } from './core.ts';
 import { cleanStates, cleanValues } from './values.ts';
 import { type Msg, msg } from './messages.ts';
 import type { EngineBook } from './engine.ts';
@@ -89,7 +89,7 @@ export function readDesk(ix: Index, raw: unknown): { desk: Desk; book: EngineBoo
   const tier: Tier = (['quick', 'studio', 'lab'] as const).includes(x.tier) ? x.tier : 'quick';
   const ids = (list: unknown, kind: 'module' | 'board') => (Array.isArray(list) ? list : []).map(id => (typeof id === 'string' ? ix.formerIds.get(id) ?? id : null))
     .filter((id): id is string => !!id && ix.defs.some(d => d.id === id && (kind === 'module' ? d.kind === 'module' : d.kind !== 'module')));
-  const on = new Set([...ix.defs.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id), ...ids(x.modules, 'module'), ...ids(x.board, 'board')]);
+  const on = onOf(ix, ids(x.modules, 'module'), ids(x.board, 'board'));
   const c = cleanValues(ix, x.vals, x.auto, RETIRED.keys), st = cleanStates(ix, x.state, RETIRED.states);
   const book: EngineBook = { stash: {}, hold: {}, lastOn: {} };
   for (const [e, s] of Object.entries(x.stash && typeof x.stash === 'object' ? x.stash : {})) {
@@ -134,6 +134,7 @@ const STEPS: { [from: number]: (r: Record<string, unknown>) => Record<string, un
     if ('pedals' in r) { out.board = r.pedals; delete out.pedals; }
     const content = r.content as { vals?: unknown; prompt?: unknown } | undefined;
     const { v, a } = split({ ...(r.vals as object), ...(content?.vals as object) });
+    /* the concept's own keys at version 0, frozen: a key renamed since is read through its `was` */
     if (content && typeof content.prompt === 'string') v['prompt.text'] = content.prompt;
     if (content) { out.withContent = true; delete out.content; }
     if ('slots' in r) { out.state = { ...(out.state as object), slots: r.slots }; delete out.slots; }

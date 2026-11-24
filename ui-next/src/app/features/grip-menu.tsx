@@ -4,7 +4,7 @@
 // different (a change of width alone is not a move); one that cannot is offered disabled. One undo step each, spoken.
 
 import { defName } from '../../derive.ts';
-import { defOf } from '../model/index.ts';
+import { LEAD, defOf } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { deskSlots, lastMeasure } from '../desk/layout.ts';
@@ -14,7 +14,7 @@ type Place = { k: number; x: number; y: number; w: number; h: number };
 const DIRS = ['top', 'earlier', 'later', 'end'] as const;
 type Dir = (typeof DIRS)[number];
 const same = (a: Place, b: Place) => Math.abs(a.x - b.x) < 2 && Math.abs(a.y - b.y) < 2;
-const tilesNow = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving')).map(t => t.dataset.m!);
+const tilesNow = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== LEAD?.id && !t.classList.contains('moving')).map(t => t.dataset.m!);
 
 /** Where each move of tile `m` would take it: the place, or null where it cannot go. */
 function targets(m: string): Record<Dir, Place | null> & { list: string[] } {

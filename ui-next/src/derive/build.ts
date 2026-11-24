@@ -78,6 +78,7 @@ Object.assign(EN, {
   'build.said.relyric': 'The build follows the new lyrics',
   'build.said.rendered': 'Saved “{title}” to the Library{again, select, true { as a new song} other {}}{old, plural, =0 {} one {; # section is sung to the old words} other {; # sections are sung to the old words}}. The build stays here',
   'build.said.reset': 'Started a new build',
+  'build.untitled': 'Built song',
   'build.song.style': 'Built from {n, plural, one {# section} other {# sections}}: {names}',
   'build.song.title': 'Built song',
 });
@@ -213,7 +214,9 @@ export interface BuildModel {
   locked: { at: number; label: Slot; text: string; aria: Slot; tip: Slot; ktip?: Slot }[] | null;
   foot: { count: Slot; render: Slot; canRender: boolean; again: boolean; reset: boolean };
   /** What Render asks the service for: the song's title and style line, its length, and the kept takes in order. */
-  render: { title: string; style: Slot; dur: number; takes: string[] } | null;
+  /** What Render asks the build session for: the song's name and card line as the page names them (Song info's title,
+   *  else its word for a built song), its length and its takes in order. */
+  render: { title: Slot; style: Slot; dur: number; takes: string[] } | null;
 }
 
 /** The song's title as Generate names one (E-40): the title, else the prompt's first phrase, capitalised. */
@@ -274,7 +277,7 @@ export function buildModel(ix: Index, node: Node, desk: Desk): BuildModel {
       render: b.rec?.rendered ? msg('build.render.again') : all || !ks ? msg('build.render') : msg('build.render.part', { k: ks, n: b.secs.length }),
       canRender: ks > 0, again: !!b.rec?.rendered, reset: !!b.rec?.rendered,
     },
-    render: ks ? { title: title || 'Built song', style: msg('build.song.style', { n: ks, names: list(b.secs.filter(kept).map(s => s.label), 'dot') }), dur: ordered.reduce((a, t) => a + t.dur, 0), takes: ordered.map(t => t.id) } : null,
+    render: ks ? { title: title || msg('build.untitled'), style: msg('build.song.style', { n: ks, names: list(b.secs.filter(kept).map(s => s.label), 'dot') }), dur: ordered.reduce((a, t) => a + t.dur, 0), takes: ordered.map(t => t.id) } : null,
   };
 }
 

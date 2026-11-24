@@ -5,13 +5,13 @@
 // undoes itself (store/desk.ts recordStep): Undo puts the runs back in the queue as they were started (F-13).
 
 import { create } from 'zustand';
-import { cancelBack, cancelWords, lostSays, vramNeed, type RunSpec, type Slot } from '../../derive.ts';
+import { cancelBack, cancelWords, lostSays, vramNeed, type RunAsk, type RunSpec, type Slot } from '../../derive.ts';
 import { service } from '../register/services.ts';
-import type { GenerateService, Job, Song } from '../services/generate.ts';
-import '../services/generate.ts';
+import type { Job, Song } from '../services/generate.ts';
 import { useDesk } from './desk.ts';
 import { tellQueue } from './notes-logs.ts';
 import { ix } from '../model/index.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 /** A card in Latest: a song, a song still rendering (`pending`), or a run the server refused (`error`). */
 export interface Card extends Omit<Song, 'createdAt'> {
@@ -35,7 +35,7 @@ export interface GenStore {
   shown: string | null;
 }
 
-const gen = () => service<GenerateService>('generate');
+const gen = () => service('generate');
 const LIVE_KEY = 'hotstep.create.rendering';
 
 export const useGen = create<GenStore>()(() => ({ cards: [], runs: [], nextId: 100, playing: null, pos: 0, paused: false, qOpen: false, menuFor: null, lastF: null, shown: null }));
@@ -52,9 +52,10 @@ const tell = (e: Ev) => { for (const f of heard) f(e); };
 
 /* ---------------------------------------------------------------- starting and cancelling */
 
-/** Starts a run: its cards go to the front of Latest at once, and the run to the back of the queue. */
-export function startRun(spec: RunSpec): Run {
-  const s = get(), id = String(s.nextId), ids = spec.songs.map((_, i) => String(s.nextId + 1 + i)), run: Run = { id, jobId: null, spec, ids };
+/** Starts a run: the server says what its songs will be (draft), their cards go to the front of Latest at once, and the
+ *  run to the back of the queue. */
+export function startRun(ask: RunAsk): Run {
+  const spec = gen().draft(ask), s = get(), id = String(s.nextId), ids = spec.songs.map((_, i) => String(s.nextId + 1 + i)), run: Run = { id, jobId: null, spec, ids };
   const cards: Card[] = spec.songs.map((x, i) => ({ id: ids[i]!, title: x.title, ...(x.take ? { take: x.take, of: x.of! } : {}), style: x.style, text: x.text, dur: x.dur, hue: x.hue, engine: spec.engine, ...(x.seed !== undefined ? { seed: x.seed } : {}), pending: { run: id, f: 0, stage: null, ready: 0, stream: spec.stream } }));
   /* a card that resolved keeps its ring (the class that plays it) until the next run starts or ends */
   set({ nextId: s.nextId + 1 + ids.length, runs: [...s.runs, run], cards: [...cards, ...s.cards.map(c => (c.fresh ? { ...c, fresh: false } : c))] });
@@ -169,13 +170,12 @@ useDesk.subscribe((s, p) => { if (s.desk.engine !== p.desk.engine) tellLog(); })
 useGen.subscribe((s, p) => {
   if (s.runs === p.runs && s.cards === p.cards) return;
   const live = s.runs.filter(r => r.jobId).map(r => ({ job: r.jobId!, n: r.ids.filter(i => s.cards.some(c => c.id === i && c.pending)).length }));
-  try { if (live.length) localStorage.setItem(LIVE_KEY, JSON.stringify(live)); else localStorage.removeItem(LIVE_KEY); } catch { /* not kept */ }
+  writePref(LIVE_KEY, live.length ? live : null);
 });
 
 /** Loads the server's songs and starts listening to its queue; says what a reload lost. */
 export async function bootGenerate(): Promise<void> {
-  let was: { job: string; n: number }[] = [];
-  try { const a = JSON.parse(localStorage.getItem(LIVE_KEY) ?? '[]'); if (Array.isArray(a)) was = a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number'); } catch { was = []; }
+  const was = readPref<{ job: string; n: number }[]>(LIVE_KEY, [], a => (Array.isArray(a) ? a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number') : undefined));
   gen().watch(heardJobs);
   const [songs, live] = await Promise.all([gen().songs(), gen().live()]);
   const max = songs.reduce((a, x) => (/^\d+$/.test(x.id) ? Math.max(a, +x.id) : a), 99);

@@ -9,8 +9,8 @@
 // running across it (E-47). A recording chosen or replaced while it stands brings focus to it (E-23).
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
-import { definePart, Glyph, useSay, type PartView } from '../kit/index.ts';
-import { reduced } from './motion.ts';
+import { definePart, Icon, useSay, type PartView } from '../kit/index.ts';
+import { reduced } from '../kit/motion.ts';
 
 const rng = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 /** The file's waveform (25-module-cont.js fileBars): a random walk of loudness seeded by its name. */
@@ -67,7 +67,7 @@ export function RecordingSpan(v: PartView) {
       </div>
       <div className="cw-ruler" aria-hidden="true">{m.ticks.map((t, i) => <span key={i} className={t.end ? 'end' : undefined} style={{ left: `${t.at}%` }}>{t.text}</span>)}</div>
       <div className="cap"><span>{say(m.cap)}</span>
-        <button type="button" className="small-btn cw-play" data-contplay="" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>
+        <button type="button" className="small-btn cw-play" data-contplay="" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>
     </>
   );
 }

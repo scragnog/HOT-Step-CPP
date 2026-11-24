@@ -22,6 +22,7 @@ export const sampler = {
   params: [
     {
       key: 'samp.steps',
+      role: 'steps',
       type: 'number',
       label: 'Steps',
       range: [1, 300, 1],

@@ -11,6 +11,7 @@ import {
   attemptsAt, cancelBack, cancelWords, changedKeys, changesUnmarked, docTitle, emptyBook, goLine, goModel, indexOf, latestShown, meterModel, meterTarget, playerSeek, playerWords,
   readoutModel, readyOf, refusalOf, refusedWords, repaintDesk, runOf, songCard, songMenu, stageOf, takeProgress, type Desk, type Msg, type VramFigures,
 } from '../src/derive.ts';
+import { draftRun } from '../src/app/services/mock/songs.ts';
 import { say } from '../src/derive/messages.ts';
 
 const ix = indexOf(DEFINITIONS);
@@ -22,7 +23,7 @@ const ok = (what: string, cond: boolean, detail: unknown = '') => { n++; if (!co
 const FIG: VramFigures = {
   card: 31.8,
   engines: {
-    ace: { fixed: [{ name: 'Text encoder', gb: 1.2 }, { name: 'Working memory', gb: 2.0 }], adapters: { gb: 0.15, most: 3 }, take: { gb: 2.3, when: 'lm.on', first: true }, over: 'passes' },
+    ace: { fixed: [{ name: 'Text encoder', gb: 1.2 }, { name: 'Working memory', gb: 2.0 }], adapters: { gb: 0.15, most: 3 }, take: { gb: 2.3, when: 'planner', first: true }, over: 'passes' },
     'minimax-m3': { fixed: [{ name: 'Encoders and vocoder', gb: 0.8 }, { name: 'Working memory', gb: 3.0 }], adapters: { gb: 0.15, most: 1 }, take: { gb: 3.4, first: false }, over: 'refuse' },
     sa3: { fixed: [{ name: 'T5Gemma and SAME', gb: 1.6 }, { name: 'Working memory', gb: 1.2 }], take: { gb: 0, first: false }, over: 'tight' },
   },
@@ -46,13 +47,15 @@ const fixed = (v: number) => () => v;
   ok('each engine names its box (S-05)', sa?.kind === 'empty' && s(sa.says) === 'Stable Audio 3 needs a prompt first' && hm?.kind === 'empty' && s(hm.says) === 'HeartMuLa needs some tags first', [sa, hm]);
   const big = desk('minimax-m3', 'studio', ['takes'], { 'prompt.text': 'big', 'takes.n': 4 }), rb = refusalOf(ix, big);
   ok('a run certain not to fit is refused before it starts (F-21), with the takes that fit', rb?.kind === 'wontFit' && rb.fits === 2 && /^Won't fit: needs 37\.4 of 31\.8 GB\. Use 2 takes$/.test(s(rb.says)), rb && 'says' in rb ? s(rb.says) : rb);
-  const run = runOf(ix, desk('ace', 'studio', ['takes'], { 'prompt.text': 'warm folk song, acoustic', 'takes.n': 3 }), fixed(0.5));
+  /* what the page asks for (runOf), and what the simulated server makes of it (its draft) */
+  const ask = runOf(ix, desk('ace', 'studio', ['takes'], { 'prompt.text': 'warm folk song, acoustic', 'takes.n': 3 }), fixed(0.5)), run = draftRun(ask, fixed(0.5));
+  ok('the page asks for no title, length or colour it did not set: the server says them (RA-12)', ask.songs.every(x => x.title === undefined && x.dur === undefined && x.hue === undefined), ask.songs);
   ok('one song per take, titled from the first three words, each take numbered', run.songs.length === 3 && run.songs.every((x, i) => x.title === 'Warm folk song' && x.take === i + 1 && x.of === 3), run.songs);
   ok('a take\'s length where the model ends it: 150 s and up to 90 more', run.songs[0]!.dur === 195, run.songs[0]!.dur);
   ok('the run keeps the desk it started from', run.engine === 'ace' && run.desk.vals['takes.n'] === 3);
   const sc = runOf(ix, desk('minimax-m3', 'studio', [], { 'prompt.text': 'Global Metadata: city pop, bright\nVocal Details: female', 'song.artist': 'The Kettles' }), fixed(0));
   ok('a Structured Caption\'s card line is its Global Metadata, after the artist (E-35); Reuse keeps it whole (E-20)', sc.songs[0]!.style === 'The Kettles · city pop, bright' && sc.songs[0]!.text.startsWith('Global Metadata:'), sc.songs[0]);
-  ok('Stable Audio 3 renders 30 s without a length', runOf(ix, desk('sa3', 'studio', [], { 'prompt.text': 'pads' }), fixed(0)).songs[0]!.dur === 30);
+  ok('Stable Audio 3 renders 30 s without a length', draftRun(runOf(ix, desk('sa3', 'studio', [], { 'prompt.text': 'pads' }), fixed(0)), fixed(0)).songs[0]!.dur === 30);
   const w = runOf(ix, desk('ace', 'studio', [], { 'prompt.text': 'a {b|c} d', 'wild.auto': true }), fixed(0.9));
   ok('wildcards are expanded at Generate', w.songs[0]!.style === 'a c d', w.songs[0]!.style);
   const lit = runOf(ix, desk('ace', 'lab', ['post', 'norm', 'gain'], { 'prompt.text': 'x', 'pp.norm.on': true, 'pp.gain.on': false }), fixed(0));
@@ -65,7 +68,7 @@ const fixed = (v: number) => () => v;
   ok('takes start one after another', Math.abs(takeProgress(0.5, 0) - 0.6) < 1e-9 && Math.abs(takeProgress(0.5, 2) - 0.3) < 1e-9 && takeProgress(1, 1) === 1);
   ok('what can be played is a window behind the render (E-40)', readyOf(0.25) === 0 && readyOf(1) === 1);
   ok('the dice light up through planning', attemptsAt(0, 3) === 1 && attemptsAt(0.15, 3) === 3 && attemptsAt(0.5, 3) === 3);
-  const rf = refusedWords('minimax-m3', 2, 30.6, 30, 3.4, 27.2);
+  const rf = refusedWords('minimax-m3', 2, { need: 30.6, card: 30, fits: 1 });
   ok('a refusal the server makes: its words and the takes that fit', s(rf.why) === 'Needs about 30.6 GB for 2 takes at once; the card has 30 GB.' && s(rf.more) === 'MiniMax-Music3 checks before it loads anything.' && rf.retry === 1, [s(rf.why), rf.retry]);
 }
 

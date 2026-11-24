@@ -6,28 +6,23 @@
 // did. The cover art subject is song info while the Cover art unit is on.
 
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { definePart, Icon, ui, useSay, type ParamView, type PartView, type Slot } from '../kit/index.ts';
+import { definePart, Icon, ui, useSay, type ParamView, type PartView, type Role, type Slot } from '../kit/index.ts';
 import { Pick } from './Pick.tsx';
 import { subView } from './subView.ts';
 import { useGrow } from './textGrow.ts';
+import { reduced } from '../kit/motion.ts';
 
-const INFO = ['song.artist', 'song.title', 'song.subject'];
+/* the parameters it lays out beside its box are found by their role (definitions/roles.ts), never by key */
+const INFO: Role[] = ['songArtist', 'songTitle', 'songSubject'];
 /* the box grows to a third of the window (150px at least), then scrolls (19-text-boxes.js growCap) */
 const CAP = () => Math.max(150, Math.round(innerHeight * 0.3));
 /* the placeholder turns through the examples every 3.5 s while the box is empty and has no focus (S-35: not under
    reduced motion) */
 const TURN_MS = 3500;
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-const LOCK = (
-  <svg className="ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-  </svg>
-);
 
 export function PromptBox(v: PartView) {
   const say = useSay(), ta = useRef<HTMLTextAreaElement>(null), info = useRef<HTMLDivElement>(null), m = v.prompt, box = v.params[0];
-  const of = (k: string) => v.params.find(p => p.key === k);
+  const of = (r: Role) => v.params.find(p => p.role === r);
   const act = (name: string, arg?: string) => { v.act(name, arg); };
   const words = (name: string) => v.actions.find(a => a.name === name);
   const [ph, setPh] = useState(0), [ping, setPing] = useState(0);
@@ -56,7 +51,7 @@ export function PromptBox(v: PartView) {
     </label>
   ) : null;
   const toggleInfo = () => { const to = !open; setOpen(to); if (to) requestAnimationFrame(() => info.current?.querySelector('input')?.focus({ preventScroll: true })); };
-  const src = of('cap.src'), ds = of('cap.ds'), wild = of('wild.auto'), trig = of('ad.trigger');
+  const src = of('captionSource'), ds = of('captionDataset'), wild = of('wildcards'), trig = of('trigger');
   /* the caption source and its dataset are chips (G-D-8); choosing a dataset is the feature's, so a track it lacks goes
      back to Custom in the same step (E-22) */
   const chip = (p: ParamView, label: Slot, title?: Slot | null, set?: (x: string | number | boolean) => void) =>
@@ -73,7 +68,7 @@ export function PromptBox(v: PartView) {
         onChange={e => { if (locked) return; v.gesture.begin('text'); box.set(e.currentTarget.value); }}
         onKeyDown={lockedKey} onClick={() => { if (locked) ring(); }} />
       <div className="cap-lock" id="capLock" hidden={!locked}>
-        {m.locked ? <>{LOCK}<span>{say(m.locked.line)}</span><button type="button" className={`linkbtn${ping ? ' ping' : ''}`} data-capcustom="" onClick={() => act('editCaptionCopy')}>{say(words('editCaptionCopy')?.label)}</button></> : null}
+        {m.locked ? <><Icon name="lock" size={12} /><span>{say(m.locked.line)}</span><button type="button" className={`linkbtn${ping ? ' ping' : ''}`} data-capcustom="" onClick={() => act('editCaptionCopy')}>{say(words('editCaptionCopy')?.label)}</button></> : null}
       </div>
       <div className="dstags" id="dsTags" hidden={!m.tools.tags}>
         {m.tools.tags ? <><div className="dst-head" title={say(m.tagsTip)}><b>{say(words('datasetTag')?.label)}</b></div>
@@ -107,7 +102,7 @@ export function PromptBox(v: PartView) {
           <input data-bind={trig.key} placeholder={trig.placeholder ? say(trig.placeholder) : undefined} aria-label={say(ui('prompt.trigger.aria'))} title={trig.tip ? say(trig.tip) : undefined} maxLength={trig.maxLength} value={String(trig.value ?? '')}
             onFocus={() => v.gesture.begin(trig.key)} onBlur={() => v.gesture.end(trig.key)} onChange={e => { v.gesture.begin(trig.key); trig.set(e.currentTarget.value); }} /></label> : null}
       </div>
-      <div className="songinfo" id="songInfo" ref={info} hidden={!open}>{INFO.map(k => field(of(k)))}{field(of('pp.art.subject'), 'si-art')}</div>
+      <div className="songinfo" id="songInfo" ref={info} hidden={!open}>{INFO.map(r => field(of(r)))}{field(of('coverSubject'), 'si-art')}</div>
       {g.mark ? <i className={`smark${g.mark.drag ? ' drag' : ''}`} aria-hidden="true" style={g.mark.style} onPointerDown={g.mark.onPointerDown} /> : null}
     </div>
   );

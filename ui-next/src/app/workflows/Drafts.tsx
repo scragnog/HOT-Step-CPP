@@ -41,7 +41,7 @@ function DraftsList() {
     return {
       about: draftsAbout(ix, d.desk),
       same: sameDraft(w.drafts.find(x => x.engine === e), draftOf(ix, d.desk, '')),
-      rows: w.drafts.map(x => ({ id: x.id, engine: x.engine, other: x.engine !== e, title: draftTitle(x), sub: draftSub(x, e, now) })),
+      rows: w.drafts.map(x => ({ id: x.id, engine: x.engine, other: x.engine !== e, title: draftTitle(ix, x), sub: draftSub(ix, x, e, now) })),
     };
   });
   /* after a change the list keeps focus on the same row's control, or the next one, or the field (C-25) */

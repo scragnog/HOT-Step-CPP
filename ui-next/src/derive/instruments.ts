@@ -14,7 +14,7 @@ import type { Json, Node, Value } from '../definitions/types.ts';
 import type { PartProps } from '../definitions/parts.ts';
 import { CHECKS } from '../definitions/parts.ts';
 import { SCHEDULE_CURVES } from '../definitions/option-faces.ts';
-import { CARD_GB } from './controls.ts';
+import { vramNeed } from './vram.ts';
 import { type Desk, type Index, applies, formatValue, has, isAuto, mmss, nodeAt, resolve, stateOf, valueOf } from './core.ts';
 import { nodeWord } from './strings.ts';
 import { EN, type Msg, type Slot, msg } from './messages.ts';
@@ -89,15 +89,23 @@ export interface InstrumentModel {
   region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot; ctl: boolean; one: boolean };
   /** timbreBlend: the blend as its percent. */
   blend?: { pct: Slot };
+  /** recentRefs: the recent reference tracks, newest first, as the server told them (desk.lists `refs.recent`). */
+  refs?: string[];
 }
 
-/** What a bespoke part draws on the desk, or undefined for a part this file does not draw. */
+/* the one registry of instruments: what each bespoke part draws and the hands it takes, filled only by defineInstrument
+   (below: this file's own, package 3a's; derive/cartridges.ts, build.ts, recording.ts and score.ts theirs) */
+const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {};
+const ACTS: { [part: string]: Acts } = {};
+
+/** What a bespoke part draws on the desk, or undefined for a part no instrument draws. */
 export function instrumentModel(ix: Index, node: Node, desk: Desk, key: string): InstrumentModel | undefined {
   const f = DRAW[node.part];
   return f ? f(ix, node, desk, key) : undefined;
 }
 
-const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {
+/* package 3a's instruments: what each draws, and (HANDS, below) the hands each takes */
+const DRAWN: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {
   keyWheel: (ix, node, desk) => ({ wheel: wheelOf(ix, node, desk) }),
   capChips: (ix, node, desk) => ({ caps: { chips: capOffer(node, desk).map(text => ({ text, on: capHas(textOf(ix, node.param, desk), text) })) } }),
   splitFlap: (ix, node, desk) => ({ flap: flapOf(ix, node, desk) }),
@@ -106,6 +114,7 @@ const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) =
   samplerScope: (ix, node, desk) => ({ scope: scopeOf(ix, node, desk) }),
   latentCurve: (ix, node, desk) => ({ dist: distOf(num(ix, desk, node.reads?.[0], 0), num(ix, desk, node.reads?.[1], 1)) }),
   repaintRegion: (ix, node, desk) => { const r = regionOf(ix, node, desk); return r ? { region: r } : {}; },
+  recentRefs: (_ix, _node, desk) => ({ refs: (desk.lists?.['refs.recent'] ?? []).map(x => String(x.value)) }),
   timbreBlend: (ix, node, desk) => ({ blend: { pct: msg('blend.pct', { v: Math.round(num(ix, desk, node.param, 0) * 100) }) } }),
 };
 
@@ -235,40 +244,21 @@ function starsOf(ix: Index, node: Node, desk: Desk): NonNullable<InstrumentModel
 
 /* ---------------------------------------------------------------- takes */
 
-/** What a run costs the card (35-gobar.js vramNeed): the models, the fixed parts, and what each take adds. The engine
- *  panel's package gives the loaded models' real figures; until then the engines' default models stand for them. */
-const VRAM: { [e: string]: { models: number; fixed: number; take: number; each: 'all' | 'extra'; lm?: string; split?: boolean; refuses?: boolean } } = {
-  ace: { models: 5.3 + 4.5 + 0.34, fixed: 1.2 + 2.0, take: 2.3, each: 'all', lm: 'lm.on', split: true },
-  'minimax-m3': { models: 2.6 + 9.1 + 0.69, fixed: 0.8 + 3.0, take: 3.4, each: 'extra', refuses: true },
-  yue2: { models: 3.9 + 0.3, fixed: 1.5, take: 1.8, each: 'extra' },
-  sa3: { models: 2.9, fixed: 1.6 + 1.2, take: 0, each: 'extra' },
-  heartmula: { models: 3.7 + 0.53 + 1.6, fixed: 0.3 + 1.5, take: 0, each: 'extra' },
-};
-/** The memory a count of takes needs on the desk's engine. */
-export function takesCost(ix: Index, desk: Desk, n: number): { models: number; need: number; each: number; passes: number; refuses: boolean } {
-  const e = VRAM[desk.engine] ?? VRAM.ace!, slots = stateOf(ix, 'slots', desk);
-  /* each loaded adapter adds a little (34-engine-panel.js vramParts) */
-  const models = e.models + e.fixed + (Array.isArray(slots) ? 0.15 * Math.min(slots.length, 3) : 0);
-  const each = e.lm ? (read(ix, desk, e.lm) === false ? 0 : e.take) : e.take;
-  const extra = e.each === 'all' ? n * each : Math.max(0, n - 1) * each, need = models + extra;
-  const passes = e.split && need > CARD_GB && each ? Math.ceil(extra / Math.max(each, CARD_GB - models)) : 1;
-  return { models, need, each, passes, refuses: !!e.refuses && need > CARD_GB };
-}
 function takesOf(ix: Index, node: Node, desk: Desk, key: string): NonNullable<InstrumentModel['takes']> {
   const k = node.param!, f = resolve(ix.params.get(k)!.p, desk.engine), max = f.range?.[1] ?? 1, n = Math.min(num(ix, desk, k, 1), max);
   /* one row up to five; past that a grid as near square as the count allows (nine are three by three, as the
      concept's; ACE-Step's eight keep that footprint, three a row: the tile stands as tall as the concept's) */
   const cols = max <= 5 ? max : Math.ceil(Math.sqrt(max));
-  const v = takesCost(ix, desk, n), over = v.need > CARD_GB, e = VRAM[desk.engine] ?? VRAM.ace!;
-  const gb = (x: number) => x.toFixed(1);
-  const m = over ? (v.refuses ? msg('takes.wontFit', { n: Math.max(1, Math.floor((CARD_GB - v.models) / (v.each || 1)) + 1) }) : e.split ? msg('takes.passes', { n: v.passes }) : msg('takes.tight')) : null;
+  /* what the count costs the card is the meter's and the go bar's figure (vram.ts vramNeed), for this count */
+  const v = vramNeed(ix, desk, n), gb = (x: number) => x.toFixed(1), card = +v.card.toFixed(1);
+  const m = v.refuses ? msg('takes.wontFit', { n: v.fits }) : v.passes > 1 ? msg('takes.passes', { n: v.passes }) : v.tight ? msg('takes.tight') : null;
   return {
     max, n, cols, valuetext: msg('takes.valuetext', { n }),
     /* the count's words for one take and for more, as the node says them at each (a reel's preview says its count) */
     labels: [1, 2].map(x => { const at = { ...desk, vals: { ...desk.vals, [k]: x } }, n0 = nodeAt(ix, node, at); return (n0 && key ? nodeWord(ix, n0, at, key, 'label') : undefined) ?? ''; }) as [Slot, Slot],
     cost: {
-      bar: Math.min(1, v.need / CARD_GB), text: msg('takes.cost', { need: gb(v.need), card: CARD_GB }), tip: msg('takes.bar', { need: gb(v.need), card: CARD_GB }),
-      cls: v.refuses ? 'over' : over ? 'split' : '', msg: m, each: v.each ? msg(e.each === 'all' ? 'takes.each' : 'takes.eachExtra', { gb: v.each }) : null,
+      bar: Math.min(1, v.need / v.card), text: msg('takes.cost', { need: gb(v.need), card }), tip: msg('takes.bar', { need: gb(v.need), card }),
+      cls: v.refuses ? 'over' : v.need > v.card ? 'split' : '', msg: m, each: v.each ? msg(v.first ? 'takes.each' : 'takes.eachExtra', { gb: v.each }) : null,
     },
   };
 }
@@ -306,7 +296,9 @@ export function sigmasOf(ix: Index, node: Node, desk: Desk): number[] {
   const k = scopeKeys(node), ts = customTs(ix, desk, k.ts);
   if (ts) return ts;
   const n = clamp(num(ix, desk, k.steps, 12), 1, 300), shOk = !!k.shift && applies(ix, k.shift, desk);
-  const sh = !shOk ? (desk.engine === 'ace' ? 3 : 1) : isAuto(ix, k.shift!, desk) ? 3 : num(ix, desk, k.shift, 3);
+  /* a shift that does not apply, or is on auto, is drawn at its default on the engine (the definition's), else 1 */
+  const sh0 = k.shift && has(ix, k.shift, desk.engine) ? Number(resolve(ix.params.get(k.shift)!.p, desk.engine).default) : 1;
+  const sh = !shOk || isAuto(ix, k.shift!, desk) ? sh0 : num(ix, desk, k.shift, sh0);
   const sc = k.sched && applies(ix, k.sched, desk) ? labelOf(ix, k.sched, desk) ?? 'Linear' : 'Linear';
   const g = (r: ScopeRead, d: number) => num(ix, desk, k[r], d);
   let f: (t: number) => number;
@@ -437,7 +429,7 @@ function seedList(x: ActIn): { key: string; list: SavedSeed[] } | null {
   return key && x.v.state[key] ? { key, list: cleanSeeds(x.v.state[key]!.value) } : null;
 }
 
-const ACTS: { [part: string]: Acts } = {
+const HANDS: { [part: string]: Acts } = {
   keyWheel: {
     /* a key on the wheel, from the value in force */
     walk: x => {
@@ -524,3 +516,4 @@ export function defineInstrument(part: string, draw?: (ix: Index, node: Node, de
   if (draw) { if (DRAW[part]) throw new Error(`the instrument "${part}" is drawn twice`); DRAW[part] = draw; }
   if (acts) ACTS[part] = { ...ACTS[part], ...acts };
 }
+for (const part of new Set([...Object.keys(DRAWN), ...Object.keys(HANDS)])) defineInstrument(part, DRAWN[part], HANDS[part]);

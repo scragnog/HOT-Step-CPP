@@ -7,7 +7,7 @@
 import { cleanSeeds, cleanState } from '../../../derive.ts';
 import { ix } from '../../model/index.ts';
 import { useDesk } from '../../store/desk.ts';
-import { references } from '../../services/references.ts';
+import { references } from '../../services/mock/references.ts';
 import { asScene, onMirror, onScene, type Scene } from '../compat.ts';
 import type { Json } from '../../../definitions/types.ts';
 

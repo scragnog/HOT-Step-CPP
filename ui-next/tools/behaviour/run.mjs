@@ -41,6 +41,13 @@ const SLICE = ENTRIES ? ENTRIES.map(x => x.id) : null;
    passes the run fails, so whoever lands the package moves it back to a normal entry (README, "Waiting scenarios") */
 const WAITING = new Map((ENTRIES ?? []).filter(x => x.waiting).map(x => [x.id, x.waiting]));
 if (SLICE) { const known = new Set(all.map(s => s.id)), bad = SLICE.filter(id => !known.has(id)); if (bad.length) throw new Error('acceptance lists scenarios that do not exist: ' + bad.join(', ')); }
+/* every scenario of the concept's suite (the files numbered below 30) is in an acceptance list or excluded from one with
+   its reason: a scenario nobody runs is a hole, not a choice (RA-06) */
+if (SLICE && !only) {
+  const listed = new Set(fs.readdirSync(ACC).filter(f => f.endsWith('.json')).flatMap(f => { const j = JSON.parse(fs.readFileSync(path.join(ACC, f), 'utf8')); return [...j.scenarios, ...(j.excluded ?? [])].map(x => x.id); }));
+  const loose = all.filter(s => +s.id.split('-')[0] < 30 && !listed.has(s.id)).map(s => s.id);
+  if (loose.length) throw new Error(`${loose.length} scenarios of the concept's suite are in no acceptance list and excluded from none (put each in one, or exclude it with its reason): ${loose.join(', ')}`);
+}
 /* a pending scenario ({ pending: { finding, right } }) states a behaviour the page is known to get wrong: a normal run
    leaves it out, --pending runs only those */
 const pendingRun = flag('pending'), pendingAll = all.filter(s => s.pending);

@@ -180,30 +180,6 @@
  ],
  "excluded": [
   {
-   "id": "06-prompt-generate/generate",
-   "why": "Every check passes but one: the document's title while songs render is \"(3) HOT-Step\" (P6-2), where it wants \"(3) HOT-Step Tiers\". The same run, with the title, is 36-generate/generate-queues-one-card-per-take and cancel-one-and-all-with-undo."
-  },
-  {
-   "id": "06-prompt-generate/generate-engines",
-   "why": "MiniMax-Music3's run that will not fit is not started (F-21, P6-1), so there is no notice to retry or dismiss; YuE2's Preview opens the score modal, which a later package builds. Its other checks pass; the refusal's notice is in 36-generate/a-refusal-the-server-makes, the engines' words in an-empty-box-is-refused-with-an-example."
-  },
-  {
-   "id": "06-prompt-generate/songs-player",
-   "why": "Its player and menu checks pass; it also reads #prompt (package 4) and opens the Library from Latest, whose navigation to the stub pages no package of this branch has built. 36-generate/play-pause-seek-and-stop and the-song-menu hold its checks of this package."
-  },
-  {
-   "id": "21-chrome-round5/focus-after-cancel-retry-dismiss",
-   "why": "Pending (F-13); it gets its notice by pressing Generate on a run certain not to fit, which F-21 (built here) does not start. Its focus checks are in 36-generate/cancel-puts-focus-on-generate and a-refusal-the-server-makes, with a refusal the server makes."
-  },
-  {
-   "id": "22-engines-round5/takes-tile-follows-retry",
-   "why": "Pending (E-03), the Takes tile (package 3a); it too gets its notice from a Generate that F-21 does not start."
-  },
-  {
-   "id": "21-chrome-round5/ctrl-enter-generates-from-rows-and-cards",
-   "why": "Pending (F-07): built here (Ctrl+Enter is heard before any row's or card's Enter); it needs #prompt (package 4) and the Workflows rows (package 7)."
-  },
-  {
    "id": "05-modules/continue-and-repaint",
    "why": "Its song menu checks pass; the rest are Continue's and Repaint's instruments (package 3a), and Repaint's removal dropping its source."
   },
@@ -218,10 +194,6 @@
   {
    "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast",
    "why": "Pending (S-17): the toast's side is built (it claims Tab only while focus is where it was and no layer opened since); the drafts popover is package 7's."
-  },
-  {
-   "id": "08-persistence-cables/reload-keeps-the-desk",
-   "why": "The whole desk over a reload; Generate's label is one of its checks, the rest are other packages'."
   },
   {
    "id": "07-overlays-keys/toasts",

@@ -15,7 +15,7 @@ export const replan = {
   stored: 'settings',
   size: { w: 1 },
   params: [
-    { key: 'yue.replan', type: 'boolean', label: 'Re-plan runaway scores', default: true, wire: 'ext:yue2AutoReplan' },
+    { key: 'yue.replan', role: 'replan', type: 'boolean', label: 'Re-plan runaway scores', default: true, wire: 'ext:yue2AutoReplan' },
     {
       key: 'yue.replanflag',
       type: 'boolean',
@@ -25,6 +25,7 @@ export const replan = {
     },
     {
       key: 'yue.tries',
+      role: 'replanTries',
       type: 'number',
       label: 'Re-plan tries',
       range: [1, 10, 1],

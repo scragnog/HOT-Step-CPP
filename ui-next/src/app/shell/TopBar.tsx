@@ -19,10 +19,12 @@ import { Theme } from './Theme.tsx';
 import { NAV, useScreen } from './screens.ts';
 import { layerClosed, layerOpen } from '../features/layers.ts';
 import { useGen } from '../store/generate.ts';
+import { reduced } from '../kit/motion.ts';
+import { openNotes } from '../features/notes-open.ts';
+import { toggleLogs } from '../features/logs-dock.ts';
 
 /* the main navigation: each page's hook in the concept's markup (data-nav) and its words' id */
 const EM_N = 32;
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function TopBar() {
   const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false), live = useGen(s => s.runs.length > 0), screen = useScreen(s => s.name);
@@ -48,7 +50,7 @@ export function TopBar() {
           <Meter />
         </div>
         <Theme />
-        <button className="pill-btn" id="notesBtn">{say(ui('notes'))}</button>
+        <button className="pill-btn" id="notesBtn" onClick={() => openNotes()}>{say(ui('notes'))}</button>
       </div>
       {open ? <EnginePanel close={(refocus: boolean) => { setOpen(false); if (refocus) document.getElementById('engBtn')?.focus({ preventScroll: true }); }} /> : null}
     </div>
@@ -71,7 +73,7 @@ function Meter() {
   }, [m.use, m.est, busy]); // eslint-disable-line react-hooks/exhaustive-deps -- it starts from where the needle is
   const leds = meterLeds(cur, m.est, m.card, EM_N);
   return (
-    <button className={`eng-meter${m.over ? ' over' : ''}${m.tight ? ' tight' : ''}`} id="engMeter" type="button" aria-expanded="false" aria-describedby="emRead" aria-label={say(m.aria)} title={say(m.title)}>
+    <button className={`eng-meter${m.over ? ' over' : ''}${m.tight ? ' tight' : ''}`} id="engMeter" type="button" aria-expanded="false" aria-describedby="emRead" onClick={() => toggleLogs()} aria-label={say(m.aria)} title={say(m.title)}>
       <span className="em-cap" aria-hidden="true">{say(ui('vram'))}</span>
       <span className="em-bar" id="emBar" aria-hidden="true">
         {leds.map((c, i) => <i key={i} className={c || undefined} style={{ '--i': i } as CSSProperties} />)}

@@ -42,21 +42,7 @@
     { "id": "09-undo-storage/hover-tooltip", "why": "C-31: the Import button's tip is the page's own." }
   ],
   "excluded": [
-    { "id": "09-undo-storage/undo-leaves-later-work", "why": "Its typing into #prompt now passes (package 4); one check calls an undo entry's preview() (what Undo will put back and leave, said before it is pressed), which the store's entries do not have (the Undo button's title says what it puts back). The rest is in 33-workflows/opening-undone-leaves-later-work." },
-    { "id": "15-other-engines/revision-holds-the-guard", "why": "Its scene puts Repetition and the Sampler on the desk after opening Start fresh, then presses Save expecting a revision. The concept's modified flag is set only by a person's change, so there Save opens as a revision; here modified is what Revert would put back (deviation P7-4), Start fresh reads modified, and Save opens as a new workflow (the concept's own rule for a changed desk), so it saves a workflow and no revision. The revision does hold the guard (tools/test-workflows.ts); 33-workflows/revision-holds-the-guard is the same scenario with Revision chosen, and passes on both pages." },
-    { "id": "03-workflows/rename-delete-menu", "why": "Its last part sets samp.steps with setVal while Gamma's desk has no Sampler; the rebuild changes a value only through a control on the desk (the slice's setVal), so it cannot pass as written. The same scenario with the Sampler on the desk is 33-workflows/rename-delete-menu." },
-    { "id": "09-undo-storage/row-heights-hold", "why": "The same off-desk setVal (Mine has no Sampler), so the revision is never modified; 33-workflows/row-heights-hold puts the Sampler on Mine's desk." },
-    { "id": "03-workflows/legacy-storage", "why": "It seeds the concept's own earlier keys (hs3-layouts, hs3-presets, hs3-profiles), which only an earlier concept wrote; the rebuild reads the concept's saved shape (version 0) under the concept's list key, not its history." },
-    { "id": "21-chrome-round5/unreadable-desk-kept-aside", "why": "It seeds the concept's desk key; the desk is kept under the page's own key in the page's shape (deviation 5), and the desk store reads it before the test layer can translate a seed. 33-workflows/unreadable-desk-kept-aside seeds the page's key." },
-    { "id": "08-persistence-cables/old-shape-ignored", "why": "The same, for a desk of an older shape: 33-workflows/old-shape-kept-aside." },
-    { "id": "08-persistence-cables/restore-cleans", "why": "A concept desk record seeded under the concept's key, cleaned field by field: the desk's restore is the slice's, and its shape the page's own; its workflow check (an unknown workflow reads as Start fresh) is 33-workflows/an-unknown-open-workflow-reads-as-start-fresh." },
-    { "id": "08-persistence-cables/reload-keeps-the-desk", "why": "Mostly other packages' state (the repaint source, slots, seed, timbre, songs); the open workflow and the revisions shown are kept under hotstep.create.workflow." },
-    { "id": "09-undo-storage/undo-keeps-a-later-edit-of-the-same-thing", "why": "Write it for me and the description: the prompt package's (4)." },
     { "id": "09-undo-storage/undo-not-under-overlays", "why": "Undo under the popover and the notes: package 8's layers (it opens a workflow first only to have something to undo)." },
-    { "id": "07-overlays-keys/notes-logs-escape", "why": "The notes and the engine log (package 8); its save-row checks (F-27) are 33-workflows/escape-in-the-save-row." },
-    { "id": "21-chrome-round5/ctrl-enter-generates-from-rows-and-cards", "why": "Pending (F-07): Ctrl+Enter generates from a workflow row (the rows already take a plain Enter only); generation and the prompt are packages 6 and 4." },
-    { "id": "09-undo-storage/gobar-holds-1440-studio", "why": "The go bar's layout with a song playing: package 6." },
-    { "id": "09-undo-storage/gobar-holds-1280-studio", "why": "As above." },
-    { "id": "09-undo-storage/gobar-holds-1280-quick", "why": "As above." }
+    { "id": "07-overlays-keys/notes-logs-escape", "why": "The notes and the engine log (package 8); its save-row checks (F-27) are 33-workflows/escape-in-the-save-row." }
   ]
 }

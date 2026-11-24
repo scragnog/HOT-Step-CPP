@@ -20,6 +20,7 @@ import { ENGINES, ENGINE_IDS } from '../src/definitions/engines.ts';
 import { PARTS, CHECKS, DESK_FACTS, OPTION_SOURCES, ACTIONS, layOut, type PartSpec } from '../src/definitions/parts.ts';
 import { TRANSFORMS, type Transform } from '../src/definitions/transforms.ts';
 import { RETIRED } from '../src/definitions/retired.ts';
+import { ROLES, type Role, type RoleSpec } from '../src/definitions/roles.ts';
 import type {
   Action, Condition, Definition, EngineId, Json, Node, NodeOverride, Option, ParamDef, Step, Strip, Tier, Value, Wire, WireKey,
   WireMap,
@@ -959,6 +960,32 @@ for (const r of FACTORY_REVISIONS) {
   for (const k of Object.keys(r.auto || {})) { const hit = ix.params.get(k); if (!hit || !resolve(hit.p, r.engine).auto) err(at, `sets the auto switch of "${k}", which has none on ${r.engine}`); }
 }
 
+/* ================================================================ 8b. the roles (definitions/roles.ts)
+   What the page needs a particular parameter or state for: what plays each role is of the kind its role says, one per
+   engine unless the role is `many`; a needed role is played; a role nothing plays is a note saying what the page does
+   without it. The core and the view ask for roles, never keys (tools/test-view.ts refuses a key or an id in their
+   code), so a key renamed the documented way keeps its role, and one removed is named here. */
+
+for (const [r, spec] of Object.entries(ROLES) as [Role, RoleSpec][]) {
+  const ks = ix.roles.get(r) ?? [], where = `roles.ts › ${r}`;
+  if (!ks.length) { (spec.needed ? err : note)(where, `no definition plays it: give a ${spec.of === 'param' ? `${spec.type} parameter` : `${spec.type} state`} \`role: '${r}'\`${spec.needed ? '' : ', or the page does without it'} (${spec.doc})`); continue; }
+  for (const k of ks) {
+    const hit = spec.of === 'param' ? ix.params.get(k) : ix.states.get(k), at = `${fileOf(hit?.d ?? DEFINITIONS[0]!)} › ${k}`;
+    if (!hit) { err(at, `plays the role "${r}", which is a ${spec.of === 'param' ? 'parameter' : 'state'}'s: give it to one`); continue; }
+    const kind = 'p' in hit ? hit.p.type : hit.s.kind;
+    if (kind !== spec.type) err(at, `plays the role "${r}", which wants a ${spec.type}, and it is a ${kind}: give the role to a ${spec.type}, or change roles.ts`);
+  }
+  if (spec.many) continue;
+  if (spec.of === 'state' && ks.length > 1) err(`roles.ts › ${r}`, `is played by ${ks.join(' and ')}: the page takes the first; give the role to one`);
+  if (spec.of === 'param') for (const e of ENGINE_IDS) { const on = ks.filter(k => has(k, e)); if (on.length > 1) err(`roles.ts › ${r}`, `is played by ${on.join(' and ')} on ${e}: give the role to one, or tell them apart by engines`); }
+}
+/* a meter that reads a number is on its range: a scale of its own would state the range twice (RA-21) */
+for (const d of DEFINITIONS) { const walk = (n: Node) => { const o = (n.opts ?? {}) as { min?: unknown; max?: unknown }, r = n.reads?.[0];
+  if (n.part === 'meter' && r && ix.params.get(r)?.p.type === 'number' && (o.min !== undefined || o.max !== undefined)) err(`${fileOf(d)} › meter`, `reads "${r}" and gives its own min or max: the meter is on ${r}'s range already, so leave them out`);
+  (n.children ?? []).forEach(walk); }; ('face' in d ? d.face ?? [] : []).forEach(walk); }
+const rolesTable = ['| Role | Played by | What the page does with it |', '| --- | --- | --- |',
+  ...(Object.entries(ROLES) as [Role, RoleSpec][]).map(([r, s]) => `| \`${r}\`${s.needed ? ' (needed)' : ''}${s.many ? ' (several)' : ''} | ${(ix.roles.get(r) ?? []).map(k => `\`${k}\` (${(ix.params.get(k)?.d ?? ix.states.get(k)?.d)!.id})`).join(', ') || 'nothing'} | ${s.doc.replace(/\|/g, '\\|')} |`)].join('\n');
+
 /* ================================================================ 9. what is in the inventory and the format but unused: notes */
 
 const partsUnused = Object.keys(PARTS).filter(p => !partUse.has(p));
@@ -1003,7 +1030,7 @@ const namesTable = DEFINITIONS.filter(d => d.params.length).map(d => [`### ${d.n
     const real = one ? say(per[0]![1]) : per.map(([e, w]) => `${SHORT[e]}: ${say(w)}`).join('<br>');
     return `| \`${p.key}\` | ${p.type} | ${engs.length === ENGINES.length ? 'all' : engs.map(e => SHORT[e]).join(', ')} | ${cell(real)} |`; })].join('\n')).join('\n\n');
 const noneTable = ['| Key | Engines | What the real app does instead |', '| --- | --- | --- |', ...noneKeys.map(k => { const ps = pairs.filter(x => x.p.key === k && isNone(x.w)); return `| \`${k}\` | ${ps.map(x => SHORT[x.e]).join(', ')} | ${cell((ps[0]!.w as { none: string }).none)} |`; })].join('\n');
-const GENERATED: Record<string, string> = { counts, inventory, names: namesTable, none: noneTable };
+const GENERATED: Record<string, string> = { counts, inventory, names: namesTable, none: noneTable, roles: rolesTable };
 
 /* ================================================================ 11. what saved data may hold: every key, state and id shipped */
 

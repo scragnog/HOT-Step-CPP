@@ -8,6 +8,7 @@
 // that moves redraws the parts that show it and nothing else (docs/09, "Rendering"). Nothing here has a branch for
 // any one module.
 
+import type { Role } from '../definitions/roles.ts';
 import { CATEGORIES, type Definition, type EngineId, type ModuleDef, type Node, type PedalDef, type Tier, type UnitDef, type Value } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
@@ -25,7 +26,7 @@ import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
 import { kidsOf, type KidModel } from './containers.ts';
 import { readoutModel, type ReadoutModel } from './readouts.ts';
 import { instrumentModel, type InstrumentModel } from './instruments.ts';
-import { mmss, stateOf } from './core.ts';
+import { mmss, onOf, stateOf } from './core.ts';
 import type { Json } from '../definitions/types.ts';
 import { modelRows, type ModelRow } from './vram.ts';
 import { heldNote } from './engine.ts';
@@ -54,6 +55,9 @@ export interface CellWords {
 /** A parameter as a part draws it. */
 export interface ParamModel {
   key: string;
+  /** What the page needs it for, when its definition says (roles.ts): a part that lays out several parameters finds
+   *  each by its role, never by its key. */
+  role?: Role;
   value: Value;
   text: Slot;
   changed: boolean;
@@ -176,7 +180,7 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   const out: ParamModel = {
     key, value: v, text: textMsg(ix, key, desk), changed: changed(ix, key, desk), auto: isAuto(ix, key, desk), applies: applies(ix, key, desk),
     label: w.label, lcd: lcdMsg(ix, key, desk), pick: pickMsg(ix, key, desk),
-    ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}),
+    ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}), ...(p.role ? { role: p.role } : {}),
   };
   if (p.type === 'number' && f.range) {
     /* while automatic, a number stands at the value auto stands for (L-11) */
@@ -254,7 +258,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   const ins = instrumentModel(ix, node, desk, key);
   if (ins) m.instrument = ins;
   if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun, ...fileDetail(hit.s.kind, stateOf(ix, k, desk), desk), ...(opts.wave && hit.s.kind === 'file' ? fileWave(stateOf(ix, k, desk)) : {}) }; });
-  if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
+  /* a meter that reads a number is on that number's scale (its range on the engine): stated once, in the parameter */
+  if (node.part === 'meter') { const r = node.reads?.[0], range = r && ix.params.has(r) && has(ix, r, desk.engine) ? resolve(ix.params.get(r)!.p, desk.engine).range : undefined; m.meter = meterScale(range ? { min: range[0], max: range[1], ...opts } : opts, m.reads[0]?.value); }
   if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
   /* the lyric sheet and the prompt card (src/derive/fields.ts) */
@@ -548,7 +553,7 @@ export function boardOrder(ix: Index, ids: Iterable<string>): string[] {
   return [...of('pedal'), ...of('unit')];
 }
 /** The desk a first visit starts on. */
-export const emptyDesk = (ix: Index): Desk => ({ engine: ENGINES[0]!.id, tier: 'quick', vals: {}, auto: {}, state: {}, on: new Set(ix.defs.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id)) });
+export const emptyDesk = (ix: Index): Desk => ({ engine: ENGINES[0]!.id, tier: 'quick', vals: {}, auto: {}, state: {}, on: onOf(ix, [], []) });
 
 /* ---------------------------------------------------------------- the Modules panel */
 

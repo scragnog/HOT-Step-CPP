@@ -4,6 +4,7 @@
 // appearing in a tile) keeps every tile's width and column (Q-29); any other change chooses afresh. 11-render.js.
 
 import { deskPlace, deskSettle, deskSolve, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
+import { BOARD, LEAD } from '../model/index.ts';
 
 interface Measured { cols: number; tiles: HTMLElement[]; items: PackItem[] }
 let packMake = '', packFresh = 0;
@@ -34,8 +35,8 @@ function measure(g: HTMLElement): Measured {
     if ('grow' in t.dataset && w === 2 && cols === 4) o.push(4);
     if ('fold' in t.dataset && cols === 3 && w === 2) o.push(1);
     if ('span' in t.dataset && w < cols && !o.includes(cols)) o.push(cols);
-    if (t.dataset.m === 'lyrics' && (cols === 3 || cols === 4) && w === 2) o.push(cols);
-    if (t.dataset.m === 'post' && cols === 4 && w === 4 && tiles[0]?.dataset.m === 'lyrics') o.push(2);
+    if (t.dataset.m === LEAD?.id && (cols === 3 || cols === 4) && w === 2) o.push(cols);
+    if (t.dataset.m === BOARD.id && cols === 4 && w === 4 && tiles[0]?.dataset.m === LEAD?.id) o.push(2);
     return o;
   });
   const hs = tiles.map(t => [rows(t.offsetHeight)]);
@@ -52,8 +53,8 @@ function measure(g: HTMLElement): Measured {
     items: tiles.map((t, i) => ({
       key: packKey(t), opts: opts[i]!.map((w, j) => ({ w, h: hs[i]![j]! })),
       reach: t.dataset.stretch ? Math.round(+t.dataset.stretch / PACK_ROW) : PACK_STRETCH,
-      fill: t.classList.contains('desk-empty') ? 2 : t.dataset.m === 'lyrics' ? 1 : 0,
-      tile: !!(t.dataset.m || t.dataset.gm) && t.dataset.m !== 'lyrics', lead: i === 0 && t.dataset.m === 'lyrics',
+      fill: t.classList.contains('desk-empty') ? 2 : t.dataset.m === LEAD?.id ? 1 : 0,
+      tile: !!(t.dataset.m || t.dataset.gm) && t.dataset.m !== LEAD?.id, lead: i === 0 && t.dataset.m === LEAD?.id,
     })),
   };
 }

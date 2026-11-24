@@ -40,6 +40,7 @@ export const planner = {
   params: [
     {
       key: 'lm.on',
+      role: 'planner',
       type: 'boolean',
       label: 'Plan the song first',
       default: true,
@@ -69,6 +70,7 @@ export const planner = {
     },
     {
       key: 'lm.preview',
+      role: 'scorePreview',
       type: 'boolean',
       label: 'Preview the score first',
       default: false,

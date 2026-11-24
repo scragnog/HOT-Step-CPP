@@ -19,6 +19,7 @@ export const takes = {
   params: [
     {
       key: 'takes.n',
+      role: 'takes',
       type: 'number',
       label: 'Takes per run',
       tip: 'Each take is a separate song from the same settings, with its own seed',

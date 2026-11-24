@@ -3,22 +3,20 @@
 // the desk only through a part's setter or one step the core names.
 
 import { flushSync } from 'react-dom';
-import type { Node, Value } from '../../definitions/types.ts';
-import { bindPart, boxHolds, changesUnmarked, refusalOf, repaintDesk, reuseRefused, reuseWords, runOf, sentTo, type Change } from '../../derive.ts';
-import { BUILT_IN, ix } from '../model/index.ts';
+import type { Value } from '../../definitions/types.ts';
+import type { Role } from '../../definitions/roles.ts';
+import { boxHolds, changesUnmarked, refusalOf, repaintDesk, reuseRefused, reuseWords, roleKey, runOf, sentTo, type Msg } from '../../derive.ts';
+import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { cancelStep, dismissCard, startRun, useGen, type Card } from '../store/generate.ts';
 import { runNamed } from '../register/actions.ts';
 import { setTierFromView } from '../shell/tier.ts';
 import { ui } from '../i18n/index.ts';
-import { inView, reduced } from './motion.ts';
+import { inView } from './motion.ts';
+import { reduced } from '../kit/motion.ts';
 
-/** A value set as a control sets it: one step, named by the core; `words` renames the step (Reuse). */
-export function setValue(key: string, v: Value, label?: Change['words']['label']): void {
-  const hit = ix.params.get(key); if (!hit) return;
-  const commit = (c: Change) => useDesk.getState().commit(label ? { ...c, words: { ...c.words, label } } : c);
-  bindPart(ix, hit.d, { part: 'knob', param: key } as Node, () => useDesk.getState().desk, commit).params[key]?.set(v as never);
-}
+/* a value set for the user, found by its role (definitions/roles.ts): the main box, the takes count */
+const setValue = (r: Role, v: Value, label?: Msg) => { const k = roleKey(ix, r, useDesk.getState().desk.engine); return k ? useDesk.getState().setValue(k, v, label) : null; };
 const focus = (sel: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(sel)?.focus({ preventScroll: true }));
 /** A link or a control pulses where it is (the concept's ping). */
 export function ping(els: Element[]): void {
@@ -30,7 +28,7 @@ export function ping(els: Element[]): void {
 export function generate(o: { seed?: number } = {}): boolean {
   const s = useDesk.getState(), r = refusalOf(ix, s.desk, { scoreChosen: o.seed !== undefined });
   if (r?.kind === 'empty') {
-    s.showToast({ text: r.says, action: { label: ui('gen.example'), run: () => { setValue('prompt.text', r.example); focus('#prompt'); } } });
+    s.showToast({ text: r.says, action: { label: ui('gen.example'), run: () => { setValue('prompt', r.example); focus('#prompt'); } } });
     focus('#prompt'); return false;
   }
   if (r?.kind === 'score') { runNamed('scorePreview'); return false; }
@@ -60,7 +58,7 @@ export function retry(id: string): void {
   const c = useGen.getState().cards.find(x => x.id === id); if (!c?.error) return;
   dismissCard(id);
   /* a run that stopped goes back in the queue as it was started; a refused one runs again with the takes that fit */
-  if (c.error.again) flushSyncRun(() => startRun(c.error!.spec)); else { setValue('takes.n', c.error.retry); generate(); }
+  if (c.error.again) flushSyncRun(() => startRun(c.error!.spec)); else { setValue('takes', c.error.retry); generate(); }
   focus('#go');
 }
 /** Dismiss a notice: focus goes to the next notice's first button, else to Generate (F-13). */
@@ -82,16 +80,15 @@ export function showChanges(): void {
   ping(els);
 }
 /** "Use N takes": Takes set to what fits, said. */
-export function takesFit(n: number): void { setValue('takes.n', n); useDesk.getState().say(ui('gen.takesSet', { n })); }
+export function takesFit(n: number): void { setValue('takes', n); useDesk.getState().say(ui('gen.takesSet', { n })); }
 
 /* ---------------------------------------------------------------- the song menu */
 
 /** "Repaint a region": one step (with the switch to ACE-Step when it is elsewhere), one toast with Undo (E-14). */
 export function repaint(c: Card): void {
   const s = useDesk.getState(), r = repaintDesk(ix, s.desk, s.book, s.mods, c);
-  s.deskStep({ label: r.label, put: r.label }, () => useDesk.setState({ desk: { ...r.desk, on: new Set([...BUILT_IN, ...r.mods, ...s.board]) }, book: r.book, mods: r.mods }));
-  const entry = useDesk.getState().undo[useDesk.getState().undo.length - 1]!;
-  useDesk.getState().showToast({ text: r.says, action: { label: ui('undo'), run: () => useDesk.getState().runUndo(entry) } });
+  const entry = s.deskStep({ label: r.label, put: r.label }, () => s.applyDesk({ desk: r.desk, book: r.book, mods: r.mods }));
+  useDesk.getState().showToast({ text: r.says, ...(entry ? { action: { label: ui('undo'), run: () => useDesk.getState().runUndo(entry) } } : {}) });
 }
 /** "Reuse its description": the text it was made from goes back in the box, one step; if the box held something, the
  *  toast says it was replaced, with Undo (E-20). */
@@ -99,8 +96,8 @@ export function reuse(c: Card): void {
   const s = useDesk.getState(), had = boxHolds(ix, s.desk).trim(), w = reuseWords(s.desk.engine);
   /* a caption a dataset supplies is not written over: Edit a copy first (E-31) */
   const locked = reuseRefused(ix, s.desk); if (locked) { s.showToast({ text: locked }); return; }
-  setValue('prompt.text', c.text ?? c.style, w.label);
-  const entry = useDesk.getState().undo[useDesk.getState().undo.length - 1];
+  const entry = setValue('prompt', c.text ?? c.style, w.label);
+  /* the toast offers Undo of this step only: none when the box already said it (RA-09) */
   if (had && entry) useDesk.getState().showToast({ text: w.replaced, action: { label: ui('undo'), run: () => useDesk.getState().runUndo(entry) } });
 }
 /** An item that opens another page says where it goes. */

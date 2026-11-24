@@ -15,20 +15,21 @@ import { closeDrawer } from './shell/drawers.ts';
 import { usePanelStore, drawerMode } from './store/panels.ts';
 import { dispatchKey } from './register/keys.ts';
 import { Slot } from './register/Slot.tsx';
-import type { Engine } from './services/engine.ts';
+import { service } from './register/services.ts';
 
-export function App({ engine }: { engine: Engine }) {
+export function App() {
   const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus), drawer = usePanelStore(s => s.drawer);
   /* #app is React's root: its own classes say which panels stand open (31-side-panels.js paintPanels) */
   useLayoutEffect(() => {
     const app = document.getElementById('app')!;
     app.classList.toggle('no-left', !panels.L); app.classList.toggle('no-right', !panels.R || panels.over); app.classList.toggle('r-over', panels.over);
   });
-  /* what the engine tells the page: its lists, the selected models, the plugin host's count */
+  /* what the server tells the page: its lists and the plugin host's count (the models and their selection are the engine
+     panel's: features/engine-panel.tsx) */
   useEffect(() => {
-    void Promise.all([engine.lists(), engine.vst.chain(), engine.models.list(useDesk.getState().desk.engine)]).then(([lists, chain, models]) =>
-      useDesk.getState().told({ lists, selection: models.selection, vstPlugins: chain.plugins.length }));
-  }, [engine]);
+    const s = service('lists');
+    void Promise.all([s.lists(), s.vstChain()]).then(([lists, chain]) => useDesk.getState().told({ lists, vstPlugins: chain.plugins.length }));
+  }, []);
   /* focus that a step left nowhere goes where the step said: the first of its places that is on the page (A-18) */
   useEffect(() => {
     if (!focus) return;

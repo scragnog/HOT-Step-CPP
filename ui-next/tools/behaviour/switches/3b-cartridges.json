@@ -226,8 +226,8 @@
   {
    "feature": "adapter lists told",
    "file": "src/app/features/adapters.tsx",
-   "find": "    ...ENGINES.map(e => adapters.slots(e.id).then(s => useDesk.getState().told({ lists: adapterLists(e.id, s) }))),",
-   "replace": "    ...ENGINES.map(e => adapters.slots(e.id).then(() => undefined)),"
+   "find": "    ...ENGINES.map(e => service('adapters').slots(e.id).then(s => useDesk.getState().told({ lists: adapterLists(e.id, s) }))),",
+   "replace": "    ...ENGINES.map(e => service('adapters').slots(e.id).then(() => undefined)),"
   },
   {
    "feature": "narrow tile",

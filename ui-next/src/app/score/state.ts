@@ -7,7 +7,7 @@ import { flushSync } from 'react-dom';
 import { abcInfo, msg, scoreAsk, scoreModel, type Score, type ScoreModel, type Slot } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
-import { scorePlanner } from '../services/score.ts';
+import { service } from '../register/services.ts';
 import { layerClosed, layerOpen } from '../features/layers.ts';
 import { ovOut } from '../features/overlay-exit.ts';
 
@@ -26,7 +26,7 @@ export async function open(seed?: number): Promise<void> {
   const trigger = document.activeElement as HTMLElement | null;
   const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); if (h && !was) layerOpen(h, { trigger, modal: true, close }); };
   if (ask.abc && seed === undefined) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }
-  const score = await scorePlanner.plan(seed ?? Math.floor(Math.random() * 2147483647), ask);
+  const score = await service('score').plan(seed ?? Math.floor(Math.random() * 2147483647), ask);
   opened({ score, m: scoreModel(score) });
 }
 export function close(): void {

@@ -8,14 +8,16 @@
 // back (B-06: Render song is one undo step).
 
 import type { Json } from '../../definitions/types.ts';
+import { roleKey } from '../../derive.ts';
+import { ix } from '../model/index.ts';
 import { useDesk } from './desk.ts';
-import { buildSession } from '../services/build.ts';
-import { recordings } from '../services/recording.ts';
+import { service } from '../register/services.ts';
 import { useGen } from './generate.ts';
 
-/** The state whose record is the build, and the file whose length the recording span needs. */
-const BUILD = 'build', RECORDING = 'contFile';
+/** The state whose record is the build, and the file whose length the recording span needs: by their roles. */
+const BUILD = roleKey(ix, 'build') ?? '', RECORDING = roleKey(ix, 'recording') ?? '';
 
+const buildSession = service('build'), recordings = service('recording');
 let build: Json = null, recording: { [file: string]: number } = {};
 const told = () => {
   const b = buildSession.state();
@@ -25,7 +27,7 @@ const tell = () => {
   const s = useDesk.getState(), file = s.desk.state[RECORDING];
   if (typeof file === 'string' && file && recording[file] === undefined) recording = { ...recording, [file]: recordings.length(file) };
   if (s.desk.sessions?.build === build && s.desk.sessions?.recording === recording) return;
-  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, build, recording } } });
+  s.told({ sessions: { build, recording } });
 };
 told(); tell();
 buildSession.subscribe(() => { told(); tell(); });

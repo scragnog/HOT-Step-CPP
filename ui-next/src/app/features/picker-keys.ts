@@ -15,9 +15,9 @@ import { ring } from '../desk/ring.ts';
 import { layerClosed, layerOpen, toastJoins, topLayer } from './layers.ts';
 import { closePop } from './pop.ts';
 import { sayParked } from './adding.ts';
+import { reduced } from '../kit/motion.ts';
 
 const host = () => document.getElementById('pickerWrap');
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** The definition a picker id names (a pedal is pd:<id>, a side unit ex:<id>). */
 export const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 
@@ -54,13 +54,13 @@ export const pickerOpen = (): boolean => usePicker.getState().open && !usePicker
 export function activate(id: string): void {
   const s = useDesk.getState(), d = defOfItem(id); if (!d) return;
   const r = s.add(d.id);
-  if (r === 'lab') {
+  if (r.did === 'lab') {
     flushSync(() => usePicker.setState({ info: { kind: 'item', id } }));
     document.querySelector<HTMLElement>('#pkInfo [data-labadd]')?.focus();
     return;
   }
-  if (r === 'there') { closePicker(); ring(d.id, d.kind === 'module' ? 'flash' : 'here'); return; }
-  sayParked(d.id);
+  if (r.did === 'there') { closePicker(); ring(d.id, d.kind === 'module' ? 'flash' : 'here'); return; }
+  sayParked(d.id, r.step);
   /* the keys stay on it, and then the line says what arrived (its focus would say what it is) */
   flushSync(() => usePicker.setState({ rove: id }));
   document.querySelector<HTMLElement>(`#pickerWrap .fl-it[data-pkid="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });

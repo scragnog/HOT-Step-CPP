@@ -9,7 +9,7 @@
 // (the logs service, services/logs.ts) and what the queue holds (store/notes-logs.ts tellQueue). It is drawn whether or
 // not it is open, as the concept paints it, into the skeleton's #logs.
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { engineLogModel } from '../../derive.ts';
 import { ix } from '../model/index.ts';
@@ -19,8 +19,6 @@ import { useModel } from '../render/useModel.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { useNotesLogs } from '../store/notes-logs.ts';
-import type { LogsService } from '../services/logs.ts';
-import '../services/logs.ts';
 import { dockLogs, logsDock, toggleLogs, vramMeter } from './logs-dock.ts';
 
 export function Logs() {
@@ -41,12 +39,6 @@ export function Logs() {
   }, [open, say]);
   useLayoutEffect(() => { logsDock()?.classList.add('fade-own'); }, []);
   useEdgeFade(ref);
-  /* the meter opens and closes it */
-  useEffect(() => {
-    const press = (e: MouseEvent) => { if ((e.target as Element).closest?.('#engMeter')) toggleLogs(); };
-    document.addEventListener('click', press);
-    return () => document.removeEventListener('click', press);
-  }, []);
   const l = logsDock(); if (!l) return null;
   return createPortal(
     <>
@@ -57,4 +49,4 @@ export function Logs() {
 fill('overlays', Logs);
 
 /** What the server says about itself, told once when the page loads. */
-void service<LogsService>('logs').status().then(status => useNotesLogs.setState({ status }), () => { /* the log says it is waiting for the server */ });
+void service('logs').status().then(status => useNotesLogs.setState({ status }), () => { /* the log says it is waiting for the server */ });

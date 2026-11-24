@@ -6,6 +6,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { engineName } from '../../definitions/engines.ts';
 import { offerLab, sayParked } from '../features/adding.ts';
+import { reduced } from '../kit/motion.ts';
 import type { Definition } from '../../definitions/types.ts';
 import { cardGroups, cardModel, categoryWord, defName, groupOf, tileName, type CardModel } from '../../derive.ts';
 import { OFFERED } from '../model/index.ts';
@@ -64,14 +65,14 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
   const add = (d: Definition, card: HTMLElement) => {
     const s = useDesk.getState(), r = s.add(d.id), name = tileName(d, s.desk);
     /* a Lab module outside Lab offers Lab in the popover by its card (package 8) */
-    if (r === 'lab') { offerLab(d.id, card); return; }
-    if (r !== 'added') return;
+    if (r.did === 'lab') { offerLab(d.id, card); return; }
+    if (r.did !== 'added') return;
     /* adding from a drawer closes it (31-side-panels.js), and the card goes with it: focus goes to what arrived, brought
        into view (RC-10; deviation 7 keeps focus on the card only while the card is there) */
     if (usePanelStore.getState().drawer) { closeDrawer(false); useDesk.getState().setFocus(gripOf(d)); }
-    requestAnimationFrame(() => document.querySelector(gripOf(d))?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+    requestAnimationFrame(() => document.querySelector(gripOf(d))?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' }));
     useDesk.getState().say(ui('added', { name }));
-    sayParked(d.id);
+    sayParked(d.id, r.step);
   };
   const keys = (e: KeyboardEvent<HTMLDivElement>, d: Definition) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) add(d, e.currentTarget); return; }

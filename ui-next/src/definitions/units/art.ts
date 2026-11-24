@@ -17,6 +17,7 @@ export const art = {
     { key: 'pp.art.on', type: 'boolean', label: 'Cover art', default: false, wire: 'param:coverArtEnabled' },
     {
       key: 'pp.art.subject',
+      role: 'coverSubject',
       type: 'text',
       label: 'Cover art subject',
       placeholder: 'overrides what the cover shows',

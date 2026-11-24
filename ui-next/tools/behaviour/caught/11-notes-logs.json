@@ -1,6 +1,33 @@
 {
  "about": "The scenarios that caught each switch of switches/11-notes-logs.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
  "caught": {
-  "notes toast tab": ["36-notes-logs/a-toast-joins-the-notes-tab-cycle"]
+  "notes toast tab": [
+   "36-notes-logs/a-toast-joins-the-notes-tab-cycle"
+  ],
+  "notes button": [
+   "07-overlays-keys/notes-logs-escape",
+   "09-undo-storage/undo-not-under-overlays",
+   "21-chrome-round5/tier-keys-wait-under-a-modal",
+   "36-notes-logs/a-toast-joins-the-notes-tab-cycle",
+   "36-notes-logs/escape-closes-the-log-last",
+   "36-notes-logs/notes-leave-as-they-came",
+   "36-notes-logs/notes-open-as-a-modal-drawer-and-give-focus-back",
+   "36-notes-logs/notes-scroll-with-their-close-in-reach",
+   "36-notes-logs/the-log-on-a-phone",
+   "36-notes-logs/the-page-waits-under-the-notes"
+  ],
+  "notes scrim closes": [
+   "07-overlays-keys/notes-logs-escape",
+   "36-notes-logs/notes-open-as-a-modal-drawer-and-give-focus-back"
+  ],
+  "log meter opens": [
+   "07-overlays-keys/notes-logs-escape",
+   "36-notes-logs/escape-closes-the-log-last",
+   "36-notes-logs/the-log-on-a-phone",
+   "36-notes-logs/the-meter-opens-the-engine-log-as-a-dock"
+  ],
+  "log head models": [
+   "36-notes-logs/the-log-says-what-the-engine-holds"
+  ]
  }
 }

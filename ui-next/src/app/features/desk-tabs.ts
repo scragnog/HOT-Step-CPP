@@ -16,11 +16,9 @@ function useTheirs(): void {
   const s = useDesk.getState(), to = { ...s.desk, engine: p.desk.engine, tier: p.desk.tier, vals: p.desk.vals, auto: p.desk.auto, state: p.desk.state, on: p.desk.on };
   /* the desk taken is the one storage holds: it is not written back as this tab's */
   deskRead(JSON.stringify(savedDeskOf(ix, to, p.book)));
-  const n = s.undo.length;
-  s.deskStep({ label: msg('desk.other.step'), put: putWords(ix, s.desk, to, s.mods.join() !== p.mods.join(), s.board.join() !== p.board.join()) },
-    () => useDesk.setState({ desk: to, book: p.book, mods: p.mods, board: p.board }));
-  /* the step just made, if the desk changed at all */
-  const u = useDesk.getState().undo, entry = u.length > n || (u.length === n && u.at(-1) !== s.undo.at(-1)) ? u.at(-1) : undefined;
+  /* the step this makes (null when the desk did not change): what the toast's Undo takes back (RA-09) */
+  const entry = s.deskStep({ label: msg('desk.other.step'), put: putWords(ix, s.desk, to, s.mods.join() !== p.mods.join(), s.board.join() !== p.board.join()) },
+    () => s.applyDesk({ desk: to, book: p.book, mods: p.mods, board: p.board }));
   useDesk.getState().showToast({ text: msg('desk.other.taken'), ...(entry ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(entry) } } : {}) });
 }
 

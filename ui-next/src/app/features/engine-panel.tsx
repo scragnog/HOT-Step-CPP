@@ -6,17 +6,14 @@
 
 import { ENGINES } from '../../definitions/engines.ts';
 import { enginePanelModel, listKey, selectionKey } from '../../derive.ts';
-import { defOf, ix } from '../model/index.ts';
+import { MODELS, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { useSay } from '../i18n/index.ts';
 import { fill } from '../register/slots.ts';
 import { service } from '../register/services.ts';
 import { Face } from '../render/Face.tsx';
 import { useModel } from '../render/useModel.ts';
-import type { ModelsService } from '../services/models.ts';
-import '../services/models.ts';
 
-const MODELS = defOf('models')!;
 
 export function EngineModels() {
   const say = useSay(), m = useModel(s => enginePanelModel(ix, s.desk.tier, s.desk.engine), 'engine-panel');
@@ -32,7 +29,7 @@ fill('engine.panel', EngineModels);
 /** Every engine's catalogue (its buckets as lists, its selection by `<engine>.<bucket>`) and the figures, told to the
  *  page as each arrives. A catalogue that cannot be read leaves that engine's model rows on "Engine default". */
 async function tell(): Promise<void> {
-  const models = service<ModelsService>('models');
+  const models = service('models');
   await Promise.all([
     models.vram().then(vram => useDesk.getState().told({ vram })),
     ...ENGINES.map(e => models.catalogue(e.id).then(c => useDesk.getState().told({

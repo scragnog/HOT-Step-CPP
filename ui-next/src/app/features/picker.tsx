@@ -21,9 +21,9 @@ import { itemId } from '../shell/panelState.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
 import { labAdd } from './adding.ts';
 import { activate, closePicker, defOfItem, setQuery } from './picker-keys.ts';
+import { reduced } from '../kit/motion.ts';
 
 const host = () => document.getElementById('pickerWrap');
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const coarse = () => matchMedia('(pointer: coarse)').matches;
 
 /* ---------------------------------------------------------------- the wall */

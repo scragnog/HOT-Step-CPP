@@ -7,27 +7,28 @@
 import { create } from 'zustand';
 import type { Definition, EngineId, Tier, Value } from '../../definitions/types.ts';
 import {
-  addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, leavesWith, newOn, readDesk, removeFrom, removedWords, savedDeskOf, stepWords, switchEngine,
-  msg, type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
+  addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, leavesWith, newOn, onOf as coreOnOf, paramSetter, readDesk, removeFrom, removedWords, savedDeskOf,
+  stepWords, switchEngine, msg, type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
 } from '../../derive.ts';
-import { BUILT_IN, defOf, ix } from '../model/index.ts';
+import { defOf, ix } from '../model/index.ts';
 import { undoables } from '../register/undoable.ts';
 import { keepAside, tellOnBoot } from './stored.ts';
 import { bootDesk, deskRead, writeDesk } from './desk-tabs.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 /** Where the desk is kept between visits. */
 export const DESK_KEY = 'hotstep.create.desk';
 /** The engines this browser has been on (the concept's hs3-engseen): the first switch to another says what it brings. */
 const SEEN_KEY = 'hotstep.create.engines';
-const seenEngines = (): string[] => { try { const a = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
-const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) try { localStorage.setItem(SEEN_KEY, JSON.stringify([...a, e])); } catch { /* not kept */ } };
+const seenEngines = (): string[] => readPref<string[]>(SEEN_KEY, [], (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined));
+const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) writePref(SEEN_KEY, [...a, e]); };
 
 /* ---------------------------------------------------------------- undo: what a step changed, path by path */
 
 /** The desk as paths (a value, an auto switch, a state, the modules, the board, the engine, the tier, the engines' book), each
  *  with its JSON: a step is the paths it changed, and undoing it puts back only those that nothing has changed since. */
-type Flat = Map<string, string>;
-interface Parts { desk: Desk; book: EngineBook; mods: string[]; board: string[] }
+export type Flat = Map<string, string>;
+export interface Parts { desk: Desk; book: EngineBook; mods: string[]; board: string[] }
 function flatOf(p: Parts): Flat {
   const f: Flat = new Map();
   for (const [k, v] of Object.entries(p.desk.vals)) f.set('v:' + k, JSON.stringify(v));
@@ -50,7 +51,7 @@ function unflat(base: Parts, f: Flat): Parts {
   const desk: Desk = { ...base.desk, vals, auto, state, engine: JSON.parse(f.get('engine')!) as EngineId, tier: JSON.parse(f.get('tier')!) as Tier, on: onOf(mods, board) };
   return { desk, book: JSON.parse(f.get('book')!) as EngineBook, mods, board };
 }
-const onOf = (mods: string[], board: string[]) => new Set([...BUILT_IN, ...mods, ...board]);
+const onOf = (mods: readonly string[], board: readonly string[]) => coreOnOf(ix, mods, board);
 /** What takes focus for a module, pedal or side unit that comes back (its grip, foot switch or power): an Undo of its
  *  removal, a Redo of its adding. */
 export const gripOf = (d: Definition): string => (d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`);
@@ -93,13 +94,20 @@ export interface DeskStore extends Parts {
   flash: { id: string; ring: 'flash' | 'here'; n: number } | null;
 
   /** Applies a change a part made and records it as one step. `from` names the part: a gesture is one part's, and a
-   *  change from another part while it runs is a step of its own. */
-  commit(c: Change, from?: string): void;
+   *  change from another part while it runs is a step of its own. Returns the step it recorded (or the gesture's step
+   *  it joined): the one a toast's Undo takes back. Every way of making a step returns its own, so nothing guesses
+   *  which step is "the newest". */
+  commit(c: Change, from?: string): Entry;
+  /** A value set from outside any part (Reuse, "Use N takes", a foot switch on the board): cleaned and named as a
+   *  control's change is (the core's paramSetter), `label` renaming the step; the step, or null when nothing changed. */
+  setValue(key: string, v: Value, label?: Msg): Entry | null;
   beginGesture(tag: string): void;
   endGesture(tag?: string): void;
   setTier(t: Tier): void;
   switchEngine(to: EngineId): void;
-  add(id: string, before?: string | null): 'added' | 'there' | 'lab';
+  /** Adds a module, pedal or unit where the core puts it: `added` with its step, `there` (already on the desk: it rings)
+   *  or `lab` (a Lab module outside Lab, offered by the caller). */
+  add(id: string, before?: string | null): { did: 'added' | 'there' | 'lab'; step: Entry | null };
   remove(id: string, focusAfter?: string | string[] | null): void;
   move(id: string, before: string | null, back?: string): void;
   runUndo(entry?: Entry): void;
@@ -107,13 +115,21 @@ export interface DeskStore extends Parts {
   showToast(t: Toast | null): void;
   say(text: Slot): void;
   setFocus(sel: string | string[] | null): void;
-  /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
-  deskStep(words: StepWords, fn: () => void): void;
+  /** A change to a package's undoable state (register/undoable.ts) or to the desk's make-up, made by fn (with
+   *  applyDesk): one step with the core's words; the step, or null when fn changed nothing. */
+  deskStep(words: StepWords, fn: () => void): Entry | null;
+  /** Sets the desk's parts at once, inside a deskStep: what is on the desk (Desk.on) follows the modules and the board
+   *  given, by the core's one rule (onOf); `flash` rings a module that arrived. A feature never writes the store's
+   *  fields itself. */
+  applyDesk(p: Partial<Parts> & { flash?: string }): void;
+  /** A text field's own Ctrl+Z moved `e` (a step that wrote its text) to `after`, or took it back to where it started
+   *  (null: it goes); `desk` is the desk with the field's text (store/fields.ts). */
+  amendStep(e: Entry, after: Flat | null, desk: Desk): void;
   /** A step that undoes and redoes itself (Entry.run): a saved record's replacement, rename or deletion. */
   recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
   /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
    *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string; songs?: Desk['songs']; hold?: NonNullable<Desk['told']>['hold'] }): void;
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string; songs?: Desk['songs']; sessions?: Desk['sessions']; hold?: NonNullable<Desk['told']>['hold'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -147,18 +163,19 @@ export const useDesk = create<DeskStore>()((set, get) => {
   seeEngine(start.desk.engine);
   let saying = false;
   /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named'], forth?: string) => {
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named'], forth?: string): Entry => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
     /* the gesture in progress is this change's when the change comes from the part that began it */
     const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
     if (g && last && last.gesture === g) {
       const merged = stepWords(ix, last.first, next.desk, named ? { named } : undefined) ?? words;
-      const undo = [...s.undo.slice(0, -1), { ...last, after, words: merged, at: Date.now() }];
-      set({ ...next, undo, redo: [] });
-      return;
+      const joined: Entry = { ...last, after, words: merged, at: Date.now() };
+      set({ ...next, undo: [...s.undo.slice(0, -1), joined], redo: [] });
+      return joined;
     }
     const entry: Entry = { words, first: prev.desk, before, after, gesture: g, at: Date.now(), ...(back ? { back } : {}), ...(forth ? { forth } : {}) };
     set({ ...next, undo: [...s.undo, entry].slice(-UNDO_MAX), redo: [] });
+    return entry;
   };
   const parts = (): Parts => { const s = get(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
   /** Moves the desk across an entry, path by path: a path changed since stays as it is. */
@@ -180,8 +197,14 @@ export const useDesk = create<DeskStore>()((set, get) => {
 
     commit(c, from) {
       const prev = parts(), desk = applyChange(prev.desk, c);
-      record(prev, { ...prev, desk }, c.words, undefined, from, c.named);
+      const e = record(prev, { ...prev, desk }, c.words, undefined, from, c.named);
       if (c.said) get().showToast({ text: c.said });
+      return e;
+    },
+    setValue(key, v, label) {
+      let e: Entry | null = null;
+      paramSetter(ix, key, () => get().desk, c => { e = get().commit(label ? { ...c, words: { ...c.words, label } } : c); })?.set(v as never);
+      return e;
     },
     beginGesture(tag) { const g = get().gesture; if (!g || !g.startsWith(tag + '#')) set({ gesture: `${tag}#${++gestures}` }); },
     endGesture(tag) { const g = get().gesture; if (g && (!tag || g.startsWith(tag + '#'))) set({ gesture: null }); },
@@ -193,22 +216,20 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const r = switchEngine(ix, prev.desk, prev.book, to);
       /* a module the new engine does not have and that cannot wait parked (a source) leaves the desk with it */
       const mods = prev.mods.filter(id => r.desk.on.has(id)), board = prev.board.filter(id => r.desk.on.has(id));
-      record(prev, { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board }, engineStep(to));
-      const entry = get().undo[get().undo.length - 1]!, fresh = !seenEngines().includes(to);
+      const entry = record(prev, { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board }, engineStep(to)), fresh = !seenEngines().includes(to);
       seeEngine(to);
       get().showToast({ text: (fresh && newOn(ix, get().desk, to, r.toast)) || r.toast, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
     },
 
     add(id, before) {
-      const s = get(), d = defOf(id); if (!d) return 'there';
+      const s = get(), d = defOf(id); if (!d) return { did: 'there', step: null };
       /* where it goes is the core's (addTo), and what a pedal or side unit arrives as (engaged, unless it would have
          nothing to run: arrivalChange) */
       const r = addTo(ix, s.desk, s.mods, s.board, d.id, before, s.gone);
       if (r.did === 'there') set({ flash: { id: d.id, ring: d.kind === 'module' ? 'flash' : 'here', n: (s.flash?.n ?? 0) + 1 } });
-      if (r.did !== 'added') return r.did;
+      if (r.did !== 'added') return { did: r.did, step: null };
       const prev = parts(), desk = d.kind === 'module' ? prev.desk : applyChange(prev.desk, arrivalChange(ix, d, prev.desk));
-      record(prev, { desk: { ...desk, on: onOf(r.mods, r.board) }, book: prev.book, mods: r.mods, board: r.board }, deskStep('add', d, prev.desk, ix), undefined, undefined, undefined, gripOf(d));
-      return 'added';
+      return { did: 'added', step: record(prev, { desk: { ...desk, on: onOf(r.mods, r.board) }, book: prev.book, mods: r.mods, board: r.board }, deskStep('add', d, prev.desk, ix), undefined, undefined, undefined, gripOf(d)) };
     },
 
     remove(id, focusAfter?: string | string[] | null) {
@@ -217,8 +238,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const { mods, board, stood, pedals, last } = removeFrom(ix, prev.mods, prev.board, d.id);
       const gone = d.kind === 'module' ? { ...get().gone, [d.id]: stood } : get().gone;
       const words = deskStep('remove', d, prev.desk, ix);
-      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, gripOf(d));
-      const entry = get().undo[get().undo.length - 1]!;
+      const entry = record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, gripOf(d));
       set({ gone, focus: focusAfter ? [focusAfter].flat() : null });
       get().showToast({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
     },
@@ -256,8 +276,18 @@ export const useDesk = create<DeskStore>()((set, get) => {
     deskStep(words, fn) {
       const prev = parts(), before = flatOf(prev); fn();
       const s = get(), after = flatOf(parts());
-      if ([...after].every(([k, v]) => before.get(k) === v)) return;
-      set({ undo: [...s.undo, { words, first: prev.desk, before, after, gesture: null, at: Date.now() }].slice(-UNDO_MAX), redo: [] });
+      if ([...after].every(([k, v]) => before.get(k) === v)) return null;
+      const e: Entry = { words, first: prev.desk, before, after, gesture: null, at: Date.now() };
+      set({ undo: [...s.undo, e].slice(-UNDO_MAX), redo: [] });
+      return e;
+    },
+    applyDesk(p) {
+      const s = get(), mods = p.mods ?? s.mods, board = p.board ?? s.board;
+      set({ desk: { ...(p.desk ?? s.desk), on: onOf(mods, board) }, book: p.book ?? s.book, mods, board, ...(p.flash ? { flash: { id: p.flash, ring: 'flash' as const, n: (s.flash?.n ?? 0) + 1 } } : {}) });
+    },
+    amendStep(e, after, desk) {
+      const s = get();
+      set({ desk, undo: after ? s.undo.map(x => (x === e ? { ...e, after } : x)) : s.undo.filter(x => x !== e) });
     },
     recordStep(words, run, back) {
       const s = get(), f = flatOf(parts()), e: Entry = { words, first: s.desk, before: f, after: f, gesture: null, at: Date.now(), run, ...(back ? { back } : {}) };
@@ -273,7 +303,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.sessions ? { sessions: { ...d.sessions, ...o.sessions } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
       /* the words for another engine's adapters (package 3b: features/adapters.tsx, from the engines' book) */
       if (o.adaptersAway !== undefined && o.adaptersAway !== get().desk.told?.adaptersAway) set({ desk: { ...get().desk, told: { ...get().desk.told, adaptersAway: o.adaptersAway } } });
       /* what the engines' book holds for another engine, which a held value's control says (features/held.ts, RD-03) */

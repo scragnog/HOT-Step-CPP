@@ -6,6 +6,7 @@
 import { flushSync } from 'react-dom';
 import type { Tier } from '../../definitions/types.ts';
 import { useDesk } from '../store/desk.ts';
+import { reduced } from '../kit/motion.ts';
 
 const ANCHORS = '#bento > .tile[data-m], .lyr-card';
 const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
@@ -22,7 +23,6 @@ function deskAnchor(): () => void {
 }
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean } = {}): void {
   const s = useDesk.getState(), keep = deskAnchor();

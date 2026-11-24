@@ -10,8 +10,9 @@ import { ui, useSay } from '../i18n/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { onRun, setMenu, toggleFold, togglePlay, useGen, type Card } from '../store/generate.ts';
 import { cancelOne, dismiss, retry } from './actions.ts';
-import { GIcon } from './icons.tsx';
-import { easing, inView, mtime, places, reduced, slide } from './motion.ts';
+import { Icon } from '../kit/index.ts';
+import { inView, places, slide } from './motion.ts';
+import { easing, mtime, reduced } from '../kit/motion.ts';
 import { logoOf } from '../shell/engines.ts';
 import { SongMenu } from './SongMenu.tsx';
 
@@ -39,9 +40,9 @@ function Pending({ c, ahead, folded, hidden }: { c: Card; ahead: number; folded:
     <article className={`song pending${p.stream ? ' streams' : ''}${playing ? ' playing' : ''}${ahead ? ' waiting' : ''}${folded ? ' folded' : ''}`} data-id={c.id} hidden={hidden} style={{ '--f': p.f.toFixed(4), ...pp } as CSSProperties}>
       <div className="art" style={{ '--pbg': songArt(c.id, c.hue) } as CSSProperties}>
         <i className="bar" style={{ width: `${p.f * 100}%` }} />
-        {p.stream ? <><i className="bar ready" style={{ width: `${p.ready * 100}%` }} /><button className="play" data-play="" hidden={!p.ready} aria-label={say(ui(playing ? 'gen.stopPart' : 'gen.playPart', { name }))} title={say(ui('gen.streamTip'))} onClick={() => togglePlay(c.id)}><GIcon name={playing ? 'stop' : 'play'} /></button></> : null}
+        {p.stream ? <><i className="bar ready" style={{ width: `${p.ready * 100}%` }} /><button className="play" data-play="" hidden={!p.ready} aria-label={say(ui(playing ? 'gen.stopPart' : 'gen.playPart', { name }))} title={say(ui('gen.streamTip'))} onClick={() => togglePlay(c.id)}><Icon name={playing ? 'stop' : 'play'} /></button></> : null}
         {w.take ? <span className="take-no" title={say(w.takeTip)}>{say(w.take)}</span> : null}
-        <button className="pend-x" data-cancelsong={c.id} title={say(ui('gen.cancelSong'))} aria-label={say(ui('gen.cancelName', { name }))} onClick={() => cancelOne(c.id)}><GIcon name="x" size={13} /></button>
+        <button className="pend-x" data-cancelsong={c.id} title={say(ui('gen.cancelSong'))} aria-label={say(ui('gen.cancelName', { name }))} onClick={() => cancelOne(c.id)}><Icon name="x" size={13} /></button>
       </div>
       <div className="meta"><div><h3>{c.title}</h3><p className="stage">{say(stage)}</p></div></div>
     </article>
@@ -57,11 +58,11 @@ function Song({ c, hidden }: { c: Card; hidden: boolean }) {
         {c.unheard ? <i className="new-dot" title={say(ui('gen.newDot'))}><span className="sr-only">{say(ui('gen.new'))}</span></i> : null}
         {w.take ? <span className="take-no" title={say(w.takeTip)}>{say(w.take)}</span> : null}
         <span className="dur">{w.dur}</span>
-        <button className="play" data-play="" aria-label={say(ui(playing ? 'gen.stop' : 'gen.play', { name }))} onClick={() => togglePlay(c.id)}><GIcon name={playing ? 'stop' : 'play'} /></button>
+        <button className="play" data-play="" aria-label={say(ui(playing ? 'gen.stop' : 'gen.play', { name }))} onClick={() => togglePlay(c.id)}><Icon name={playing ? 'stop' : 'play'} /></button>
       </div>
       <div className="meta">
         <div><h3>{c.title}</h3><p title={say(w.styleTip)}>{c.style}</p></div>
-        <button className="more" data-songmenu="" aria-haspopup="menu" aria-expanded={menu} aria-label={say(ui('gen.actions', { name }))} onClick={() => setMenu(menu ? null : c.id)}><GIcon name="more" size={16} /></button>
+        <button className="more" data-songmenu="" aria-haspopup="menu" aria-expanded={menu} aria-label={say(ui('gen.actions', { name }))} onClick={() => setMenu(menu ? null : c.id)}><Icon name="more" size={16} /></button>
       </div>
     </article>
   );

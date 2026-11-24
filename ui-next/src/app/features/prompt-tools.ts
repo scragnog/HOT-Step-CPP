@@ -9,9 +9,9 @@ import {
   nodeOf, plainStep, tagStep, tempoStep, writeForMe, type Change, type Msg, type ToolStep,
 } from '../../derive.ts';
 import type { Json } from '../../definitions/types.ts';
-import { BUILT_IN, ix } from '../model/index.ts';
+import { ix } from '../model/index.ts';
 import { defineAction } from '../register/actions.ts';
-import { useDesk } from '../store/desk.ts';
+import { useDesk, type Entry } from '../store/desk.ts';
 import { ui } from '../i18n/index.ts';
 
 const PROMPT = nodeOf(ix, 'promptBox')!, LYRICS = nodeOf(ix, 'lyricSheet')!, KEY = PROMPT.node.param!;
@@ -21,28 +21,27 @@ const desk = () => store().desk;
 const FROM = 'prompt-tools';
 
 export const tell = (text: Msg) => store().showToast({ text });
-/** Says what the newest step did, with its Undo. */
-function withUndo(text: Msg): void {
-  const e = store().undo[store().undo.length - 1];
+/** Says what a step did, with Undo of that step (the one the tool took, never the newest in the history). */
+function withUndo(text: Msg, e: Entry | null): void {
   store().showToast(e ? { text, action: { label: ui('undo'), run: () => store().runUndo(e) } } : { text });
 }
 /** Applies a tool's step and says it; false when it changed nothing. */
 export function apply(r: ToolStep | null, from = FROM): boolean {
   if (!r) return false;
-  const n = store().undo.length;
-  flushSync(() => store().commit(r.change, from));
-  if (r.said) { if (r.undo && store().undo.length > n) withUndo(r.said); else tell(r.said); }
+  let e: Entry | null = null;
+  flushSync(() => { e = store().commit(r.change, from); });
+  if (r.said) { if (r.undo && e) withUndo(r.said, e); else tell(r.said); }
   return true;
 }
 /** A step that brings the module a value lives on, when it is not on the desk: one step, as deskStep records one. */
-function bringing(words: Change['words'], change: { vals: Change['vals']; auto: Change['auto']; state?: { [k: string]: Json } }, brings: string | null): void {
-  flushSync(() => store().deskStep(words, () => {
+function bringing(words: Change['words'], change: { vals: Change['vals']; auto: Change['auto']; state?: { [k: string]: Json } }, brings: string | null): Entry | null {
+  let e: Entry | null = null;
+  flushSync(() => { e = store().deskStep(words, () => {
     const s = store(), d = applyChange(s.desk, { vals: change.vals, auto: change.auto, state: change.state ?? {}, words });
-    if (!brings) { useDesk.setState({ desk: d }); return; }
-    const r = addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone);
-    if (r.did !== 'added') { useDesk.setState({ desk: d }); return; }
-    useDesk.setState({ desk: { ...d, on: new Set([...BUILT_IN, ...r.mods, ...r.board]) }, mods: r.mods, board: r.board, flash: { id: brings, ring: 'flash', n: (s.flash?.n ?? 0) + 1 } });
-  }));
+    const r = brings ? addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone) : null;
+    store().applyDesk(r?.did === 'added' ? { desk: d, mods: r.mods, board: r.board, flash: brings! } : { desk: d });
+  }); });
+  return e;
 }
 /* focus that a tool's own button took with it when it went (the box's Expand once the wildcards are gone) goes to the box */
 const keepFocus = (sel: string) => requestAnimationFrame(() => { const a = document.activeElement; if (!a || a === document.body || !(a as HTMLElement).offsetParent) document.querySelector<HTMLElement>(sel)?.focus({ preventScroll: true }); });
@@ -69,7 +68,7 @@ defineAction('expandWildcards', arg => {
 defineAction('moveToLyrics', () => { if (apply(moveToLyrics(ix, KEY, desk()))) requestAnimationFrame(() => field(LYRICS_FIELD)?.focus({ preventScroll: true })); });
 defineAction('tempoFromPrompt', () => {
   const r = tempoStep(ix, KEY, desk()); if (!r) return;
-  bringing(r.words, r, r.brings); withUndo(r.said);
+  withUndo(r.said, bringing(r.words, r, r.brings));
 });
 defineAction('plainCaption', () => { apply(plainStep(ix, KEY, desk())); keepFocus('#prompt'); });
 defineAction('editCaptionCopy', () => { apply(copyStep(ix, KEY, desk())); requestAnimationFrame(() => field('#prompt')?.focus({ preventScroll: true })); });
@@ -79,7 +78,7 @@ defineAction('importLatent', name => {
   if (!name) return;
   const r = latentStep(ix, KEY, desk(), name);
   if ('says' in r) { tell(r.says); return; }
-  bringing(r.words, r, r.brings); withUndo(r.said);
+  withUndo(r.said, bringing(r.words, r, r.brings));
 });
 defineAction('clearLatent', () => { apply(latentClear(ix, desk())); keepFocus('#latBtn [data-file="latent"]'); });
 defineAction('promptLocked', () => store().say(lockedMsg(ix, desk())));

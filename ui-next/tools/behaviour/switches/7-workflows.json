@@ -3,7 +3,7 @@
   "switches": [
     {"feature": "wf open a workflow", "file": "src/app/store/workflows.ts", "find": "    apply(o.tier ? { ...to, desk: { ...to.desk, tier: w.tier } } : to);", "replace": "    void to;"},
     {"feature": "wf open in its tier", "file": "src/app/store/workflows.ts", "find": "    apply(o.tier ? { ...to, desk: { ...to.desk, tier: w.tier } } : to);", "replace": "    apply(to);"},
-    {"feature": "wf load a revision", "file": "src/app/store/workflows.ts", "find": "  desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {\n    apply(to);", "replace": "  desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {\n    void apply;"},
+    {"feature": "wf load a revision", "file": "src/app/store/workflows.ts", "find": "  const e = desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {\n    apply(to);", "replace": "  const e = desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {\n    void apply;"},
     {"feature": "wf open marks undo", "file": "src/app/store/workflows.ts", "find": "defineUndoable('workflow', {", "replace": "void defineUndoable; ({"},
     {"feature": "wf save a revision", "file": "src/app/store/workflows.ts", "find": "useWf.setState({ saved: putRevision(dropRevision(s.saved, nr), nr, at),", "replace": "useWf.setState({ saved: s.saved,"},
     {"feature": "wf save a workflow", "file": "src/app/store/workflows.ts", "find": "useWf.setState({ saved: putWorkflow(old ? dropWorkflowOnly(s.saved, old.name) : s.saved, nw, at),", "replace": "useWf.setState({ saved: s.saved, ...{ x: dropWorkflowOnly },"},

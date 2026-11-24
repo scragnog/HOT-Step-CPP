@@ -17,6 +17,7 @@ export const lyrics = {
   params: [
     {
       key: 'lyrics.text',
+      role: 'lyrics',
       type: 'text',
       label: 'Lyrics',
       undoName: 'the lyrics',
@@ -26,9 +27,10 @@ export const lyrics = {
       wire: 'content:lyrics',
       per: [{ engines: ['heartmula'], placeholder: 'Leave this empty for an instrumental.' }],
     },
-    { key: 'lyrics.instr', type: 'boolean', label: 'Instrumental', default: false, wire: 'content:instrumental' },
+    { key: 'lyrics.instr', role: 'instrumental', type: 'boolean', label: 'Instrumental', default: false, wire: 'content:instrumental' },
     {
       key: 'lyrics.lang',
+      role: 'language',
       type: 'choice',
       label: 'Vocal language',
       tip: 'The language the vocals are sung in.',
@@ -50,6 +52,7 @@ export const lyrics = {
     },
     {
       key: 'lyrics.gender',
+      role: 'vocalGender',
       type: 'choice',
       label: 'Vocal gender',
       tip: 'Compose caption writes this into Vocal Details',
