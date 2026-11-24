@@ -1,7 +1,8 @@
 // The go bar's Drafts (35-drafts.js): a popover above the go bar with a name field (focus starts there, Enter saves:
 // F-18), Save draft (resting while the desk holds what the last draft holds), and the drafts, newest first, each with
 // its engine, when, and how it differs; Load (switching the engine for another engine's draft) and Delete, both with
-// Undo. What a draft holds and every word are the core's.
+// Undo. What a draft holds and every word are the core's. It opens in the page's one popover (features/pop.ts), as
+// the fixed panel above the go bar.
 
 import { useRef, useState, type CSSProperties } from 'react';
 import { engineName } from '../../definitions/engines.ts';
@@ -12,19 +13,22 @@ import { ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
 import { ENGINE_COLOUR, logoOf } from '../shell/engines.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
-import { Pop } from './pop.tsx';
-import { closePop } from './popPlace.ts';
-import { useWfView } from './state.ts';
+import { closePop, openPop } from '../features/pop.ts';
+import { usePop } from '../store/overlays.ts';
 import { useWfModel } from './useWfModel.ts';
 
+/** Opens the drafts from their button (or closes them, from it again). */
+function openDrafts(b: HTMLElement): boolean {
+  /* above the whole go bar (F-18) */
+  const bar = document.querySelector<HTMLElement>('.gobar');
+  return openPop(b, () => <DraftsList />, { label: ui('drafts'), fixed: true, focus: '#draftName', place: { prefer: 'up', ...(bar ? { over: bar } : {}) } });
+}
+
 export function DraftsButton() {
-  const say = useSay(), open = useWfView(s => s.pop?.kind === 'drafts');
+  const say = useSay(), open = usePop(s => s.anchor?.id === 'draftsBtn');
   return (
-    <>
-      <button className="tool drafts-btn" id="draftsBtn" type="button" aria-haspopup="dialog" aria-expanded={open} title={say(ui('drafts.title'))}
-        onClick={e => { if (open) closePop(); else useWfView.setState({ pop: { kind: 'drafts', anchor: e.currentTarget } }); }}>{say(ui('drafts'))}</button>
-      {open ? <Pop label={say(ui('drafts'))} fixedUp><DraftsList /></Pop> : null}
-    </>
+    <button className="tool drafts-btn" id="draftsBtn" type="button" aria-haspopup="dialog" aria-expanded={open} title={say(ui('drafts.title'))}
+      onClick={e => { openDrafts(e.currentTarget); }}>{say(ui('drafts'))}</button>
   );
 }
 
@@ -48,7 +52,7 @@ function DraftsList() {
       <h4>{say(ui('draft.h'))}</h4>
       <p className="pop-p" title={say(m.about.tip)}>{say(m.about.says)}</p>
       <div className="pop-row">
-        <input ref={field} id="draftName" maxLength={40} placeholder={say(ui('draft.name'))} aria-label={say(ui('draft.name.label'))} {...(m.same ? { 'aria-describedby': 'draftSame' } : {})}
+        <input ref={field} id="draftName" data-enter="" maxLength={40} placeholder={say(ui('draft.name'))} aria-label={say(ui('draft.name.label'))} {...(m.same ? { 'aria-describedby': 'draftSame' } : {})}
           onInput={e => setName(e.currentTarget.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } }} />
         <button type="button" className="small-btn primary" data-draftsave="" disabled={m.same && !name.trim()} onClick={save}>{say(ui('draft.save'))}</button>
       </div>

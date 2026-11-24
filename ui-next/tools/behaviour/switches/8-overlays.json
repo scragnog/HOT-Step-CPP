@@ -11,7 +11,7 @@
     {"feature": "picker categories", "file": "src/app/features/picker.tsx", "find": "onClick={() => usePicker.setState({ cat: c as PickerCat })}", "replace": "onClick={() => void c}"},
     {"feature": "picker below", "file": "src/app/features/picker.tsx", "find": "    const measure = () => {", "replace": "    const measure = () => { return;"},
     {"feature": "picker ring", "file": "src/app/features/picker.tsx", "find": "?.classList.add('target');", "replace": "?.classList.add('targeted');"},
-    {"feature": "popover", "file": "src/app/features/pop.ts", "find": "export function openPop(anchor: HTMLElement, body: () => ReactNode, o: { label?: Slot; place?: PlaceOpts } = {}): boolean {", "replace": "export function openPop(anchor: HTMLElement, body: () => ReactNode, o: { label?: Slot; place?: PlaceOpts } = {}): boolean { return false;"},
+    {"feature": "popover", "file": "src/app/features/pop.ts", "find": "export function openPop(anchor: HTMLElement, body: () => ReactNode, o: PopOpts = {}): boolean {", "replace": "export function openPop(anchor: HTMLElement, body: () => ReactNode, o: PopOpts = {}): boolean { return false;"},
     {"feature": "popover outside", "file": "src/app/features/pop.ts", "find": "  if (t.isConnected && !t.closest('#pop, #toast') && !t.closest(OPENERS)) closePop();", "replace": ""},
     {"feature": "lab offer", "file": "src/app/shell/Panels.tsx", "find": "    if (r === 'lab') { offerLab(d.id, card); return; }", "replace": "    if (r === 'lab') { offerLab(d.id); return; }"},
     {"feature": "grip menu", "file": "src/app/features/grip-menu.tsx", "find": "  openPop(b, () => <MoveMenu m={m} />);", "replace": "  void openPop;"},

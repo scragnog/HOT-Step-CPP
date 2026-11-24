@@ -1,17 +1,37 @@
-// A tier change from the view: the desk shows more or less of itself, and the controls a link named are rung on arrival
-// (the concept's setTier and ringCtls, 31-shell.js). The concept's choreographed tier transition (a View Transition in
-// which every part present in both tiers is one object) is a later work package; this changes the tier at once.
+// A tier change from the view: the desk shows more or less of itself, the place the user was reading stays where it was
+// on screen (Q-14, RC-11), and the controls a link named are rung on arrival (the concept's setTier, deskAnchor and
+// ringCtls, 31-shell.js, 11-render.js). The concept's choreographed tier transition (a View Transition in which every
+// part present in both tiers is one object) is the motion package's (9); this changes the tier at once.
 
+import { flushSync } from 'react-dom';
 import type { Tier } from '../../definitions/types.ts';
 import { useDesk } from '../store/desk.ts';
+
+const ANCHORS = '#bento > .tile[data-m], .lyr-card';
+const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
+/** The place the user is reading, taken before the change: the tile focus is in, else the one nearest under the bars;
+ *  the function puts it back where it was on screen (nothing at the top of the page: there is nothing to keep). */
+function deskAnchor(): () => void {
+  if (scrollY < 1) return () => {};
+  const line = Math.max(document.querySelector('.top')?.getBoundingClientRect().bottom ?? 0, document.querySelector('.deskbar')?.getBoundingClientRect().bottom ?? 0);
+  let el: Element | null = document.activeElement?.closest?.(ANCHORS) ?? null, best = Infinity;
+  if (!el) document.querySelectorAll(ANCHORS).forEach(t => { const r = t.getBoundingClientRect(); if (!r.height || r.bottom <= line + 8 || r.top >= innerHeight) return; const d = Math.abs(r.top - line); if (d < best) { best = d; el = t; } });
+  if (!el) return () => {};
+  const k = anchorKey(el), top = (el as Element).getBoundingClientRect().top;
+  return () => { const n = document.querySelector(k); if (!n) return; const d = n.getBoundingClientRect().top - top; if (Math.abs(d) > 0.5) scrollTo(scrollX, scrollY + d); };
+}
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean } = {}): void {
-  const s = useDesk.getState();
-  s.setTier(t);
+  const s = useDesk.getState(), keep = deskAnchor();
+  /* drawn and laid out now, so the anchor is put back before the page is painted; and again once the tiles' own sizes
+     have settled the layout (a re-pack on the next frame) */
+  flushSync(() => s.setTier(t));
+  keep();
   requestAnimationFrame(() => {
+    keep();
     if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
     if (!o.ring?.length) return;
     const els = o.ring.map(k => document.querySelector<HTMLElement>(k.startsWith('[') ? `#bento ${k}` : `#bento [data-ctl="${k}"], #bento [data-bind="${k}"]`)).filter((x): x is HTMLElement => !!x);

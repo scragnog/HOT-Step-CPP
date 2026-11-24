@@ -2,6 +2,23 @@
   "about": "The fix round's fixes around the desk, each switched off by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of acceptance/fix-chrome.json fail. A feature with two entries is one fix made in two places that each cover it alone today (RC-02: records written as they read back, and the merge comparing the kept form).",
   "switches": [
     {"feature": "fix rc02 a record merges as storage gives it back", "file": "src/app/store/workflows.ts", "find": "ours = keptSaved(ix, useWf.getState().saved);", "replace": "ours = useWf.getState().saved;"},
-    {"feature": "fix rc02 a record merges as storage gives it back", "file": "src/derive/values.ts", "find": "return !c || text === r.default || CHECKS", "replace": "return !c || CHECKS"}
+    {"feature": "fix rc02 a record merges as storage gives it back", "file": "src/derive/values.ts", "find": "return !c || text === r.default || CHECKS", "replace": "return !c || CHECKS"},
+    {"feature": "fix rc08 a tab reloads with its own desk", "file": "src/app/store/desk-tabs.ts", "find": "    return own(key);\n  }", "replace": "  }"},
+    {"feature": "fix rc08 another tab's desk is offered", "file": "src/app/features/desk-tabs.ts", "find": "  if (document.visibilityState !== 'visible' || !toOffer()) return;", "replace": "  return;"},
+    {"feature": "fix rc08 a tab that only looks writes nothing", "file": "src/app/store/desk.ts", "find": "  deskRead(JSON.stringify(savedDeskOf(ix, r.desk, r.book)));", "replace": ""},
+    {"feature": "fix rc08 undo puts the tier back", "file": "src/app/store/desk.ts", "find": " f.set('tier', JSON.stringify(p.desk.tier));", "replace": ""},
+    {"feature": "fix rc09 a field keeps its own ctrl+enter", "file": "src/app/features/generate.tsx", "find": " || (e.target as Element | null)?.closest?.('[data-enter]')) return;", "replace": ") return;"},
+    {"feature": "fix rc01 the navigation shows a page", "file": "src/app/features/screens.tsx", "find": "  showScreen(name);\n", "replace": "  void name;\n"},
+    {"feature": "fix rc04 the song menu beside its card", "file": "src/app/generate/SongMenu.tsx", "find": "if (k.up < h && k.down < h && side !== null) {", "replace": "if (side === -1) {"},
+    {"feature": "fix rc05 an outside click gives focus back", "file": "src/app/generate/SongMenu.tsx", "find": "close(false); if (m) layerClosed(m);", "replace": "close(false);"},
+    {"feature": "fix rc06 the engine panel is a layer", "file": "src/app/shell/TopBar.tsx", "find": "    layerOpen(pn, { trigger: document.getElementById('engBtn'), undo: true, close: () => closeNow.current(true) });\n", "replace": "    void pn;\n"},
+    {"feature": "fix rc07 redo focuses what came back", "file": "src/app/store/desk.ts", "find": "...(e.forth ? { focus: [e.forth] } : {})", "replace": ""},
+    {"feature": "fix rc10 an add from a drawer focuses it", "file": "src/app/shell/Panels.tsx", "find": " useDesk.getState().setFocus(gripOf(d)); }", "replace": " }"},
+    {"feature": "fix rc11 the tile being read stays put", "file": "src/app/shell/tier.ts", "find": "  keep();\n  requestAnimationFrame(() => {\n    keep();", "replace": "  requestAnimationFrame(() => {"},
+    {"feature": "fix rc13 an empty filter says so", "file": "src/app/shell/Panels.tsx", "find": "{groups.length ? groups.map(", "replace": "{groups.length || true ? groups.map("},
+    {"feature": "fix rc14 hidden modules in desk order", "file": "src/derive/view.ts", "find": ".sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));", "replace": ";"},
+    {"feature": "fix rc15 an earlier toast stays out", "file": "src/app/features/layers.ts", "find": " && toasts > l.toasts ?", "replace": " ?"},
+    {"feature": "fix rc16 a tool's step is a desk step", "file": "src/derive/fields.ts", "find": "return words ? { vals: v, auto, state: {}, words: asDesk(words) } : null;", "replace": "return words ? { vals: v, auto, state: {}, words } : null;"},
+    {"feature": "fix rc17 an unreadable workflow is said", "file": "src/derive/workflows.ts", "find": "notes.push(msg('wf.import.noWorkflow'));", "replace": "void 0;"}
   ]
 }

@@ -1,8 +1,24 @@
 {
   "about": "The fix round around the desk (review-r2 RC-01 to RC-18, review-r3 RA-04): each defect fixed has a scenario that fails without the fix, reached the way a user reaches it (scenarios/37-fix-chrome.mjs).",
   "scenarios": [
-    { "id": "37-fix-chrome/rc02-delete-and-rename-a-saved-revision-stick", "why": "RC-02: a revision saved here, deleted or renamed, stays so in the list, in storage and after a reload; Undo and Redo say nothing is taken." },
-    { "id": "37-fix-chrome/rc02-an-imported-revision-deletes", "why": "RC-02: a revision exported, deleted, imported, renamed and deleted stays deleted." },
-    { "id": "37-fix-chrome/rc02-two-tabs-delete-and-rename", "why": "RC-02 and C-09: deletes, renames and saves in two tabs, in both orders, reach the other tab and never bring back a record." }
+    {"id": "37-fix-chrome/rc02-delete-and-rename-a-saved-revision-stick", "why": "RC-02: a revision saved here, deleted or renamed, stays so in the list, in storage and after a reload; Undo and Redo say nothing is taken."},
+    {"id": "37-fix-chrome/rc02-an-imported-revision-deletes", "why": "RC-02: a revision exported, deleted, imported, renamed and deleted stays deleted."},
+    {"id": "37-fix-chrome/rc02-two-tabs-delete-and-rename", "why": "RC-02 and C-09: deletes, renames and saves in two tabs, in both orders, reach the other tab and never bring back a record."},
+    {"id": "37-fix-chrome/rc08-two-tabs-keep-their-own-desk", "why": "RC-08 and C-09: a tab keeps its own desk when another writes, offers the newer one (once), reloads with its own, Use that desk is one step Undo takes back (tier included); a tab that only looks writes nothing."},
+    {"id": "37-fix-chrome/ra04-drafts-is-the-one-popover-and-a-layer", "why": "RA-04 and RC-09: the Drafts list is the page's one popover and a layer: Ctrl+Z says close it first, Ctrl+Enter starts no run, Shift+Tab closes it, a tile's moves take its place, one Escape closes it."},
+    {"id": "37-fix-chrome/rc03-row-menu-keys", "why": "RC-03: the row menu's arrows move one item, Tab past it closes it, Escape closes it and gives focus back to its button."},
+    {"id": "37-fix-chrome/rc09-ctrl-enter-in-the-save-row-saves", "why": "RC-09: Ctrl+Enter in the save row's name field saves, as its Enter does, and starts no run."},
+    {"id": "37-fix-chrome/rc05-song-menu-outside-click-focus", "why": "RC-05: the song menu closed by a click outside gives focus back to its button."},
+    {"id": "37-fix-chrome/rc06-picker-closes-the-engine-panel", "why": "RC-06: the engine panel is a layer: F9 closes it as the picker opens, Escape lands on Engine; its own Escape still closes it."},
+    {"id": "37-fix-chrome/rc07-redo-of-an-add-focuses-the-tile", "why": "RC-07: Redo of an add puts focus on the tile's grip."},
+    {"id": "37-fix-chrome/rc10-added-from-a-drawer-comes-into-view", "why": "RC-10: at 360 on touch, a module added from the Modules drawer is in view with focus on its grip."},
+    {"id": "37-fix-chrome/rc11-the-tile-being-read-stays-put", "why": "RC-11 (Q-14): the focused tile keeps its place on screen through Alt+3 and Alt+1."},
+    {"id": "37-fix-chrome/rc13-an-empty-filter-says-so", "why": "RC-13: an empty Modules filter says so, with Clear the filter."},
+    {"id": "37-fix-chrome/rc14-hidden-modules-in-desk-order", "why": "RC-14: the hidden Lab modules are named in the desk's order."},
+    {"id": "37-fix-chrome/rc15-an-earlier-toast-stays-out-of-a-modal", "why": "RC-15: a toast showing before a modal opens is not in its Tab cycle."},
+    {"id": "37-fix-chrome/rc16-a-tool-undo-says-the-rest-stays", "why": "RC-16: a prompt tool's Undo tooltip ends with \"Anything else you did since stays as it is.\""},
+    {"id": "37-fix-chrome/rc17-an-unreadable-workflow-is-said", "why": "RC-17: an imported file whose workflow cannot be read says where the revision went; no markup runs."},
+    {"id": "37-fix-chrome/rc01-the-navigation-goes-somewhere", "why": "RC-01: the navigation shows each page's stand-in and comes back; aria-current and focus follow; Latest's Open the Library goes there."},
+    {"id": "37-fix-chrome/rc04-song-menu-beside-its-card", "why": "RC-04: with no room above or below and no page to move, the song menu stands beside its card, clear of the card and the go bar."}
   ]
 }

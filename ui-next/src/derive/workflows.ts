@@ -64,6 +64,7 @@ const WORDS: { [id: string]: string } = {
   'wf.import.limited': '{n, plural, one {# value was limited to its range} other {# values were limited to their range}}',
   'wf.import.unknown': '{n, plural, one {# module isn\'t} other {# modules aren\'t}} known here',
   'wf.import.cut': 'text too long for its field was shortened',
+  'wf.import.noWorkflow': 'the workflow the file names could not be read',
   'wf.import.beside': 'filed as "{name}" beside the factory one',
   'wf.import.notJson': 'That file isn\'t valid JSON',
   'wf.import.notRevision': 'That file isn\'t a HOT-Step revision',
@@ -132,6 +133,10 @@ const WORDS: { [id: string]: string } = {
   'store.what.wf': 'saved workflows',
   'store.what.drafts': 'drafts',
   'store.desk': 'Your last desk couldn\'t be read, so this is a fresh desk. A copy is kept in this browser; nothing was deleted',
+  'desk.other': 'Another tab has a newer desk. This one still shows its own.',
+  'desk.other.use': 'Use that desk',
+  'desk.other.step': 'Use the other tab\'s desk',
+  'desk.other.taken': 'Now showing the other tab\'s desk',
   'store.told': '{items}.',
   'store.aside': 'Download the copy',
   'store.aside.done': 'Downloaded the copies',
@@ -556,6 +561,7 @@ export function putWords(ix: Index, before: Desk, after: Desk, mods: boolean, bo
   if (mods) items.push(msg('path.mods'));
   if (board) items.push(msg('path.pedals'));
   if (before.engine !== after.engine) items.push(msg('path.engine'));
+  if (before.tier !== after.tier) items.push(msg('path.tier'));
   const keys = new Set([...Object.keys(before.vals), ...Object.keys(after.vals), ...Object.keys(before.auto), ...Object.keys(after.auto)]);
   const n = [...keys].filter(k => JSON.stringify(before.vals[k]) !== JSON.stringify(after.vals[k]) || before.auto[k] !== after.auto[k]).length;
   if (n === 1) { const k = [...keys].find(x => JSON.stringify(before.vals[x]) !== JSON.stringify(after.vals[x]) || before.auto[x] !== after.auto[x])!; if (ix.params.has(k)) items.push(stepName(ix, k, after)); }
@@ -624,6 +630,8 @@ export function importRevision(ix: Index, saved: Saved, file: unknown, openWf: s
   if (c.limited) notes.push(msg('wf.import.limited', { n: c.limited }));
   if (unknown) notes.push(msg('wf.import.unknown', { n: unknown }));
   if (cut) notes.push(msg('wf.import.cut'));
+  /* a file that names a workflow this page cannot read says where it went instead (RC-17) */
+  if ('workflow' in file && file.workflow != null && !newWf && !here) notes.push(msg('wf.import.noWorkflow'));
   if (FACTORY_REVISIONS.some(x => x.workflow === wf && x.engine === r.engine && sameName(x.name, r.name))) {
     const base = r.name.slice(0, NAME_MAX - 4);
     let i = 2; while (revNameClash(saved, wf, r.engine, `${base} (${i})`)) i++;

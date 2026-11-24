@@ -15,6 +15,8 @@ onKey({
   run: e => {
     e.preventDefault();
     const s = useDesk.getState(), redo = redoKey(e);
+    /* on another page they do nothing (14-undo.js) */
+    if (document.getElementById('app')?.hidden) return;
     if (usePanelStore.getState().drawer) { s.showToast({ text: ui(redo ? 'undo.closeFirst.redo' : 'undo.closeFirst') }); return; }
     if (!(redo ? s.redo : s.undo).length) { s.showToast({ text: ui(redo ? 'undo.nothing.redo' : 'undo.nothing') }); return; }
     if (redo) s.runRedo(); else s.runUndo();

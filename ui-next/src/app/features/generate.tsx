@@ -14,13 +14,14 @@ fill('centre.gobar', GoBarFill);
 fill('centre.latest', Latest);
 void bootGenerate();
 
-/** A layer open over Create (features/layers.ts), under which no page shortcut acts. */
-const layerOpen = () => !!topLayer() || !!document.querySelector('#engPanel:not([hidden])') || !!document.getElementById('app')?.hidden;
+/** A layer open over Create (features/layers.ts: the engine panel is one), under which no page shortcut acts. */
+const layerOpen = () => !!topLayer() || !!document.getElementById('app')?.hidden;
 
 /* Ctrl+Enter is Generate from every focus position on Create with no layer open, a workflow row, a revision row and a
-   Modules card included: it is heard before any row's or card's own Enter (F-07); a held key queues once */
+   Modules card included: it is heard before any row's or card's own Enter (F-07); a held key queues once. A field
+   whose Enter is its own (`data-enter`: a name being saved or renamed) keeps it, as the concept's stops it there (RC-09) */
 addEventListener('keydown', e => {
-  if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.defaultPrevented || layerOpen()) return;
+  if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.defaultPrevented || layerOpen() || (e.target as Element | null)?.closest?.('[data-enter]')) return;
   e.preventDefault(); e.stopPropagation();
   if (!e.repeat) generate();
 }, true);

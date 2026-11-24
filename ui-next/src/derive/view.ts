@@ -132,7 +132,8 @@ export function runAction(ix: Index, d: Definition, a: Action, desk: Desk, node?
 /** The note above the desk while the tier hides Lab modules that are on it (and used by its engine): their names. */
 export function hiddenLabModules(ix: Index, desk: Desk): Msg | null {
   if (desk.tier === 'lab') return null;
-  const hid = ix.defs.filter(d => d.kind === 'module' && !!d.labUnder && onDesk(d, desk) && d.engines.includes(desk.engine));
+  /* in the desk's order (the order of desk.on, the user's: RC-14), as the concept names them */
+  const order = [...desk.on], hid = ix.defs.filter(d => d.kind === 'module' && !!d.labUnder && onDesk(d, desk) && d.engines.includes(desk.engine)).sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   return hid.length ? msg('desk.hidden', { names: list(hid.map(d => defName(d, desk))) }) : null;
 }
 

@@ -12,7 +12,7 @@ import { useDesk } from '../store/desk.ts';
 import { usePicker, type PickerInfo } from '../store/overlays.ts';
 import { usePanelStore, drawerMode } from '../store/panels.ts';
 import { ring } from '../desk/ring.ts';
-import { focusables, layerClosed, layerOpen, topLayer } from './layers.ts';
+import { layerClosed, layerOpen, toastJoins, topLayer } from './layers.ts';
 import { closePop } from './pop.ts';
 import { sayParked } from './adding.ts';
 
@@ -96,10 +96,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { stop(); if (search.value) { flushSync(() => setQuery('')); search.focus(); } else closePicker(); return; }
   if (e.key === 'Tab') {
     stop();
-    /* a toast raised while the picker is open joins its cycle while it shows (F-18) */
-    const toast = document.getElementById('toast'), f = [search, ...[...document.querySelectorAll<HTMLElement>('#pickerWrap .fl-it[tabindex="0"]')].filter(x => x.offsetParent),
+    /* a toast raised while the picker is open joins its cycle while it shows (F-18), not one shown before (RC-15) */
+    const f = [search, ...[...document.querySelectorAll<HTMLElement>('#pickerWrap .fl-it[tabindex="0"]')].filter(x => x.offsetParent),
       ...document.querySelectorAll<HTMLElement>('#pkInfo button'), ...document.querySelectorAll<HTMLElement>('#pkBar button'), document.getElementById('pkClose')!,
-      ...(toast && !toast.hidden ? focusables(toast) : [])];
+      ...toastJoins(host())];
     const i = f.indexOf(document.activeElement as HTMLElement); f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length]!.focus();
     return;
   }
