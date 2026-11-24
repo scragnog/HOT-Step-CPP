@@ -1,0 +1,233 @@
+{
+ "about": "Package 3a's features (the instruments), each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+ "switches": [
+  {
+   "feature": "wheel housing",
+   "file": "src/app/parts/Tempo.tsx",
+   "find": "  if (!w || w.solo || !p) return <div className=\"tempo solo\">{v.children}</div>;",
+   "replace": "  return <div className=\"tempo solo\">{v.children}</div>;"
+  },
+  {
+   "feature": "wheel walk",
+   "file": "src/derive/instruments.ts",
+   "find": "    case 'ArrowRight': return on ? at(on, i + 1) : at(maj, 0);",
+   "replace": "    case 'ArrowRight': return null;"
+  },
+  {
+   "feature": "wheel spelling",
+   "file": "src/derive/instruments.ts",
+   "find": "  const segs = (['maj', 'min'] as const).flatMap(rg => ring(rg === 'maj' ? 'major' : 'minor').map((value, i) => ({ value, ring: rg, i, ...glyphOf(value), name: spellKey(value), sel: value === v })));",
+   "replace": "  const segs = (['maj', 'min'] as const).flatMap(rg => ring(rg === 'maj' ? 'major' : 'minor').map((value, i) => ({ value, ring: rg, i, ...glyphOf(value), name: value, sel: value === v })));"
+  },
+  {
+   "feature": "wheel run",
+   "file": "src/app/parts/Tempo.tsx",
+   "find": "  const press = (fn: () => void) => { v.gesture.begin('run'); fn(); clearTimeout(run.current); run.current = setTimeout(() => v.gesture.end('run'), p.run ?? 600); };",
+   "replace": "  const press = (fn: () => void) => { fn(); };"
+  },
+  {
+   "feature": "tap sets",
+   "file": "src/app/parts/Tempo.tsx",
+   "find": "    if (n > 1) v.act('tap', (taps.current[n - 1]! - taps.current[0]!) / (n - 1));",
+   "replace": "    if (n > 9) v.act('tap', (taps.current[n - 1]! - taps.current[0]!) / (n - 1));"
+  },
+  {
+   "feature": "tap armed",
+   "file": "src/app/parts/Tempo.tsx",
+   "find": "    setArmed(n === 1);",
+   "replace": "    setArmed(false);"
+  },
+  {
+   "feature": "chip groups",
+   "file": "src/derive/instruments.ts",
+   "find": "  const on = capHas(text, chip), rest = capParts(text).filter(x => !capItem(chip).test(x));",
+   "replace": "  const on = capHas(text, chip), rest = capParts(text).filter(x => x !== chip);"
+  },
+  {
+   "feature": "seed typed",
+   "file": "src/derive/instruments.ts",
+   "find": "  const raw = text.replace(/[\\s,_]/g, '');",
+   "replace": "  const raw = text;"
+  },
+  {
+   "feature": "flap cells",
+   "file": "src/app/parts/Seed.tsx",
+   "find": "    if (was === null) { setCells(el, text); return; }",
+   "replace": "    if (was === null) { return; }"
+  },
+  {
+   "feature": "lm link",
+   "file": "src/app/parts/Seed.tsx",
+   "find": "      {f.lm !== null ? <div className=\"seed-link\">{link}<span className=\"lbl\" data-lmseed=\"\">{say(f.lm)}</span></div> : null}",
+   "replace": "      {null}"
+  },
+  {
+   "feature": "seed save",
+   "file": "src/derive/instruments.ts",
+   "find": "      x.v.state[l.key]!.apply(old ? 'update' : 'save', [entry, ...l.list.filter(s => String(s.v) !== String(seed))] as unknown as Json, undefined, { seed: String(seed) });",
+   "replace": "      void entry;"
+  },
+  {
+   "feature": "seed star",
+   "file": "src/derive/instruments.ts",
+   "find": "      const s = l.list[at]!, next = l.list.map((y, i) => (i === at ? { ...y, star: !s.star } : y));",
+   "replace": "      const s = l.list[at]!, next = l.list.map(y => y);"
+  },
+  {
+   "feature": "seed search",
+   "file": "src/app/parts/Seed.tsx",
+   "find": "  const rows = q ? m.rows.filter(r => new RegExp(escape(q), 'i').test(r.find)) : m.rows;",
+   "replace": "  const rows = m.rows;"
+  },
+  {
+   "feature": "random saved",
+   "file": "src/derive/instruments.ts",
+   "find": "const { seed } = seedOf(x.ix, x.node, x.desk), pool = l.list.length > 1 ? l.list.filter(s => String(s.v) !== String(seed)) : l.list;",
+   "replace": "const pool = l.list;"
+  },
+  {
+   "feature": "reels",
+   "file": "src/app/parts/Takes.tsx",
+   "find": "            <button key={i} type=\"button\" className={`reel2${i < n ? ' on' : ''}`} data-take={i + 1} tabIndex={-1} aria-hidden=\"true\" style={{ '--i': i } as CSSProperties} onClick={() => set(i + 1)}><i /></button>",
+   "replace": "            <button key={i} type=\"button\" className={`reel2${i < n ? ' on' : ''}`} data-take={i + 1} tabIndex={-1} aria-hidden=\"true\" style={{ '--i': i } as CSSProperties}><i /></button>"
+  },
+  {
+   "feature": "reel preview",
+   "file": "src/app/parts/Takes.tsx",
+   "find": "  const shown = preview ?? n, pv = preview !== null && preview !== n;",
+   "replace": "  const shown = n, pv = false;"
+  },
+  {
+   "feature": "reels keys",
+   "file": "src/app/parts/Takes.tsx",
+   "find": "    const f = KEYS[e.key]; if (!f) return;",
+   "replace": "    const f = KEYS[e.key]; if (f) return;"
+  },
+  {
+   "feature": "takes cost",
+   "file": "src/derive/instruments.ts",
+   "find": "  const extra = e.each === 'all' ? n * each : Math.max(0, n - 1) * each, need = models + extra;",
+   "replace": "  const extra = 0, need = models + extra;"
+  },
+  {
+   "feature": "scope curve",
+   "file": "src/derive/instruments.ts",
+   "find": "  } else f = SCHEDULE_CURVES[sc] ?? (t => 1 - t);",
+   "replace": "  } else f = t => 1 - t;"
+  },
+  {
+   "feature": "scope dots",
+   "file": "src/derive/instruments.ts",
+   "find": "    dots: n <= 32 ? sg.map((s, i) => ({ x: +(X(i) / 3).toFixed(2), y: +(Y(s) / 1.1).toFixed(2) })) : [],",
+   "replace": "    dots: [],"
+  },
+  {
+   "feature": "scope band",
+   "file": "src/app/parts/Scope.tsx",
+   "find": "            {s.band ? <rect x={s.band.x} y=\"8\" width={s.band.w} height=\"92\" fill=\"#f5b54422\" /> : null}",
+   "replace": "            {null}"
+  },
+  {
+   "feature": "scope read",
+   "file": "src/app/parts/Scope.tsx",
+   "find": "          {s.read.map((r, i) => {",
+   "replace": "          {s.read.slice(9).map((r, i) => {"
+  },
+  {
+   "feature": "scope ts",
+   "file": "src/derive/instruments.ts",
+   "find": "  const k = scopeKeys(node), ts = customTs(ix, desk, k.ts);\n",
+   "replace": "  const k = scopeKeys(node), ts = null as number[] | null;\n"
+  },
+  {
+   "feature": "ivl handles",
+   "file": "src/app/parts/Scope.tsx",
+   "find": "    p.toFraction(((e.clientX - r.left) / r.width * 300 - 6) / 288);",
+   "replace": "    void r;"
+  },
+  {
+   "feature": "latent curve",
+   "file": "src/derive/instruments.ts",
+   "find": "  return { grid: Array.from({ length: 9 }, (_, i) => X(i - 4)), zero: X(0), before: curve(0, 1), after: curve(shift, rescale) };",
+   "replace": "  return { grid: Array.from({ length: 9 }, (_, i) => X(i - 4)), zero: X(0), before: curve(0, 1), after: curve(0, 1) };"
+  },
+  {
+   "feature": "region keys",
+   "file": "src/derive/instruments.ts",
+   "find": "    const na = clamp(a + dir * st, 0, 1 - w); return [na, na + w];",
+   "replace": "    return [a, b];"
+  },
+  {
+   "feature": "region drag",
+   "file": "src/app/parts/Repaint.tsx",
+   "find": "    v.act('move', { kind: d.kind, x0: d.x0, x: x / r.width, a0: d.a0, b0: d.b0 });",
+   "replace": "    void d;"
+  },
+  {
+   "feature": "span words",
+   "file": "src/derive/steps.ts",
+   "find": "  if (typeof sp === 'object' && !Array.isArray(sp) && typeof sp.start === 'number' && typeof sp.end === 'number') return",
+   "replace": "  if (typeof sp === 'object' && !Array.isArray(sp) && typeof sp.start === 'string' && typeof sp.end === 'number') return"
+  },
+  {
+   "feature": "named merge",
+   "file": "src/app/store/desk.ts",
+   "find": "      const merged = stepWords(ix, last.first, next.desk, named ? { named } : undefined) ?? words;",
+   "replace": "      const merged = stepWords(ix, last.first, next.desk) ?? words;"
+  },
+  {
+   "feature": "recent refs",
+   "file": "src/app/parts/Timbre.tsx",
+   "find": "  const use = (r: string) => file.apply('load', r, { file: r });",
+   "replace": "  const use = (r: string) => void r;"
+  },
+  {
+   "feature": "refs more",
+   "file": "src/app/parts/Timbre.tsx",
+   "find": "  const shown = refs.length > 3 ? refs.slice(0, 2) : refs;",
+   "replace": "  const shown = refs;"
+  },
+  {
+   "feature": "blend",
+   "file": "src/app/parts/Timbre.tsx",
+   "find": "        onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => onValueKey(e, p, v.gesture)} onKeyUp={() => onValueKeyUp(v.gesture)} onDoubleClick={() => p.reset()}>\n        <span className=\"venn-scale\"",
+   "replace": "        onDoubleClick={() => p.reset()}>\n        <span className=\"venn-scale\""
+  },
+  {
+   "feature": "blend off",
+   "file": "src/app/parts/Timbre.tsx",
+   "find": "  const off = v.dim !== null;",
+   "replace": "  const off = false;"
+  },
+  {
+   "feature": "xy corners",
+   "file": "src/app/parts/XyPad.tsx",
+   "find": "  return corners.some(Boolean) ? <div",
+   "replace": "  return corners.some(Boolean) && false ? <div"
+  },
+  {
+   "feature": "knob auto",
+   "file": "src/app/parts/Knob.tsx",
+   "find": "  const auto = p.canAuto ? <button",
+   "replace": "  const auto = false ? <button"
+  },
+  {
+   "feature": "knob symbol",
+   "file": "src/app/parts/Knob.tsx",
+   "find": "  const label = say(v.label), sym = SYM.test(label);",
+   "replace": "  const label = say(v.label), sym = false;"
+  },
+  {
+   "feature": "box put back",
+   "file": "src/app/parts/NumberBox.tsx",
+   "find": "commit(el.value); el.value = box?.text ?? ''; was.current",
+   "replace": "commit(el.value); was.current"
+  },
+  {
+   "feature": "key changed mark",
+   "file": "src/app/parts/readouts.tsx",
+   "find": "<span className={`cdot-lcd${r?.changed ? ' changed' : ''}`} data-ctl={r?.key}>",
+   "replace": "<span className=\"cdot-lcd\" data-ctl={r?.key}>"
+  }
+ ]
+}

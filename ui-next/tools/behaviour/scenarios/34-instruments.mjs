@@ -130,8 +130,9 @@ export default [
     const pts = () => document.querySelector(`.tile[data-m="sampler"] [data-scope] polyline`).getAttribute('points');
     await t.eq('a dot a step while there are 32 or fewer', () => document.querySelectorAll(`.tile[data-m="sampler"] [data-scope] .sdot`).length, 9);
     const p0 = await t.js(pts);
+    await t.do('the Cosine schedule', () => { S.vals['samp.sched'] = 'Cosine'; render(); });
+    await t.ok('the curve is the schedule its menu pictures (A-22)', p0 => document.querySelector('.tile[data-m="sampler"] [data-scope] polyline').getAttribute('points') !== p0, p0);
     await t.do('the Power schedule', () => { S.vals['samp.sched'] = 'Power'; render(); });
-    await t.ok('the curve is the schedule its menu pictures', p0 => document.querySelector('.tile[data-m="sampler"] [data-scope] polyline').getAttribute('points') !== p0, p0);
     const p1 = await t.js(pts);
     await t.do('a steeper exponent', () => { S.vals['sch.exp'] = 3; render(); });
     await t.ok('the curve follows the shape\'s slider', p1 => document.querySelector('.tile[data-m="sampler"] [data-scope] polyline').getAttribute('points') !== p1, p1);
@@ -175,8 +176,9 @@ export default [
     await t.ok('End takes it to the song\'s end, its length kept (L-36)', () => Math.abs(S.region[1] - 1) < 1e-9 && Math.abs(S.region[0] - 0.79) < 1e-6 || S.region);
     await t.click('[data-rpwave]', null, [0.2, 0.5]);
     await t.ok('a plain click outside leaves it (A-32)', () => Math.abs(S.region[0] - 0.79) < 1e-6 || S.region);
-    await t.mouseDrag('[data-rpwave]', [[-60, 0]], [0.9, 0.5]);
-    await t.ok('a drag inside carries it whole, one step', () => S.region[0] < 0.79 && Math.abs(S.region[1] - S.region[0] - 0.21) < 1e-6 && /^Repaint region /.test(__i.undo()) || [S.region, __i.undo()]);
+    const u1 = await t.js(() => UNDO.length);
+    await t.mouseDrag('[data-rpwave]', [[-60, 0], [-60, 0]], [0.9, 0.5]);
+    await t.ok('a drag inside carries it whole, one step', u => S.region[0] < 0.75 && Math.abs(S.region[1] - S.region[0] - 0.21) < 1e-6 && /^Repaint region /.test(__i.undo()) && UNDO.length === u + 1 || [S.region, __i.undo()], u1);
     await t.ok('the spoken range follows', () => { const m = s => `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`; return document.querySelector('[data-rpwave]').getAttribute('aria-valuetext') === `${m(S.region[0] * 171)} to ${m(S.region[1] * 171)}`; });
   } },
   { id: 'timbre-recent-files-and-blend', run: async t => {

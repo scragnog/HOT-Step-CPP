@@ -312,6 +312,19 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   control none of whose parameters applies is not drawn, as the concept's `ok()` leaves it out (package 1 flagged it);
   `derive/view.ts boardNodes` gives a pedal's or a unit's own nodes as the definition writes them (the renderer found no
   words for a node an engine's or a state's line had resolved: the Mastering pedal's Studio face printed nothing).
+- Package 3a: `derive/instruments.ts instrumentModel` (`PartModel.instrument`: what a bespoke instrument draws: the key
+  wheel's segments spelled as a musician does, the prompt chips and which are in, the split-flap's cells and the LM seed's
+  link, the saved seeds' rows and the save form's defaults, the reels and the VRAM a count costs, the scope's schedule,
+  band, cutoff, read-out and handles, the latent curves, the repaint region in the song's times, the blend's percent) and
+  `partAct` (`PartView.act(name, arg)`: what a hand on a bespoke part does, made through the part's own setters, so it is
+  cleaned, bound and named as every other change, or refused and said, with Undo in the toast where a step's words call
+  for it): `wheelWalk`, `capToggle`, `seedTyped`, `cleanSeeds`, `takesCost`, `sigmasOf`, `distOf`, `regionMove`.
+  `ParamModel.canAuto` and `run`, a number on auto standing at what auto stands for (`at`), a list of option words
+  (`corners.0`...) in `PartModel.words`, `ReadModel.changed`. `derive/steps.ts`: the seed's named step is named as every
+  change of the seed is (random or the number kept), a span is said in the song's times; a change carries the named step
+  it took (`Change.named`), so a gesture of several (a region dragged) is named by it. `derive/desk.ts nodeShown`: a
+  bespoke part that houses children stands, on an engine without what it edits, while one of them does (the key wheel
+  houses Tempo's LCD).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 
@@ -380,6 +393,17 @@ group, a strip, a plugin's controls, a deck: `testing/gallery.ts`, `gallery.mjs`
 run check`). `testing/compat/containers.ts` gives the scenarios the drop zones' files (`S.timbreFile`, `S.contFile`,
 `S.masterRef`), the adapters loaded (`S.slots`) and `isAuto`.
 
+**Package 3a (the instruments of Tempo, Seed, Takes, the Sampler, Repaint, Timbre reference, Latent & correction and
+Performance trades)** adds `acceptance/3a-instruments.json` (22 scenarios: 13 of `scenarios/34-instruments.mjs`, which hold
+on the concept page too, and 9 of the concept's suite; 9 more waiting on packages 4, 6 and 8), `switches/3a-instruments.json`
+(38 features), `slice-states/30-instruments.mjs` (24 states of the instruments on their own, compared with
+`instruments-accepted.json`) and `tools/test-instruments.ts` (in `npm run check`). Its parts are `parts/Tempo.tsx`
+(keyWheel, tapTempo, capChips), `Seed.tsx` (splitFlap, savedSeeds), `Takes.tsx`, `Scope.tsx` (samplerScope, latentCurve),
+`Repaint.tsx`, `Timbre.tsx` (recentRefs, timbreBlend), with `parts/motion.ts` (the page's motion tokens read for their
+animations); `services/references.ts` (the recent reference tracks, server-owned) and `features/references.ts` (a file a
+drop zone takes is remembered); `testing/compat/instruments.ts` (`S.seed`, `S.stars`, `S.refs`, `S.source`, `S.region`).
+The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` no longer wait.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
@@ -442,6 +466,23 @@ run check`). `testing/compat/containers.ts` gives the scenarios the drop zones' 
     concept's page has its demo songs (215).
 26. **A drop zone names its file field and its clear button by its state's noun** ("Choose the timbre reference"); the
     concept wrote each by hand ("Choose a reference track").
+27. **LM seed follows stands on the Seed tile while the planner is on the desk**: it is the planner's switch, and with the
+    planner off the desk it would change nothing that is sent (the value in force). The concept shows it at Lab always.
+28. **The saved seeds are the desk's state, and every change of them is a step** (save, update, star, unstar, delete),
+    as every change of the desk is; the concept's save and star are no steps. The test page starts with the concept's two
+    demo seeds (`testing/compat/instruments.ts`); the product starts with none.
+29. **The recent references are the server's reference tracks** (`services/references.ts`, as the existing frontend's
+    `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
+    `recentRefs` state stays declared and holds nothing.
+30. **The Takes tile's VRAM line counts the engines' default models** until the engine panel's package gives the loaded
+    models' figures; ACE-Step has eight reels (docs/03, Takes).
+31. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
+32. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a
+    region"), so the region needs no song list; the region is kept in seconds, as the real application keeps it.
+33. **At Studio Repaint's mode and crossfade stand in a row (`.knobs`) beside the wave**, where the concept draws a
+    `.rp-ctl`; at Lab they stand on the wave's caption line, as the concept's.
+34. **A seed's refusal, the saved seeds' update and delete, and the plain loads say what they did in a toast through
+    the core** (`partAct`'s words), the update and delete with Undo; the concept's Update toast offered Undo too.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
