@@ -6,12 +6,13 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { engineName } from '../../definitions/engines.ts';
 import { offerLab, sayParked } from '../features/adding.ts';
+import { reduced } from '../kit/motion.ts';
 import type { Definition } from '../../definitions/types.ts';
 import { cardGroups, cardModel, categoryWord, defName, groupOf, tileName, type CardModel } from '../../derive.ts';
 import { OFFERED } from '../model/index.ts';
 import { useModel } from '../render/useModel.ts';
 import { Slot } from '../register/Slot.tsx';
-import { useDesk } from '../store/desk.ts';
+import { gripOf, useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
 import { thumbOf } from '../thumbs/index.ts';
@@ -66,8 +67,10 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
     /* a Lab module outside Lab offers Lab in the popover by its card (package 8) */
     if (r.did === 'lab') { offerLab(d.id, card); return; }
     if (r.did !== 'added') return;
-    /* adding from a drawer closes it (31-side-panels.js) */
-    closeDrawer(false);
+    /* adding from a drawer closes it (31-side-panels.js), and the card goes with it: focus goes to what arrived, brought
+       into view (RC-10; deviation 7 keeps focus on the card only while the card is there) */
+    if (usePanelStore.getState().drawer) { closeDrawer(false); useDesk.getState().setFocus(gripOf(d)); }
+    requestAnimationFrame(() => document.querySelector(gripOf(d))?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' }));
     useDesk.getState().say(ui('added', { name }));
     sayParked(d.id, r.step);
   };
@@ -107,7 +110,9 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
       <div className="side-body" id="browser" ref={body}>
         <input id="brSearch" className="br-search" placeholder={say(ui('panel.filter'))} aria-label={say(ui('panel.filter'))} aria-controls="brList" value={q} onChange={e => setQ(e.currentTarget.value)}
           onKeyDown={e => { if (e.key === 'Escape') { if (q) { e.preventDefault(); e.stopPropagation(); setQ(''); } else e.currentTarget.blur(); } }} />
-        <div id="brList" ref={list}>{groups.map(([c, ds]) => [<div key={c + ':h'} className="br-group">{say(categoryWord(c))}</div>, <div key={c} className="bgrid">{ds.map(card)}</div>])}</div>
+        {/* a filter that matches nothing says so, with the way out (RC-13) */}
+        <div id="brList" ref={list}>{groups.length ? groups.map(([c, ds]) => [<div key={c + ':h'} className="br-group">{say(categoryWord(c))}</div>, <div key={c} className="bgrid">{ds.map(card)}</div>])
+          : <p className="br-none">{say(ui('panel.none', { q: q.trim() }))} <button type="button" className="linkbtn" data-brclear="" onClick={() => { setQ(''); document.getElementById('brSearch')?.focus(); }}>{say(ui('panel.none.clear'))}</button></p>}</div>
       </div>
     </aside>
   );

@@ -27,6 +27,10 @@ export const usePicker = create<PickerState>()(() => ({ open: false, closing: fa
 
 /** Where a popover stands against its anchor (placeFloat): above first, or above a whole element (`over`). */
 export interface PlaceOpts { prefer?: 'up'; over?: HTMLElement; alignEnd?: boolean }
+/** How a popover opens (pop.ts openPop): its accessible name, where it stands, whether it is the fixed panel that stays
+ *  in place as the page scrolls (the drafts above the go bar: `.fixedpop`), and what takes focus (a selector inside it;
+ *  else its pressed or primary button, else its first control). */
+export interface PopOpts { label?: Slot; place?: PlaceOpts; fixed?: boolean; focus?: string }
 export interface PopState {
   /** What opened it: it toggles from there, and focus goes back there. */
   anchor: HTMLElement | null;
@@ -35,7 +39,9 @@ export interface PopState {
   /** Its accessible name. */
   label: Slot | null;
   place: PlaceOpts;
+  fixed: boolean;
+  focus: string | null;
   /** Counts each opening, so the same body opened again is placed and focused again. */
   n: number;
 }
-export const usePop = create<PopState>()(() => ({ anchor: null, body: null, label: null, place: {}, n: 0 }));
+export const usePop = create<PopState>()(() => ({ anchor: null, body: null, label: null, place: {}, fixed: false, focus: null, n: 0 }));

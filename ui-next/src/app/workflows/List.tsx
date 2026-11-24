@@ -14,8 +14,8 @@ import { Icon, type IconName } from '../kit/icons.tsx';
 import { CONCEPT_ID, ENGINE_COLOUR, logoOf } from '../shell/engines.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
 import { exportRevision } from './io.ts';
-import { Pop } from './pop.tsx';
-import { closePop } from './popPlace.ts';
+import { closePop, openPop } from '../features/pop.ts';
+import { usePop } from '../store/overlays.ts';
 import { openSave } from './save.ts';
 import { rowSel, useWfView, type RowRef } from './state.ts';
 import { useWfModel } from './useWfModel.ts';
@@ -112,10 +112,14 @@ function RowMenu({ row, acts, armed0 }: { row: RowRef; acts: MenuAct[]; armed0?:
 
 interface RowProps { tab: (r: RowRef) => number; tier: string }
 
+/** Opens a row's menu in the page's one popover (features/pop.ts), from its ⋯; `armed`: with Delete armed (F-36). */
+const openRowMenu = (row: RowRef, anchor: HTMLElement, armed?: 'delpreset' | 'rdel') =>
+  openPop(anchor, () => <RowMenu key={sel(row) + (armed ?? '')} row={row} acts={menuActs(row)} armed0={armed} />);
+
 function More({ row, name, tab }: { row: RowRef; name: string; tab: number }) {
-  const say = useSay(), open = useWfView(s => s.pop?.kind === 'menu' && sel(s.pop.row) === sel(row));
-  return <button type="button" className="jump ico-btn" data-rowmore="" aria-haspopup="menu" {...(open ? { 'aria-expanded': true } : {})} aria-label={say(ui('wf.more.label', { name }))} title={say(ui('wf.more'))} tabIndex={tab}
-    onClick={e => { e.stopPropagation(); if (open) { closePop(); return; } useWfView.setState({ pop: { kind: 'menu', row, anchor: e.currentTarget } }); }}>{ico('more')}</button>;
+  const say = useSay(), me = useRef<HTMLButtonElement>(null), open = usePop(s => !!s.anchor && s.anchor === me.current);
+  return <button ref={me} type="button" className="jump ico-btn" data-rowmore="" aria-haspopup="menu" {...(open ? { 'aria-expanded': true } : {})} aria-label={say(ui('wf.more.label', { name }))} title={say(ui('wf.more'))} tabIndex={tab}
+    onClick={e => { e.stopPropagation(); openRowMenu(row, e.currentTarget); }}>{ico('more')}</button>;
 }
 
 /** A row's own key handling: Enter and Space act as a click; the arrows move through the list (F-07). */
@@ -131,7 +135,7 @@ function rowKeys(e: KeyboardEvent<HTMLDivElement>, act: () => void): void {
      (F-36) */
   const ref = rowRef(row);
   if (ref?.user && e.key === 'F2') { e.preventDefault(); runAct(ref, ref.kind === 'wf' ? 'wfren' : 'rren'); return; }
-  if (ref?.user && e.key === 'Delete') { const more = row.querySelector<HTMLElement>('[data-rowmore]'); if (more) { e.preventDefault(); useWfView.setState({ pop: { kind: 'menu', row: ref, anchor: more, armed: ref.kind === 'wf' ? 'delpreset' : 'rdel' } }); } return; }
+  if (ref?.user && e.key === 'Delete') { const more = row.querySelector<HTMLElement>('[data-rowmore]'); if (more) { e.preventDefault(); openRowMenu(ref, more, ref.kind === 'wf' ? 'delpreset' : 'rdel'); } return; }
   if (e.key.length === 1 && e.key !== ' ') {
     const name = (r: HTMLElement) => r.dataset.rn ?? r.dataset.preset ?? '', k = nameKey(e.key);
     const next = [...rows.slice(i + 1), ...rows.slice(0, i)].find(r => nameKey(name(r)).startsWith(k));
@@ -264,14 +268,12 @@ export function WorkflowList() {
     row.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
     if (!still) row.animate([{ backgroundColor: '#1d9a5b33' }, { backgroundColor: 'transparent' }], { duration: 500, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }, [wash]);
-  const menu = useWfView(s => (s.pop?.kind === 'menu' ? s.pop : null));
   return (
     <>
       <div className="pre-group">{say(ui('wf.yours'))}</div>
       {model.yours.length ? model.yours.map(w => <WorkflowRow key={'u:' + w.name} w={w} tab={tab} tier={tier} />) : <p className="empty-note">{model.empty ? say(model.empty) : null}</p>}
       <div className="pre-group">{say(ui('wf.factory'))}</div>
       {model.factory.map(w => <WorkflowRow key={'f:' + w.name} w={w} tab={tab} tier={tier} />)}
-      {menu ? <Pop label={menu.anchor.getAttribute('aria-label') ?? say(ui('wf.more'))}><RowMenu key={sel(menu.row) + (menu.armed ?? '')} row={menu.row} acts={menuActs(menu.row)} armed0={menu.armed} /></Pop> : null}
     </>
   );
 }

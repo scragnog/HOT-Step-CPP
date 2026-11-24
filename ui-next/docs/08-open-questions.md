@@ -239,7 +239,17 @@ definitions send that the existing page does not is an exact entry naming its ow
 and gets what it says. Following the existing page strictly would mean a new parameter is not sent until this is
 answered, so each new knob would ship inert.
 
-## 20. Saved seeds and parameter profiles: the page's or the server's?
+## 20. The song menu where nothing has room for it
+
+On a short desk at 1920x1080 (and at 1536 and 1280 with the page at its end) a song card sits under the go bar with
+neither 340px above it (the go bar is in the way) nor below it (the window ends), and the page cannot move. The concept
+then puts the menu beside its card, over the go bar, and shows all seven items. Its own later rule (F-28, pending there)
+says the menu never covers the go bar, so the rebuild stands it beside its card between the go bar and the window's
+foot, 293px of 340, and its last item scrolls in (deviation P6-4, RC-04). Covering the go bar for the moment the menu
+is open would show everything at once; keeping the go bar clear keeps Generate and the queue in sight. Meanwhile: the
+go bar stays clear.
+
+## 21. Saved seeds and parameter profiles: the page's or the server's?
 
 The existing frontend keeps saved seeds on the server (`ui/src/components/global-bar/SeedManagerDrawer.tsx`: `/seeds`,
 with favourites and a random pick) and parameter profiles per backend (`ui/src/services/api.ts`: `/profiles`). The
@@ -257,7 +267,7 @@ Meanwhile the page keeps both in the browser, as the concept does. Moving the se
 list read from it (the `stars` state then holds nothing, as `recentRefs` does for the reference tracks); moving the
 revisions is the workflows store's reads and writes (`store/stored.ts`) behind a service.
 
-## 21. The Concept notes in the real application
+## 22. The Concept notes in the real application
 
 The Notes button opens the concept's design notes (`src/app/i18n/words/notes.ts`, about 14 KB: what the page does and
 why, the review's remarks). They are right for the concept's published page, where they explain the redesign; in the
@@ -265,7 +275,7 @@ real application they are text to translate into five languages that a user of H
 the button and the drawer in package 10 (one `fill` and one file), keep them behind a developer setting, or rewrite
 them as the page's own help. Meanwhile they ship as the concept's.
 
-## 22. The page's language
+## 23. The page's language
 
 The application has five locales and a language detector (`ui/src/i18n/index.ts`); the rebuild runs i18next on an
 instance of its own (so it never takes over the application's) fixed to English, and every word it says is a message

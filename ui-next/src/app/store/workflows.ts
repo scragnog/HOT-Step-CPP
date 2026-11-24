@@ -15,7 +15,7 @@ import { create } from 'zustand';
 import type { EngineId, Revision, Workflow } from '../../definitions/types.ts';
 import {
   applyDraft, draftLoaded, draftStep, draftTitle, dropRevision, dropWorkflow, emptySaved, findRevision, findWorkflow, importRevision, layoutOf, loadRevision, loadStep, loadedWords,
-  mergeDrafts, mergeSaved, msg, newestDrafts, openStep, putRevision, putWords, putWorkflow, readDrafts, readSaved, recordStep, renameRevision, renameWorkflow, revNameClash, revisionIndex,
+  keptDrafts, keptSaved, mergeDrafts, mergeSaved, msg, newestDrafts, openStep, putRevision, putWords, putWorkflow, readDrafts, readSaved, recordStep, renameRevision, renameWorkflow, revNameClash, revisionIndex,
   revisionOf, sameName, savedFile, START_FRESH, storeSkipped, storeUnreadable, switchEngine, unloadedFiles, wfNameClash, whatRevision, whatWorkflow, workflowIndex, workflowModified, workflowOf,
   draftOf, DRAFT_MAX, onOf, type Desk, type Msg, type Open, type RevId, type Saved, type Slot, type StoredDraft,
 } from '../../derive.ts';
@@ -91,7 +91,9 @@ export function rebootWf(): void { useWf.setState({ ...boot(), info: null, wash:
 /** Writes the lists: storage is read first and merged, so a workflow another tab saved meanwhile is kept, and appears
  *  here. Returns whether the browser took it. */
 export function persistSaved(): boolean {
-  const got = readStored(WF_KEY), theirs = !got.bad ? readSaved(ix, got.v)?.saved ?? null : null, ours = useWf.getState().saved;
+  /* the three sides are compared as storage gives them back (keptSaved): a record made here and the same record read
+     back are one record, so what this tab deleted or renamed is not taken for the other tab's (RC-02) */
+  const got = readStored(WF_KEY), theirs = !got.bad ? readSaved(ix, got.v)?.saved ?? null : null, ours = keptSaved(ix, useWf.getState().saved);
   const m = theirs ? mergeSaved(base, ours, theirs) : ours;
   useWf.setState({ saved: m });
   const ok = writeStored(WF_KEY, JSON.stringify(savedFile(m)));
@@ -99,7 +101,7 @@ export function persistSaved(): boolean {
   return ok;
 }
 export function persistDrafts(): boolean {
-  const got = readStored(DRAFT_KEY), theirs = !got.bad ? readDrafts(ix, got.v)?.drafts ?? null : null, ours = useWf.getState().drafts;
+  const got = readStored(DRAFT_KEY), theirs = !got.bad ? readDrafts(ix, got.v)?.drafts ?? null : null, ours = keptDrafts(ix, useWf.getState().drafts);
   const m = theirs ? mergeDrafts(draftBase, ours, theirs) : newestDrafts(ours);
   useWf.setState({ drafts: m });
   const ok = writeStored(DRAFT_KEY, JSON.stringify(m));
@@ -119,7 +121,7 @@ export function theyWrote(key: string, text: string | null): void {
   let v: unknown; try { v = JSON.parse(text); } catch { return; }
   if (key === WF_KEY) {
     const r = readSaved(ix, v); if (!r) return;
-    const s = useWf.getState(), was = s.saved, m = mergeSaved(base, was, r.saved);
+    const s = useWf.getState(), was = s.saved, m = mergeSaved(base, keptSaved(ix, was), r.saved);
     base = structuredClone(r.saved);
     let open = s.open, said: Msg | null = null;
     if (open.workflow && !findWorkflow(m, open.workflow)) {
@@ -134,7 +136,7 @@ export function theyWrote(key: string, text: string | null): void {
   }
   if (key === DRAFT_KEY) {
     const r = readDrafts(ix, v); if (!r) return;
-    const m = mergeDrafts(draftBase, useWf.getState().drafts, r.drafts);
+    const m = mergeDrafts(draftBase, keptDrafts(ix, useWf.getState().drafts), r.drafts);
     draftBase = structuredClone(r.drafts);
     useWf.setState({ drafts: m });
   }

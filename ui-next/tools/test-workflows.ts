@@ -7,10 +7,12 @@
 import { DEFINITIONS } from '../src/definitions/index.ts';
 import { FACTORY_REVISIONS, FACTORY_WORKFLOWS } from '../src/definitions/factory.ts';
 import type { EngineId, Revision, Tier } from '../src/definitions/types.ts';
+import { ENGINE_IDS } from '../src/definitions/engines.ts';
 import {
   applyDraft, cleanDraft, draftOf, draftSub, draftTitle, emptySaved, exportFile, findRevision, findWorkflow, importRevision, indexOf, layoutOf, listModel, loadRevision, merge3, mergeSaved,
   normName, putRevision, putWorkflow, readDrafts, readSaved, renameWorkflow, revisionDetail, revisionModified, revisionOf, revNameClash, sameDraft, sameName, saveCheck, saveState, storeSkipped,
   storeTold, wfNameClash, workflowModified, workflowOf, dropWorkflow, openStep, putWords, type Desk, type Msg, type Saved,
+  dropRevision, keptDrafts, keptSaved, renameRevision, savedFile,
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
 
@@ -70,6 +72,32 @@ ok('and compared whatever their capitals', sameName('My  polish ', 'my polish') 
   ok('records compare by content, whatever order their fields were written in', merge3([a], [{ ...a }], [{ board: [], modules: ['tempo'], tier: 'studio' as Tier, name: 'A', v: 1 as const }], key).length === 1);
   const m = mergeSaved(saved([a]), saved([a]), saved([a, wf('a ')]));
   ok('names merge by the one name rule', m.workflows.length === 1, m);
+}
+
+/* ---- RC-02: a record reads back as it was written, so the merge (C-09) never takes this tab's own record, read back
+   from storage, for another tab's edit: a revision deleted or renamed here stays deleted or renamed */
+{
+  const all = (e: EngineId) => desk(e, 'lab', DEFINITIONS.filter(d => d.engines.includes(e) && !(d.kind === 'module' && (d.builtIn || d.source))).map(d => d.id));
+  const back = (sv: Saved) => readSaved(ix, JSON.parse(JSON.stringify(savedFile(sv))))!.saved;
+  for (const e of ENGINE_IDS) for (const withContent of [false, true]) {
+    const r = revisionOf(ix, all(e), 'Start fresh', 'Mine', withContent), w = workflowOf(ix, all(e), 'Mine');
+    ok(`a revision made on ${e}${withContent ? ' with its content' : ''} reads back as it was written`, J(back(saved([w], [r]))) === J(saved([w], [r])), [J(r).length, J(back(saved([w], [r])).revisions[0]).length]);
+  }
+  for (const f of FACTORY_REVISIONS) {
+    const r = revisionOf(ix, loadRevision(ix, all(f.engine), f).desk, f.workflow, 'Copy', true);
+    ok(`a revision made from ${f.workflow} › ${f.name} reads back as it was written`, J(back(saved([], [r])).revisions) === J([r]));
+  }
+  const d0 = all('ace'), dr = { ...draftOf(ix, { ...d0, vals: { 'prompt.text': 'p', 'lat.ts': '' } }, ''), id: 'x', at: 5 };
+  ok('a draft reads back as it was written', J(keptDrafts(ix, [dr])) === J([{ v: 1, id: 'x', name: '', engine: 'ace', at: 5, vals: dr.vals }]), keptDrafts(ix, [dr]));
+  /* the store's write, as store/workflows.ts persistSaved makes it: base and ours in the kept form, theirs read back */
+  const mine = revisionOf(ix, d0, 'Start fresh', 'My song'), other = revisionOf(ix, d0, 'Start fresh', 'Other');
+  const s0 = keptSaved(ix, saved([], [mine, other])), stored = back(s0), id = { workflow: 'Start fresh', engine: 'ace' as EngineId, name: 'My song' };
+  const del = mergeSaved(s0, keptSaved(ix, dropRevision(s0, id)), stored);
+  ok('a revision deleted here stays deleted when the write merges with storage (RC-02)', J(del.revisions.map(r => r.name)) === J(['Other']), del.revisions.map(r => r.name));
+  const ren = mergeSaved(s0, keptSaved(ix, renameRevision(s0, id, 'Bee')), stored);
+  ok('a revision renamed here leaves one record, under its new name (RC-02)', J(ren.revisions.map(r => r.name)) === J(['Bee', 'Other']), ren.revisions.map(r => r.name));
+  const both = mergeSaved(s0, keptSaved(ix, renameRevision(s0, id, 'Bee')), back(dropRevision(s0, { ...id, name: 'Other' })));
+  ok('and a delete in another tab meanwhile is kept with it', J(both.revisions.map(r => r.name)) === J(['Bee']), both.revisions.map(r => r.name));
 }
 
 /* ---- a workflow on the desk */

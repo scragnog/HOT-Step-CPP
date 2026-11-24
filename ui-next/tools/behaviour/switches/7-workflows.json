@@ -34,8 +34,8 @@
     {"feature": "wf save a draft", "file": "src/app/store/workflows.ts", "find": "  useWf.setState({ drafts: all.slice(0, DRAFT_MAX) });\n", "replace": ""},
     {"feature": "wf load a draft", "file": "src/app/store/workflows.ts", "find": "putOf(from, to)), () => apply(to));", "replace": "putOf(from, to)), () => void to);"},
     {"feature": "wf delete a draft", "file": "src/app/store/workflows.ts", "find": "  useWf.setState({ drafts: s.drafts.filter(d => d.id !== id) }); persistDrafts();", "replace": "  persistDrafts();"},
-    {"feature": "wf drafts popover", "file": "src/app/workflows/Drafts.tsx", "find": "else useWfView.setState({ pop: { kind: 'drafts', anchor: e.currentTarget } });", "replace": "else void e;"},
-    {"feature": "wf row menu", "file": "src/app/workflows/List.tsx", "find": "useWfView.setState({ pop: { kind: 'menu', row, anchor: e.currentTarget } });", "replace": "void row;"},
+    {"feature": "wf drafts popover", "file": "src/app/workflows/Drafts.tsx", "find": "onClick={e => { openDrafts(e.currentTarget); }}", "replace": "onClick={e => { void e; }}"},
+    {"feature": "wf row menu", "file": "src/app/workflows/List.tsx", "find": "onClick={e => { e.stopPropagation(); openRowMenu(row, e.currentTarget); }}", "replace": "onClick={e => { e.stopPropagation(); void row; }}"},
     {"feature": "wf list keys", "file": "src/app/workflows/List.tsx", "find": "  if (ref?.user && e.key === 'F2') { e.preventDefault(); runAct(ref, ref.kind === 'wf' ? 'wfren' : 'rren'); return; }\n", "replace": ""},
     {"feature": "wf tree keys", "file": "src/app/workflows/List.tsx", "find": "  else if (e.key === 'ArrowRight') {", "replace": "  else if (e.key === 'ArrowRight' && !e.key) {"},
     {"feature": "wf focus kept on row", "file": "src/app/workflows/List.tsx", "find": "const keepOn = (r: RowRef) => useDesk.getState().setFocus(sel(r));", "replace": "const keepOn = (r: RowRef) => void r;"}

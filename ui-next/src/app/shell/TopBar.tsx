@@ -16,17 +16,18 @@ import { Slot } from '../register/Slot.tsx';
 import { ui, useSay } from '../i18n/index.ts';
 import { ENGINE_COLOUR, logoOf, CONCEPT_ID } from './engines.ts';
 import { Theme } from './Theme.tsx';
+import { NAV, useScreen } from './screens.ts';
+import { layerClosed, layerOpen } from '../features/layers.ts';
 import { useGen } from '../store/generate.ts';
 import { reduced } from '../kit/motion.ts';
 import { openNotes } from '../features/notes-open.ts';
 import { toggleLogs } from '../features/logs-dock.ts';
 
 /* the main navigation: each page's hook in the concept's markup (data-nav) and its words' id */
-const NAV = [['create', 'create'], ['Library', 'library'], ['Studios', 'studios'], ['Training', 'training'], ['Settings', 'settings']] as const;
 const EM_N = 32;
 
 export function TopBar() {
-  const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false), live = useGen(s => s.runs.length > 0);
+  const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false), live = useGen(s => s.runs.length > 0), screen = useScreen(s => s.name);
   const name = ENGINES.find(e => e.id === engine)!.name;
   /* the panel is named whether it is open or not, as the concept's markup names it */
   useEffect(() => { document.getElementById('engPanel')?.setAttribute('aria-label', say(ui('engine.panel'))); }, [say]);
@@ -36,7 +37,8 @@ export function TopBar() {
       {/* eslint-disable-next-line no-restricted-syntax */}
       <button className="brand" type="button" data-goto="create" aria-label={say(ui('brand.label'))} title={say(ui('brand.title'))}>HOT<b>-</b>Step</button>
       <nav className="main" aria-label={say(ui('nav'))}>
-        {NAV.map(([n, id]) => <button key={n} data-nav={n} aria-current={n === 'create' ? 'page' : undefined}>{say(ui(`nav.${id}`))}</button>)}
+        {/* a press shows that page (features/screens.tsx: Create, or the stand-in for the others: RC-01) */}
+        {NAV.map(([n, id]) => <button key={n} data-nav={n} aria-current={n === screen ? 'page' : undefined}>{say(ui(`nav.${id}`))}</button>)}
       </nav>
       <div className="top-right">
         <div className={`engine${live ? ' lg-live' : ''}`} id="engine" style={{ '--ec': ENGINE_COLOUR[engine] } as CSSProperties}>
@@ -108,11 +110,18 @@ function EnginePanel({ close }: { close: (refocus: boolean) => void }) {
     document.addEventListener('pointerdown', out, true); addEventListener('resize', place);
     return () => { document.removeEventListener('pointerdown', out, true); removeEventListener('resize', place); pn.hidden = true; };
   }, [engine, close]);
+  /* the panel is one of the page's layers (features/layers.ts): Escape closes it, the picker opening closes it (RC-06),
+     no shortcut acts under it but the page's Undo (deviation 30) */
+  const closeNow = useRef(close); useEffect(() => { closeNow.current = close; });
+  useEffect(() => {
+    const pn = document.getElementById('engPanel'); if (!pn) return;
+    layerOpen(pn, { trigger: document.getElementById('engBtn'), undo: true, close: () => closeNow.current(true) });
+    return () => layerClosed(pn, false);
+  }, []);
   const choose = (e: EngineId) => useDesk.getState().switchEngine(e);
   /* the panel's own keys, on the panel (a model's list is drawn elsewhere, #dd, and keeps its own) */
   const key = (ev: KeyboardEvent) => {
     const pn = el.current; if (ev.defaultPrevented || !pn) return;
-    if (ev.key === 'Escape') { ev.preventDefault(); close(true); return; }
     const card = (ev.target as Element).closest<HTMLElement>('.ep-card'); if (!card) return;
     const cards = [...pn.querySelectorAll<HTMLElement>('.ep-card')], i = cards.indexOf(card);
     const to = ({ ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1 } as Record<string, number>)[ev.key];

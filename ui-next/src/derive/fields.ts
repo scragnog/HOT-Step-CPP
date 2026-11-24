@@ -274,12 +274,15 @@ function latentHere(ix: Index, desk: Desk): boolean {
 /** A named step of the box's parameter that sets these values (cleaned on the engine in force), with what it says
  *  after it is done; null when it changes nothing. */
 export interface ToolStep { change: Change; said: Msg | null; undo: boolean }
+/** A tool's step is one of the desk's (the concept's deskUndo): what Undo puts back ends with "Anything else you did
+ *  since stays as it is", as every desk step's does (RC-16). */
+const asDesk = (w: Change['words']): Change['words'] => (w.put.id === 'step.put' ? { ...w, put: msg('step.put.desk', w.put.slots ?? {}) } : w);
 function named(ix: Index, desk: Desk, key: string, step: string, vals: { [k: string]: Value }, auto: { [k: string]: boolean } = {}, slots?: { [s: string]: string | number }): Change | null {
   const v: Change['vals'] = {};
   for (const [k, x] of Object.entries(vals)) if (has(ix, k, desk.engine)) v[k] = setValue(ix, desk, k, x).value;
   const after = applyChange(desk, { vals: v, auto, state: {}, words: { label: msg(''), put: msg('') } });
   const words = stepWords(ix, desk, after, { named: { key, step, ...(slots ? { slots } : {}) } });
-  return words ? { vals: v, auto, state: {}, words } : null;
+  return words ? { vals: v, auto, state: {}, words: asDesk(words) } : null;
 }
 /* what Write it for me writes (simulated): content the engine reads, in its words; on a tags engine, tags (S-33) */
 const WRITTEN = { words: 'warm indie folk, fingerpicked acoustic guitar, soft female vocals, intimate room sound', tags: 'indie folk, acoustic guitar, fingerpicked, warm, soft female vocals' };
@@ -344,7 +347,7 @@ export function tempoStep(ix: Index, key: string, desk: Desk): { vals: Change['v
   const v = setValue(ix, at, K(ix, 'bpm'), bpm).value;
   const after = applyChange(at, { vals: { [K(ix, 'bpm')]: v }, auto: { [K(ix, 'bpm')]: false }, state: {}, words: { label: msg(''), put: msg('') } });
   const words = stepWords(ix, desk, after, { named: { key, step: 'tempo', slots: { bpm } } }) ?? { label: msg('step.change', { what: '' }), put: msg('') };
-  return { vals: { [K(ix, 'bpm')]: v }, auto: { [K(ix, 'bpm')]: false }, words, brings, said: msg('sg.bpm.said', { bpm, added: String(!!brings) }) };
+  return { vals: { [K(ix, 'bpm')]: v }, auto: { [K(ix, 'bpm')]: false }, words: asDesk(words), brings, said: msg('sg.bpm.said', { bpm, added: String(!!brings) }) };
 }
 
 /** A Structured Caption on another engine, as plain words. */
@@ -400,12 +403,12 @@ export function latentStep(ix: Index, key: string, desk: Desk, name: string): { 
   const auto = K(ix, 'bpm') in vals ? { [K(ix, 'bpm')]: false } : {}, state = { [K(ix, 'latent')]: name };
   const after = applyChange(at, { vals, auto, state, words: { label: msg(''), put: msg('') } });
   const words = stepWords(ix, desk, after, { named: { key: K(ix, 'latent'), step: 'load' } }) ?? { label: msg('step.change', { what: '' }), put: msg('') };
-  return { state, vals, auto, words, brings, said: msg('latent.said', { name, added: String(!!brings) }) };
+  return { state, vals, auto, words: asDesk(words), brings, said: msg('latent.said', { name, added: String(!!brings) }) };
 }
 /** The latent let go: back to a fresh render. */
 export function latentClear(ix: Index, desk: Desk): ToolStep | null {
   const lat = K(ix, 'latent'), after = { ...desk, state: { ...desk.state, [lat]: null } }, words = stepWords(ix, desk, after, { named: { key: lat, step: 'clear' } });
-  return words ? { change: { vals: {}, auto: {}, state: { [lat]: null }, words }, undo: true, said: msg('latent.cleared') } : null;
+  return words ? { change: { vals: {}, auto: {}, state: { [lat]: null }, words: asDesk(words) }, undo: true, said: msg('latent.cleared') } : null;
 }
 
 /** Reuse (a song's menu) puts its text in the box; a caption a dataset supplies is not written over, and says so in

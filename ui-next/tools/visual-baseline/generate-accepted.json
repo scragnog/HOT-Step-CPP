@@ -33,8 +33,8 @@
    "state": "^gen-menu",
    "key": "^#menu$",
    "field": "",
-   "n": 38,
-   "why": "Deviation P6-4 (F-28): the song menu opens above its button, never over the go bar, scrolling inside when there is no room; the concept opens it below and moves the page."
+   "n": 34,
+   "why": "Deviation P6-4 (F-28): the song menu opens above its button, never over the go bar; with no room on either side and no page to move it stands beside its card between the go bar and the window's foot, scrolling inside for what that room lacks; the concept opens it below and moves the page, or beside its card over the go bar."
   },
   {
    "state": "^gen-menu",

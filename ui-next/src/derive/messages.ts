@@ -48,6 +48,7 @@ export const EN: { [id: string]: string } = {
   'path.mods': 'the modules',
   'path.pedals': 'the pedals',
   'path.engine': 'the engine',
+  'path.tier': 'the tier',
   'step.change': 'Change {what}',
   'step.settings': '{n} settings',
   'switch.toast': 'On {engine}.',
