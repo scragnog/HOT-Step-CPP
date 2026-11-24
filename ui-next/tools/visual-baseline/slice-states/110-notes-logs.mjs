@@ -37,4 +37,4 @@ export const STATES = [
 ];
 
 /** The regions compared: the notes drawer and its scrim, the engine log, the VRAM meter that opens it. */
-export const SCOPES = { notes: ['#notes', '#notesScrim', '#logs', '#engMeter'] };
+export const SCOPES = { notes: ['#notes', '#notesScrim', '#notesClose', '#notesTitle', '#logs', '#logEngine', '#logsClose', '#logText', '#engMeter', '#emBar', '#emRead', '#emUse'] };

@@ -24,7 +24,7 @@ import '../services/logs.ts';
 import { dockLogs, logsDock, toggleLogs, vramMeter } from './logs-dock.ts';
 
 export function Logs() {
-  const say = useSay(), open = useNotesLogs(s => s.logs), ref = useRef<HTMLElement | null>(logsDock());
+  const say = useSay(), open = useNotesLogs(s => s.logs), ref = useRef<HTMLElement | null>(logsDock()), docked = useRef(false);
   /* what the server says and what the queue holds are part of what it is asked with */
   const status = useNotesLogs(s => s.status), queue = useNotesLogs(s => s.queue);
   const m = useModel(s => engineLogModel(ix, s.desk, status, queue), `engine-log ${JSON.stringify([status, queue])}`);
@@ -32,7 +32,9 @@ export function Logs() {
     const l = logsDock(); if (!l) return;
     l.hidden = !open; l.setAttribute('aria-label', say(ui('log.label')));
     vramMeter()?.setAttribute('aria-expanded', String(open));
-    dockLogs();
+    /* the page's foot is touched only once the log has opened (the concept's dockLogs runs on its toggle) */
+    if (open || docked.current) dockLogs();
+    docked.current ||= open;
     if (!open) return;
     const ro = new ResizeObserver(() => dockLogs()); ro.observe(l);
     return () => ro.disconnect();

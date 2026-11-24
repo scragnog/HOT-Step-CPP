@@ -483,6 +483,18 @@ they are then and say what they left alone; C-02, C-07). The shell gained four s
 (Save and Import after the panel's heading), `panel.workflows.save` (the save row, between the head and the list),
 `centre.drafts` (the go bar's Drafts) and `centre.saveState` (the read-out before Undo).
 
+**Package 11 (the Concept notes and the engine log)** adds `acceptance/11-notes-logs.json` (14 scenarios: 10 of
+`scenarios/36-notes-logs.mjs`, nine of which hold on the concept page too, the tenth being the concept's pending F-18 for
+the notes; the concept's pending F-08, `21-chrome-round5/tier-keys-wait-under-a-modal`; and 3 waiting on packages 4 and
+6, each for the prompt card or generation), `switches/11-notes-logs.json` (30 features), `slice-states/110-notes-logs.mjs`
+(15 states of the drawer and the log, compared in the scope `notes` with `notes-accepted.json`: `vb.mjs compare
+concept-notes rebuild-notes --scope notes --accept tools/visual-baseline/notes-accepted.json`) and
+`tools/test-notes-logs.ts` (17 checks, in `npm run check`). The notes are drawn into the skeleton's `#notes`
+(`features/notes.tsx`, opened and closed by `notes-open.ts` through `layers.ts`), the log into `#logs`
+(`features/logs.tsx`, `logs-dock.ts`), both always drawn, as the concept paints them; what the log says is the core's
+(`derive/logs.ts`) from the logs service (`services/logs.ts`) and the queue the generation package tells
+(`store/notes-logs.ts tellQueue`).
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
