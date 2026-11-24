@@ -25,6 +25,12 @@ export function onKey(b: KeyBinding): void {
 }
 
 /** Asks each binding in order; the first that answers runs. */
+/** Fields whose Enter is their own (a name being saved or renamed): Ctrl+Enter there is that Enter, not Generate, as
+ *  the concept's field stops it (RC-09). A feature names its fields by selector. */
+const OWN_ENTER: string[] = [];
+export const ownEnter = (sel: string): void => { OWN_ENTER.push(sel); };
+export const enterIsOwn = (el: Element | null): boolean => !!el && OWN_ENTER.some(s => !!el.closest?.(s));
+
 export function dispatchKey(e: KeyboardEvent): void {
   for (const k of KEYS) if (k.when(e)) { k.run(e); return; }
 }

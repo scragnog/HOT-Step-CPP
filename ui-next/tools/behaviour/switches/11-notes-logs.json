@@ -14,7 +14,7 @@
     {"feature":"notes bold","file":"src/app/features/notes.tsx","find":"(i % 2 ? <b key={i}>{s}</b> :","replace":"(i % 2 ? <Fragment key={i}>{s}</Fragment> :"},
     {"feature":"notes edge fade","file":"src/app/features/notes.tsx","find":"  useEdgeFade(ref);","replace":"  void useEdgeFade; void ref;"},
     {"feature":"notes tier keys wait","file":"src/app/features/modal-keys.ts","find":"id: 'modal-waits', order: 6,","replace":"id: 'modal-waits', order: 60,"},
-    {"feature":"notes toast tab","file":"src/app/features/layers.ts","find":"joins = l.modal && toast && !toast.hidden ? focusables(toast) : [];","replace":"joins = l.modal && toast && false ? focusables(toast) : [];"},
+    {"feature":"notes toast tab","file":"src/app/features/layers.ts","find":"const joins = toastJoins(l.el);","replace":"const joins: HTMLElement[] = [];"},
     {"feature":"log meter opens","file":"src/app/features/logs.tsx","find":"if ((e.target as Element).closest?.('#engMeter')) toggleLogs();","replace":"if ((e.target as Element).closest?.('#engMeter')) void toggleLogs;"},
     {"feature":"log expanded","file":"src/app/features/logs.tsx","find":"    vramMeter()?.setAttribute('aria-expanded', String(open));","replace":"    void vramMeter;"},
     {"feature":"log named","file":"src/app/features/logs.tsx","find":"l.setAttribute('aria-label', say(ui('log.label')));","replace":""},

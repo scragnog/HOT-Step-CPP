@@ -70,7 +70,7 @@ export function SaveRow() {
         <button type="button" data-saveas="wf" aria-pressed={!m.rev} onClick={() => { useWfView.setState({ saveAs: 'wf', confirm: null, err: null }); field.current?.focus(); }}>{say(ui('wf.saveAs.wf'))}</button>
       </div>
       <span className="save-field">
-        <input ref={field} id="saveName" data-enter="" placeholder={say(ui(!v.saveOpen ? 'wf.name.it' : m.rev ? 'wf.name.rev' : 'wf.name.wf'))} maxLength={MAX} aria-label={say(ui('wf.name'))} aria-describedby="saveHint saveCount" onInput={typed}
+        <input ref={field} id="saveName" placeholder={say(ui(!v.saveOpen ? 'wf.name.it' : m.rev ? 'wf.name.rev' : 'wf.name.wf'))} maxLength={MAX} aria-label={say(ui('wf.name'))} aria-describedby="saveHint saveCount" onInput={typed}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSave(true); } }} />
         <span className="save-count mono" id="saveCount" hidden={count < MAX - 5} aria-live="polite">{v.saveOpen ? say(ui('wf.count', { n: count, max: MAX })) : ''}</span>
       </span>

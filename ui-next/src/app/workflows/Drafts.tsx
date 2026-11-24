@@ -52,7 +52,7 @@ function DraftsList() {
       <h4>{say(ui('draft.h'))}</h4>
       <p className="pop-p" title={say(m.about.tip)}>{say(m.about.says)}</p>
       <div className="pop-row">
-        <input ref={field} id="draftName" data-enter="" maxLength={40} placeholder={say(ui('draft.name'))} aria-label={say(ui('draft.name.label'))} {...(m.same ? { 'aria-describedby': 'draftSame' } : {})}
+        <input ref={field} id="draftName" maxLength={40} placeholder={say(ui('draft.name'))} aria-label={say(ui('draft.name.label'))} {...(m.same ? { 'aria-describedby': 'draftSame' } : {})}
           onInput={e => setName(e.currentTarget.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } }} />
         <button type="button" className="small-btn primary" data-draftsave="" disabled={m.same && !name.trim()} onClick={save}>{say(ui('draft.save'))}</button>
       </div>

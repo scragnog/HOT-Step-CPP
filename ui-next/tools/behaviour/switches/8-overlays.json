@@ -7,7 +7,7 @@
     {"feature": "picker column", "file": "src/app/features/picker-keys.ts", "find": "if (el === cur || (dy && el.closest('.fl-wall') !== wall)) return;", "replace": "if (el === cur) return;"},
     {"feature": "picker lab offer", "file": "src/app/features/picker-keys.ts", "find": "  if (r === 'lab') {", "replace": "  if (r === 'lab' && false) {"},
     {"feature": "picker reopen", "file": "src/app/features/picker-keys.ts", "find": "    if (pickerOpen()) { closePicker(); return; }", "replace": "    if (usePicker.getState().open) { closePicker(); return; }"},
-    {"feature": "picker toast tab", "file": "src/app/features/picker-keys.ts", "find": "...(toast && !toast.hidden ? focusables(toast) : [])];", "replace": "...(toast && false ? focusables(toast) : [])];"},
+    {"feature": "picker toast tab", "file": "src/app/features/picker-keys.ts", "find": "      ...toastJoins(host())];", "replace": "      ];"},
     {"feature": "picker categories", "file": "src/app/features/picker.tsx", "find": "onClick={() => usePicker.setState({ cat: c as PickerCat })}", "replace": "onClick={() => void c}"},
     {"feature": "picker below", "file": "src/app/features/picker.tsx", "find": "    const measure = () => {", "replace": "    const measure = () => { return;"},
     {"feature": "picker ring", "file": "src/app/features/picker.tsx", "find": "?.classList.add('target');", "replace": "?.classList.add('targeted');"},

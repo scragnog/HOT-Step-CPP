@@ -53,7 +53,7 @@ function Rename({ row, name, commit }: { row: RowRef; name: string; commit: (v: 
   };
   return (
     <>
-      <input ref={input} className="pren" data-enter="" maxLength={28} aria-label={say(ui('wf.newName'))} aria-describedby="prenHint" {...(err ? { 'aria-invalid': true } : {})}
+      <input ref={input} className="pren" maxLength={28} aria-label={say(ui('wf.newName'))} aria-describedby="prenHint" {...(err ? { 'aria-invalid': true } : {})}
         onInput={() => setErr(null)} onClick={e => e.stopPropagation()}
         onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') end(true); if (e.key === 'Escape') end(false); }}
         onBlur={e => end(true, e.relatedTarget)} />

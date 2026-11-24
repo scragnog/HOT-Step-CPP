@@ -861,7 +861,7 @@ The fix round around the desk's (numbered FC-, review-r2 and RA-04):
   shows whichever tab wrote last. A new tab opens with the desk changed last, as the concept's.
 - FC-2. **A desk step puts back the tier it changed** (Use that desk, Open in its tier): the tier is one of the
   undo's paths (`store/desk.ts flatOf`), as the concept's `deskEntry` has it.
-- FC-3. **Ctrl+Enter in a field whose Enter is its own** (the save row's name, a rename, the draft's name: `data-enter`)
+- FC-3. **Ctrl+Enter in a field whose Enter is its own** (the save row's name, a rename, the draft's name: `register/keys.ts ownEnter`)
   is that Enter (RC-09), as the concept's field stops it; everywhere else it is Generate (P6-9).
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
