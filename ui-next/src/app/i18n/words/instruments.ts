@@ -54,5 +54,6 @@ export const WORDS: { [id: string]: string } = {
   'ui.blend.title': 'Drag the reference into your sound',
   'ui.blend.ref': 'reference',
   'ui.blend.you': 'your sound',
+  'ui.blend.valuetext': '{pct} reference',
   'ui.auto.knob': 'Let the engine choose {label}',
 };

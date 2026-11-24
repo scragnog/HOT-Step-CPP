@@ -773,6 +773,7 @@ export const sampler = {
       ],
       per: [
         {
+          engines: ['ace'],
           tiers: ['lab'],
           params: ['samp.cs', 'samp.ce'],
           reads: ['samp.steps', 'samp.shift', 'samp.sched', 'sch.alpha', 'sch.beta', 'sch.exp', 'sch.a', 'sch.b', 'sch.x', 'sch.split', 'lat.ts', 'perf.cfgcut', 'samp.solver', 'sa3.sampler'],

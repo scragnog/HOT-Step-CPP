@@ -18,10 +18,21 @@ export function Row(v: PartView) {
   const kids = (v.kids ?? []).filter(k => k.shown);
   /* a row of rack groups is the concept's group row; groups switched by a pill line up as Latent & correction's */
   if (kids.length && kids.every(k => k.part === 'group')) return <div className={`ad-groups${kids.every(k => k.inner[0] === 'pill') ? ' lat-groups' : ''}`}>{v.children}</div>;
+  /* a pad with a column beside it (Performance trades: the pad, then its gauge over its knob) is the concept's .padrow
+     and .padside (25-module-perf.css; package 3a) */
+  if (kids.length === 2 && kids[0]!.part === 'xyPad' && kids[1]!.part === 'row') return <div className="padrow">{v.children}</div>;
+  if (kids.some(k => k.part === 'speedGauge')) return <div className="padside">{v.children}</div>;
+  /* a row of plugin pickers is the Sampler's .picks (package 3a) */
+  if (kids.length && kids.every(k => k.part === 'pick')) return <div className="picks">{v.children}</div>;
   return <div className="knobs">{v.children}</div>;
 }
 export const Rack = ({ children }: PartView) => <div className="pextra rackrow">{children}</div>;
-export const Well = ({ children }: PartView) => <div className="knobs samp-strip">{children}</div>;
+/* the Sampler's well: its pickers stand together beside its numbers in .picks (E-20, S-30; package 3a) */
+export function Well(v: PartView) {
+  const kids = v.kids ?? [], items = itemsOf(v.children), picks = kids.map((k, i) => (k.shown && k.part === 'pick' ? i : -1)).filter(i => i >= 0);
+  if (!picks.length) return <div className="knobs samp-strip">{v.children}</div>;
+  return <div className="knobs samp-strip with-picks">{items.filter((_, i) => !picks.includes(i))}<div className="picks">{picks.map(i => items[i])}</div></div>;
+}
 export const Lcd = ({ children }: PartView) => <div className="lcd">{children}</div>;
 export const Foot = ({ children }: PartView) => <div className="tile-foot">{children}</div>;
 

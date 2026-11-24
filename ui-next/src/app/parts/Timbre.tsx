@@ -45,7 +45,7 @@ export function TimbreBlend(v: PartView) {
   return (
     <>
       <div className={`venn${off ? ' is-off' : ''}`} data-venn={p.key} data-scrub={p.key} role="slider" tabIndex={0} aria-label={say(ui('blend.label'))}
-        aria-valuemin={p.range?.[0]} aria-valuemax={p.range?.[1]} aria-valuenow={p.value as number} style={{ '--p': String(p.at ?? 0) } as CSSProperties} title={say(ui('blend.title'))}
+        aria-valuemin={p.range?.[0]} aria-valuemax={p.range?.[1]} aria-valuenow={p.value as number} aria-valuetext={say(ui('blend.valuetext', { pct: v.instrument?.blend?.pct ?? '' }))} style={{ '--p': String(p.at ?? 0) } as CSSProperties} title={say(ui('blend.title'))}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
         onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => onValueKey(e, p, v.gesture)} onKeyUp={() => onValueKeyUp(v.gesture)} onDoubleClick={() => p.reset()}>
         <span className="venn-scale" aria-hidden="true" />

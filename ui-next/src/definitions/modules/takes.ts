@@ -51,7 +51,7 @@ export const takes = {
   ],
   strip: [{ when: { engine: ['sa3', 'heartmula'] }, says: 'One song per run · Generate again to queue another' }],
   face: [
-    { part: 'takesReels', param: 'takes.n', label: 'takes per run', per: [{ when: { param: 'takes.n', is: 1 }, label: 'take per run' }] },
+    { part: 'takesReels', param: 'takes.n', label: 'Takes per run', per: [{ when: { param: 'takes.n', is: 1 }, label: 'Take per run' }] },
   ],
   thumb: { file: 'takes' },
 } satisfies ModuleDef;
