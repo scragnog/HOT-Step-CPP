@@ -5,13 +5,15 @@
 import type { Action, Definition, Node, NodeOverride, ParamDef, Strip, Value } from '../definitions/types.ts';
 import { CHECKS, PARTS, UNITS, type PartSpec } from '../definitions/parts.ts';
 import { EN } from './messages.ts';
+import { ENGINES } from '../definitions/engines.ts';
 
 export interface Str { key: string; text: string }
 
 /** The core's own messages (messages.ts EN) and the parts' how-to words: the strings no definition holds. */
 export function coreStrings(): Str[] {
   return [...Object.entries(EN).map(([key, text]) => ({ key, text })),
-    ...Object.entries(PARTS as Record<string, PartSpec>).flatMap(([name, s]) => (s.howTo ? [{ key: `part.${name}.howTo`, text: s.howTo }] : []))];
+    ...Object.entries(PARTS as Record<string, PartSpec>).flatMap(([name, s]) => (s.howTo ? [{ key: `part.${name}.howTo`, text: s.howTo }] : [])),
+    ...ENGINES.flatMap(e => e.tagline.map((t, i) => ({ key: `engine.${e.id}.tag${i + 1}`, text: t })))];
 }
 
 /** A value as a key part: letters and digits kept, every other character written as its code in hex between two
@@ -138,7 +140,7 @@ export function nodeKeys(d: Definition): Map<Node, string> {
    in its language (messages.ts). The key is the one stringsOf() gives the line the words come from on the desk. */
 
 import type { Desk, Index } from './core.ts';
-import { countOf, factOf, fill, formatValue, has, holds, isAuto, isEngineLine, valueOf, wordsOf, SLOT } from './core.ts';
+import { choiceLists, countOf, factOf, fill, formatValue, has, holds, isAuto, isEngineLine, modelDefault, valueOf, wordsOf, SLOT } from './core.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
 import type { ParamFace } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
@@ -231,12 +233,15 @@ export function formatMsg(ix: Index, key: string, desk: Desk, v: Value): Slot {
   const word = (f.format?.words || []).find(w => w.value === v);
   if (word) return optionWord(ix, key, desk, String(v), word.text, 'format');
   if (typeof v === 'boolean') return msg(v ? 'value.on' : 'value.off');
+  /* a model choice left at "" is written as the file it stands for, as the request sends it */
+  const stands = v === '' ? modelDefault(ix, key, desk) : undefined;
+  if (stands !== undefined) return formatValue(f, stands, desk.lists, desk.engine);
   if (typeof v === 'string') {
     const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
     const o = fixed.find(x => x.value === v);
     if (o) return optionWord(ix, key, desk, v, o.label, 'options');
   }
-  return formatValue(f, v, desk.lists);
+  return formatValue(f, v, desk.lists, desk.engine);
 }
 /** What a parameter says it is, as a message: its value written, or its auto words. */
 export function textMsg(ix: Index, key: string, desk: Desk): Slot {
@@ -272,10 +277,8 @@ export function pickMsg(ix: Index, key: string, desk: Desk): Slot {
  *  includes and then the server's list for its source (desk.lists), without a value twice. */
 export function optionsOf(ix: Index, key: string, desk: Desk): { value: string | number; label: Slot; short?: Msg; tip?: Msg; lcd?: Msg; pick?: Msg; detail?: Msg }[] {
   const { p, d } = ix.params.get(key)!, f = wordsOf(ix, p, desk), base = `create.${d.id}.p.${dashed(p.key)}.o`, at = lineAt(ix, key, desk, 'options');
-  const fixed = Array.isArray(f.options) ? f.options : f.options?.include ?? [];
-  const from = !Array.isArray(f.options) && f.options ? f.options : null;
   /* the server's list, without what the definition lists itself, and only the values it names (`only`) */
-  const listed = from ? (desk.lists?.[from.from] ?? []).filter(x => !fixed.some(o => o.value === x.value) && (!from.only || from.only.includes(String(x.value)))) : [];
+  const { fixed, listed } = choiceLists(f, desk);
   return [
     ...fixed.map(o => ({ value: o.value, label: { id: `${base}.${keyPart(o.value)}.label${at}`, en: o.label } as Msg,
       ...('short' in o && o.short ? { short: { id: `${base}.${keyPart(o.value)}.short${at}`, en: o.short } as Msg } : {}),

@@ -45,9 +45,10 @@ function gridStep(opts: HTMLElement[], cur: HTMLElement, dir: number): HTMLEleme
   return cand.filter(c => c.dy < row + 8).sort((a, b) => a.dx - b.dx)[0]!.o;
 }
 
-interface Props { anchor: RefObject<HTMLButtonElement | null>; p: ParamView; variant: Variant; faces?: Face[]; title?: Slot; close: (refocus: boolean) => void }
+/** `note`: what a model list says beside its heading (the card it is drawn against). */
+interface Props { anchor: RefObject<HTMLButtonElement | null>; p: ParamView; variant: Variant; faces?: Face[]; title?: Slot; note?: Slot; close: (refocus: boolean) => void }
 
-export function Dropdown({ anchor, p, variant, faces, title, close }: Props) {
+export function Dropdown({ anchor, p, variant, faces, title, note, close }: Props) {
   const say = useSay(), label = say(p.label), el = host(), opts = useMemo(() => p.options ?? [], [p.options]);
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState<string | null>(null);
@@ -187,14 +188,14 @@ export function Dropdown({ anchor, p, variant, faces, title, close }: Props) {
     const mem = (f: Face) => (f.mem !== undefined ? <span className="mem"><i style={{ '--w': `${f.mem * 100}%` } as CSSProperties} /></span> : null);
     body = (
       <>
-        <div className="dd-model-title">{say(title ?? p.label)} <span>{say(ui('dd.model.vram'))}</span></div>
+        <div className="dd-model-title">{say(title ?? p.label)} <span>{say(note ?? ui('dd.model.vram'))}</span></div>
         {groups.map(g => {
           if (g.os.length === 1) { const o = g.os[0]!, f = faceOf(o); return <button key={String(o.value)} type="button" className="opt opt-model" {...a(o)} onClick={() => choose(o)}><b>{g.name}</b>{f.quant ? <span className={`qb q-${f.qc}`}>{f.quant}</span> : <span />}<span className="gb">{f.gbText ?? say(ui('dd.model.variant'))}</span>{mem(f)}</button>; }
           const show = g.os.find(o => o.on) ?? g.os[0]!, f = faceOf(show);
           return (
             <div key={g.name} className={`opt-mrow${g.os.some(o => o.on) ? ' on' : ''}`}>
               <b>{g.name}</b>
-              <span className="qchips">{g.os.map(o => <button key={String(o.value)} type="button" className="opt opt-q" {...a(o)} title={words(o)} onClick={() => choose(o)}><span className={`qb q-${faceOf(o).qc}`}>{faceOf(o).quant}</span></button>)}</span>
+              <span className="qchips">{g.os.map(o => <button key={String(o.value)} type="button" className="opt opt-q" {...a(o)} title={faceOf(o).title ?? words(o)} onClick={() => choose(o)}><span className={`qb q-${faceOf(o).qc}`}>{faceOf(o).quant}</span></button>)}</span>
               <span className="gb">{f.gbText ?? ''}</span>{mem(f)}
             </div>
           );

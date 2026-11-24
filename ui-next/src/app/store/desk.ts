@@ -99,8 +99,9 @@ export interface DeskStore extends Parts {
   setFocus(sel: string | string[] | null): void;
   /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
   deskStep(words: StepWords, fn: () => void): void;
-  /** What the engine told the page: its lists, the selected models, the plugin host's count. */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number }): void;
+  /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
+   *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -243,7 +244,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: o.lists } : {}), ...(o.selection ? { selection: o.selection } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
     },
   };
 });

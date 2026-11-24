@@ -69,6 +69,9 @@ export interface OptionsFrom {
   from: OptionSourceName;
   /** For 'models': the backend's bucket (GET /api/backends/models buckets). */
   bucket?: string;
+  /** For 'models': a model file the engine loads (the engine panel's): its "" (the engine's default) stands for the
+   *  file the server has selected in the bucket, and its size counts in the VRAM figures (derive/vram.ts). */
+  loaded?: boolean;
   /** Options the definition knows, merged with the server's list by value: words given here win, and a value the
    *  server does not list ("Native": the engine's own sampling) is offered first. */
   include?: Option[];
