@@ -9,12 +9,12 @@ const FOCUSABLE = 'button:not([disabled]):not([hidden]), input:not([disabled]), 
 const open = () => { const d = usePanelStore.getState().drawer; return d ? document.getElementById(d === 'left' ? 'leftPanel' : 'rightPanel') : null; };
 
 onKey({
-  id: 'drawer-escape', order: 10,
+  id: 'drawer-escape', order: 10, create: true,
   when: e => e.key === 'Escape' && !!usePanelStore.getState().drawer && !document.querySelector('#dd:not([hidden])'),
   run: e => { e.preventDefault(); closeDrawer(true); },
 });
 onKey({
-  id: 'drawer-tab', order: 10,
+  id: 'drawer-tab', order: 10, create: true,
   when: e => e.key === 'Tab' && !!open(),
   run: e => {
     const p = open()!, f = [...p.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(x => x.getClientRects().length), i = f.indexOf(document.activeElement as HTMLElement);

@@ -19,7 +19,7 @@ export const msg = (id: string, slots?: Msg['slots']): Msg => (slots ? { id, slo
 export const list = (items: Slot[], join: SlotList['join'] = 'and'): SlotList => ({ list: items, join });
 
 /** The core's English. Templates: {name} a slot, {name|lower} with its first letter lower case (a label inside a
- *  sentence), {n, plural, one {...} other {...}} with # for the number, {x, select, value {...} other {...}}. */
+ *  sentence), {name|upper} with its first letter upper case (words that start a sentence), {n, plural, one {...} other {...}} with # for the number, {x, select, value {...} other {...}}. */
 export const EN: { [id: string]: string } = {
   'value.on': 'on',
   'value.off': 'off',
@@ -49,6 +49,8 @@ export const EN: { [id: string]: string } = {
   'path.pedals': 'the pedals',
   'path.engine': 'the engine',
   'path.tier': 'the tier',
+  'step.kept': '{what|upper} changed since, so {n, plural, one {it was left as it is} other {they were left as they are}}',
+  'step.kept.spent': '{what} changed since',
   'step.change': 'Change {what}',
   'step.settings': '{n} settings',
   'switch.toast': 'On {engine}.',
@@ -348,8 +350,8 @@ function render(t: string, slots: { [name: string]: Slot }, table: { [id: string
 function placeholder(inner: string, slots: { [name: string]: Slot }, table: { [id: string]: string }, lang: string): string {
   const m = /^\s*([^,]+?)\s*(?:,\s*(plural|select)\s*,([\s\S]*))?$/.exec(inner);
   if (!m) return `{${inner}}`;
-  /* a slot's name may hold "|" ({file:slots.0|Adapter 1}); only "|lower" at its end is a modifier */
-  const [, whole, kind, rest] = m, mod = whole!.endsWith('|lower') ? 'lower' : '', name = mod ? whole!.slice(0, -6) : whole;
+  /* a slot's name may hold "|" ({file:slots.0|Adapter 1}); only "|lower" or "|upper" at its end is a modifier */
+  const [, whole, kind, rest] = m, mod = /\|(lower|upper)$/.exec(whole!)?.[1] ?? '', name = mod ? whole!.slice(0, -6) : whole;
   if (!(name! in slots)) return `{${inner}}`;
   const v = slots[name!]!;
   if (kind) {
@@ -360,7 +362,7 @@ function placeholder(inner: string, slots: { [name: string]: Slot }, table: { [i
     return render(branch.replace(/#/g, say(v, table, lang)), slots, table, lang);
   }
   const text = say(v, table, lang);
-  return mod === 'lower' ? lowFirst(text) : text;
+  return mod === 'lower' ? lowFirst(text) : mod === 'upper' ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 /** The first letter lower case, unless the word is an acronym or a name with capitals inside (DCW, StableStep,
  *  pP-VAE stays as it is): one rule, used wherever a label stands inside a sentence. */

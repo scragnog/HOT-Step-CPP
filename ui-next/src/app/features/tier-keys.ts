@@ -6,7 +6,7 @@ import { setTierFromView } from '../shell/tier.ts';
 const TIERS = ['quick', 'studio', 'lab'] as const;
 
 onKey({
-  id: 'tier-keys',
+  id: 'tier-keys', create: true,
   when: e => e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^Digit[123]$/.test(e.code),
   run: e => { e.preventDefault(); setTierFromView(TIERS[+e.code.slice(5) - 1]!); },
 });

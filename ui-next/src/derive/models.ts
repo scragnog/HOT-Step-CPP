@@ -14,7 +14,7 @@ import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
 import { type Desk, type Index, applies, changed, has, holds, isAuto, nodeAt, resolve, shownValue, stripOf, valueOf, wordsOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
-import { defName } from './steps.ts';
+import { defDesc, defName } from './steps.ts';
 import {
   actionWords, bareText, fillMsg, forcedOf, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stateWords, stripWords, textMsg,
   wordKey,
@@ -552,7 +552,7 @@ export function cardModel(d: Definition, desk: Desk, query: string, words: { nam
   const rank = !q ? 1 : nm.startsWith(q) || nm.split(/[\s&-]+/).some(w => w.startsWith(q)) ? 1 : nm.includes(q) ? 2
     : q.length >= 3 && new RegExp('(^|[^\\p{L}\\p{N}])' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u').test((words.desc + ' ' + words.group).toLowerCase()) ? 3 : 0;
   const engines = list(d.engines.map(engineName));
-  const tip = notHere ? msg(locked ? 'card.notUsedLab' : 'card.notUsed', { engine: engineName(desk.engine), engines }) : locked ? msg('card.lab') : on ? msg('card.on') : { id: `create.${d.id}.desc`, en: d.desc };
+  const tip = notHere ? msg(locked ? 'card.notUsedLab' : 'card.notUsed', { engine: engineName(desk.engine), engines }) : locked ? msg('card.lab') : on ? msg('card.on') : defDesc(d, desk);
   return { id: d.id, name, tip: msg('card.label', { name, tip }), why: tip, locked, notHere, on, lab: d.kind === 'module' && !!d.labUnder, tag: enginesTag(d, 'card'), rank, group: categoryWord(groupOf(d)), thumbName: words.name };
 }
 

@@ -148,6 +148,8 @@ export function Dropdown({ anchor, p, variant, faces, title, note, close }: Prop
               {preview ? <button type="button" className="small-btn pt-use" data-ptuse="" onClick={() => { const o = opts.find(x => String(x.value) === preview); if (o) choose(o); }}>{say(ui('dd.use'))}</button> : null}
             </div>
             {filtered ? filterBox(ui('dd.filter.short')) : null}
+            {/* a symbol shown under a finger says a second tap uses it, as the concept's say() does (S-02) */}
+            <span className="sr-only" role="status">{preview ? say(ui('dd.tapAgain', { name: words(big) })) : ''}</span>
           </div>
           <div className="pt-grid" onMouseLeave={() => { if (!preview) setShown(null); }}>
             {rows.map(({ g, n, os }) => (

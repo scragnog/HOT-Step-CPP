@@ -8,7 +8,7 @@ import { engineName } from '../../definitions/engines.ts';
 import { offerLab, sayParked } from '../features/adding.ts';
 import { reduced } from '../kit/motion.ts';
 import type { Definition } from '../../definitions/types.ts';
-import { cardGroups, cardModel, categoryWord, defName, groupOf, tileName, type CardModel } from '../../derive.ts';
+import { cardGroups, cardModel, categoryWord, defDesc, defName, groupOf, tileName, type CardModel } from '../../derive.ts';
 import { OFFERED } from '../model/index.ts';
 import { useModel } from '../render/useModel.ts';
 import { Slot } from '../register/Slot.tsx';
@@ -56,7 +56,7 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
   const list = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null);
   useEdgeFade(body);
   /* every card as the core sees it on the desk; the filter matches the words the page shows, in its language */
-  const cards = useModel(s => OFFERED.map(d => cardModel(d, s.desk, q, { name: say(defName(d, s.desk)), desc: say({ id: `create.${d.id}.desc`, en: d.desc }), group: say(categoryWord(groupOf(d))) })), 'cards:' + q);
+  const cards = useModel(s => OFFERED.map(d => cardModel(d, s.desk, q, { name: say(defName(d, s.desk)), desc: say(defDesc(d, s.desk)), group: say(categoryWord(groupOf(d))) })), 'cards:' + q);
   const byId = new Map(cards.map(c => [c.id, c]));
   const groups = GROUPS.map(g => [g, OFFERED.filter(d => groupOf(d) === g && byId.get(d.id)!.rank).sort((a, b) => byId.get(a.id)!.rank - byId.get(b.id)!.rank)] as const).filter(([, ds]) => ds.length);
   const first = groups[0]?.[1][0], stop = rove && OFFERED.some(d => itemId(d) === rove) ? rove : first ? itemId(first) : null;

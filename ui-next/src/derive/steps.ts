@@ -5,7 +5,7 @@
 
 import type { Definition, Json, ParamDef, Step, Text, Value } from '../definitions/types.ts';
 import { type Desk, type Index, has, isAuto, mmss, nameOn, resolve, valueOf } from './core.ts';
-import { type Msg, type Slot, list, msg } from './messages.ts';
+import { type Msg, type Slot, type SlotList, list, msg } from './messages.ts';
 import { fillMsg, formatMsg, paramWords, stateWords, stepKey } from './strings.ts';
 
 export interface StepWords {
@@ -52,6 +52,12 @@ export const defName = (d: Definition, desk: Desk): Msg => {
   const line = d.kind === 'module' ? (d.per || []).find(l => l.engines.includes(desk.engine) && l.name) : undefined;
   return { id: `create.${d.id}.name${line ? `@${line.engines.join('+')}` : ''}`, en: nameOn(d, desk.engine) };
 };
+/** A definition's description on the desk's engine, as a message: its engine's line's when that has one (Tempo on
+ *  MiniMax-Music3 holds Beat I/O, not a length: E-15). Every list that describes a module says this. */
+export const defDesc = (d: Definition, desk: Desk): Msg => {
+  const line = d.kind === 'module' ? (d.per || []).find(l => l.engines.includes(desk.engine) && l.desc) : undefined;
+  return line ? { id: `create.${d.id}.desc@${line.engines.join('+')}`, en: line.desc! } : { id: `create.${d.id}.desc`, en: d.desc };
+};
 
 /** A value as a step shows it: "auto" on auto, else as it is written everywhere. */
 function shown(ix: Index, key: string, desk: Desk): Slot {
@@ -74,11 +80,25 @@ export function changesOf(ix: Index, before: Desk, after: Desk): { keys: string[
 }
 
 /** What a desk path is called in "Change ..." and "Puts back ...". */
-function pathNames(ix: Index, keys: string[], state: string[], desk: Desk): Slot {
-  const vs = keys.map(k => stepName(ix, k, desk)), rest = [...new Set(state)].filter(s => ix.states.has(s)).map(s => stateWords(ix, s).noun);
+function pathNames(ix: Index, keys: string[], state: string[], desk: Desk, parts: Msg[] = []): SlotList {
+  const vs = keys.map(k => stepName(ix, k, desk)), rest = [...parts, ...[...new Set(state)].filter(s => ix.states.has(s)).map(s => stateWords(ix, s).noun)];
   const isThe = (m: Msg) => /^the /.test(m.en ?? '');
   const theVs = vs.filter(isThe), plain = vs.filter(x => !isThe(x));
   return list([...rest, ...theVs, ...(plain.length > 2 ? [msg('step.settings', { n: plain.length })] : plain)]);
+}
+
+/** The parts of the desk a step can change besides values and states, by the words that name them. */
+export type DeskPath = 'mods' | 'board' | 'engine' | 'tier';
+const PATH_WORDS: { [p in DeskPath]: string } = { mods: 'path.mods', board: 'path.pedals', engine: 'path.engine', tier: 'path.tier' };
+/** What an Undo or Redo left alone because something changed it again since the step (14-undo.js: a later edit of the
+ *  same thing is kept, and the toast says so): "The description changed since, so it was left as it is". `spent`:
+ *  nothing of the step was left to move, and the words follow "Nothing to put back for ...:". Null when it kept
+ *  nothing it can name. */
+export function keptWords(ix: Index, kept: { keys: string[]; state: string[]; parts: DeskPath[] }, desk: Desk, spent = false): Msg | null {
+  const keys = [...new Set(kept.keys)].filter(k => ix.params.has(k)), state = [...new Set(kept.state)].filter(s => ix.states.has(s)), parts = [...new Set(kept.parts)];
+  const what = pathNames(ix, keys, state, desk, parts.map(p => msg(PATH_WORDS[p])));
+  if (!what.list.length) return null;
+  return spent ? msg('step.kept.spent', { what }) : msg('step.kept', { what, n: keys.length + state.length + parts.length });
 }
 
 /** The words of the step from `before` to `after`. `named`: the step a part asked for; `row`: the Quick choice row the

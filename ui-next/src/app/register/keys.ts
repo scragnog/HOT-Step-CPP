@@ -7,6 +7,12 @@
 // `order` decides who is asked first where two could answer the same key (lower first; 50 by default): a text field's
 // own Ctrl+Z (the lyrics package) registers before the page's Undo with a lower order and declines (`when` false)
 // once the field has nothing of its own left to undo.
+//
+// `create: true` marks a key of the Create page (F9, Alt+1/2/3, F6, Space for the player, the drawers' keys): on
+// another page (Library, Settings...) it is not asked, so it does nothing there (31-screens.js); the keys every page
+// shares (Escape over the notes, the page's Undo, which on another page takes the key and does nothing) leave it out.
+
+import { onCreate } from '../shell/screens.ts';
 
 export interface KeyBinding {
   /** A name, unique on the page: two features never bind under one name. */
@@ -14,6 +20,8 @@ export interface KeyBinding {
   when(e: KeyboardEvent): boolean;
   run(e: KeyboardEvent): void;
   order?: number;
+  /** A key of the Create page: not asked while another page shows. */
+  create?: boolean;
 }
 
 const KEYS: KeyBinding[] = [];
@@ -32,7 +40,8 @@ export const ownEnter = (sel: string): void => { OWN_ENTER.push(sel); };
 export const enterIsOwn = (el: Element | null): boolean => !!el && OWN_ENTER.some(s => !!el.closest?.(s));
 
 export function dispatchKey(e: KeyboardEvent): void {
-  for (const k of KEYS) if (k.when(e)) { k.run(e); return; }
+  const create = onCreate();
+  for (const k of KEYS) if ((create || !k.create) && k.when(e)) { k.run(e); return; }
 }
 
 /** Ctrl (or Cmd) and a key, without Alt; `shift` says whether Shift must be held (undefined: either). */

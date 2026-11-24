@@ -17,7 +17,7 @@
     {"feature": "wf delete", "file": "src/app/store/workflows.ts", "find": "  del();\n  const entry = desk().recordStep(recordStep('delete', gone.name, whatWorkflow(gone.name))", "replace": "  void del;\n  const entry = desk().recordStep(recordStep('delete', gone.name, whatWorkflow(gone.name))"},
     {"feature": "wf delete asks", "file": "src/app/workflows/List.tsx", "find": "    if ((a === 'delpreset' || a === 'rdel') && armed !== a) { setArmed(a); return; }\n", "replace": ""},
     {"feature": "wf update", "file": "src/app/store/workflows.ts", "find": "  useWf.setState({ saved: putWorkflow(s.saved, nw) }); persistSaved();", "replace": "  persistSaved();"},
-    {"feature": "wf record undo", "file": "src/app/store/desk.ts", "find": "const note = e.run ? e.run.undo() :", "replace": "const note = e.run ? undefined :"},
+    {"feature": "wf record undo", "file": "src/app/store/desk.ts", "find": "const r = e.run ? { moved: true, note: e.run.undo() ?? null } :", "replace": "const r = e.run ? { moved: true, note: null } :"},
     {"feature": "wf workflow modified", "file": "src/derive/workflows.ts", "find": "  return mine.mods.join() !== now.mods.join() || mine.board.join() !== now.board.join();", "replace": "  return false && mine.mods.join() !== now.mods.join();"},
     {"feature": "wf revision modified", "file": "src/derive/workflows.ts", "find": "  revisionDiff(ix, r, desk).length > 0 || revisionStateDiffers(ix, r, desk) || revisionContentDiffers(ix, r, desk);", "replace": "  false;"},
     {"feature": "wf revision details", "file": "src/app/workflows/List.tsx", "find": "      {info ? <Detail row={r} /> : null}", "replace": "      {null}"},
