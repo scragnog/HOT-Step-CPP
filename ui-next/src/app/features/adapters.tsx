@@ -5,11 +5,10 @@
 // and puts focus on its fader or its ×  (L-07). And what the page is told about the adapters installed, from the
 // adapters service (services/adapters.ts), once when the page loads.
 //
-// The list is drawn into the concept's #pop. Package 8 builds the page's popover; until then this is the only thing
-// that opens #pop, and it shows, places and hides it itself (the concept's openPop and placeFloat, 17-popover.js).
+// The list is drawn in the page's popover (features/pop.ts openPop, package 8): placed under its button, named for it,
+// focus on its first file, closed by Escape, a press outside or Tab, focus back to the button.
 
-import { useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
+import type { KeyboardEvent } from 'react';
 import type { Definition, Node } from '../../definitions/types.ts';
 import { ENGINES } from '../../definitions/engines.ts';
 import { adapterLists, adaptersAway, bindPart, instrumentModel, nodeAt, nodeKeys, partAct, type Desk } from '../../derive.ts';
@@ -17,7 +16,7 @@ import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { useSay } from '../i18n/index.ts';
 import { defineAction } from '../register/actions.ts';
-import { fill } from '../register/slots.ts';
+import { openPop, closePop } from './pop.ts';
 import { useModel } from '../render/useModel.ts';
 import { CartArt } from '../parts/CartArt.tsx';
 import { adapters } from '../services/adapters.ts';
@@ -34,20 +33,13 @@ const CARTS = findCarts();
 /** What the cartridges draw on a desk, their node as that desk shows it. */
 const cartsOn = (desk: Desk) => { const n = CARTS ? nodeAt(ix, CARTS.node, desk) : null; return n && CARTS ? instrumentModel(ix, n, desk, CARTS.key)?.carts ?? null : null; };
 
-/* which list is open, and the button it opened from */
-let open: { which: 'slot' | 'planner'; anchor: HTMLElement | null } | null = null;
-const subs = new Set<() => void>();
-const setOpen = (o: typeof open) => { open = o; subs.forEach(f => f()); };
-/** Closes the open list; focus goes back to its button. */
-function close(refocus = true) { const a = open?.anchor; a?.setAttribute('aria-expanded', 'false'); setOpen(null); if (refocus && a?.isConnected) a.focus({ preventScroll: true }); }
-const useOpen = () => useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => open);
 /* the button a hand pressed last: the list opens under it (a click does not focus a button everywhere) */
 let pressed: HTMLElement | null = null;
 document.addEventListener('click', e => { pressed = (e.target as HTMLElement | null)?.closest?.('button') ?? null; }, true);
 const toggle = (which: 'slot' | 'planner') => () => {
   const f = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
   const a = pressed?.isConnected ? pressed : f;
-  setOpen(open && open.which === which && open.anchor === a ? null : { which, anchor: a });
+  if (a) openPop(a, () => <AdapterList which={which} />);
 };
 defineAction('loadAdapter', toggle('slot'));
 defineAction('loadPlannerAdapter', toggle('planner'));
@@ -62,47 +54,23 @@ function act(name: string, arg: unknown): void {
   } catch { /* the cartridges are not on the desk any more */ }
 }
 
-export function AdapterList() {
-  const say = useSay(), o = useOpen(), pop = document.getElementById('pop');
-  const m = useModel(s => (o ? cartsOn(s.desk) : null), `adapter-list|${o?.which ?? ''}`);
-  const list = o?.which === 'planner' ? m?.plannerList : m?.list;
-  /* shown under its button (above it when there is more room there), within the window; focus on its first file */
-  useLayoutEffect(() => {
-    const pop = document.getElementById('pop'); if (!pop) return;
-    pop.hidden = !list; if (!list || !o) { pop.removeAttribute('aria-label'); return; }
-    /* named, as every popover is, for the button that opened it (17-popover.js openPop) */
-    pop.setAttribute('aria-label', o.anchor?.getAttribute('aria-label') || o.anchor?.textContent?.trim() || say(list.head));
-    const a = o.anchor?.isConnected ? o.anchor.getBoundingClientRect() : null, vw = document.documentElement.clientWidth, w = pop.offsetWidth, h = pop.offsetHeight, gap = 6, edge = 12;
-    if (a) {
-      const below = innerHeight - edge - a.bottom - gap, above = a.top - gap - edge, up = h > below && above > below;
-      pop.style.top = `${Math.round((up ? a.top - gap - h : a.bottom + gap) + scrollY)}px`;
-      pop.style.left = `${Math.round(Math.min(Math.max(edge, a.left), Math.max(edge, vw - w - edge)) + scrollX)}px`; pop.style.right = 'auto';
-      pop.classList.toggle('up', up);
-    }
-    o.anchor?.setAttribute('aria-expanded', 'true');
-    pop.querySelector<HTMLElement>('.cartpick')?.focus({ preventScroll: true });
-  }, [list, o, say]);
-  /* a press outside it, or on another button, closes it */
-  useEffect(() => {
-    const pop = document.getElementById('pop'); if (!o) return;
-    const out = (e: PointerEvent) => { const t = e.target as HTMLElement | null; if (t && !t.closest('#pop, #toast') && !(o.anchor && o.anchor.contains(t))) close(false); };
-    /* the list is a grid of choices: the arrow keys move through it, Home and End go to its ends; Escape closes it (L-22) */
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
-      const all = [...(pop?.querySelectorAll<HTMLElement>('.cartlist > .cartpick') ?? [])], i = all.indexOf(document.activeElement as HTMLElement);
-      if (i < 0) return;
-      const cols = getComputedStyle(all[0]!.parentElement!).gridTemplateColumns.split(' ').length;
-      const j = ({ ArrowRight: i + 1, ArrowLeft: i - 1, ArrowDown: i + cols, ArrowUp: i - cols, Home: 0, End: all.length - 1 } as { [k: string]: number })[e.key];
-      if (j === undefined) return;
-      e.preventDefault(); all[Math.min(all.length - 1, Math.max(0, j))]!.focus();
-    };
-    document.addEventListener('pointerdown', out, true); pop?.addEventListener('keydown', keys);
-    return () => { document.removeEventListener('pointerdown', out, true); pop?.removeEventListener('keydown', keys); };
-  }, [o]);
-  if (!pop || !o || !list) return null;
+/** The list in the popover: the next slot's files, or the planner LM adapters. */
+export function AdapterList({ which }: { which: 'slot' | 'planner' }) {
+  const say = useSay(), m = useModel(s => cartsOn(s.desk), `adapter-list|${which}`);
+  const list = which === 'planner' ? m?.plannerList : m?.list;
+  if (!list) return null;
+  /* the list is a grid of choices: the arrow keys move through it, Home and End go to its ends (L-22) */
+  const keys = (e: KeyboardEvent<HTMLDivElement>) => {
+    const all = [...e.currentTarget.querySelectorAll<HTMLElement>('.cartpick')], i = all.indexOf(document.activeElement as HTMLElement);
+    if (i < 0 || !all.length) return;
+    const cols = getComputedStyle(e.currentTarget).gridTemplateColumns.split(' ').length;
+    const j = ({ ArrowRight: i + 1, ArrowLeft: i - 1, ArrowDown: i + cols, ArrowUp: i - cols, Home: 0, End: all.length - 1 } as { [k: string]: number })[e.key];
+    if (j === undefined) return;
+    e.preventDefault(); all[Math.min(all.length - 1, Math.max(0, j))]!.focus();
+  };
   const choose = (x: (typeof list.items)[number]) => {
-    const which = o.which, before = useDesk.getState().desk;
-    close(false);
+    const before = useDesk.getState().desk;
+    closePop(false);
     if (which === 'planner') {
       act('planner', x.value);
       useDesk.getState().setFocus(`[data-m="${CARTS!.def.id}"] [data-setv]`);
@@ -114,22 +82,20 @@ export function AdapterList() {
       if (useDesk.getState().desk !== before) useDesk.getState().setFocus(f ? `[data-m="${CARTS!.def.id}"] [data-fader="${f}"]` : `[data-m="${CARTS!.def.id}"] [data-cartx]`);
     }
   };
-  return createPortal(
+  return (
     <>
       <h4>{say(list.head)}</h4>
-      <div className="cartlist">
+      <div className="cartlist" onKeyDown={keys}>
         {list.items.map(x => (
-          <button key={x.value} type="button" className={`cartpick t-${x.cls}`} {...(o.which === 'planner' ? { 'data-pickplanner': x.label } : { 'data-loadad': `${x.file}|${x.type}` })} title={say(x.title)} onClick={() => choose(x)}>
+          <button key={x.value} type="button" className={`cartpick t-${x.cls}`} {...(which === 'planner' ? { 'data-pickplanner': x.label } : { 'data-loadad': `${x.file}|${x.type}` })} title={say(x.title)} onClick={() => choose(x)}>
             <span className="mini-art"><CartArt a={x.art} /></span><b>{x.file}</b><em>{x.type}</em>
           </button>
         ))}
       </div>
       {list.note !== null ? <span className="lbl">{say(list.note)}</span> : null}
-    </>,
-    pop,
+    </>
   );
 }
-fill('overlays', AdapterList);
 
 /** The installed adapters of every engine, and the planner LM adapters, told to the page once it loads. */
 async function tell(): Promise<void> {

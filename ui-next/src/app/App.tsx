@@ -14,8 +14,8 @@ import { LiveRegion, Toast } from './shell/Toast.tsx';
 import { closeDrawer } from './shell/drawers.ts';
 import { usePanelStore, drawerMode } from './store/panels.ts';
 import { dispatchKey } from './register/keys.ts';
-import type { Engine } from './services/engine.ts';
 import { Slot } from './register/Slot.tsx';
+import type { Engine } from './services/engine.ts';
 
 export function App({ engine }: { engine: Engine }) {
   const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus), drawer = usePanelStore(s => s.drawer);
@@ -61,9 +61,9 @@ export function App({ engine }: { engine: Engine }) {
       <Centre />
       <ModulesPanel open={panels.R} set={v => panels.set('right', v)} />
       <Toast />
-      <LiveRegion />
-      {/* the overlays the packages draw at the page's root (register/slots.ts): the first to need it placed it (package 3b) */}
+      {/* the overlays the packages fill (register/slots.ts 'overlays'): each portals into its container in the skeleton */}
       <Slot name="overlays" />
+      <LiveRegion />
     </>
   );
 }

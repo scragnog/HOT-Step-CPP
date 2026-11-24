@@ -28,7 +28,6 @@
   ],
   "excluded": [
     { "id": "04-controls/number-boxes", "why": "Its BPM box is Tempo's lcdNumber inside an LCD row (lcdRow, package 2). Its number-box checks are in 31-controls/number-box-types-steps-and-scrubs; the lcdNumber's in 32-controls-gallery/lcd-number-types-and-steps." },
-    { "id": "04-controls/ruler-fader-scrub", "why": "Its faders are the adapters' cartridges (package 3) and its reference blend the timbre module's (package 3); its ruler and token checks are in 31-controls." },
     { "id": "04-controls/dropdowns", "why": "Its LCD picker and the knobs a schedule brings are in rack groups (group, package 2), its time signature in an LCD row (package 2), its model picker in the engine panel (package 5); and it finds options by data-opt as their label (deviation 10). Its plugin checks are in 31-controls/plugin-picker-table-grid-and-filter." },
     { "id": "04-controls/language-stamp", "why": "The stamp is on the lyric sheet (package 4), and it reads the concept's storage key hs3-lang-recent (deviation 5: the page keeps hotstep.create.langRecent). The stamp's list is in 32-controls-gallery/chip-model-and-stamp-pickers." },
     { "id": "04-controls/typed-checks-examples", "why": "The planner seed is a terminal field (terminal, package 2); Insert example and the scope are package 3's. Its kept-field checks are in 31-controls/checked-text-keeps-or-refuses." },
