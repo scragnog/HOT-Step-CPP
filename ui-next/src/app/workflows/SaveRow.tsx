@@ -22,7 +22,8 @@ export function HeadButtons() {
   return (
     <>
       <button type="button" className="small-btn" id="saveBtn" aria-controls="saveRow" aria-expanded={open} onClick={() => (useWfView.getState().saveOpen ? closeSave(false) : openSave())}>
-        <Icon name="plus" size={13} />{say(ui('panel.save'))}
+        {/* the concept's own plus, a heavier stroke than the icon set's */}
+        <svg className="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>{say(ui('panel.save'))}
       </button>
       <button type="button" className="icon-btn" id="importBtn" title={say(ui('panel.import.title'))} aria-label={say(ui('panel.import'))} onClick={() => file.current?.click()}><Icon name="upload" size={15} /></button>
       <input ref={file} type="file" id="importFile" accept="application/json,.json" hidden onChange={e => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ''; if (f) importChosen(f); }} />
@@ -60,18 +61,18 @@ export function SaveRow() {
     else saveWorkflow(name ?? replace!, replace, () => openSave('rev'));
   };
   const typed = () => { setCount(field.current?.value.length ?? 0); if (useWfView.getState().err || useWfView.getState().confirm) useWfView.setState({ err: null, confirm: null }); };
-  const hint = v.err ? v.err.says : m.hint.says, warn = !!v.err || m.hint.warn;
+  const hint = v.err ? v.err.says : m.hint.says, warn = v.saveOpen && (!!v.err || m.hint.warn);
   return (
     <div className="save-row" id="saveRow" hidden={!v.saveOpen}>
       <div className="save-as" role="group" aria-label={say(ui('wf.saveAs.group'))}>
-        <button type="button" data-saveas="rev" aria-pressed={m.rev} disabled={!m.wf} title={say(m.wf ? { id: 'wf.saveAs.rev.title', slots: { name: m.wf } } : { id: 'wf.saveAs.rev.none' })}
+        <button type="button" data-saveas="rev" aria-pressed={m.rev} disabled={!m.wf} title={say(!v.saveOpen ? ui('wf.saveAs.rev.title') : m.wf ? { id: 'wf.saveAs.rev.title', slots: { name: m.wf } } : { id: 'wf.saveAs.rev.none' })}
           onClick={() => { useWfView.setState({ saveAs: 'rev', confirm: null, err: null }); field.current?.focus(); }}>{say(ui('wf.saveAs.rev'))}</button>
         <button type="button" data-saveas="wf" aria-pressed={!m.rev} onClick={() => { useWfView.setState({ saveAs: 'wf', confirm: null, err: null }); field.current?.focus(); }}>{say(ui('wf.saveAs.wf'))}</button>
       </div>
       <span className="save-field">
-        <input ref={field} id="saveName" placeholder={say(ui(m.rev ? 'wf.name.rev' : 'wf.name.wf'))} maxLength={MAX} aria-label={say(ui('wf.name'))} aria-describedby="saveHint saveCount" onInput={typed}
+        <input ref={field} id="saveName" placeholder={say(ui(!v.saveOpen ? 'wf.name.it' : m.rev ? 'wf.name.rev' : 'wf.name.wf'))} maxLength={MAX} aria-label={say(ui('wf.name'))} aria-describedby="saveHint saveCount" onInput={typed}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSave(true); } }} />
-        <span className="save-count mono" id="saveCount" hidden={count < MAX - 5} aria-live="polite">{count < MAX - 5 ? '' : say(ui('wf.count', { n: count, max: MAX }))}</span>
+        <span className="save-count mono" id="saveCount" hidden={count < MAX - 5} aria-live="polite">{v.saveOpen ? say(ui('wf.count', { n: count, max: MAX })) : ''}</span>
       </span>
       <button type="button" className={`small-btn primary${v.confirm ? ' warn' : ''}`} id="saveOk" onClick={save}>{say(ui(v.confirm ? 'wf.replace' : 'wf.save'))}</button>
       <label className="save-inc" id="saveInc" hidden={!m.rev}><input ref={inc} type="checkbox" id="incContent" defaultChecked /> {say(ui('wf.include'))}</label>

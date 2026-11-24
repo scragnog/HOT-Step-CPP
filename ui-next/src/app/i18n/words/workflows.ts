@@ -26,6 +26,8 @@ export const WORDS: { [id: string]: string } = {
   'ui.wf.saveAs.rev': 'Revision',
   'ui.wf.saveAs.wf': 'New workflow',
   'ui.wf.name': 'Name',
+  'ui.wf.name.it': 'Name it',
+  'ui.wf.saveAs.rev.title': 'Every setting, under the open workflow',
   'ui.wf.name.rev': 'Revision name',
   'ui.wf.name.wf': 'Workflow name',
   'ui.wf.save': 'Save',

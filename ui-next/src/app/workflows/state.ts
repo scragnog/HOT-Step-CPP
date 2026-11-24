@@ -17,15 +17,16 @@ export interface WfView {
   err: { says: import('../../derive.ts').Msg; n: number } | null;
   /** What the save field should hold when it next shows (Save as… fills it). */
   prefill: { text: string; n: number } | null;
-  /** The row whose name is a field. */
+  /** The row whose name is a field, and why the name typed there was refused (said under the row: F-11). */
   renaming: RowRef | null;
+  renameErr: import('../../derive.ts').Msg | null;
   /** The popover the panel or the go bar opened: the row menu of a row, or the drafts. */
   pop: { kind: 'menu'; row: RowRef; anchor: HTMLElement; armed?: 'delpreset' | 'rdel' } | { kind: 'drafts'; anchor: HTMLElement } | null;
   /** The row that takes Tab in the list (F-07): its selector. */
   rove: string | null;
 }
 
-export const useWfView = create<WfView>()(() => ({ saveOpen: false, saveAs: 'rev', confirm: null, err: null, prefill: null, renaming: null, pop: null, rove: null }));
+export const useWfView = create<WfView>()(() => ({ saveOpen: false, saveAs: 'rev', confirm: null, err: null, prefill: null, renaming: null, renameErr: null, pop: null, rove: null }));
 
 /** A row's selector, by the concept's data attributes. */
 export const rowSel = (r: RowRef, backend: (e: RevId['engine']) => string): string => r.kind === 'wf'

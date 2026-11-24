@@ -93,13 +93,13 @@ const WORDS: { [id: string]: string } = {
   'wf.row.chev': 'Show the revisions of {name}',
   'wf.row.openIn': 'Open in {tier}',
   'wf.row.openIn.label': 'Open {name} in {tier}',
-  'rev.row.label': '{name}{mine, select, true {, yours} other {}}, {engine}{holds, select, lyrics {, holds lyrics} box {, holds {box}} other {}}{mod, select, true {, modified} other {}}',
+  'rev.row.label': '{name}{mine, select, true {, yours} other {}}, {engine}{holds, select, lyrics {, holds lyrics} box {, holds a {box}} other {}}{mod, select, true {, modified} other {}}',
   'rev.row.tip.load': 'Load {wf}, then this revision\'s settings',
   'rev.row.tip.changed': '{n, plural, one {# setting} other {# settings}} changed since it was saved. The info button shows which.',
   'rev.row.tip.content': 'What it holds besides settings (description, lyrics or song info) changed since it was saved',
   'rev.row.tip.mod': 'Changed since it was saved',
   'rev.row.holds.lyrics': 'Holds lyrics too',
-  'rev.row.holds.box': 'Holds {box} too',
+  'rev.row.holds.box': 'Holds a {box} too',
   'rev.row.info': 'What {name} holds',
   'rev.row.info.title': 'What it holds',
   'rev.row.info.title.mod': 'What it holds, and what changed',
@@ -114,6 +114,11 @@ const WORDS: { [id: string]: string } = {
   'wf.saveAs.name': '{name} (mine)',
   'rev.detail.empty': 'Every setting at its default.',
   'rev.detail.content': 'Content',
+  'rev.detail.post': 'Post-processing',
+  'rev.detail.of': '{owner} · {label}',
+  'rev.detail.slot': '{type} · {v}',
+  'wf.box': '{e, select, minimax-m3 {caption} sa3 {prompt} heartmula {tags} other {description}}',
+  'wf.box.cap': '{e, select, minimax-m3 {Caption} sa3 {Prompt} heartmula {Tags} other {Description}}',
   'rev.detail.lyrics': 'Lyrics',
   'rev.detail.lines': '{n, plural, one {# line} other {# lines}}',
   'rev.detail.quote': '“{text}”',
@@ -419,7 +424,7 @@ export function revisionHolds(r: Revision): 'lyrics' | 'box' | null {
   return t('lyrics.text') ? 'lyrics' : t('prompt.text') ? 'box' : null;
 }
 /** What the main box is called on an engine, inside a sentence ("the description", "the tags"). */
-export const boxWord = (ix: Index, desk: Desk, e: EngineId = desk.engine): Msg => stepName(ix, 'prompt.text', onEngine(desk, e));
+export const boxWord = (_ix: Index, desk: Desk, e: EngineId = desk.engine): Msg => msg('wf.box', { e });
 
 /** A revision's details (the info button): its settings that are not at their defaults, by what owns them, in the
  *  definitions' order; a modified revision also lists what changed since, with its value now (C-36); its adapters and
@@ -428,23 +433,35 @@ export interface DetailRow { label: Slot; value: Slot; now?: Slot; wide?: true }
 export interface Detail { groups: { name: Slot; rows: DetailRow[] }[]; empty: Msg | null }
 export function revisionDetail(ix: Index, r: Revision, desk: Desk, modified: boolean): Detail {
   const d0 = onEngine(desk, r.engine), diff = new Map(modified ? revisionDiff(ix, r, desk).map(x => [x.key, x.now]) : []);
-  const groups: Detail['groups'] = [];
-  for (const def of ix.defs) {
+  const groups: Detail['groups'] = [], post: DetailRow[] = [];
+  /* the modules in the desk's order, then the pedals and side units together, each named by its pedal (C-36) */
+  const mods = ix.defs.filter(d => d.kind === 'module').sort((a, b) => a.at - b.at), board = ix.defs.filter(d => d.kind !== 'module').sort((a, b) => (a.kind === b.kind ? a.at - b.at : a.kind === 'pedal' ? -1 : 1));
+  for (const def of [...mods, ...board]) {
     const rows: DetailRow[] = [];
+    /* an adapter slot's strength stands on the slot's own line, "LoRA · 0.80" (the parameter whose name is the slot's) */
+    const slotOf = (k: string) => /\{file:([\w.-]+)\.(\d+)\|/.exec(def.params.find(p => p.key === k)?.undoName ?? '');
+    for (const s of def.state ?? []) {
+      if (s.stored !== 'settings' || !def.engines.includes(r.engine)) continue;
+      stateSlots(r.state?.[s.key]).forEach((x, i) => {
+        if (!isRec(x) || typeof x.file !== 'string') return;
+        const k = def.params.find(p => { const m = slotOf(p.key); return !!m && m[1] === s.key && +m[2]! === i; })?.key;
+        const v = k && has(ix, k, r.engine) ? held(ix, k, r.engine, r.vals, r.auto) : null, type = typeof x.type === 'string' ? x.type : '';
+        rows.push({ label: x.file, value: v === null ? type : msg('rev.detail.slot', { type, v: words(ix, k!, d0, v) }), ...(k && diff.has(k) ? { now: diff.get(k)! } : {}) });
+      });
+    }
     for (const p of def.params) {
       const k = p.key;
       if (!has(ix, k, r.engine) || isSource(ix, k) || storedOf(ix, k) !== 'settings' || p.type === 'text') continue;
+      if (slotOf(k) && stateSlots(r.state?.[slotOf(k)![1]!])[+slotOf(k)![2]!]) continue;
       const v = held(ix, k, r.engine, r.vals, r.auto), f = resolve(p, r.engine), dflt = f.auto ? 'auto' : f.default;
       if (JSON.stringify(v) === JSON.stringify(dflt) && !diff.has(k)) continue;
-      const now = diff.get(k);
-      rows.push({ label: paramWords(ix, k, d0).label, value: words(ix, k, d0, v), ...(now !== undefined ? { now } : {}) });
-    }
-    for (const s of def.state ?? []) {
-      if (s.stored !== 'settings' || !def.engines.includes(r.engine)) continue;
-      for (const x of stateSlots(r.state?.[s.key])) if (isRec(x) && typeof x.file === 'string') rows.push({ label: x.file, value: typeof x.type === 'string' ? x.type : '' });
+      const now = diff.get(k), label = paramWords(ix, k, d0).label;
+      const own = def.kind === 'module' ? label : def.on === k ? defName(def, d0) : msg('rev.detail.of', { owner: defName(def, d0), label });
+      (def.kind === 'module' ? rows : post).push({ label: own, value: words(ix, k, d0, v), ...(now !== undefined ? { now } : {}) });
     }
     if (rows.length) groups.push({ name: defName(def, d0), rows });
   }
+  if (post.length) groups.push({ name: msg('rev.detail.post'), rows: post });
   if (r.withContent) {
     const rows: DetailRow[] = [], text = (k: string) => (typeof r.vals[k] === 'string' ? (r.vals[k] as string) : '');
     const box = text('prompt.text');
@@ -669,7 +686,7 @@ export function applyDraft(ix: Index, desk: Desk, d: Draft): Desk {
 }
 /** The words over the Drafts list: what a draft saves on this engine. */
 export function draftsAbout(ix: Index, desk: Desk): { says: Msg; tip: Msg } {
-  const lyrics = has(ix, 'lyrics.text', desk.engine), box = paramWords(ix, 'prompt.text', desk).label;
+  const lyrics = has(ix, 'lyrics.text', desk.engine), box = msg('wf.box.cap', { e: desk.engine });
   return { says: msg('draft.about', { box, lyrics: String(lyrics), n: DRAFT_MAX }), tip: msg('draft.about.title', { box: boxWord(ix, desk), lyrics: String(lyrics) }) };
 }
 export const draftLoaded = (d: Draft, switched: boolean): Msg =>

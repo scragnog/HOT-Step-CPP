@@ -35,8 +35,10 @@ const rowRef = (el: Element): RowRef | null => {
 /* ---------------------------------------------------------------- renaming in place (G-D-30, F-11) */
 
 function Rename({ row, name, commit }: { row: RowRef; name: string; commit: (v: string) => Msg | null }) {
-  const say = useSay(), input = useRef<HTMLInputElement>(null), [err, setErr] = useState<Msg | null>(null), done = useRef(false);
-  useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
+  const say = useSay(), input = useRef<HTMLInputElement>(null), err = useWfView(s => s.renameErr), done = useRef(false);
+  const setErr = (e: Msg | null) => useWfView.setState({ renameErr: e });
+  /* the field holds the name as its value, not as an attribute (as the concept's renameInline sets it) */
+  useEffect(() => { const f = input.current; if (!f) return; f.value = name; f.focus(); f.select(); }, [name]);
   const end = (ok: boolean, blurTo?: Element | null) => {
     if (done.current) return;
     const v = normName(input.current?.value ?? '');
@@ -45,19 +47,23 @@ function Rename({ row, name, commit }: { row: RowRef; name: string; commit: (v: 
       if (e) { setErr(e); useDesk.getState().say(e); input.current?.focus(); return; }
     }
     done.current = true;
-    useWfView.setState({ renaming: null });
+    useWfView.setState({ renaming: null, renameErr: null });
     /* focus stays on the row (under its new name), unless the blur took it elsewhere */
     if (!blurTo) requestAnimationFrame(() => document.querySelector<HTMLElement>(sel(row.kind === 'wf' ? { ...row, name: useWf.getState().saved.workflows.some(w => w.name === v) && ok ? v : name } : { ...row, id: { ...row.id, name: ok && findRevision(useWf.getState().saved, { ...row.id, name: v }, true) ? v : name } }))?.focus({ preventScroll: true }));
   };
   return (
     <>
-      <input ref={input} className="pren" defaultValue={name} maxLength={28} aria-label={say(ui('wf.newName'))} aria-describedby="prenHint" {...(err ? { 'aria-invalid': true } : {})}
+      <input ref={input} className="pren" maxLength={28} aria-label={say(ui('wf.newName'))} aria-describedby="prenHint" {...(err ? { 'aria-invalid': true } : {})}
         onInput={() => setErr(null)} onClick={e => e.stopPropagation()}
         onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') end(true); if (e.key === 'Escape') end(false); }}
         onBlur={e => end(true, e.relatedTarget)} />
-      <p className="save-hint warn pren-hint" id="prenHint" hidden={!err}>{err ? say(err) : ''}</p>
     </>
   );
+}
+/** A refused rename's reason, under its row (the concept appends it to the row). */
+function RenameHint() {
+  const say = useSay(), err = useWfView(s => s.renameErr);
+  return <p className="save-hint warn pren-hint" id="prenHint" hidden={!err}>{err ? say(err) : ''}</p>;
 }
 
 /* ---------------------------------------------------------------- the row menu (G-D-29) */
@@ -166,7 +172,7 @@ function RevisionRow({ r, tab }: { r: RevRow } & Pick<RowProps, 'tab'>) {
   return (
     <>
       <div className={`pre rev${r.on ? ' on' : ''}${r.modified ? ' mod' : ''}`} {...attrs} role="button" tabIndex={t} aria-label={say(r.label)} {...(r.on ? { 'aria-current': true } : {})} title={say(r.tip)}
-        onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) load(); }} onKeyDown={e => rowKeys(e, load)} onFocus={e => { if (e.target === e.currentTarget) useWfView.setState({ rove: sel(ref) }); }}>
+        onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) load(); }} onKeyDown={e => rowKeys(e, load)} onFocus={() => useWfView.setState({ rove: sel(ref) })}>
         <span className="rev-eng" style={{ '--ec': ENGINE_COLOUR[r.engine] } as CSSProperties} title={engineName(r.engine)} dangerouslySetInnerHTML={{ __html: logoOf(r.engine, 13) }} />
         {renaming ? <Rename row={ref} name={name} commit={v => renameRev(r.id, v)} /> : <b>{name}</b>}
         {r.mine ? <i className="pmine" title={say(ui('wf.yoursMark.title'))} aria-hidden="true">{say(ui('wf.yoursMark'))}</i> : null}
@@ -185,6 +191,7 @@ function RevisionRow({ r, tab }: { r: RevRow } & Pick<RowProps, 'tab'>) {
             ? <button type="button" className="jump show" data-rover="" {...attrs} title={say({ id: 'rev.update.title' })} tabIndex={t} onClick={e => { e.stopPropagation(); keepOn(ref); updateRevision(r.id); }}>{ico('saveIn', 13)}{say(ui('wf.update'))}</button>
             : <button type="button" className="jump show" data-saveasnew={`rev|${name}`} title={say({ id: 'rev.saveAs.title' })} tabIndex={t} onClick={e => { e.stopPropagation(); openSave('rev', { id: 'wf.saveAs.name', slots: { name } }); }}>{ico('pagePlus', 13)}{say(ui('wf.saveAs'))}</button>}
         </span> : null}
+        {renaming ? <RenameHint /> : null}
       </div>
       {info ? <Detail row={r} /> : null}
     </>
@@ -201,7 +208,7 @@ function WorkflowRow({ w, tab, tier }: { w: WfRow } & RowProps) {
   return (
     <div className={`wf${shown ? ' open' : ''}`}>
       <div className={`pre wfrow${w.on ? ' on' : ''}${w.modified ? ' mod' : ''}`} data-preset={w.name} role="button" tabIndex={t} aria-label={say(w.label)} {...(w.on ? { 'aria-current': true } : {})} title={say(w.tip)}
-        onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) open(); }} onKeyDown={e => rowKeys(e, open)} onFocus={e => { if (e.target === e.currentTarget) useWfView.setState({ rove: sel(ref) }); }}>
+        onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) open(); }} onKeyDown={e => rowKeys(e, open)} onFocus={() => useWfView.setState({ rove: sel(ref) })}>
         <button type="button" className="pchev" data-wfopen={w.name} aria-expanded={shown} disabled={!n} title={say({ id: 'wf.row.count', slots: { n } })} aria-label={say({ id: 'wf.row.chev', slots: { name: w.name } })} tabIndex={t}
           onClick={e => { e.stopPropagation(); chev(); }}>{ico('chevR', 12)}</button>
         <span className={`pdot ${w.tier}`} title={say(w.tierWord)}><span className="sr-only">{say(w.tierWord)}</span></span>
@@ -220,6 +227,7 @@ function WorkflowRow({ w, tab, tier }: { w: WfRow } & RowProps) {
             ? <button type="button" className="jump show" data-wfupd={w.name} title={say({ id: 'wf.update.wf.title' })} tabIndex={t} onClick={e => { e.stopPropagation(); keepOn(ref); updateWorkflow(w.name); }}>{ico('saveIn', 13)}{say(ui('wf.update'))}</button>
             : <button type="button" className="jump show" data-saveasnew={`wf|${w.name}`} title={say({ id: 'wf.saveAs.wf.title' })} tabIndex={t} onClick={e => { e.stopPropagation(); openSave('wf', { id: 'wf.saveAs.name', slots: { name: w.name } }); }}>{ico('pagePlus', 13)}{say(ui('wf.saveAs'))}</button>}
         </span> : null}
+        {renaming ? <RenameHint /> : null}
       </div>
       {shown ? <div className="revs">{w.revisions.map(r => <RevisionRow key={`${r.user ? 1 : 0}|${r.engine}|${r.id.name}`} r={r} tab={tab} />)}</div> : null}
     </div>
@@ -230,8 +238,9 @@ function WorkflowRow({ w, tab, tier }: { w: WfRow } & RowProps) {
 
 export function WorkflowList() {
   const say = useSay(), model = useWfModel((d, w) => listModel(ix, w.saved, w.open, d.desk, d.mods, d.board)), tier = useDesk(s => s.desk.tier);
-  const rove = useWfView(s => s.rove), fold = useWf(s => s.fold), expanded = useWf(s => s.expanded), list = useRef<HTMLElement | null>(document.getElementById('presetList'));
-  /* the list is #presetList, the shell's; its edges fade where there is more (edgeFade) */
+  const rove = useWfView(s => s.rove), fold = useWf(s => s.fold), expanded = useWf(s => s.expanded), list = useRef<HTMLElement | null>(null);
+  /* the list is #presetList, the shell's (drawn once this is): its edges fade where there is more (edgeFade) */
+  useLayoutEffect(() => { list.current = document.getElementById('presetList'); }, []);
   useEdgeFade(list);
   /* the row that takes Tab: the one last focused, else the open workflow, else the first (F-07) */
   const rows: RowRef[] = [...model.yours, ...model.factory].flatMap(w => [{ kind: 'wf' as const, name: w.name, user: w.user },
@@ -239,6 +248,8 @@ export function WorkflowList() {
   const sels = rows.map(sel), openRow = [...model.yours, ...model.factory].find(w => w.on);
   const stop = rove && sels.includes(rove) ? rove : openRow ? sel({ kind: 'wf', name: openRow.name, user: openRow.user }) : sels[0] ?? null;
   const tab = (r: RowRef) => (sel(r) === stop ? 0 : -1);
+  /* the row that first takes Tab keeps it until another row is focused (32-workflows.js roveRows) */
+  useEffect(() => { if (stop && !useWfView.getState().rove) useWfView.setState({ rove: stop }); });
   /* a name cut short leads its row's tooltip (F-05) */
   useLayoutEffect(() => {
     document.querySelectorAll<HTMLElement>('#presetList .pre > b').forEach(b => { const row = b.closest<HTMLElement>('.pre')!; if (b.scrollWidth > b.clientWidth + 1 && !row.title.startsWith(b.textContent + ' · ')) row.title = `${b.textContent} · ${row.title}`; });
