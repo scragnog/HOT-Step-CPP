@@ -15,6 +15,7 @@ import type { CreateIntent } from './request.ts';
 import { defName, stepName } from './steps.ts';
 import { tileAtTier, usedHere, parkedOn } from './desk.ts';
 import { vramNeed } from './vram.ts';
+import type { SourceSong } from './instruments.ts';
 import { switchEngine, type EngineBook } from './engine.ts';
 
 const K = {
@@ -41,8 +42,6 @@ export const exampleText = (e: EngineId): string => (BOX[e] === 'tags' ? 'indie 
 
 /* ---------------------------------------------------------------- the song a repaint works on */
 
-/** The song a repaint works on, as its record holds it (package 3a's Repaint reads the same record). */
-export interface SourceSong { song: number | string; title: string; style: string; dur: number; hue: number }
 export function repaintSource(ix: Index, desk: Desk): SourceSong | null {
   const v = stateOf(ix, S.source, desk) as Partial<SourceSong> | null | undefined;
   return v && typeof v === 'object' && typeof v.dur === 'number' && typeof v.title === 'string' ? { song: v.song ?? '', title: v.title, style: str(v.style), dur: v.dur, hue: Number(v.hue) || 0 } : null;

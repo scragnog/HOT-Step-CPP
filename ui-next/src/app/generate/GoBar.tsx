@@ -7,7 +7,6 @@ import { Fragment, useLayoutEffect, useRef, type CSSProperties, type MouseEvent 
 import { goLine, goModel } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useModel } from '../render/useModel.ts';
-import { fillsOf, type SlotName } from '../register/slots.ts';
 import { Slot } from '../register/Slot.tsx';
 import { ui, useSay } from '../i18n/index.ts';
 import { useGen } from '../store/generate.ts';
@@ -33,13 +32,8 @@ function Line() {
   );
 }
 
-/** Drafts is the drafts package's (package 7 fills `centre.drafts`); until it is, the slice's button stands here. */
-const DRAFTS = 'centre.drafts' as SlotName;
-function Drafts() {
-  const say = useSay();
-  if (fillsOf(DRAFTS).length) return <Slot name={DRAFTS} />;
-  return <button className="tool drafts-btn" id="draftsBtn" type="button" aria-haspopup="dialog" aria-expanded="false" title={say(ui('drafts.title'))}>{say(ui('drafts'))}</button>;
-}
+/** Drafts is the drafts package's (package 7 fills `centre.drafts`). */
+const Drafts = () => <Slot name="centre.drafts" />;
 
 /** The queue as Generate shows it: how many songs render now (the head run's) and how many wait. */
 const counts = (s: ReturnType<typeof useGen.getState>) => {

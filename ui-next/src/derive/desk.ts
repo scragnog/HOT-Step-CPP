@@ -19,6 +19,9 @@ export function nodeShown(ix: Index, n: Node, desk: Desk): boolean {
   if (!at) return false;
   const spec = (PARTS as Record<string, PartSpec>)[at.part];
   const binds = [at.param, ...(at.params ?? [])].filter((k): k is string => !!k);
+  /* a bespoke part that holds children (the key wheel beside Tempo's LCD) stands while one of them does, even on an
+     engine without what it edits: it is then their housing alone */
+  if (spec?.kind === 'bespoke' && at.children?.length && binds.length && !binds.some(k => has(ix, k, desk.engine))) return at.children.some(c => nodeShown(ix, c, desk));
   if (spec?.edits && binds.length && !binds.some(k => has(ix, k, desk.engine))) return false;
   /* on a module's tile, a control none of whose parameters applies is not drawn, as the concept leaves out what does not
      apply (its ok()); a node that should stay and stand back says so with `dim`. A pedal or a side unit keeps every

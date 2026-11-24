@@ -63,7 +63,7 @@ export function Centre() {
         </div>
         <Tiers />
         <div className="deskbar-end">
-          <span className="save-state" id="saveState" title={say(ui('saved.title'))}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><span>{say(ui('saved'))}</span></span>
+          <Slot name="centre.saveState" />
           <UndoRedo />
         </div>
       </div>

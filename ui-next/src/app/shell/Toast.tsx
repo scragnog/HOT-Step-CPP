@@ -12,7 +12,7 @@
 import { useEffect, useLayoutEffect, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { create } from 'zustand';
-import { placeToast, watchToast } from './placeToast.ts';
+import { dockH, placeToast, watchToast } from './placeToast.ts';
 import { useDesk, type Toast as ToastData } from '../store/desk.ts';
 import { sayNow, ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
@@ -54,12 +54,13 @@ function backFrom(el: Element | null): void {
 function hideCur(): void {
   const host = hostEl(), inside = !!host?.contains(document.activeElement); cur?.life.stop(); cur = null;
   useDesk.getState().showToast(null);
-  if (inside) requestAnimationFrame(() => backFrom(host));
+  /* at once, so an action run after it (Undo, a save row) can move focus on from there (36-toast.js hideToast) */
+  if (inside) backFrom(host);
 }
 function dropOld(o: Old): void {
   o.life.stop(); const inside = o.el.contains(document.activeElement);
   stack.setState(s => ({ olds: s.olds.filter(x => x !== o) })); o.el.remove(); placeStack();
-  if (inside) requestAnimationFrame(() => backFrom(o.el));
+  if (inside) backFrom(o.el);
 }
 /** The message on #toast moves into a copy above it, with the time it had left. */
 function demote(c: { t: ToastData; life: Life }, focused: boolean): void {
@@ -100,8 +101,8 @@ useDesk.subscribe((s, p) => { if (s.toast !== p.toast) shown(s.toast, p.toast); 
 function placeStack(): void {
   placeToast();
   const t = hostEl(), vw = document.documentElement.clientWidth, c = document.getElementById('centre')?.getBoundingClientRect();
-  const g = document.querySelector('.gobar')?.getBoundingClientRect(), stuck = !!g && g.height > 0 && Math.abs(g.bottom - innerHeight) < 2;
-  let y = t && !t.hidden ? innerHeight - t.getBoundingClientRect().top + 8 : stuck ? innerHeight - g!.top + 16 : 24;
+  const g = document.querySelector('.gobar')?.getBoundingClientRect(), stuck = !!g && g.height > 0 && Math.abs(g.bottom - (innerHeight - dockH())) < 2;
+  let y = t && !t.hidden ? innerHeight - t.getBoundingClientRect().top + 8 : stuck ? innerHeight - g!.top + 16 : 24 + dockH();
   for (const o of [...stack.getState().olds].reverse()) {
     const w = o.el.offsetWidth, cx = c && c.width ? c.left + c.width / 2 : vw / 2;
     o.el.style.right = 'auto'; o.el.style.left = `${Math.max(16, Math.min(vw - w - 16, cx - w / 2))}px`; o.el.style.bottom = `calc(${Math.round(y)}px + env(safe-area-inset-bottom, 0px))`;

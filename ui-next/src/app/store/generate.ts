@@ -5,11 +5,13 @@
 // undoes itself (store/desk.ts recordStep): Undo puts the runs back in the queue as they were started (F-13).
 
 import { create } from 'zustand';
-import { cancelBack, cancelWords, lostSays, type RunSpec, type Slot } from '../../derive.ts';
+import { cancelBack, cancelWords, lostSays, vramNeed, type RunSpec, type Slot } from '../../derive.ts';
 import { service } from '../register/services.ts';
 import type { GenerateService, Job, Song } from '../services/generate.ts';
 import '../services/generate.ts';
 import { useDesk } from './desk.ts';
+import { tellQueue } from './notes-logs.ts';
+import { ix } from '../model/index.ts';
 
 /** A card in Latest: a song, a song still rendering (`pending`), or a run the server refused (`error`). */
 export interface Card extends Omit<Song, 'createdAt'> {
@@ -148,6 +150,18 @@ function tellDesk(o: { hue?: number; attempts?: number }): void {
   told = { ...told, ...o }; useDesk.getState().told({ songs: o });
 }
 useGen.subscribe((s, p) => { if (s.cards !== p.cards && s.cards[0]) tellDesk({ hue: s.cards[0].hue }); });
+
+/* the engine log's queue line (package 11): how many songs render now (the head run's) and how many wait, and, while
+   another engine than the selected one renders, which and what it holds (B-34) */
+let queueSaid = '';
+function tellLog(): void {
+  const s = get(), head = s.runs[0], pend = s.cards.filter(c => c.pending), now = head ? pend.filter(c => c.pending!.run === head.id).length : 0;
+  const e = useDesk.getState().desk.engine, other = head && head.spec.engine !== e ? head.spec : null;
+  const q = pend.length ? { rendering: now, waiting: pend.length - now, ...(other ? { engine: other.engine, loaded: vramNeed(ix, other.desk).models } : {}) } : null, j = JSON.stringify(q);
+  if (j !== queueSaid) { queueSaid = j; tellQueue(q); }
+}
+useGen.subscribe((s, p) => { if (s.runs !== p.runs || s.cards !== p.cards) tellLog(); });
+useDesk.subscribe((s, p) => { if (s.desk.engine !== p.desk.engine) tellLog(); });
 
 /* ---------------------------------------------------------------- what is rendering, kept across a reload */
 

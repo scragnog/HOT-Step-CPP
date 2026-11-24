@@ -14,6 +14,7 @@ import { LiveRegion, Toast } from './shell/Toast.tsx';
 import { closeDrawer } from './shell/drawers.ts';
 import { usePanelStore, drawerMode } from './store/panels.ts';
 import { dispatchKey } from './register/keys.ts';
+import { Slot } from './register/Slot.tsx';
 import type { Engine } from './services/engine.ts';
 
 export function App({ engine }: { engine: Engine }) {
@@ -60,6 +61,8 @@ export function App({ engine }: { engine: Engine }) {
       <Centre />
       <ModulesPanel open={panels.R} set={v => panels.set('right', v)} />
       <Toast />
+      {/* the overlays the packages fill (register/slots.ts 'overlays'): each portals into its container in the skeleton */}
+      <Slot name="overlays" />
       <LiveRegion />
     </>
   );

@@ -86,6 +86,10 @@
    "why": "The VRAM meter while a run renders: the needle swings toward what it needs, the engine marked live, another engine rendering said with what it holds (B-34; package 5 left it here: meterModel with the run, meterTarget)."
   },
   {
+   "id": "36-generate/the-engine-log-says-the-queue",
+   "why": "The engine log's queue line (package 11's tellQueue): idle, then how many render and wait, and the engine rendering when it is not the selected one (S-33, B-34)."
+  },
+  {
    "id": "36-generate/the-dice-and-the-cover-follow-the-runs",
    "why": "Package 2 left them here: the re-planning dice light up with the tries the run reports, and the cover swatch takes the newest song's colour (desk.songs, readoutModel)."
   },

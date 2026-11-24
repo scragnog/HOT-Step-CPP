@@ -220,6 +220,15 @@ export default [
     await t.do('let it finish', () => {}, null, 4200);
     await t.ok('then the meter is the selected engine\'s again, at rest', () => /^VRAM: \d+\.\d GB loaded/.test(document.querySelector('#engMeter').getAttribute('aria-label')) && !document.querySelector('#engine').classList.contains('lg-live'));
   } },
+  { id: 'the-engine-log-says-the-queue', run: async t => {
+    await desk('studio', ['takes'], { vals: { 'takes.n': 3 } })(t); await prompt('warm folk song')(t);
+    await t.click('#engMeter');
+    await t.ok('at rest the log says the queue is idle', () => /\[queue\]\s+idle/.test(document.querySelector('#logText').textContent));
+    await t.click('#go', 400); await t.click('#go', 400);
+    await t.ok('then how many render and how many wait (S-33)', () => /\[queue\]\s+3 rendering, 3 waiting/.test(document.querySelector('#logText').textContent) || document.querySelector('#logText').textContent);
+    await t.do('another engine selected while it renders', () => switchEngine('sa3'), null, 200);
+    await t.ok('and which engine renders when it is not the selected one (B-34)', () => /\[queue\]\s+3 rendering, 3 waiting on ACE-Step 1\.5/.test(document.querySelector('#logText').textContent) || document.querySelector('#logText').textContent);
+  } },
   { id: 'the-dice-and-the-cover-follow-the-runs', run: async t => {
     await desk('lab', ['replan', 'post'], { backend: 'yue', pedals: ['art'], vals: { 'yue.replan': true, 'yue.tries': 4, 'pp.art.on': true } })(t); await prompt('a long folk ballad')(t);
     await t.ok('no die is used before a run', () => document.querySelectorAll('[data-dice-box] .die').length === 4 && !document.querySelector('[data-dice-box] .die.used'));

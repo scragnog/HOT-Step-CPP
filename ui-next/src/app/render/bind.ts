@@ -5,7 +5,7 @@
 
 import { useMemo } from 'react';
 import type { Action, Definition, Node } from '../../definitions/types.ts';
-import { actionWords, applyChoice, bindPart, checkText, fileRefused, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
+import { actionWords, applyChoice, bindPart, checkText, fileRefused, partAct, partModel, runAction, stripOf, type Change, type CellWords, type Msg, type PartModel, type Surface } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { runNamed } from '../register/actions.ts';
@@ -60,6 +60,14 @@ function actionsOf(def: Definition, node: Node, key: string) {
     apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
     load: (k: string, name: string, type: string) => { const no = fileRefused(name, type); if (no) tell(no); else bound()?.state[k]?.apply('load', name, undefined, { file: name }); },
     batch: (fn: () => void) => { const b = bound(); if (!b) return; open = b; try { b.batch(fn); } finally { open = null; } },
+    /* a bespoke part's hand (src/derive/instruments.ts): what it says may offer to undo the step it just took */
+    act: (name: string, arg?: unknown) => {
+      const b = bound(); if (!b) return false;
+      return partAct(ix, b.node, b, desk(), name, arg, (m, undo) => {
+        const e = undo ? useDesk.getState().undo.at(-1) : undefined, s = useDesk.getState();
+        s.showToast({ text: m, ...(e ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } } : {}) });
+      });
+    },
     gesture: { begin: (sub = '') => useDesk.getState().beginGesture(`${from}|${sub}`), end: (sub = '') => useDesk.getState().endGesture(`${from}|${sub}`) },
   };
 }
@@ -80,5 +88,5 @@ function assemble(m: PartModel, a: ReturnType<typeof actionsOf>): PartView {
     scrub: (from, px, shift) => a.scrub(p.key, from, px, shift), along: (f, span, px) => a.along(p.key, f, span, px),
   }));
   const state = (m.state ?? []).map(st => ({ ...st, apply: (step: string, next: unknown, slots?: { [slot: string]: string | number }) => a.apply(st.key, step, next, slots), load: (name: string, type: string) => a.load(st.key, name, type) }));
-  return { ...m, params, state, choose: a.choose, run: a.run, batch: a.batch, gesture: a.gesture };
+  return { ...m, params, state, choose: a.choose, run: a.run, batch: a.batch, act: a.act, gesture: a.gesture };
 }

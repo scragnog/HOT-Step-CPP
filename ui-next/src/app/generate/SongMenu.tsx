@@ -10,6 +10,7 @@ import { ui, useSay } from '../i18n/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { setMenu, useGen, type Card } from '../store/generate.ts';
 import { repaint, reuse, sendTo } from './actions.ts';
+import { layerClosed, layerOpen } from '../features/layers.ts';
 
 const trigger = (id: string) => document.querySelector<HTMLElement>(`#latest .song[data-id="${id}"] [data-songmenu]`);
 const close = (refocus: boolean) => { const id = useGen.getState().menuFor; setMenu(null); if (refocus && id) trigger(id)?.focus({ preventScroll: true }); };
@@ -47,9 +48,11 @@ export function SongMenu() {
   useLayoutEffect(() => {
     const m = document.getElementById('menu'); if (!m) return;
     m.hidden = !c;
-    if (!c) { m.removeAttribute('aria-label'); m.style.maxHeight = ''; return; }
+    if (!c) { m.removeAttribute('aria-label'); m.style.maxHeight = ''; layerClosed(m, false); return; }
     m.setAttribute('aria-label', say(ui('gen.actions', { name: songCard(c).name })));
     const b = trigger(c.id); if (b) place(m, b);
+    /* one of the page's layers (features/layers.ts): Escape closes it and focus goes back to its button */
+    layerOpen(m, { trigger: b, close: () => close(true) });
     m.querySelector<HTMLElement>('button:not(:disabled)')?.focus({ preventScroll: true });
   }, [c?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- placed and focused when it opens
   /* a click outside closes it (its own button toggles it) */
@@ -71,7 +74,6 @@ export function SongMenu() {
 
 function onKey(e: KeyboardEvent): void {
   const m = document.getElementById('menu')!, items = [...m.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')], i = items.indexOf(document.activeElement as HTMLElement);
-  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }
   /* Tab leaves the menu: it closes, and focus goes on from its button, as if the menu had not been there (S-16) */
   if (e.key === 'Tab') { close(true); return; }
   const j = ({ ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 } as Record<string, number>)[e.key]; if (j === undefined) return;

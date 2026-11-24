@@ -4,6 +4,7 @@
 
 import { fill } from '../register/slots.ts';
 import { onKey, isTextField } from '../register/keys.ts';
+import { topLayer } from './layers.ts';
 import { GoBarFill } from '../generate/Live.tsx';
 import { Latest } from '../generate/Latest.tsx';
 import { generate } from '../generate/actions.ts';
@@ -13,8 +14,8 @@ fill('centre.gobar', GoBarFill);
 fill('centre.latest', Latest);
 void bootGenerate();
 
-/** A layer open over Create, under which no page shortcut acts. */
-const layerOpen = () => !!document.querySelector('#pickerWrap:not([hidden]), #notes:not([hidden]), #scoreModal:not([hidden]), #pop:not([hidden]), #menu:not([hidden]), #engPanel:not([hidden])') || !!document.getElementById('app')?.hidden;
+/** A layer open over Create (features/layers.ts), under which no page shortcut acts. */
+const layerOpen = () => !!topLayer() || !!document.querySelector('#engPanel:not([hidden])') || !!document.getElementById('app')?.hidden;
 
 /* Ctrl+Enter is Generate from every focus position on Create with no layer open, a workflow row, a revision row and a
    Modules card included: it is heard before any row's or card's own Enter (F-07); a held key queues once */

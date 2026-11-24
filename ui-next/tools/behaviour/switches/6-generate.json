@@ -256,8 +256,8 @@
     {
       "feature": "menu escape",
       "file": "src/app/generate/SongMenu.tsx",
-      "find": "if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }",
-      "replace": ""
+      "find": "layerOpen(m, { trigger: b, close: () => close(true) });",
+      "replace": "void layerOpen;"
     },
     {
       "feature": "menu tab",
@@ -372,6 +372,12 @@
       "file": "src/app/generate/actions.ts",
       "find": "if (c.error.again) flushSyncRun(() => startRun(c.error!.spec));",
       "replace": "if (c.error.again) void startRun;"
+    },
+    {
+      "feature": "log queue",
+      "file": "src/app/store/generate.ts",
+      "find": "if (j !== queueSaid) { queueSaid = j; tellQueue(q); }",
+      "replace": "void tellQueue; void j;"
     },
     {
       "feature": "songs list",
