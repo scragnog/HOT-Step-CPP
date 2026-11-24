@@ -704,6 +704,14 @@ and number of invalid values instead of letting the WAV writer replace them
 with silence. Node preserves the `[Synth-Finite]` diagnostic in the failed
 generation's error through the engine log subscription.
 
+WAV input (reference audio, `/understand`, training preparation) goes through
+`read_wav_buf` in `engine/src/wav.h`. It reads 16, 24 and 32-bit integer PCM
+and 32-bit float, with a classic or `WAVE_FORMAT_EXTENSIBLE` header, mono or
+stereo, at any rate. Anything else (8-bit PCM, 64-bit float) is refused with
+`[WAV] Unsupported: format=… bits=…`. `engine/tests/test-wav-read.cpp`
+(`wav-read-test`, built with `-DBUILD_TESTING=ON`) covers every accepted
+layout and both refusals.
+
 ## How ace-server is organised
 
 One process, one port, one GPU worker thread. `POST /lm`, `/synth`, `/understand`,
