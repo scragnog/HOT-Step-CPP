@@ -237,7 +237,7 @@ A real name is shown once when it is the same on every engine the parameter is o
 | `lm.topp` | number | ace | `param:lmTopP` |
 | `lm.minp` | number | ace | `param:lmMinP` |
 | `lm.plaus` | number | ace, yue2 | ace: `param:lmCfgMinP`<br>yue2: `ext:yue2CfgMinP` |
-| `lm.resc` | number | ace, yue2 | ace: `param:lmCfgRescale`. The existing UI steps by 0.05; the concept by 0.01.<br>yue2: `ext:yue2CfgRescale` |
+| `lm.resc` | number | ace, yue2 | ace: `param:lmCfgRescale`. The existing UI steps by 0.05; the concept by 0.01.<br>yue2: `ext:yue2CfgRescale`. The server declares steps of 0.05; the concept steps by 0.01 on both engines (RD-12). |
 | `lm.logp` | boolean | ace, yue2 | ace: `param:lmCfgLogprob`<br>yue2: `ext:yue2CfgLogprob` |
 | `lm.codes` | number | ace | `param:lmCodesStrength` |
 | `lm.codesmode` | choice | ace | `param:lmCodesMode` |

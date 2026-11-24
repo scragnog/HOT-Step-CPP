@@ -25,7 +25,7 @@ export function TextField(v: PartView) {
   return (
     <>
       <input className={cls} type="text" data-bind={p.key} data-ctl={look === 'term' ? p.key : undefined} value={text} size={size}
-        placeholder={p.placeholder ? say(p.placeholder) : undefined} aria-label={say(p.label)} aria-invalid={bad ? true : undefined} aria-describedby={bad ? id : undefined} title={bad ? say(bad) : undefined}
+        placeholder={v.words.placeholder ? say(v.words.placeholder) : p.placeholder ? say(p.placeholder) : undefined} aria-label={say(p.label)} aria-invalid={bad ? true : undefined} aria-describedby={bad ? id : undefined} title={bad ? say(bad) : undefined}
         onChange={e => setDraft(e.currentTarget.value)}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } else if (e.key === 'Escape') { e.preventDefault(); back(); } }}
         onBlur={commit} />

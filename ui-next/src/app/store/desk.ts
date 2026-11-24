@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import type { Definition, EngineId, Tier, Value } from '../../definitions/types.ts';
 import {
-  addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, newOn, readDesk, removeFrom, removedWords, savedDeskOf, stepWords, switchEngine,
+  addTo, applyChange, arrivalChange, boardOrder, deskStep, emptyBook, emptyDesk, engineStep, leavesWith, newOn, readDesk, removeFrom, removedWords, savedDeskOf, stepWords, switchEngine,
   msg, type Change, type Desk, type EngineBook, type Msg, type Slot, type StepWords,
 } from '../../derive.ts';
 import { BUILT_IN, defOf, ix } from '../model/index.ts';
@@ -203,7 +203,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const gone = d.kind === 'module' ? { ...get().gone, [d.id]: stood } : get().gone;
       const words = deskStep('remove', d, prev.desk, ix);
       const back = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
-      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board) }, mods, board }, words, back);
+      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, back);
       const entry = get().undo[get().undo.length - 1]!;
       set({ gone, focus: focusAfter ? [focusAfter].flat() : null });
       get().showToast({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });

@@ -1,0 +1,131 @@
+{
+ "about": "The desk's fix round (review r1, RD-01 to RD-18, and RA-23): each fix switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only), so it takes the defect back; each must make a scenario of the acceptance fail (tools/behaviour/switches.mjs --only '^fix-desk').",
+ "switches": [
+  {
+   "feature": "fix-desk: the opener's own click",
+   "file": "src/app/features/pop.ts",
+   "find": "  if (usePop.getState().anchor?.contains(t)) return;\n",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a dim keeps a control only while it holds",
+   "file": "src/derive/desk.ts",
+   "find": "!(at.dim && holds(ix, at.dim.when, desk))",
+   "replace": "!at.dim"
+  },
+  {
+   "feature": "fix-desk: an empty housing is not drawn",
+   "file": "src/derive/desk.ts",
+   "find": "&& (binds.length || !at.reads?.length)) return",
+   "replace": "&& binds.length > 0) return"
+  },
+  {
+   "feature": "fix-desk: held notes on controls",
+   "file": "src/derive/models.ts",
+   "find": "  if (held) out.held = held;\n",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: held notes on strips",
+   "file": "src/derive/models.ts",
+   "find": "held: d.params.map(p => (p.held ? heldNote(ix, p.key, desk) : null)).find(x => !!x) ?? null }",
+   "replace": "held: null }"
+  },
+  {
+   "feature": "fix-desk: takes strip a row at Quick",
+   "file": "src/definitions/modules/takes.ts",
+   "find": "size: { w: 4, quickW: 4, stripKeepsWidth: true }",
+   "replace": "size: { w: 4, stripKeepsWidth: true }"
+  },
+  {
+   "feature": "fix-desk: the sleeve's waveform",
+   "file": "src/app/parts/DropZone.tsx",
+   "find": "{st.wave ? <MiniWave wave={st.wave} /> : null}",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: the plan cursor's line",
+   "file": "src/app/styles/rebuild/10-standards.css",
+   "find": "[data-term] > .cursor:last-child { display: block; }",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a plugin without controls says so",
+   "file": "src/app/parts/readouts.tsx",
+   "find": "  if (v.opts.look === 'plugin') return <div className=\"plugctl none\"",
+   "replace": "  if (v.opts.look === 'plugin') return null; if (v.opts.look === 'never') return <div className=\"plugctl none\""
+  },
+  {
+   "feature": "fix-desk: the source ring",
+   "file": "src/derive/models.ts",
+   "find": "${d.source ? 'source' : ''} ",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a source leaves with its song",
+   "file": "src/app/store/desk.ts",
+   "find": "state: leavesWith(d, prev.desk.state) }",
+   "replace": "state: prev.desk.state }"
+  },
+  {
+   "feature": "fix-desk: a source leaves with its song",
+   "file": "src/derive/engine.ts",
+   "find": " desk.state = leavesWith(d, desk.state);",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a note's words after its action",
+   "file": "src/app/parts/readouts.tsx",
+   "find": "{v.words.after ? ` ${say(v.words.after)}` : null}</div>;",
+   "replace": "</div>;"
+  },
+  {
+   "feature": "fix-desk: a board knob says its pedal",
+   "file": "src/derive/steps.ts",
+   "find": "lc = label.toLowerCase(), board = d.kind !== 'module';",
+   "replace": "lc = label.toLowerCase(), board = false;"
+  },
+  {
+   "feature": "fix-desk: an owner named once",
+   "file": "src/derive/steps.ts",
+   "find": "  if (said && same > 1 && own.toLowerCase().endsWith(' ' + lc)) return ownMsg;\n",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: cfg rescale by hundredths",
+   "file": "src/definitions/modules/planner.ts",
+   "find": "wire: { to: 'ext:yue2CfgRescale', differs: ['range'], note: 'The server declares steps of 0.05; the concept steps by 0.01 on both engines (RD-12).' } }",
+   "replace": "wire: 'ext:yue2CfgRescale', range: [0, 1, 0.05] }"
+  },
+  {
+   "feature": "fix-desk: a state step undone back to",
+   "file": "src/derive/steps.ts",
+   "find": "const bare = ix.states.has(n.key) ? stepFromTo(stepSays(def)) : undefined;",
+   "replace": "const bare = undefined as string | undefined; void stepFromTo;"
+  },
+  {
+   "feature": "fix-desk: a value in force is no step",
+   "file": "src/derive/parts.ts",
+   "find": "      if (!step && !(k in b.vals) && JSON.stringify(r.value)",
+   "replace": "      if (false && !step && !(k in b.vals) && JSON.stringify(r.value)"
+  },
+  {
+   "feature": "fix-desk: the score preview without the lead sheet",
+   "file": "src/derive/score.ts",
+   "find": "const d = ix.defs.find(x => x.engines.includes(desk.engine) && (x.face ?? []).some(n => n.part === 'abcFoot'));",
+   "replace": "const d = ix.defs.find(x => desk.on.has(x.id) && x.engines.includes(desk.engine) && (x.face ?? []).some(n => n.part === 'abcFoot'));"
+  },
+  {
+   "feature": "fix-desk: the terminal seed says follows",
+   "file": "src/definitions/modules/planner.ts",
+   "find": "opts: { look: 'term', size: 10, placeholder: 'follows' }",
+   "replace": "opts: { look: 'term', size: 10 }"
+  },
+  {
+   "feature": "fix-desk: the lip's focus ring inside",
+   "file": "src/app/styles/rebuild/28-side-units.css",
+   "find": ".u-lip button:focus-visible { outline-offset: -2px; }",
+   "replace": ""
+  }
+ ]
+}

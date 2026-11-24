@@ -367,7 +367,8 @@ export function tileModel(ix: Index, d: ModuleDef, desk: Desk): TileModel {
   const a = unsup ? null : alsoSet(ix, d, desk);
   const s = strip ? stripWords(ix, `create.${d.id}.strip`, strip, desk) : null;
   return {
-    id: d.id, cls: `tile ${w} ${d.labUnder ? 'labmod' : ''} ${unsup ? 'unsup' : ''}`, attrs,
+    /* a source module (Repaint) carries the whole-box ring of the module working on a song (RD-09) */
+    id: d.id, cls: `tile ${w} ${d.labUnder ? 'labmod' : ''} ${d.source ? 'source' : ''} ${unsup ? 'unsup' : ''}`, attrs,
     name: tileName(d, desk), group: parent ? msg('tile.group.lab', { parent: defName(parent, desk) }) : categoryWord(d.category),
     unsup: unsup ? msg('tile.unsup', { engine: engineName(desk.engine) }) : null,
     strip: s ? { says: s.says, actions: s.actions.map(x => ({ label: x.label, ...(x.tip ? { tip: x.tip } : {}) })), held: d.params.map(p => (p.held ? heldNote(ix, p.key, desk) : null)).find(x => !!x) ?? null } : null,

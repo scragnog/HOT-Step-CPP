@@ -138,7 +138,7 @@ export const planner = {
       default: 0,
       engines: ['ace', 'yue2'],
       wire: { to: 'param:lmCfgRescale', differs: ['range'], note: 'The existing UI steps by 0.05; the concept by 0.01.' },
-      per: [{ engines: ['yue2'], wire: 'ext:yue2CfgRescale', range: [0, 1, 0.05] }],
+      per: [{ engines: ['yue2'], wire: { to: 'ext:yue2CfgRescale', differs: ['range'], note: 'The server declares steps of 0.05; the concept steps by 0.01 on both engines (RD-12).' } }],
     },
     {
       key: 'lm.logp',
@@ -539,7 +539,7 @@ export const planner = {
         {
           part: 'termLine',
           engines: ['minimax-m3'],
-          children: [{ part: 'textField', param: 'mm.seed', label: '--seed', opts: { look: 'term', size: 10 } }],
+          children: [{ part: 'textField', param: 'mm.seed', label: '--seed', opts: { look: 'term', size: 10, placeholder: 'follows' } }],
           tiers: ['lab'],
         },
       ],

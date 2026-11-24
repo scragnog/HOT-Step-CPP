@@ -250,6 +250,18 @@
    "match": "ace lab seed .*only the page \\[\"lm.seedlock\"\\], only the definitions \\[\\]",
    "why": "As above: LM seed follows stands on the Seed tile while the planner, whose switch it is, is on the desk.",
    "n": 1
+  },
+  {
+   "derivation": "undo step names",
+   "match": "\"pp\\.gain\"",
+   "why": "The page names the Pre-VST gain pedal's Gain \"Pre-VST gain gain\": its owner's name already ends with the label, so the step says the owner once (RD-18).",
+   "rewrite": [
+    [
+     "Pre-VST gain gain",
+     "Pre-VST gain"
+    ]
+   ],
+   "n": 16
   }
  ]
 }

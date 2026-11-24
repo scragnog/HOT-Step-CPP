@@ -918,6 +918,15 @@ export const sampler = {
       tiers: ['lab'],
     },
     {
+      /* an experimental plugin with no controls of its own says so where its controls would be (RD-06) */
+      part: 'note',
+      text: 'This solver has no controls of its own; it runs on its plugin defaults unless a profile sets them.',
+      opts: { look: 'plugin', head: 'Ancestral Euler' },
+      engines: ['yue2'],
+      when: { param: 'samp.solver', is: 'ancestral' },
+      tiers: ['lab'],
+    },
+    {
       part: 'group',
       opts: { title: 'Plan Overdrive controls', look: 'plugin' },
       engines: ['yue2'],
@@ -951,6 +960,24 @@ export const sampler = {
         { part: 'labelled', children: [{ part: 'token', param: 'yn.htv3.10' }] },
         { part: 'labelled', children: [{ part: 'token', param: 'yn.htv3.11' }] },
       ],
+      tiers: ['lab'],
+    },
+    {
+      /* an experimental plugin with no controls of its own says so where its controls would be (RD-06) */
+      part: 'note',
+      text: 'This scheduler has no controls of its own; it runs on its plugin defaults unless a profile sets them.',
+      opts: { look: 'plugin', head: 'Plan-Aware' },
+      engines: ['yue2'],
+      when: { param: 'samp.sched', is: 'plan_aware' },
+      tiers: ['lab'],
+    },
+    {
+      /* an experimental plugin with no controls of its own says so where its controls would be (RD-06) */
+      part: 'note',
+      text: 'This scheduler has no controls of its own; it runs on its plugin defaults unless a profile sets them.',
+      opts: { look: 'plugin', head: 'Plan-Loose' },
+      engines: ['yue2'],
+      when: { param: 'samp.sched', is: 'plan_loose' },
       tiers: ['lab'],
     },
     {

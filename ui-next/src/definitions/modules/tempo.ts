@@ -297,7 +297,7 @@ export const tempo = {
       part: 'note',
       text: 'MiniMax-Music3 reads tempo from the caption.',
       engines: ['minimax-m3'],
-      opts: { look: 'cap' },
+      opts: { look: 'cap', after: 'writes it in.' },
       actions: [{ do: 'bespoke', name: 'composeCaption', label: 'Compose caption' }],
       tiers: ['quick'],
     },

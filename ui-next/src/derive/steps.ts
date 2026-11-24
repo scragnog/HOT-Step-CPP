@@ -6,7 +6,7 @@
 import type { Definition, Json, ParamDef, Step, Text, Value } from '../definitions/types.ts';
 import { type Desk, type Index, has, isAuto, mmss, nameOn, resolve, valueOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
-import { fillMsg, formatMsg, paramWords, stateWords, stepKey } from './strings.ts';
+import { fillMsg, formatMsg, paramWords, stateWords, stepFromTo, stepKey } from './strings.ts';
 
 export interface StepWords {
   /** What the step is called: the Undo button's label. */
@@ -41,10 +41,18 @@ export function stepName(ix: Index, key: string, desk: Desk): Msg {
   const label = w.label.en!, own = nameOn(d, desk.engine), ownMsg = defName(d, desk);
   /* a pedal's or unit's switch labelled On is the pedal or unit */
   if (d.kind !== 'module' && d.on === key && label === 'On') return ownMsg;
-  /* the parameters that print the same words on this engine, among the definitions on the desk (a module, pedal or unit
-     no one has added renames nothing: SL-13), as the concept counts them: those another engine has too */
-  const same = [...ix.params.values()].filter(x => (x.d === d || (x.d.kind === 'module' && x.d.builtIn) || desk.on.has(x.d.id)) && (x.p.key === key ? label : resolve(x.p, desk.engine).label).toLowerCase() === label.toLowerCase()).length;
-  return same > 1 && !label.toLowerCase().startsWith(own.toLowerCase()) ? msg('name.owned', { owner: ownMsg, label: w.label }) : w.label;
+  /* the parameters that print the same words. A module's are counted among the definitions on the desk, on this engine
+     (a module no one has added renames nothing: SL-13). A pedal's or side unit's knob stands among the board's
+     look-alike knobs, and its words are counted as the concept counts them, among every definition on every engine, so
+     "Mix" on the board always says whose (RD-11) */
+  const lc = label.toLowerCase(), board = d.kind !== 'module';
+  const same = [...ix.params.values()].filter(x => x.p.key === key || (board
+    ? [x.p.label, ...(x.p.engines ?? x.d.engines).map(e => resolve(x.p, e).label)].some(l => l.toLowerCase() === lc)
+    : ((x.d.kind === 'module' && x.d.builtIn) || desk.on.has(x.d.id)) && resolve(x.p, desk.engine).label.toLowerCase() === lc)).length;
+  /* the owner's name already says it ("Pre-VST gain", not "Pre-VST gain gain": RD-18) */
+  const said = lc.startsWith(own.toLowerCase()) || own.toLowerCase().endsWith(' ' + lc);
+  if (said && same > 1 && own.toLowerCase().endsWith(' ' + lc)) return ownMsg;
+  return same > 1 && !said ? msg('name.owned', { owner: ownMsg, label: w.label }) : w.label;
   void p;
 }
 /** A definition's name on the desk's engine, as a message. */
@@ -99,6 +107,12 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
     /* a state's step says its value before and after, unless the part says them (a phase window's span) */
     if (ix.states.has(n.key)) { slots.noun = stateWords(ix, n.key).noun; if (!('from' in slots)) slots.from = stateText(ix, n.key, before); if (!('to' in slots)) slots.to = stateText(ix, n.key, after); }
     const label = fillMsg(ix, stepKey(ix, n.key, n.step), stepSays(def), after);
+    /* a state's step that says its value before and after is undone "back to" it, as a value's step is (RD-13) */
+    const bare = ix.states.has(n.key) ? stepFromTo(stepSays(def)) : undefined;
+    if (bare !== undefined) {
+      const m = fillMsg(ix, `${stepKey(ix, n.key, n.step)}.name`, bare, after), name: Msg = { ...m, slots: { ...m.slots, ...slots } };
+      return { label: { ...label, slots: { ...label.slots, ...slots } }, undone: msg('step.set.undone', { name, from: slots.from! }), redone: msg('step.set.redone', { name, to: slots.to! }), put };
+    }
     return { label: { ...label, slots: { ...label.slots, ...slots } }, put };
   }
   /* the seed: its number while it is kept, else random */

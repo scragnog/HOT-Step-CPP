@@ -91,7 +91,9 @@ defineInstrument('abcFoot', (ix, node, desk) => ({ abc: abcOf(ix, node, desk) })
  *  on the desk. */
 export interface ScoreAsk { abc: string; names: string[]; title: string; chords: boolean }
 export function scoreAsk(ix: Index, desk: Desk): ScoreAsk | null {
-  const d = ix.defs.find(x => desk.on.has(x.id) && x.engines.includes(desk.engine) && (x.face ?? []).some(n => n.part === 'abcFoot'));
+  /* the lead sheet's definition on this engine, on the desk or not: the planner's own "score preview" asks for one with
+     only the planner on the desk, and a lead sheet off the desk reads as empty (RD first use: it opened nothing) */
+  const d = ix.defs.find(x => x.engines.includes(desk.engine) && (x.face ?? []).some(n => n.part === 'abcFoot'));
   const node = d?.face?.find(n => n.part === 'abcFoot');
   if (!node) return null;
   const [abcK, modeK, lyricsK, promptK, titleK] = node.reads ?? [];

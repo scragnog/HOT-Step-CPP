@@ -30,8 +30,10 @@ export function Note(v: PartView) {
   /* a badge with its tip and the words after it on its line (Continue from recording's Experimental; package 3c) */
   if (v.opts.look === 'badge') return <span className="lbl"><b className="exp" tabIndex={0} title={tip}>{text}</b>{v.words.after ? ` ${say(v.words.after)}` : null}</span>;
   /* the caption note under an instrument (Tempo's), with its actions after it; Quick's hint */
-  if (v.opts.look === 'cap') return <div className="cap-note" title={tip}>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" /></div>;
+  if (v.opts.look === 'cap') return <div className="cap-note" title={tip}>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" />{v.words.after ? ` ${say(v.words.after)}` : null}</div>;
   if (v.opts.look === 'hint') return <span className="qhint" title={tip}>{text}</span>;
+  /* an experimental plugin with no controls of its own, where its controls would stand (the Sampler's YuE2 plugins) */
+  if (v.opts.look === 'plugin') return <div className="plugctl none" title={tip}><b>{v.words.head ? say(v.words.head) : null}</b><span className="lbl">{text}</span></div>;
   /* plain words in the page's own ink (the Adapters' "Merged into the model at load"; package 3b) */
   if (v.opts.look === 'plain') return <span title={tip}>{text}</span>;
   return <span className="lbl" title={tip}>{text}</span>;

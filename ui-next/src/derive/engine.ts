@@ -6,6 +6,7 @@ import { engineName } from '../definitions/engines.ts';
 import { type Desk, type Index, applies, changed, enginesOf, everythingOn, formatValue, has, isAuto, resolve, valueOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
+import { leavesWith } from './desk.ts';
 
 /** What the desk keeps for the engines not in use. */
 export interface EngineBook {
@@ -73,7 +74,7 @@ export function switchEngine(ix: Index, deskIn: Desk, book0: EngineBook, to: Eng
   /* a source module (Repaint) the new engine does not have leaves the desk */
   desk.on = deskIn.on;
   let removed: Msg | null = null;
-  for (const d of ix.defs) if (d.kind === 'module' && d.source && desk.on.has(d.id) && !d.engines.includes(to)) { desk.on = new Set([...desk.on].filter(x => x !== d.id)); removed = msg('switch.removed', { name: defName(d, deskIn), engines: list(d.engines.map(engineName)) }); }
+  for (const d of ix.defs) if (d.kind === 'module' && d.source && desk.on.has(d.id) && !d.engines.includes(to)) { desk.on = new Set([...desk.on].filter(x => x !== d.id)); desk.state = leavesWith(d, desk.state); removed = msg('switch.removed', { name: defName(d, deskIn), engines: list(d.engines.map(engineName)) }); }
   /* the toast: one sentence per thing that happened, in the order they matter */
   const said: Slot[] = [];
   if (held.length) {

@@ -28,7 +28,7 @@
     { "id": "10-desk-modules/repaint-region-keeps-its-place", "why": "repaintRegion: a plain click outside keeps the region (A-32), a drag inside carries it, the spoken range follows." },
     { "id": "14-lab-desk/repaint-home-end", "why": "repaintRegion: Home and End move the region to the song's ends, its length kept (L-36)." },
     { "id": "17-undo-net/repaint-region-is-its-own-step", "why": "repaintRegion: a key and a drag are steps named in the song's times (Q-24), Ctrl+Z puts the region back and leaves Repaint (L-01)." },
-    { "id": "05-modules/continue-and-repaint", "why": "repaintRegion from the song menu's Repaint a region: arrows, Shift, a drag that draws a new region, removing Repaint drops the source.", "waiting": { "package": 3, "because": "Its Continue part passes since package 3c and its song menu part since package 6; only its last check fails: removing Repaint leaves the song's record in the desk's state, where the concept drops S.source (whoever owns Repaint's leaving decides)." } },
+    { "id": "05-modules/continue-and-repaint", "why": "repaintRegion from the song menu's Repaint a region: arrows, Shift, a drag that draws a new region, removing Repaint drops the source (RA-23, fix-desk: derive/desk.ts leavesWith)." },
     { "id": "11-engines/prompt-chips-and-ranges", "why": "capChips on Stable Audio 3 and HeartMuLa, and the length's range per engine." },
     { "id": "14-lab-desk/tip-keeps-off-the-read-out", "why": "The reels' and the knobs' tips open clear of their read-outs (L-06)." }
   ],

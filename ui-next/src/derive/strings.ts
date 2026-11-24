@@ -52,7 +52,7 @@ export function stringsOf(d: Definition): Str[] {
   for (const s of d.state || []) {
     const k = `${base}.s.${dashed(s.key)}`;
     add(`${k}.noun`, s.noun); add(`${k}.empty`, s.empty);
-    for (const [n, st] of Object.entries(s.steps || {})) add(`${k}.step.${n}`, typeof st === 'string' ? st : st.says);
+    for (const [n, st] of Object.entries(s.steps || {})) { const t = typeof st === 'string' ? st : st.says; add(`${k}.step.${n}`, t); add(`${k}.step.${n}.name`, stepFromTo(t)); }
   }
   const face = 'face' in d ? d.face || [] : [];
   face.forEach(n => node(`${base}.n`, n, counts(face)));
@@ -177,6 +177,9 @@ export function stateWords(ix: Index, key: string): { noun: Msg; empty?: Msg } {
   const { s, d } = ix.states.get(key)!, k = `create.${d.id}.s.${dashed(s.key)}`;
   return { noun: { id: `${k}.noun`, en: s.noun }, ...(s.empty ? { empty: { id: `${k}.empty`, en: s.empty } } : {}) };
 }
+/** A state's named step that says its value before and after ("{noun} {from} → {to}"): what it is called without
+ *  them, so Undo and Redo say "… back to {from}" and "… {to}" as every value's step does (RD-13). Undefined otherwise. */
+export const stepFromTo = (says: string): string | undefined => (/ \{from\} → \{to\}$/.test(says) ? says.replace(/ \{from\} → \{to\}$/, '') : undefined);
 /** The key of a parameter's or a state's named step. */
 export const stepKey = (ix: Index, key: string, step: string): string => {
   const hp = ix.params.get(key);

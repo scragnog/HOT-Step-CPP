@@ -34,6 +34,16 @@ export function nodeShown(ix: Index, n: Node, desk: Desk): boolean {
   return true;
 }
 
+/** What a module takes with it when it leaves the desk: a source module (Repaint) works on one song, chosen when it was
+ *  added, and its state (the song, the region) goes with it, as the concept clears S.source; re-adding it starts from
+ *  the song menu again (RA-23). Every other module's state waits for it to come back. */
+export function leavesWith(d: Definition, state: Desk['state']): Desk['state'] {
+  if (d.kind !== 'module' || !d.source || !d.state?.some(s => s.key in state)) return state;
+  const out = { ...state };
+  for (const s of d.state) delete out[s.key];
+  return out;
+}
+
 /** A module is used by the desk's engine. One that is not waits parked. */
 export const usedHere = (d: Definition, e: EngineId): boolean => d.engines.includes(e);
 /** A module's tile shows at the desk's tier: a Lab module (labUnder) only at Lab. */

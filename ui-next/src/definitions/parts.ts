@@ -185,6 +185,7 @@ export const PARTS = {
     opts: {
       look: { type: ['plain', 'lcd', 'term'], doc: 'plain; lcd: an LCD input; term: an inline terminal input.' },
       size: { type: 'number', doc: 'Width in characters.' },
+      placeholder: { type: 'text', doc: 'Its own words while empty, where the parameter\'s would not read as one token (a terminal\'s --seed "follows": RD-18).' },
     },
   },
   textArea: {
@@ -290,7 +291,7 @@ export const PARTS = {
   note: {
     kind: 'readout', css: ['01-base.css', '15-controls.css'],
     doc: 'A quiet line of words: a hint, why something is off, what another module changes. Its actions follow as links.',
-    opts: { after: { type: 'text', doc: 'badge: the words after the badge, on its line.' }, look: { type: ['plain', 'warn', 'cap', 'hint', 'badge'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
+    opts: { after: { type: 'text', doc: 'badge: the words after the badge, on its line; cap: the words after its action, which then reads inside the sentence (RD-10).' }, look: { type: ['plain', 'warn', 'cap', 'hint', 'badge', 'plugin'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint; plugin: the card of an experimental plugin with no controls of its own (RD-06).' }, head: { type: 'text', doc: 'plugin: the plugin\'s name, in bold before the words.' } },
   },
   link: {
     kind: 'readout', css: ['14-buttons.css'],

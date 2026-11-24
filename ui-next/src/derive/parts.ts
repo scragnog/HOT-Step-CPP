@@ -86,6 +86,8 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
     if (!step && also) throw new Error(`${node.part} changes other values beside ${k}: name the step that does`);
     change(k, (b, at) => {
       const r = setValue(ix, at, k, value, typed);
+      /* a value already in force changes nothing and is no step (a key pressed at the end of the range: RD-14) */
+      if (!step && !(k in b.vals) && JSON.stringify(r.value) === JSON.stringify(valueOf(ix, k, at)) && !isAuto(ix, k, at)) { if (r.said) b.said = r.said; return; }
       b.vals[k] = r.value; if (resolve(p, at.engine).auto) b.auto[k] = false; if (r.said) b.said = r.said;
       if (step) {
         const s = stepOf(p, step);

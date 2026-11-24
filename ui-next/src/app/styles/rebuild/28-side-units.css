@@ -1,0 +1,4 @@
+/* The side units' lip buttons (power and remove) sit in a lip that clips what stands outside it: their focus ring is
+   drawn inside the button, so it shows whole rather than as a red line along its bottom edge (RD-15; the owner's
+   rule against one-sided edges). */
+.u-lip button:focus-visible { outline-offset: -2px; }

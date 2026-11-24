@@ -1,0 +1,73 @@
+{
+ "about": "The desk's fix round (review r1, RD-01 to RD-18; review r3's RA-23): every scenario that checks one of its fixes, each driven the way a person reaches it (a card in the Modules panel, the engine panel, the tier keys, a file field, a control's keys). 37-fix-desk.mjs holds on the concept page too but for the three the concept gets wrong, named in their `why` (--page hotstep-tiers.html). The first-use sweep that found the score preview's (every action button of every module, pedal and side unit, from empty, on every engine and tier, against the concept) is a probe in the round's notes, not a scenario.",
+ "scenarios": [
+  {
+   "id": "37-fix-desk/first-adapter-from-the-empty-strip",
+   "why": "RD-01: the first adapter from the empty strip, by mouse and by Enter; the list, its focus, the load step, Undo back to the strip, Escape (features/pop.ts: the click that opened the popover never closes it)."
+  },
+  {
+   "id": "37-fix-desk/first-planner-adapter-and-other-engines",
+   "why": "RD-01: the Lab strip's planner adapter, and the first adapter on YuE2, MiniMax-Music3 and HeartMuLa, each reached through the engine panel."
+  },
+  {
+   "id": "37-fix-desk/a-dim-keeps-a-control-only-for-its-reason",
+   "why": "RD-02: the Sampler's shift and schedule on MiniMax-Music3 and HeartMuLa with Lua plugins off and on (derive/desk.ts nodeShown: a dim keeps a control only while it holds)."
+  },
+  {
+   "id": "37-fix-desk/held-takes-said-where-they-are",
+   "why": "RD-03 and RD-04: the held count on the one-song strip and under the reels (heldNote through Desk.told.hold), the strip a whole row at Quick (takes.ts quickW, the validator's check)."
+  },
+  {
+   "id": "37-fix-desk/no-empty-housing-at-quick",
+   "why": "RD-04: Stable Audio 3's Length at Quick has no empty key-wheel housing (derive/desk.ts nodeShown)."
+  },
+  {
+   "id": "37-fix-desk/the-reference-sleeve-draws-its-wave",
+   "why": "RD-05: a file chosen in the timbre sleeve's field draws its waveform (dropZone `wave`, StateModel.wave)."
+  },
+  {
+   "id": "37-fix-desk/the-plan-text-is-as-tall-as-the-concept-draws-it",
+   "why": "RD-07: the plan block is 113px, the cursor's line its own height (styles/rebuild/10-standards.css)."
+  },
+  {
+   "id": "37-fix-desk/a-plugin-without-controls-says-so",
+   "why": "RD-06: the YuE2 solver and schedules with no controls of their own say so (sampler.ts notes, the note's `plugin` look)."
+  },
+  {
+   "id": "37-fix-desk/repaint-rings-its-tile-and-leaves-with-its-song",
+   "why": "RD-09 and RA-23: Repaint from the song menu carries the source ring; removed, it takes its song with it, Undo brings both back (derive/desk.ts leavesWith)."
+  },
+  {
+   "id": "37-fix-desk/mm3-quick-tempo-note-reads-whole",
+   "why": "RD-10: MiniMax-Music3's Quick Tempo note with its action inside the sentence (the note's `after` on its cap look)."
+  },
+  {
+   "id": "37-fix-desk/a-pedal-knob-step-names-its-pedal",
+   "why": "RD-11 and RD-18: a board knob's generic label names its pedal; Pre-VST gain's Gain is said once (derive/steps.ts stepName). The concept fails the second check (its fault)."
+  },
+  {
+   "id": "37-fix-desk/a-key-at-the-end-of-the-range-is-no-step",
+   "why": "RD-14: a key at the end of the range records nothing (derive/parts.ts). The concept fails it (its fault)."
+  },
+  {
+   "id": "37-fix-desk/yue-cfg-rescale-steps-by-hundredths",
+   "why": "RD-12: YuE2's CFG rescale steps by 0.01, as the concept."
+  },
+  {
+   "id": "37-fix-desk/continue-part-undo-says-back-to",
+   "why": "RD-13: a chosen recording's part moved by a key; Undo says where it went back to (a state step that says from and to: strings.ts stepFromTo)."
+  },
+  {
+   "id": "37-fix-desk/score-preview-from-the-planner-alone",
+   "why": "First use: the planner's \"▶ score preview\" on YuE2 opens the preview with no lead sheet on the desk (derive/score.ts scoreAsk)."
+  },
+  {
+   "id": "37-fix-desk/mm3-planner-seed-reads-as-a-token",
+   "why": "RD-18: the planner terminal's empty --seed says \"follows\" (textField `placeholder`)."
+  },
+  {
+   "id": "37-fix-desk/side-unit-lip-focus-is-a-whole-ring",
+   "why": "RD-15: a side unit's power button shows its keyboard focus as a whole ring inside it (styles/rebuild/28-side-units.css). The concept fails it (its fault)."
+  }
+ ]
+}
