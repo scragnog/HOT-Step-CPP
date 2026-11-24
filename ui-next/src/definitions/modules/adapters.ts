@@ -12,7 +12,8 @@ export const adapters = {
   engines: ['ace', 'minimax-m3', 'yue2', 'heartmula'],
   owner: 'engine',
   stored: 'settings',
-  size: { w: 2, grow: true, stretch: 144 },
+  /* one column at Quick and Studio while one cartridge stands alone (25-module-adapters.js tileW) */
+  size: { w: 2, grow: true, stretch: 144, narrowWhen: { any: [{ not: { state: 'adapters', atLeast: 2 } }, { param: 'ad.adv', is: 'simple' }] } },
   per: [{ engines: ['heartmula'], size: { grow: false } }],
   tierSummary: [
     'One adapter and its fader',
@@ -77,6 +78,12 @@ export const adapters = {
         { value: 'runtime_lowrank', label: 'Low-Rank' },
       ],
       engines: ['ace', 'minimax-m3'],
+      /* while section directives or phase windows are set the server runs the adapters at runtime: shown so, the choice
+         kept for after (A-30) */
+      forced: [
+        { when: { state: 'sectionDirectives', set: true }, value: 'runtime', says: 'Runtime while section directives are set', tip: 'Runtime is used while section directives are set' },
+        { when: { state: 'runtimeForced', set: true }, value: 'runtime', says: 'Runtime while phase windows are set', tip: 'Runtime is used while active phase windows are set' },
+      ],
       wire: { to: 'param:adapterMode', note: 'Real values merge, runtime, runtime_lowrank.' },
       per: [
         {
@@ -389,7 +396,14 @@ export const adapters = {
       noun: 'the adapters',
       /* a second adapter loaded while Stack is Single stacks them; removing one moves the later strengths up and
          renumbers the lyric directives (concept 25-module-adapters.js) */
-      steps: { load: { says: 'Load {file}', changes: ['ad.adv'] }, remove: { says: 'Remove {file}', changes: ['s0', 's1', 's2', 'lyrics.text'] } },
+      steps: {
+        load: { says: 'Load {file}', changes: ['ad.adv'] },
+        remove: { says: 'Remove {file}', changes: ['s0', 's1', 's2', 'lyrics.text'] },
+        /* a phase handle moved, and a section's mask set, named for the adapter they belong to (L-01, L-09) */
+        phase: 'Phase of {file} {from} → {to}',
+        mask: { says: '{section}: {file} {from} → {to}', changes: ['lyrics.text'] },
+        masks: { says: 'Section masks of {file}', changes: ['lyrics.text'] },
+      },
       owner: 'engine',
       stored: 'settings',
       wire: [
@@ -473,95 +487,131 @@ export const adapters = {
   ],
   face: [
     {
+      /* the cartridges, and what stands around them, placed by the part where the concept draws it (parts.ts
+         cartridges): its params are each slot's strength, then the first slot's own faders, then the planner adapter;
+         its reads, by place, the stack switch, the stack mode, the combined strength, the planner adapter and the lyrics */
       part: 'cartridges',
       params: ['s0'],
       state: ['slots'],
-      opts: { flat: true },
+      reads: ['ad.adv', 'ad.stack', 'ad.sigma', 'ad.planner', 'lyrics.text'],
+      opts: {
+        kinds: ['DiT', 'DiT', 'DiT'],
+        side: 'Load a second one to blend them and give each lyric section its own mix.',
+        planner: 'Planner LM',
+        plannerNote: 'Shapes the plan, not the sound',
+        plannerList: 'These change what the planner writes, not how the DiT sounds.',
+      },
+      actions: [
+        { do: 'bespoke', name: 'loadAdapter', label: '+ Load adapter' },
+        { do: 'bespoke', name: 'loadPlannerAdapter', label: '+ Planner adapter' },
+        { do: 'tier', tier: 'studio', label: 'Edit in Studio' },
+      ],
       per: [
-        { tiers: ['studio'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc'], opts: {} },
-        { tiers: ['lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner', 'lyrics.text'], opts: {} },
-      ],
-    },
-    {
-      part: 'choiceRow',
-      param: 's0',
-      label: 'Strength',
-      choices: [['Light', 0.5], ['Full', 1], ['Strong', 1.5]],
-      between: 'strength {v}',
-      tiers: ['quick'],
-    },
-    {
-      part: 'foot',
-      when: { all: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.adv', is: 'advanced' }] },
-      children: [
-        { part: 'segmented', param: 'ad.stack' },
-        { part: 'labelled', label: 'Combined', children: [{ part: 'token', param: 'ad.sigma' }] },
-        { part: 'labelled', label: 'Alignment', children: [{ part: 'token', param: 'ad.align' }], tiers: ['lab'] },
-      ],
-      tiers: ['studio', 'lab'],
-    },
-    {
-      part: 'bank',
-      opts: { title: 'Group scales', note: 'Scales every DiT adapter by layer group. A channel at 0 is skipped.' },
-      engines: ['ace'],
-      children: [
-        /* the tape under each fader says it short (concept BANK_SHORT) */
-        { part: 'fader', param: 'ag.self', label: 'Self' },
-        { part: 'fader', param: 'ag.cross', label: 'Cross' },
-        { part: 'fader', param: 'ag.mlp' },
-        { part: 'fader', param: 'ag.cond' },
-        { part: 'fader', param: 'ag.time', label: 'Time' },
-        { part: 'fader', param: 'ag.proj', label: 'Proj' },
-      ],
-      tiers: ['lab'],
-    },
-    {
-      part: 'bank',
-      opts: { title: 'Master section', note: 'Early, mid and late are thirds of the network\'s depth.' },
-      engines: ['minimax-m3', 'yue2', 'heartmula'],
-      children: [
-        { part: 'fader', param: 'ad.att' },
-        { part: 'fader', param: 'ad.mlp' },
-        { part: 'fader', param: 'ad.early' },
-        { part: 'fader', param: 'ad.mid' },
-        { part: 'fader', param: 'ad.late' },
-        { part: 'fader', param: 'ad.plan', opts: { travel: 2 } },
-      ],
-      tiers: ['lab'],
-    },
-    {
-      part: 'labelled',
-      label: 'Rebase on',
-      engines: ['ace'],
-      children: [{ part: 'pick', param: 'ad.home', opts: { variant: 'lcd' } }, { part: 'token', param: 'ad.beta' }],
-      tiers: ['lab'],
-    },
-    {
-      part: 'labelled',
-      label: 'Rebase onto the loaded model',
-      engines: ['yue2', 'heartmula'],
-      children: [{ part: 'token', param: 'ad.beta' }],
-      tiers: ['lab'],
-    },
-    {
-      part: 'foot',
-      children: [
-        { part: 'labelled', label: 'Stack', engines: ['ace'], children: [{ part: 'segmented', param: 'ad.adv' }] },
         {
-          part: 'labelled',
-          label: 'Apply as',
-          engines: ['ace', 'minimax-m3'],
-          children: [{ part: 'segmented', param: 'ad.mode' }],
-          dim: { when: { state: 'runtimeForced', set: true }, says: 'Runtime is used while section directives or phase windows are set. Merge returns after' },
+          engines: ['ace'],
+          actions: [
+            { do: 'bespoke', name: 'loadAdapter', label: '+ Load adapter' },
+            { do: 'bespoke', name: 'loadPlannerAdapter', label: '+ Planner adapter' },
+            { do: 'tier', tier: 'studio', label: 'Edit in Studio' },
+            /* adapters loaded but not used while Stack is Single (A-14) */
+            { do: 'set', param: 'ad.adv', value: 'advanced', label: 'Stack them' },
+          ],
         },
-        { part: 'labelled', label: 'Precision', tip: 'Full, Q8 (half the VRAM) or Q4 (a quarter)', children: [{ part: 'segmented', param: 'ad.rq' }] },
-        { part: 'labelled', label: 'Precision', tip: 'HQ, or Low (a quarter of the VRAM)', children: [{ part: 'segmented', param: 'ad.mq' }] },
+        { engines: ['minimax-m3'], opts: { kinds: ['Planner LM'], side: '{engine} loads one Planner LM adapter.' } },
+        { engines: ['yue2'], opts: { kinds: ['AR · composer', 'NAR · renderer'], side: 'The second slot takes a NAR renderer adapter: it colours the sound, this one the composition.' } },
+        { engines: ['heartmula'], opts: { kinds: ['Global LM'], side: 'HeartMuLa takes one adapter: a GGUF LoRA for its Global LM.' } },
+        /* at Quick its note "2 adapters, stacked" carries the stack switch, as the concept's does (Q-18) */
+        { tiers: ['quick'], when: { state: 'adapters', atLeast: 2 }, params: ['s0', 'ad.adv'] },
+        { tiers: ['studio'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc'] },
+        { tiers: ['lab'], params: ['s0', 's1', 's2', 'ad.arp', 'ad.arc', 'ad.planner'] },
+      ],
+      children: [
+        /* 0: Quick's strength, under the flat cartridge */
+        {
+          part: 'choiceRow',
+          param: 's0',
+          label: 'Strength',
+          choices: [['Light', 0.5], ['Full', 1], ['Strong', 1.5]],
+          between: 'strength {v}',
+          tiers: ['quick'],
+        },
+        /* 1 to 4: the stack bar, above the cartridges while they are stacked */
+        { part: 'segmented', param: 'ad.stack', tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Combined', children: [{ part: 'token', param: 'ad.sigma' }], tiers: ['studio', 'lab'] },
+        {
+          part: 'note',
+          text: 'each fader is its share',
+          tip: 'Click or drag across a cartridge\'s section strip to set its level per section. Saved in the lyrics.',
+          engines: ['ace'],
+          when: { all: [{ state: 'adapters', atLeast: 2 }, { param: 'ad.adv', is: 'advanced' }] },
+          per: [{ when: { param: 'ad.stack', is: 'sum' }, text: 'the faders add up' }],
+          tiers: ['studio', 'lab'],
+        },
+        { part: 'labelled', label: 'Alignment', children: [{ part: 'token', param: 'ad.align' }], tiers: ['lab'] },
+        /* 5, 6: the fader banks, the rebase row on the heading's line (L-05) */
+        {
+          part: 'bank',
+          opts: { title: 'Group scales', note: 'Scales every DiT adapter by layer group. A channel at 0 is skipped.' },
+          text: 'every DiT adapter',
+          engines: ['ace'],
+          children: [
+            /* the tape under each fader says it short (concept BANK_SHORT) */
+            { part: 'fader', param: 'ag.self', label: 'Self' },
+            { part: 'fader', param: 'ag.cross', label: 'Cross' },
+            { part: 'fader', param: 'ag.mlp' },
+            { part: 'fader', param: 'ag.cond' },
+            { part: 'fader', param: 'ag.time', label: 'Time' },
+            { part: 'fader', param: 'ag.proj', label: 'Proj' },
+            {
+              part: 'labelled',
+              label: 'Rebase on',
+              opts: { look: 'rebase' },
+              per: [{ when: { param: 'ad.home', not: '' }, tip: 'Skipped while section directives or phase windows are in use' }],
+              children: [
+                { part: 'pick', param: 'ad.home', opts: { variant: 'lcd' } },
+                { part: 'labelled', label: 'β', children: [{ part: 'token', param: 'ad.beta' }] },
+              ],
+            },
+          ],
+          tiers: ['lab'],
+        },
+        {
+          part: 'bank',
+          opts: { title: 'Master section', note: 'Early, mid and late are thirds of the network\'s depth.' },
+          text: 'the loaded adapter',
+          engines: ['minimax-m3', 'yue2', 'heartmula'],
+          per: [
+            { engines: ['minimax-m3'], opts: { title: 'Master section', note: 'Early, mid and late are thirds of the network\'s depth. Plan below 1 lets the base model plan while the adapter sings.' } },
+            { when: { state: 'adapters', atLeast: 2 }, text: 'both adapters' },
+          ],
+          children: [
+            { part: 'fader', param: 'ad.att' },
+            { part: 'fader', param: 'ad.mlp' },
+            { part: 'fader', param: 'ad.early' },
+            { part: 'fader', param: 'ad.mid' },
+            { part: 'fader', param: 'ad.late' },
+            { part: 'fader', param: 'ad.plan', opts: { travel: 2 } },
+            {
+              part: 'labelled',
+              label: 'Rebase onto the loaded model',
+              opts: { look: 'rebase' },
+              engines: ['yue2', 'heartmula'],
+              children: [{ part: 'labelled', label: 'β', children: [{ part: 'token', param: 'ad.beta' }] }],
+            },
+          ],
+          tiers: ['lab'],
+        },
+        /* 7 on: the foot */
+        { part: 'labelled', label: 'Stack', engines: ['ace'], children: [{ part: 'segmented', param: 'ad.adv' }], tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Apply as', engines: ['ace', 'minimax-m3'], children: [{ part: 'segmented', param: 'ad.mode' }], tiers: ['studio', 'lab'] },
+        { part: 'note', text: 'Merged into the model at load', engines: ['yue2'], tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Precision', tip: 'Full, Q8 (half the VRAM) or Q4 (a quarter)', children: [{ part: 'segmented', param: 'ad.rq' }], tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Precision', tip: 'HQ, or Low (a quarter of the VRAM)', children: [{ part: 'segmented', param: 'ad.mq' }], tiers: ['studio', 'lab'] },
         { part: 'pill', param: 'ad.dora', label: 'DoRA magnitudes', tiers: ['lab'] },
         { part: 'pill', param: 'ad.ref', tiers: ['lab'] },
-        { part: 'pill', param: 'ad.trigcap' },
-        { part: 'pill', param: 'ad.gpu' },
+        { part: 'pill', param: 'ad.trigcap', tiers: ['studio', 'lab'] },
+        { part: 'pill', param: 'ad.gpu', tiers: ['studio', 'lab'] },
       ],
-      tiers: ['studio', 'lab'],
     },
   ],
   thumb: { file: 'adapters' },
