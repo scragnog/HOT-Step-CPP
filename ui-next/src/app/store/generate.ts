@@ -137,8 +137,18 @@ function heardJobs(jobs: Job[]): void {
     } else if (j.status === 'cancelled') set(s => ({ runs: s.runs.filter(r => r !== run) }));
     else {
       const by = new Map(j.songs.map(x => [x.id, x]));
-      if (j.f !== run.f) set(s => ({ lastF: s.runs[0] === run ? j.f : s.lastF, runs: s.runs.map(r => (r === run ? { ...r, f: j.f } : r)) }));
-      set(s => ({ cards: s.cards.map(c => { const x = c.pending && by.get(c.id); if (!x) return c; if (x.ready > 0 && !c.pending!.ready) queueMicrotask(() => tell({ kind: 'ready', id: c.id })); return { ...c, pending: { ...c.pending!, f: x.f, stage: x.stage, ready: x.ready } }; }) }));
+      /* the run's progress and its songs' in one update, and none when the server reports what it reported before */
+      set(s => {
+        let moved = false;
+        const cards = s.cards.map(c => {
+          const x = c.pending && by.get(c.id); if (!x) return c;
+          if (x.ready > 0 && !c.pending!.ready) queueMicrotask(() => tell({ kind: 'ready', id: c.id }));
+          if (c.pending!.f === x.f && c.pending!.stage === x.stage && c.pending!.ready === x.ready) return c;
+          moved = true; return { ...c, pending: { ...c.pending!, f: x.f, stage: x.stage, ready: x.ready } };
+        });
+        if (j.f === run.f && !moved) return s;
+        return { ...(j.f !== run.f ? { lastF: s.runs[0] === run ? j.f : s.lastF, runs: s.runs.map(r => (r === run ? { ...r, f: j.f } : r)) } : {}), ...(moved ? { cards } : {}) };
+      });
       if (j.engine === 'yue2' && j.attempts) tellDesk({ attempts: j.attempts });
     }
   }
@@ -167,10 +177,13 @@ useDesk.subscribe((s, p) => { if (s.desk.engine !== p.desk.engine) tellLog(); })
 /* ---------------------------------------------------------------- what is rendering, kept across a reload */
 
 /* the songs rendering are written down as they change, so the next visit can say which the server did not keep (F-27) */
+let liveWritten: string | null = null;
 useGen.subscribe((s, p) => {
   if (s.runs === p.runs && s.cards === p.cards) return;
-  const live = s.runs.filter(r => r.jobId).map(r => ({ job: r.jobId!, n: r.ids.filter(i => s.cards.some(c => c.id === i && c.pending)).length }));
-  writePref(LIVE_KEY, live.length ? live : null);
+  const live = s.runs.filter(r => r.jobId).map(r => ({ job: r.jobId!, n: r.ids.filter(i => s.cards.some(c => c.id === i && c.pending)).length })), text = JSON.stringify(live);
+  /* written when it changes, not on every report of a run's progress */
+  if (text === liveWritten) return;
+  liveWritten = text; writePref(LIVE_KEY, live.length ? live : null);
 });
 
 /** Loads the server's songs and starts listening to its queue; says what a reload lost. */

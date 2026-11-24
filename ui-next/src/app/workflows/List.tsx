@@ -255,10 +255,11 @@ export function WorkflowList() {
   const tab = (r: RowRef) => (sel(r) === stop ? 0 : -1);
   /* the row that first takes Tab keeps it until another row is focused (32-workflows.js roveRows) */
   useEffect(() => { if (stop && !useWfView.getState().rove) useWfView.setState({ rove: stop }); });
-  /* a name cut short leads its row's tooltip (F-05) */
-  useLayoutEffect(() => {
+  /* a name cut short leads its row's tooltip (F-05): read once the list is painted and whenever its rows change, so the
+     list's widths are read when the page is laid out anyway, not in the middle of drawing it */
+  useEffect(() => {
     document.querySelectorAll<HTMLElement>('#presetList .pre > b').forEach(b => { const row = b.closest<HTMLElement>('.pre')!; if (b.scrollWidth > b.clientWidth + 1 && !row.title.startsWith(b.textContent + ' · ')) row.title = `${b.textContent} · ${row.title}`; });
-  });
+  }, [model, fold, expanded, tier]);
   /* a renamed or imported row is brought into view and washed green (G-D-30, F-20) */
   const wash = useWf(s => s.wash);
   useEffect(() => {

@@ -1,0 +1,33 @@
+{
+  "about": "The performance pass (tools/perf/README.md): guards that fail if its causes come back, each an action done as a user does it on a full desk with what the page counted (src/app/tally.ts, the test layer's __tally) held to a limit: views asked for their model again, tiles measured and layouts forced, the desk store's notifications, layouts solved. scenarios/39-perf.mjs; they hold on the rebuild only (the concept counts nothing).",
+  "scenarios": [
+    {
+      "id": "39-perf/a-knob-key-asks-again-only-the-models-that-read-it",
+      "why": "One knob key on the full Lab desk asks again only the models that read the value it changed (3 of about 250; before the pass every view, 732 a key), with one notification of the desk store and no layout (render/reads.ts, store/desk.ts)."
+    },
+    {
+      "id": "39-perf/a-knob-drag-asks-again-only-the-models-that-read-it",
+      "why": "A knob dragged through 20 pointer moves asks again only the models that read its value (one notification a change) and measures no tile."
+    },
+    {
+      "id": "39-perf/undo-and-redo-are-one-notification-each",
+      "why": "An Undo and a Redo are each one update of the desk store (the parts put back, the history, the focus and the toast together; before the pass 7), and the Undo of a knob key asks again only the models that read it."
+    },
+    {
+      "id": "39-perf/a-removal-measures-only-what-changed",
+      "why": "Removing a tile from the full desk measures no tile and forces no layout to measure (the tiles that stay keep their measurement, desk/layout.ts); Undo measures only the tile it brings back."
+    },
+    {
+      "id": "39-perf/a-move-by-key-measures-nothing-and-solves-each-place-once",
+      "why": "A move by an arrow key measures no tile and solves the layout once for each place the tile could take (13 on the full desk), the pack after the move reusing its place's layout."
+    },
+    {
+      "id": "39-perf/a-tile-dragged-across-the-desk-measures-nothing",
+      "why": "Dragging a tile across the desk and dropping it measures no tile: its preview is measured as the tile it copies."
+    },
+    {
+      "id": "39-perf/a-tier-change-lays-the-desk-out-once-it-is-drawn",
+      "why": "A tier change measures the desk at most twice (when React has drawn the new tier, and once its tiles have settled)."
+    }
+  ]
+}

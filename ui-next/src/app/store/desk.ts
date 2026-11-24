@@ -39,17 +39,27 @@ function flatOf(p: Parts): Flat {
   for (const [n, s] of undoables()) f.set('x:' + n, JSON.stringify(s.read()));
   return f;
 }
-function unflat(base: Parts, f: Flat): Parts {
-  const vals: Desk['vals'] = {}, auto: Desk['auto'] = {}, state: Desk['state'] = {};
-  for (const [p, j] of f) {
-    if (p.startsWith('v:')) vals[p.slice(2)] = JSON.parse(j) as Value;
-    else if (p.startsWith('a:')) auto[p.slice(2)] = JSON.parse(j) as boolean;
-    else if (p.startsWith('s:')) state[p.slice(2)] = JSON.parse(j);
-    else if (p.startsWith('x:')) { const s = undoables().get(p.slice(2)); if (s && JSON.stringify(s.read()) !== j) s.write(JSON.parse(j)); }
+/** The parts with the paths `moved` set as `to` has them (a path `to` lacks is taken away); everything else is kept as
+ *  it is, the same objects, so what did not change is not new to anything that watches it. */
+function unflat(base: Parts, moved: string[], to: Flat): Parts {
+  const p = base.desk;
+  let vals = p.vals, auto = p.auto, state = p.state, engine = p.engine, tier = p.tier, mods = base.mods, board = base.board, book = base.book;
+  const put = <V,>(o: { [k: string]: V }, was: { [k: string]: V }, k: string, j: string | undefined): { [k: string]: V } => { const n = o === was ? { ...o } : o; if (j === undefined) delete n[k]; else n[k] = JSON.parse(j) as V; return n; };
+  for (const path of moved) {
+    const j = to.get(path);
+    if (path.startsWith('v:')) vals = put(vals, p.vals, path.slice(2), j);
+    else if (path.startsWith('a:')) auto = put(auto, p.auto, path.slice(2), j);
+    else if (path.startsWith('s:')) state = put(state, p.state, path.slice(2), j);
+    else if (path.startsWith('x:')) { const s = undoables().get(path.slice(2)); if (s && j !== undefined && JSON.stringify(s.read()) !== j) s.write(JSON.parse(j)); }
+    else if (path === 'mods') mods = JSON.parse(j!) as string[];
+    else if (path === 'board') board = JSON.parse(j!) as string[];
+    else if (path === 'engine') engine = JSON.parse(j!) as EngineId;
+    else if (path === 'tier') tier = JSON.parse(j!) as Tier;
+    else if (path === 'book') book = JSON.parse(j!) as EngineBook;
   }
-  const mods = JSON.parse(f.get('mods')!) as string[], board = JSON.parse(f.get('board')!) as string[];
-  const desk: Desk = { ...base.desk, vals, auto, state, engine: JSON.parse(f.get('engine')!) as EngineId, tier: JSON.parse(f.get('tier')!) as Tier, on: onOf(mods, board) };
-  return { desk, book: JSON.parse(f.get('book')!) as EngineBook, mods, board };
+  const on = onOf(mods, board), same = on.size === p.on.size && [...on].every(x => p.on.has(x));
+  const desk: Desk = vals === p.vals && auto === p.auto && state === p.state && engine === p.engine && tier === p.tier && same ? p : { ...p, vals, auto, state, engine, tier, on: same ? p.on : on };
+  return { desk, book, mods, board };
 }
 const onOf = (mods: readonly string[], board: readonly string[]) => coreOnOf(ix, mods, board);
 /** What takes focus for a module, pedal or side unit that comes back (its grip, foot switch or power): an Undo of its
@@ -79,8 +89,6 @@ export interface Toast { text: Slot; action?: { label: Slot; run: () => void } }
 export interface DeskStore extends Parts {
   undo: Entry[];
   redo: Entry[];
-  /** The gesture in progress, whose changes merge into one step. */
-  gesture: string | null;
   toast: Toast | null;
   /** Spoken in the live region: everything said in one task, together (the concept's say(), F-12). Every toast is said
    *  too, so what the page shows is also told to a screen reader. */
@@ -103,6 +111,8 @@ export interface DeskStore extends Parts {
   setValue(key: string, v: Value, label?: Msg): Entry | null;
   beginGesture(tag: string): void;
   endGesture(tag?: string): void;
+  /** The gesture in progress, if any (the test layer's scripts ask). */
+  gestureNow(): string | null;
   setTier(t: Tier): void;
   switchEngine(to: EngineId): void;
   /** Adds a module, pedal or unit where the core puts it: `added` with its step, `there` (already on the desk: it rings)
@@ -162,36 +172,48 @@ export const useDesk = create<DeskStore>()((set, get) => {
   const start = initial();
   seeEngine(start.desk.engine);
   let saying = false;
-  /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named'], forth?: string): Entry => {
+  /* the gesture in progress, whose changes merge into one step: the store's own bookkeeping, which nothing draws, so
+     beginning or ending one tells no one */
+  let gesture: string | null = null;
+  /** What the live region says next: everything said in one task, together. */
+  const saidWith = (text: Slot): DeskStore['said'] => {
+    const was = get().said, out = { text: saying && was ? [...was.text, text] : [text], n: (was?.n ?? 0) + 1 };
+    if (!saying) { saying = true; queueMicrotask(() => { saying = false; }); }
+    return out;
+  };
+  /** A toast, and its words said: what a step adds to its one update of the store. */
+  const notice = (t: Toast | null): Partial<DeskStore> => (t ? { toast: t, said: saidWith(t.text) } : { toast: null });
+  /** Records a step from the parts as they were to the parts as they are now, in one update of the store with what
+   *  `also` adds for the step (a toast, a focus request). `g0`: the gesture the step belongs to, when the caller says (a
+   *  run of moves). */
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named'], forth?: string, also?: (e: Entry) => Partial<DeskStore>, g0?: string): Entry => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
     /* the gesture in progress is this change's when the change comes from the part that began it */
-    const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
+    const g = g0 ?? (gesture && (from === undefined || gesture.startsWith(from + '|')) ? gesture : null);
     if (g && last && last.gesture === g) {
       const merged = stepWords(ix, last.first, next.desk, named ? { named } : undefined) ?? words;
       const joined: Entry = { ...last, after, words: merged, at: Date.now() };
-      set({ ...next, undo: [...s.undo.slice(0, -1), joined], redo: [] });
+      set({ ...next, undo: [...s.undo.slice(0, -1), joined], redo: [], ...also?.(joined) });
       return joined;
     }
     const entry: Entry = { words, first: prev.desk, before, after, gesture: g, at: Date.now(), ...(back ? { back } : {}), ...(forth ? { forth } : {}) };
-    set({ ...next, undo: [...s.undo, entry].slice(-UNDO_MAX), redo: [] });
+    set({ ...next, undo: [...s.undo, entry].slice(-UNDO_MAX), redo: [], ...also?.(entry) });
     return entry;
   };
   const parts = (): Parts => { const s = get(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
   /** Moves the desk across an entry, path by path: a path changed since stays as it is, and the note says so (the core's
    *  keptWords). `moved` is false when nothing of the step was left to move: it is spent (F-24). */
-  const cross = (from: Flat, to: Flat): { moved: boolean; note: Slot | null } => {
-    const now = flatOf(parts()), paths = new Set([...from.keys(), ...to.keys()]), out = new Map(now), kept: string[] = [];
-    let moved = false;
+  const cross = (from: Flat, to: Flat): { moved: boolean; note: Slot | null; next: Parts | null } => {
+    const now = flatOf(parts()), paths = new Set([...from.keys(), ...to.keys()]), kept: string[] = [], moved: string[] = [];
     for (const p of paths) {
       if (from.get(p) === to.get(p)) continue;
       if (now.get(p) !== from.get(p)) { if (now.get(p) !== to.get(p)) kept.push(p); continue; }
-      const v = to.get(p); if (v === undefined) out.delete(p); else out.set(p, v);
-      moved = true;
+      moved.push(p);
     }
-    if (moved) set(unflat(parts(), out));
+    /* the parts it moves to, which the Undo or Redo sets in its one update of the store */
+    const next = moved.length ? unflat(parts(), moved, to) : null;
     const of = (pre: string) => kept.filter(p => p.startsWith(pre)).map(p => p.slice(2));
-    return { moved, note: keptWords(ix, { keys: [...of('v:'), ...of('a:')], state: of('s:'), parts: kept.filter((p): p is DeskPath => /^(mods|board|engine|tier)$/.test(p)) }, get().desk, !moved) };
+    return { moved: moved.length > 0, next, note: keptWords(ix, { keys: [...of('v:'), ...of('a:')], state: of('s:'), parts: kept.filter((p): p is DeskPath => /^(mods|board|engine|tier)$/.test(p)) }, (next ?? parts()).desk, !moved.length) };
   };
   /** What an Undo or Redo says: done, with what it left alone; or nothing to do, and why. */
   const crossed = (e: Entry, way: 'undone' | 'redone', r: { moved: boolean; note: Slot | null }): Slot => {
@@ -200,21 +222,20 @@ export const useDesk = create<DeskStore>()((set, get) => {
     return r.note ? { list: [said, r.note], join: 'sentences' } : said;
   };
   return {
-    ...start, undo: [], redo: [], gesture: null, toast: start.told ? { text: start.told } : null, said: null, focus: null, gone: {}, flash: null,
+    ...start, undo: [], redo: [], toast: start.told ? { text: start.told } : null, said: null, focus: null, gone: {}, flash: null,
 
     commit(c, from) {
-      const prev = parts(), desk = applyChange(prev.desk, c);
-      const e = record(prev, { ...prev, desk }, c.words, undefined, from, c.named);
-      if (c.said) get().showToast({ text: c.said });
-      return e;
+      const prev = parts(), desk = applyChange(prev.desk, c), said = c.said;
+      return record(prev, { ...prev, desk }, c.words, undefined, from, c.named, undefined, said ? () => notice({ text: said }) : undefined);
     },
     setValue(key, v, label) {
       let e: Entry | null = null;
       paramSetter(ix, key, () => get().desk, c => { e = get().commit(label ? { ...c, words: { ...c.words, label } } : c); })?.set(v as never);
       return e;
     },
-    beginGesture(tag) { const g = get().gesture; if (!g || !g.startsWith(tag + '#')) set({ gesture: `${tag}#${++gestures}` }); },
-    endGesture(tag) { const g = get().gesture; if (g && (!tag || g.startsWith(tag + '#'))) set({ gesture: null }); },
+    beginGesture(tag) { if (!gesture || !gesture.startsWith(tag + '#')) gesture = `${tag}#${++gestures}`; },
+    endGesture(tag) { if (gesture && (!tag || gesture.startsWith(tag + '#'))) gesture = null; },
+    gestureNow: () => gesture,
     setTier(t) { const s = get(); if (s.desk.tier !== t) set({ desk: { ...s.desk, tier: t } }); },
 
     switchEngine(to) {
@@ -223,9 +244,9 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const r = switchEngine(ix, prev.desk, prev.book, to);
       /* a module the new engine does not have and that cannot wait parked (a source) leaves the desk with it */
       const mods = prev.mods.filter(id => r.desk.on.has(id)), board = prev.board.filter(id => r.desk.on.has(id));
-      const entry = record(prev, { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board }, engineStep(to)), fresh = !seenEngines().includes(to);
+      const fresh = !seenEngines().includes(to), desk = { ...r.desk, on: onOf(mods, board) };
       seeEngine(to);
-      get().showToast({ text: (fresh && newOn(ix, get().desk, to, r.toast)) || r.toast, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
+      record(prev, { desk, book: r.book, mods, board }, engineStep(to), undefined, undefined, undefined, undefined, entry => notice({ text: (fresh && newOn(ix, desk, to, r.toast)) || r.toast, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } }));
     },
 
     add(id, before) {
@@ -245,9 +266,8 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const { mods, board, stood, pedals, last } = removeFrom(ix, prev.mods, prev.board, d.id);
       const gone = d.kind === 'module' ? { ...get().gone, [d.id]: stood } : get().gone;
       const words = deskStep('remove', d, prev.desk, ix);
-      const entry = record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, gripOf(d));
-      set({ gone, focus: focusAfter ? [focusAfter].flat() : null });
-      get().showToast({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
+      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, gripOf(d), undefined, undefined, undefined,
+        entry => ({ gone, focus: focusAfter ? [focusAfter].flat() : null, ...notice({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } }) }));
     },
 
     move(id, before, back) {
@@ -257,26 +277,25 @@ export const useDesk = create<DeskStore>()((set, get) => {
       if (mods.join() === prev.mods.join()) return;
       /* a run of presses on one tile's grip, each within two seconds of the last, is one move (30-desk.js) */
       const s = get(), lastE = s.undo[s.undo.length - 1], tag = `move:${id}#`;
-      set({ gesture: lastE?.gesture?.startsWith(tag) && Date.now() - lastE.at < 2000 ? lastE.gesture : `${tag}${++gestures}` });
-      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, prev.board) }, mods }, deskStep('move', d, prev.desk, ix), back);
-      set({ gesture: null });
+      const g = lastE?.gesture?.startsWith(tag) && Date.now() - lastE.at < 2000 ? lastE.gesture : `${tag}${++gestures}`;
+      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, prev.board) }, mods }, deskStep('move', d, prev.desk, ix), back, undefined, undefined, undefined, undefined, g);
+      gesture = null;
     },
 
+    /* an Undo or a Redo is one update of the store: the history, the parts it puts back, the focus and the toast */
     runUndo(entry) {
       const s = get(), e = entry ?? s.undo[s.undo.length - 1]; if (!e) return;
       const i = s.undo.indexOf(e); if (i < 0) return;
-      set({ undo: s.undo.filter(x => x !== e), gesture: null });
-      const r = e.run ? { moved: true, note: e.run.undo() ?? null } : cross(e.after, e.before);
-      set({ redo: [...get().redo, e], focus: e.back ? [e.back] : null });
-      get().showToast({ text: crossed(e, 'undone', r), action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
+      gesture = null;
+      const r = e.run ? { moved: true, note: e.run.undo() ?? null, next: null } : cross(e.after, e.before), now = get();
+      set({ ...r.next, undo: now.undo.filter(x => x !== e), redo: [...now.redo, e], focus: e.back ? [e.back] : null, ...notice({ text: crossed(e, 'undone', r), action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } }) });
     },
     runRedo(entry) {
       const s = get(), e = entry ?? s.redo[s.redo.length - 1]; if (!e) return;
       const i = s.redo.indexOf(e); if (i < 0) return;
-      set({ redo: s.redo.filter(x => x !== e), gesture: null });
-      const r = e.run ? { moved: true, note: e.run.redo() ?? null } : cross(e.before, e.after);
-      set({ undo: [...get().undo, e], ...(e.forth ? { focus: [e.forth] } : {}) });
-      get().showToast({ text: crossed(e, 'redone', r), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
+      gesture = null;
+      const r = e.run ? { moved: true, note: e.run.redo() ?? null, next: null } : cross(e.before, e.after), now = get();
+      set({ ...r.next, redo: now.redo.filter(x => x !== e), undo: [...now.undo, e], ...(e.forth ? { focus: [e.forth] } : {}), ...notice({ text: crossed(e, 'redone', r), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } }) });
     },
     deskStep(words, fn) {
       const prev = parts(), before = flatOf(prev); fn();
@@ -299,20 +318,24 @@ export const useDesk = create<DeskStore>()((set, get) => {
       set({ undo: [...s.undo, e].slice(-UNDO_MAX), redo: [] });
       return e;
     },
-    showToast(t) { set({ toast: t }); if (t) get().say(t.text); },
-    say(text) {
-      const was = get().said;
-      set({ said: { text: saying && was ? [...was.text, text] : [text], n: (was?.n ?? 0) + 1 } });
-      if (!saying) { saying = true; queueMicrotask(() => { saying = false; }); }
-    },
+    showToast(t) { set(notice(t)); },
+    say(text) { set({ said: saidWith(text) }); },
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
+    /* what the page is told is set in one update, and only what differs from what it was told before: told the same
+       again (the engines' book's holds after an Undo), nothing changes */
     told(o) {
-      const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.sessions ? { sessions: { ...d.sessions, ...o.sessions } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      const d = get().desk, same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+      const merged = <V,>(was: { [k: string]: V } | undefined, add: { [k: string]: V } | undefined) => (add && Object.keys(add).some(k => !was || !(k in was) || !same(was[k], add[k])) ? { ...was, ...add } : null);
+      const lists = merged(d.lists, o.lists), selection = merged(d.selection, o.selection), songs = merged(d.songs, o.songs), sessions = merged(d.sessions, o.sessions);
+      const vram = o.vram && !same(o.vram, d.vram) ? o.vram : null;
+      let told = d.told;
+      if (o.vstPlugins !== undefined && o.vstPlugins !== told?.vstPlugins) told = { ...told, vstPlugins: o.vstPlugins };
       /* the words for another engine's adapters (package 3b: features/adapters.tsx, from the engines' book) */
-      if (o.adaptersAway !== undefined && o.adaptersAway !== get().desk.told?.adaptersAway) set({ desk: { ...get().desk, told: { ...get().desk.told, adaptersAway: o.adaptersAway } } });
+      if (o.adaptersAway !== undefined && o.adaptersAway !== told?.adaptersAway) told = { ...told, adaptersAway: o.adaptersAway };
       /* what the engines' book holds for another engine, which a held value's control says (features/held.ts, RD-03) */
-      if (o.hold !== undefined && JSON.stringify(o.hold) !== JSON.stringify(get().desk.told?.hold ?? {})) set({ desk: { ...get().desk, told: { ...get().desk.told, hold: o.hold } } });
+      if (o.hold !== undefined && JSON.stringify(o.hold) !== JSON.stringify(told?.hold ?? {})) told = { ...told, hold: o.hold };
+      if (!lists && !selection && !songs && !sessions && !vram && told === d.told) return;
+      set({ desk: { ...d, ...(lists ? { lists } : {}), ...(selection ? { selection } : {}), ...(vram ? { vram } : {}), ...(songs ? { songs } : {}), ...(sessions ? { sessions } : {}), ...(told !== d.told ? { told } : {}) } });
     },
   };
 });

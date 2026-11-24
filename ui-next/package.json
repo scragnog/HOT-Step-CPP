@@ -31,7 +31,8 @@
     "baseline": "node tools/visual-baseline/vb.mjs",
     "visual:all": "node tools/visual-baseline/visual-all.mjs",
     "switches": "node tools/behaviour/switches.mjs",
-    "switches:apply": "node tools/behaviour/switches.mjs --applies"
+    "switches:apply": "node tools/behaviour/switches.mjs --applies",
+    "perf": "node tools/perf/run-all.mjs"
   },
   "dependencies": {
     "i18next": "^26.0.10",

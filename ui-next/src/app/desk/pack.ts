@@ -47,6 +47,30 @@ export function deskSpots(C: number, rs: Rect[], cy: number, cc: number, w: numb
   return out.sort((a, b) => a.y - b.y || a.c - b.c);
 }
 
+/** deskSpots, for the solver's states: the tiles over the columns a place spans are read from `cols` (each column's
+ *  tiles in order of their tops), so a place is tested against those tiles only. The same places, in the same order. */
+function spotsIn(C: number, rs: Rect[], cols: Rect[][], cy: number, cc: number, w: number, h: number, lead: boolean): { c: number; y: number }[] {
+  const out: { c: number; y: number }[] = [];
+  for (let c = 0; c + w <= C; c++) {
+    if (lead && c) break;
+    /* each tile over these columns once: from the first of them it covers */
+    const over: Rect[] = []; for (let k = c; k < c + w; k++) for (const r of cols[k]!) if (Math.max(r.c, c) === k) over.push(r);
+    const free = (y: number) => { for (const r of over) if (!(r.y + r.h <= y || y + h <= r.y)) return false; return true; };
+    const ys = [cy]; for (const r of over) if (r.y + r.h > cy) ys.push(r.y + r.h);
+    ys.sort((a, b) => a - b);
+    for (const y0 of ys) {
+      if (y0 === cy && c <= cc) continue;
+      if (!free(y0)) continue;
+      /* the nearest free edge of any tile just below drops it there */
+      let y = y0;
+      for (const r of rs) for (const e of [r.y, r.y + r.h]) if (e > y0 && e <= y0 + PACK_SNAP && (y === y0 || e < y) && free(e)) y = e;
+      if (y !== y0 && !over.some(r => r.y + r.h === y0)) y = y0;
+      out.push({ c, y }); break;
+    }
+  }
+  return out.sort((a, b) => a.y - b.y || a.c - b.c);
+}
+
 /** Places items by a plan (each item's option and column; with no column, the highest place). */
 export function deskPlace(C: number, items: PackItem[], plan: Plan[]): Rect[] {
   const rs: Rect[] = []; let cy = 0, cc = -1;
@@ -81,40 +105,46 @@ export function deskSettle(C: number, items: PackItem[], rs: Rect[]): Omit<Layou
   return { out, bottom, blank, fillGrow, flexGrow, holes, ragged };
 }
 
-/** Chooses each tile's width and place by a small beam search in reading order: holes inside the desk weigh most,
- *  then empty columns at its foot, then blank surface, then height; a width that is not the tile's own, or a place
- *  lower than the highest one open to it, costs a little. Deterministic. */
-export function deskSolve(C: number, items: PackItem[]): Layout {
-  const N = items.length;
-  if (!N) return { out: [], bottom: 0, blank: 0, fillGrow: 0, flexGrow: 0, holes: 0, ragged: 0, plan: [], ws: [] };
-  const dead = (rs: Rect[], cy: number) => {
-    const under = (r: Rect, c: number) => { let n = cy; rs.forEach(o => { if (o !== r && o.c <= c && c < o.c + o.w && o.y >= r.y + r.h) n = Math.min(n, o.y); }); return Math.max(cy, r.y + r.h) === cy ? n : Infinity; };
-    const cap = (r: Rect) => { let g = Infinity; for (let c = r.c; c < r.c + r.w; c++) { const n = under(r, c); g = Math.min(g, n === Infinity ? 0 : n - (r.y + r.h)); } return Math.min(Math.max(0, g), items[r.i]!.fill === 2 ? Infinity : items[r.i]!.fill ? r.h0 * 1.5 : items[r.i]!.reach); };
+type St = { rs: Rect[]; cols: Rect[][]; bot: number; key: string; cy: number; cc: number; cost: number; plan: Plan[]; s?: number };
+const START = (C: number): St => ({ rs: [], cols: Array.from({ length: C }, () => []), bot: -Infinity, key: '', cy: 0, cc: -1, cost: 0, plan: [] });
+const NONE: Layout = { out: [], bottom: 0, blank: 0, fillGrow: 0, flexGrow: 0, holes: 0, ragged: 0, plan: [], ws: [] };
+
+/** One step of the search: item i placed every way it may go after each state of the beam; the best states kept. */
+function step(C: number, items: PackItem[], i: number, beam: St[]): St[] {
+  const reachOf = (r: Rect) => (items[r.i]!.fill === 2 ? Infinity : items[r.i]!.fill ? r.h0 * 1.5 : items[r.i]!.reach);
+  /* the empty height under the tiles, where nothing below can close it: a column's gaps, less what the tile above may
+     grow by (cap); cols[c] holds the tiles that cover column c, in order of their tops (then of placing) */
+  const dead = (cols: Rect[][], cy: number) => {
+    const under = (r: Rect, c: number) => { if (Math.max(cy, r.y + r.h) !== cy) return Infinity; const b = r.y + r.h; for (const o of cols[c]!) if (o !== r && o.y >= b) return Math.min(cy, o.y); return cy; };
+    const cap = (r: Rect) => { let g = Infinity; for (let c = r.c; c < r.c + r.w; c++) { const n = under(r, c); g = Math.min(g, n === Infinity ? 0 : n - (r.y + r.h)); } return Math.min(Math.max(0, g), reachOf(r)); };
     let d = 0;
     for (let c = 0; c < C; c++) {
       let y = 0, last: Rect | null = null;
-      rs.filter(r => r.c <= c && c < r.c + r.w).sort((a, b) => a.y - b.y).forEach(r => { if (r.y > y) d += Math.max(0, r.y - y - (last ? cap(last) : 0)); if (r.y + r.h >= y) { y = r.y + r.h; last = r; } });
+      for (const r of cols[c]!) { if (r.y > y) d += Math.max(0, r.y - y - (last ? cap(last) : 0)); if (r.y + r.h >= y) { y = r.y + r.h; last = r; } }
       if (cy > y) d += Math.max(0, cy - y - (last ? cap(last) : 0));
     }
     return d;
   };
-  type St = { rs: Rect[]; cy: number; cc: number; cost: number; plan: Plan[]; s?: number };
-  let beam: St[] = [{ rs: [], cy: 0, cc: -1, cost: 0, plan: [] }];
-  for (let i = 0; i < N; i++) {
-    const it = items[i]!, next: St[] = [];
-    for (const st of beam) it.opts.forEach((o, oi) => {
-      const w = Math.min(C, o.w), sp = deskSpots(C, st.rs, st.cy, st.cc, w, o.h, it.lead);
-      sp.forEach((s, si) => {
-        const rs = [...st.rs, { i, c: s.c, w, y: s.y, h: o.h, h0: o.h, o: oi }];
-        const cost = st.cost + (oi ? 40 : 0) + (s.y - sp[0]!.y) * 0.5 * w + si * 2;
-        const ns: St = { rs, cy: s.y, cc: s.c, cost, plan: [...st.plan, { o: oi, c: s.c }] };
-        ns.s = dead(rs, s.y) * 4 + Math.max(...rs.map(r => r.y + r.h)) * C * 0.5 + cost; next.push(ns);
-      });
+  /* a column's tiles with r added: after every tile whose top is at or above r's, as a stable sort by top puts it */
+  const withRect = (col: Rect[], r: Rect) => { let k = col.length; while (k > 0 && col[k - 1]!.y > r.y) k--; return [...col.slice(0, k), r, ...col.slice(k)]; };
+  const it = items[i]!, next: St[] = [];
+  for (const st of beam) it.opts.forEach((o, oi) => {
+    const w = Math.min(C, o.w), sp = spotsIn(C, st.rs, st.cols, st.cy, st.cc, w, o.h, it.lead);
+    sp.forEach((s, si) => {
+      const r: Rect = { i, c: s.c, w, y: s.y, h: o.h, h0: o.h, o: oi }, rs = [...st.rs, r], cols = st.cols.slice();
+      for (let c = s.c; c < s.c + w; c++) cols[c] = withRect(st.cols[c]!, r);
+      const cost = st.cost + (oi ? 40 : 0) + (s.y - sp[0]!.y) * 0.5 * w + si * 2, bot = Math.max(st.bot, s.y + o.h);
+      const ns: St = { rs, cols, bot, key: (st.key ? st.key + ' ' : '') + s.c + ',' + w + ',' + s.y, cy: s.y, cc: s.c, cost, plan: [...st.plan, { o: oi, c: s.c }] };
+      ns.s = dead(cols, s.y) * 4 + bot * C * 0.5 + cost; next.push(ns);
     });
-    next.sort((a, b) => a.s! - b.s!);
-    const seen = new Set<string>(); beam = [];
-    for (const ns of next) { const k = ns.rs.map(r => r.c + ',' + r.w + ',' + r.y).join(' '); if (seen.has(k)) continue; seen.add(k); beam.push(ns); if (beam.length >= PACK_BEAM) break; }
-  }
+  });
+  next.sort((a, b) => a.s! - b.s!);
+  const seen = new Set<string>(), out: St[] = [];
+  for (const ns of next) { if (seen.has(ns.key)) continue; seen.add(ns.key); out.push(ns); if (out.length >= PACK_BEAM) break; }
+  return out;
+}
+/** The best of the last beam, its edges squared. */
+function finish(C: number, items: PackItem[], beam: St[]): Layout {
   let best: Layout | null = null;
   for (const st of beam) {
     const s = deskSettle(C, items, st.rs) as Layout;
@@ -123,4 +153,30 @@ export function deskSolve(C: number, items: PackItem[]): Layout {
   }
   best!.ws = best!.plan.map(p => p.o);
   return best!;
+}
+
+/** Chooses each tile's width and place by a small beam search in reading order: holes inside the desk weigh most,
+ *  then empty columns at its foot, then blank surface, then height; a width that is not the tile's own, or a place
+ *  lower than the highest one open to it, costs a little. Deterministic. Each state keeps, per column, its tiles in
+ *  order of their tops (`cols`) and its lowest edge (`bot`), so a candidate is scored without sorting the desk again. */
+export function deskSolve(C: number, items: PackItem[]): Layout {
+  if (!items.length) return { ...NONE };
+  let beam = [START(C)];
+  for (let i = 0; i < items.length; i++) beam = step(C, items, i, beam);
+  return finish(C, items, beam);
+}
+
+/** deskSolve with `item` put at each place k from `lo` to `hi` among `rest` (the arrow keys and a drag ask where a tile
+ *  would stand at every place): the same layouts, the steps the orders share (the tiles before the place) taken once. */
+export function deskSolveAt(C: number, rest: PackItem[], item: PackItem, lo: number, hi: number): Layout[] {
+  const pre: St[][] = [[START(C)]];
+  for (let j = 0; j < hi; j++) pre.push(step(C, rest, j, pre[j]!));
+  const out: Layout[] = [];
+  for (let k = lo; k <= hi; k++) {
+    const items = [...rest.slice(0, k), item, ...rest.slice(k)];
+    let beam = pre[k]!;
+    for (let i = k; i < items.length; i++) beam = step(C, items, i, beam);
+    out.push(finish(C, items, beam));
+  }
+  return out;
 }

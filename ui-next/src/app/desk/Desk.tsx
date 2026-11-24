@@ -15,7 +15,7 @@ import { Tile } from '../render/Tile.tsx';
 import { useModel } from '../render/useModel.ts';
 import { Slot } from '../register/Slot.tsx';
 import { setTierFromView } from '../shell/tier.ts';
-import { packSoon, renderPack } from './layout.ts';
+import { renderPack, watchDesk } from './layout.ts';
 import { ring } from './ring.ts';
 import { FoldButton } from './Fold.tsx';
 import { deskFold } from '../store/fold.ts';
@@ -33,6 +33,13 @@ export function HiddenNote() {
 /* a starter adds its module and focus lands on it (Q-16) */
 const addStarter = (id: string) => { if (useDesk.getState().add(id).did === 'added') useDesk.getState().setFocus(`.tile[data-m="${id}"] .grip`); };
 
+/** Adding what is already there rings it: a leaf of its own, so a ring draws nothing else again. */
+function Rings() {
+  const flash = useDesk(x => x.flash);
+  useEffect(() => { if (flash) ring(flash.id, flash.ring); }, [flash]);
+  return null;
+}
+
 export function Desk() {
   /* Quick's fold standing open is the session's (store/fold.ts); which modules it folds is the core's */
   const say = useSay(), open = useKept(deskFold), m = useModel(s => deskModel(ix, s.desk, s.mods, open), `desk:${open}`);
@@ -48,21 +55,13 @@ export function Desk() {
   /* a tile whose content changes size, or the window, re-places the desk */
   useEffect(() => {
     const g = document.getElementById('bento'); if (!g) return;
-    const now = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods, deskFold.get()).make}|${innerWidth}`; };
-    const ro = new ResizeObserver(() => packSoon(now, true));
-    const watch = () => g.querySelectorAll('.tile-body').forEach(b => ro.observe(b));
-    watch(); const mo = new MutationObserver(watch); mo.observe(g, { childList: true });
-    const rs = () => packSoon(now, false);
-    addEventListener('resize', rs);
-    return () => { ro.disconnect(); mo.disconnect(); removeEventListener('resize', rs); };
+    return watchDesk(g, () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods, deskFold.get()).make}|${innerWidth}`; });
   }, []);
-  /* adding what is already there rings it */
-  const flash = useDesk(x => x.flash);
-  useEffect(() => { if (flash) ring(flash.id, flash.ring); }, [flash]);
   const tag = (t: { words: Parameters<typeof say>[0]; tip: Parameters<typeof say>[0] } | null) => (t ? <small className="pc-eng" title={say(t.tip)}>{say(t.words)}</small> : null);
   const starters = m.empty?.starters.map(d => <button key={d.id} className="sbtn" data-additem={d.id} onClick={() => addStarter(d.id)}>+ <b>{say(d.name)}</b></button>);
   return (
     <div className="bento" id="bento">
+      <Rings />
       {m.tier !== 'quick' ? (m.lyricsHere ? <Slot name="desk.lead" /> : <div className="w4 deskrow"><Slot name="desk.lead" /></div>) : null}
       {m.tiles.map(id => <Tile key={id} def={defOf(id) as ModuleDef} />)}
       {m.empty?.quick ? (

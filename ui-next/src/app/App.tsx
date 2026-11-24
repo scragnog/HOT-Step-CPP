@@ -17,8 +17,22 @@ import { dispatchKey } from './register/keys.ts';
 import { Slot } from './register/Slot.tsx';
 import { service } from './register/services.ts';
 
+/** Focus that a step left nowhere goes where the step said: the first of its places that is on the page (A-18). A leaf
+ *  of its own, so a focus request draws nothing else again. */
+function FocusRequests() {
+  const focus = useDesk(s => s.focus);
+  useEffect(() => {
+    if (!focus) return;
+    requestAnimationFrame(() => {
+      const el = focus.map(sel => document.querySelector<HTMLElement>(sel)).find(x => x && x.getClientRects().length);
+      el?.focus({ preventScroll: true }); useDesk.getState().setFocus(null);
+    });
+  }, [focus]);
+  return null;
+}
+
 export function App() {
-  const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus), drawer = usePanelStore(s => s.drawer);
+  const say = useSay(), panels = usePanels(), drawer = usePanelStore(s => s.drawer);
   /* #app is React's root: its own classes say which panels stand open (31-side-panels.js paintPanels) */
   useLayoutEffect(() => {
     const app = document.getElementById('app')!;
@@ -30,14 +44,6 @@ export function App() {
     const s = service('lists');
     void Promise.all([s.lists(), s.vstChain()]).then(([lists, chain]) => useDesk.getState().told({ lists, vstPlugins: chain.plugins.length }));
   }, []);
-  /* focus that a step left nowhere goes where the step said: the first of its places that is on the page (A-18) */
-  useEffect(() => {
-    if (!focus) return;
-    requestAnimationFrame(() => {
-      const el = focus.map(sel => document.querySelector<HTMLElement>(sel)).find(x => x && x.getClientRects().length);
-      el?.focus({ preventScroll: true }); useDesk.getState().setFocus(null);
-    });
-  }, [focus]);
   /* the page's keys: each feature registers its own (register/keys.ts, src/app/features) */
   useEffect(() => {
     addEventListener('keydown', dispatchKey);
@@ -65,6 +71,7 @@ export function App() {
       {/* the overlays the packages fill (register/slots.ts 'overlays'): each portals into its container in the skeleton */}
       <Slot name="overlays" />
       <LiveRegion />
+      <FocusRequests />
     </>
   );
 }

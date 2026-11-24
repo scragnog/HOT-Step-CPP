@@ -54,7 +54,7 @@ export function install(): void {
       if (x === undefined || !hit || !has(ix, key, s.desk.engine)) return;
       /* the values one script sets at once (one t.do) are one step, as the concept's gesture of its own merges them */
       const s0 = useDesk.getState();
-      if (!s0.gesture?.startsWith('script|')) { s0.beginGesture('script|'); queueMicrotask(() => useDesk.getState().endGesture('script|')); }
+      if (!s0.gestureNow()?.startsWith('script|')) { s0.beginGesture('script|'); queueMicrotask(() => useDesk.getState().endGesture('script|')); }
       flushSync(() => paramSetter(ix, key, () => useDesk.getState().desk, c => { useDesk.getState().commit(c, 'script'); })?.set(x));
     },
     paintPromptTools() { take(written()); },

@@ -4,10 +4,19 @@
 // appearing in a tile) keeps every tile's width and column (Q-29); any other change chooses afresh. 11-render.js.
 // A re-pack that a tile's content set off slides the tiles it moves (the concept's packDesk, M-02); a change to the
 // desk's make-up is the desk's own transition's (features/motion.ts), told when the desk has been laid out (onPacked).
+//
+// What a tile needs (its natural width and its height at each width it may take) is measured once and kept, and
+// measured again only when it can have changed (docs/09, "Rendering"): a tile new on the desk, one whose classes or
+// layout attributes changed, one whose markup changed inside (a MutationObserver), one whose body changed size while
+// the layout had not moved it (a ResizeObserver), every tile when the desk's columns or width change or a web font
+// arrives. Measuring is the concept's (each width set in turn, the height read), on those tiles only, the others
+// standing where they are; a layout is solved once for the same tiles (a small cache), and only what changed is
+// written, so a re-pack that changes nothing touches nothing.
 
 import { easing, mtime, reduced, booted } from '../kit/motion.ts';
-import { deskPlace, deskSettle, deskSolve, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
+import { deskPlace, deskSettle, deskSolve, deskSolveAt, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
 import { BOARD, LEAD } from '../model/index.ts';
+import { tally } from '../tally.ts';
 
 interface Measured { cols: number; tiles: HTMLElement[]; items: PackItem[] }
 let packMake = '', packFresh = 0;
@@ -30,42 +39,129 @@ export function holdScroll(fn: () => void): void {
 
 const packKey = (t: HTMLElement) => t.dataset.m || t.dataset.gm || (t.classList.contains('desk-empty') ? '_empty' : t.className);
 
-function measure(g: HTMLElement): Measured {
-  const tiles = [...g.children].filter((t): t is HTMLElement => t instanceof HTMLElement && !t.classList.contains('moving'));
-  g.classList.add('measuring');
-  tiles.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; t.classList.remove('stretched', 'widened', 'narrowed'); });
-  const cols = getComputedStyle(g).gridTemplateColumns.split(' ').length;
+/* ---------------------------------------------------------------- what is kept of each tile's measurement */
+
+/** A tile's measurement: its natural width and its height (in rows) at each width measured, for the desk's columns and
+ *  width (`geo`) and the tile's own look (its classes and layout attributes) when it was measured. */
+interface Kept { el: HTMLElement; look: string; geo: string; nat: number; hs: Map<number, number> }
+const kept = new WeakMap<HTMLElement, Map<string, Kept>>();
+/** Tiles whose content changed since they were measured. */
+let stale = new WeakSet<HTMLElement>();
+/** Tiles the layout moved or restyled since the ResizeObserver last spoke: a change of their body's size is the layout's. */
+let placed = new WeakSet<HTMLElement>();
+/** What the layout last wrote on each tile. */
+const wrote = new WeakMap<HTMLElement, string>();
+/* the classes a tile carries for a moment, or the layout's own: none changes what it measures */
+const PASSING = new Set(['stretched', 'widened', 'narrowed', 'flash', 'here', 'glow', 'moving', 'ghost', 'lift', 'landing', 'ring-here', 'offscreen', 'turning']);
+const lookOf = (t: HTMLElement) => [...t.classList].filter(c => !PASSING.has(c)).sort().join(' ') + '|' + ['m', 'grow', 'fold', 'span', 'stretch', 'fill'].map(k => t.dataset[k] ?? '-').join('|');
+/** The desk's child that holds n. */
+const tileOf = (g: HTMLElement, n: Node | null): HTMLElement | null => { while (n && n.parentNode !== g) n = n.parentNode; return n instanceof HTMLElement ? n : null; };
+
+const observed = new WeakMap<HTMLElement, MutationObserver>();
+/* a change inside a tile (React drew it again, a part set a size) marks the tile; a change of the tile's own attributes
+   does not (the layout's style and classes, a drag's marks: what of them a measurement depends on is the tile's look,
+   lookOf), nor the desk's children coming and going (a new element is measured as new) */
+function noteMutations(g: HTMLElement, rs: MutationRecord[]): void {
+  for (const r of rs) {
+    if (r.target === g) continue;
+    const t = tileOf(g, r.target); if (!t) continue;
+    if (r.type === 'attributes' && r.target === t) continue;
+    stale.add(t);
+  }
+}
+function watchContent(g: HTMLElement): void {
+  if (observed.has(g)) { noteMutations(g, observed.get(g)!.takeRecords()); return; }
+  const mo = new MutationObserver(rs => noteMutations(g, rs));
+  mo.observe(g, { childList: true, subtree: true, attributes: true, characterData: true });
+  observed.set(g, mo);
+}
+/* a web font that arrives changes what every tile needs */
+document.fonts?.addEventListener?.('loadingdone', () => { stale = new WeakSet(); fontGen++; });
+let fontGen = 0;
+
+/** Measures the tiles in `need` as the concept's deskMeasure does (each tile's natural width, then its height at each
+ *  width it may take, every tile of a width set at once), the other tiles standing where they are. */
+function measureSome(need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>): void {
+  tally('measure'); tally('measure.tiles', need.length);
   const rows = (h: number) => Math.max(1, Math.ceil((h + PACK_GAP) / PACK_ROW));
-  const nat = tiles.map(t => { const cs = getComputedStyle(t), e = cs.gridColumnEnd, sp = [cs.gridColumnStart, e].find(v => /^span/.test(v)); return e === '-1' ? cols : sp ? Math.min(cols, parseInt(sp.slice(5)) || 1) : 1; });
-  const opts = tiles.map((t, i) => {
-    const w = nat[i]!, o = [w];
-    if ('grow' in t.dataset && w < cols && (w === 1 ? cols > 2 : cols === 3)) o.push(w + 1);
-    if ('grow' in t.dataset && w === 2 && cols === 4) o.push(4);
-    if ('fold' in t.dataset && cols === 3 && w === 2) o.push(1);
-    if ('span' in t.dataset && w < cols && !o.includes(cols)) o.push(cols);
-    if (t.dataset.m === LEAD?.id && (cols === 3 || cols === 4) && w === 2) o.push(cols);
-    if (t.dataset.m === BOARD.id && cols === 4 && w === 4 && tiles[0]?.dataset.m === LEAD?.id) o.push(2);
-    return o;
-  });
-  const hs = tiles.map(t => [rows(t.offsetHeight)]);
+  need.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; t.classList.remove('stretched', 'widened', 'narrowed'); wrote.delete(t); });
+  const nat = need.map(t => { const cs = getComputedStyle(t), e = cs.gridColumnEnd, sp = [cs.gridColumnStart, e].find(v => /^span/.test(v)); return e === '-1' ? cols : sp ? Math.min(cols, parseInt(sp.slice(5)) || 1) : 1; });
+  const ws = need.map((t, i) => widths(t, nat[i]!));
+  tally('measure.layouts');
+  const hs = need.map(t => [rows(t.offsetHeight)]);
   for (let j = 1; j < 3; j++) {
-    const set = tiles.filter((_, i) => opts[i]![j]);
+    const set = need.filter((_, i) => ws[i]![j]);
     if (!set.length) break;
-    tiles.forEach((t, i) => { const o = opts[i]![j]; if (o) { t.style.gridColumn = 'span ' + o; t.classList.toggle('narrowed', o < nat[i]!); t.classList.toggle('widened', o > nat[i]!); } });
-    tiles.forEach((t, i) => { if (opts[i]![j]) hs[i]![j] = rows(t.offsetHeight); });
+    tally('measure.layouts');
+    need.forEach((t, i) => { const o = ws[i]![j]; if (o) { t.style.gridColumn = 'span ' + o; t.classList.toggle('narrowed', o < nat[i]!); t.classList.toggle('widened', o > nat[i]!); } });
+    need.forEach((t, i) => { if (ws[i]![j]) hs[i]![j] = rows(t.offsetHeight); });
     set.forEach(t => { t.style.gridColumn = ''; t.classList.remove('narrowed', 'widened'); });
   }
-  g.classList.remove('measuring');
-  return {
-    cols, tiles,
-    items: tiles.map((t, i) => ({
-      key: packKey(t), opts: opts[i]!.map((w, j) => ({ w, h: hs[i]![j]! })),
-      reach: t.dataset.stretch ? Math.round(+t.dataset.stretch / PACK_ROW) : PACK_STRETCH,
-      fill: t.classList.contains('desk-empty') ? 2 : t.dataset.m === LEAD?.id ? 1 : 0,
-      tile: !!(t.dataset.m || t.dataset.gm) && t.dataset.m !== LEAD?.id, lead: i === 0 && t.dataset.m === LEAD?.id,
-    })),
-  };
+  need.forEach((t, i) => { ks.set(packKey(t), { el: t, look: lookOf(t), geo, nat: nat[i]!, hs: new Map(ws[i]!.map((w, j) => [w, hs[i]![j]!])) }); stale.delete(t); });
 }
+
+/** The widths a tile may take (its own first), as the concept's deskMeasure offers them. */
+function widthsOf(t: HTMLElement, w: number, cols: number, first: HTMLElement | undefined): number[] {
+  const o = [w];
+  if ('grow' in t.dataset && w < cols && (w === 1 ? cols > 2 : cols === 3)) o.push(w + 1);
+  if ('grow' in t.dataset && w === 2 && cols === 4) o.push(4);
+  if ('fold' in t.dataset && cols === 3 && w === 2) o.push(1);
+  if ('span' in t.dataset && w < cols && !o.includes(cols)) o.push(cols);
+  if (t.dataset.m === LEAD?.id && (cols === 3 || cols === 4) && w === 2) o.push(cols);
+  if (t.dataset.m === BOARD.id && cols === 4 && w === 4 && first?.dataset.m === LEAD?.id) o.push(2);
+  return o;
+}
+
+/* the desk's columns, read when its width or its tier is new: the resolved grid-template-columns counts the columns
+   the tiles' places add too, so they are read with every tile's place cleared (the concept reads them so), and kept
+   while the width and the tier stay */
+const grids = new WeakMap<HTMLElement, { at: string; cols: number }>();
+const tilesOf = (g: HTMLElement) => [...g.children].filter((t): t is HTMLElement => t instanceof HTMLElement && !t.classList.contains('moving'));
+
+/** What every tile needs, measuring only those whose measurement cannot be kept, handed to `place`; while tiles stand
+ *  somewhere else for a moment (the columns read, tiles measured) until `place` has put them back, the page's height and
+ *  scroll are held. */
+function measure(g: HTMLElement, width: number, place: (m: Measured) => void): void {
+  const tiles = tilesOf(g), at = `${width}|${g.closest('.centre')?.className ?? ''}`, ks = kept.get(g) ?? new Map<string, Kept>();
+  kept.set(g, ks); watchContent(g);
+  let cols = grids.get(g)?.at === at ? grids.get(g)!.cols : 0;
+  const widths = (t: HTMLElement, nat: number) => widthsOf(t, nat, cols, tiles[0]);
+  /* a preview (a moved tile's copy) is the tile it copies: its measurement is the tile's (the drag measures nothing) */
+  const usable = (t: HTMLElement, k: Kept | undefined, geo: string): k is Kept => !!k && k.geo === geo && k.look === lookOf(t) && !stale.has(t) && !stale.has(k.el)
+    && (k.el === t || (t.classList.contains('ghost') && k.el.classList.contains('moving') && k.el.dataset.mo === t.dataset.gm));
+  const needOf = (geo: string) => tiles.filter(t => { const k = ks.get(packKey(t)); return !usable(t, k, geo) || widths(t, k.nat).some(w => !k.hs.has(w)); });
+  let need = cols ? needOf(`${cols}|${width}|${fontGen}`) : tiles;
+  const items = (): Measured => ({
+    cols, tiles,
+    items: tiles.map((t, i) => {
+      const k = ks.get(packKey(t))!, ws = widths(t, k.nat);
+      return {
+        key: packKey(t), opts: ws.map(w => ({ w, h: k.hs.get(w)! })),
+        reach: t.dataset.stretch ? Math.round(+t.dataset.stretch / PACK_ROW) : PACK_STRETCH,
+        fill: t.classList.contains('desk-empty') ? 2 : t.dataset.m === LEAD?.id ? 1 : 0,
+        tile: !!(t.dataset.m || t.dataset.gm) && t.dataset.m !== LEAD?.id, lead: i === 0 && t.dataset.m === LEAD?.id,
+      };
+    }),
+  });
+  if (!need.length) { place(items()); return; }
+  holdScroll(() => {
+    g.style.minHeight = g.offsetHeight + 'px';
+    try {
+      if (!cols) { tiles.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; wrote.delete(t); }); cols = getComputedStyle(g).gridTemplateColumns.split(' ').length; grids.set(g, { at, cols }); need = needOf(`${cols}|${width}|${fontGen}`); }
+      if (need.length) measureSome(need, cols, widths, `${cols}|${width}|${fontGen}`, ks);
+      place(items());
+    } finally { g.style.minHeight = ''; }
+  });
+}
+
+/* ---------------------------------------------------------------- the layout, solved once for the same tiles */
+
+const solved = new Map<string, Layout>();
+const itemsKey = (C: number, items: PackItem[]) => C + '#' + items.map(it => `${it.key}:${it.opts.map(o => o.w + 'x' + o.h).join(',')}:${it.reach}:${it.fill}:${+it.tile}${+it.lead}`).join(';');
+const remember = (k: string, l: Layout) => { solved.delete(k); solved.set(k, l); if (solved.size > 48) solved.delete(solved.keys().next().value!); return l; };
+/** deskSolve, kept for the same columns and tiles (the arrow keys' places, the pack after a move, a re-pack that finds
+ *  nothing changed). */
+const solve = (C: number, items: PackItem[]): Layout => { const k = itemsKey(C, items), l = solved.get(k); if (l) return remember(k, l); tally('solve'); return remember(k, deskSolve(C, items)); };
 
 /** The desk's make-up: what, when it changes, makes the layout choose its widths afresh. */
 export const deskMake = (tier: string, engine: string, mods: string[], qAll: boolean) => [tier, engine, mods.join(), qAll, innerWidth].join('|');
@@ -77,26 +173,35 @@ export function renderPack(make: string): void {
   packNow(make);
 }
 
-/** Places every tile. `keep`: keep the widths chosen for this same desk (a content change). */
+/** Places every tile. `keep`: keep the widths chosen for this same desk (a content change). Writes only what changed. */
 export function packNow(make: string, keep = make === packMake && performance.now() - packFresh > 700): void {
-  holdScroll(() => document.querySelectorAll<HTMLElement>('.bento').forEach(g => {
+  tally('pack');
+  document.querySelectorAll<HTMLElement>('.bento').forEach(g => {
     if (getComputedStyle(g).display !== 'grid') return;
     if (!g.offsetParent) { if (state.get(g)) packFresh = performance.now(); state.set(g, null); return; }
-    g.style.minHeight = g.offsetHeight + 'px';
-    const m = measure(g), sig = g.clientWidth + '|' + m.cols + '|' + m.items.map(it => it.key).join('|');
-    const was = state.get(g);
-    let res: Layout;
-    if (keep && was && was.sig === sig) res = { ...deskSettle(m.cols, m.items, deskPlace(m.cols, m.items, was.plan)), plan: was.plan };
-    else res = deskSolve(m.cols, m.items);
-    state.set(g, { sig, plan: res.plan }); meas = m;
-    m.tiles.forEach((t, i) => {
-      const p = res.out.find(r => r.i === i); if (!p) return; const w0 = m.items[i]!.opts[0]!.w;
-      t.style.gridColumn = `${p.c + 1} / span ${p.w}`; t.style.gridRow = `${p.y + 1} / span ${p.h}`;
-      t.classList.toggle('stretched', p.h > p.h0); t.classList.toggle('widened', p.w > w0); t.classList.toggle('narrowed', p.w < w0);
-    });
-    g.style.minHeight = '';
-  }));
+    const width = g.clientWidth;
+    measure(g, width, m => placeAll(g, m, width, keep));
+  });
   packed();
+}
+
+/** Places the tiles where the layout puts them, writing only what changed. */
+function placeAll(g: HTMLElement, m: Measured, width: number, keep: boolean): void {
+  const sig = width + '|' + m.cols + '|' + m.items.map(it => it.key).join('|');
+  const was = state.get(g);
+  let res: Layout;
+  if (keep && was && was.sig === sig) res = { ...deskSettle(m.cols, m.items, deskPlace(m.cols, m.items, was.plan)), plan: was.plan };
+  else res = solve(m.cols, m.items);
+  state.set(g, { sig, plan: res.plan }); meas = m;
+  m.tiles.forEach((t, i) => {
+    const p = res.out.find(r => r.i === i); if (!p) return; const w0 = m.items[i]!.opts[0]!.w;
+    const col = `${p.c + 1} / span ${p.w}`, row = `${p.y + 1} / span ${p.h}`, st = p.h > p.h0, wi = p.w > w0, na = p.w < w0;
+    /* what React drew again keeps the layout's classes only if it kept the class attribute: they are checked, not assumed */
+    if (wrote.get(t) === col + '|' + row && t.classList.contains('stretched') === st && t.classList.contains('widened') === wi && t.classList.contains('narrowed') === na) return;
+    wrote.set(t, col + '|' + row); placed.add(t);
+    t.style.gridColumn = col; t.style.gridRow = row;
+    t.classList.toggle('stretched', st); t.classList.toggle('widened', wi); t.classList.toggle('narrowed', na);
+  });
 }
 
 /** A content change (a tile's body changed size, the window resized): re-place, keeping widths while the make-up holds. */
@@ -116,6 +221,21 @@ export function flushPack(): void { if (!raf) return; cancelAnimationFrame(raf);
 /** The desk laid out now for what its tiles hold now (a tile that grew since the last pack, before the ResizeObserver
  *  has said so): the desk's own transition measures where things end only once they are there. */
 export function settlePack(): void { if (raf) { flushPack(); return; } if (packMake) packNow(packMake); }
+
+/** Watches the desk's tiles for a change of size: a tile's body that changed size while the layout had not moved it
+ *  re-places the desk (`now` is the desk's make-up), as does the window. */
+export function watchDesk(g: HTMLElement, now: () => string): () => void {
+  const ro = new ResizeObserver(es => {
+    for (const e of es) { const t = tileOf(g, e.target); if (t && !placed.has(t)) stale.add(t); }
+    placed = new WeakSet();
+    packSoon(now, true);
+  });
+  const watch = () => g.querySelectorAll('.tile-body').forEach(b => ro.observe(b));
+  watch(); const mo = new MutationObserver(watch); mo.observe(g, { childList: true });
+  const rs = () => packSoon(now, false);
+  addEventListener('resize', rs);
+  return () => { ro.disconnect(); mo.disconnect(); removeEventListener('resize', rs); };
+}
 
 /** A content re-pack: the tiles it moves slide from where they stood over --t-base (the concept's packDesk); not while
  *  a drag makes room its own way, a tier change runs, or a tile is already moving. */
@@ -141,8 +261,10 @@ export function deskSlots(g: HTMLElement, key: string, item: PackItem): { k: num
   const rest = m.items.filter(it => it.key !== key);
   const lead = rest[0]?.lead ? 1 : 0, last = rest.reduce((a, it, i) => (it.tile ? i + 1 : a), lead);
   const gr = g.getBoundingClientRect(), colW = (g.clientWidth - (m.cols - 1) * PACK_GAP) / m.cols, out = [];
+  /* each place's layout, the steps the orders share taken once; kept, so the pack after a move solves nothing */
+  const all = deskSolveAt(m.cols, rest, item, lead, last); tally('solve', all.length);
   for (let k = lead; k <= last; k++) {
-    const items = [...rest.slice(0, k), item, ...rest.slice(k)], res = deskSolve(m.cols, items), p = res.out.find(r => r.i === k)!;
+    const items = [...rest.slice(0, k), item, ...rest.slice(k)], res = remember(itemsKey(m.cols, items), all[k - lead]!), p = res.out.find(r => r.i === k)!;
     out.push({ k: k - lead, x: gr.left + scrollX + p.c * (colW + PACK_GAP), y: gr.top + scrollY + p.y * PACK_ROW, w: p.w * colW + (p.w - 1) * PACK_GAP, h: p.h * PACK_ROW - PACK_GAP });
   }
   return out;
