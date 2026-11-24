@@ -3,7 +3,9 @@
 // side unit's two-line LCD; button a small button that runs its node's action. What each says, and what its actions
 // do, are the core's.
 
+import { useContext } from 'react';
 import { definePart, ui, useSay, type PartView } from '../kit/index.ts';
+import { NoteInline } from './inline.ts';
 
 /** A node's actions as links or buttons. */
 export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' | 'term' }) {
@@ -11,14 +13,16 @@ export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' 
   return (
     <>
       {v.actions.map((a, i) => look === 'link'
-        ? <button key={i} type="button" className="linkbtn" data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
+        ? <button key={i} type="button" className="linkbtn" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
         : <button key={i} type="button" className={look === 'term' ? 'tbtn' : 'pbtn'} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>)}
     </>
   );
 }
 
 export function Note(v: PartView) {
-  const say = useSay(), tip = v.words.tip ? say(v.words.tip) : undefined, text = say(v.words.text);
+  const say = useSay(), tip = v.words.tip ? say(v.words.tip) : undefined, text = say(v.words.text), inline = useContext(NoteInline);
+  /* one of the notes of a line that says what a choice does (the lead sheet's lyric timing): its words and links */
+  if (inline) return <>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" /></>;
   if (v.surface === 'pedal') return <small className="pnote" title={tip}>{v.actions.length ? say(ui('note.then', { text })) : text}<ActionLinks v={v} look="link" /></small>;
   /* in a terminal, its quiet ink; in an LCD's row, the LCD's dimmed words */
   if (v.surface === 'term') return <span className="k" title={tip}>{text}</span>;

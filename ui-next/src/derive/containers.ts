@@ -26,6 +26,8 @@ export interface KidModel {
   extra: boolean;
   /** The parameters it edits, or its own children edit, on the engine in use (a guard's line: its penalty first). */
   keys: string[];
+  /** Its look, where its node gives one (a warning note: package 3c's lyric-timing line). */
+  look?: string;
 }
 
 /** A container's children on the desk, in the order the renderer draws them. `node` is the container's node as the
@@ -41,6 +43,7 @@ export function kidsOf(ix: Index, node: Node, desk: Desk, key: string): KidModel
       inner: at ? (at.children ?? []).filter(g => nodeShown(ix, g, desk)).map(g => g.part) : [],
       extra: !!c.tiers && (!node.tiers || node.tiers.some(t => !c.tiers!.includes(t))),
       keys: at ? [...editsOf(at), ...(at.children ?? []).flatMap(g => editsOf(g))].filter(x => has(ix, x, desk.engine)) : [],
+      ...(typeof (c.opts as { look?: unknown } | undefined)?.look === 'string' ? { look: (c.opts as { look: string }).look } : {}),
     };
   });
 }

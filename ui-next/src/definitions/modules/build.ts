@@ -106,16 +106,19 @@ export const build = {
     },
   ],
   face: [
-    { part: 'buildBoard', state: ['build'], reads: ['lyrics.text', 'lm.cotmode'] },
     {
-      part: 'foot',
+      /* the board holds its settings and draws them under the section being built (the concept's .b-ctl); while a keep
+         locks Follow score and Plan strength it shows them as read-outs in their place */
+      part: 'buildBoard',
+      state: ['build'],
+      reads: ['lyrics.text', 'lm.cotmode', 'yue.btakes', 'yue.bmode', 'yue.bcond', 'yue.bar', 'prompt.text', 'song.title'],
+      opts: { ownChords: 'new' },
       children: [
-        { part: 'segmented', param: 'yue.bmode' },
-        { part: 'labelled', label: 'Takes', children: [{ part: 'token', param: 'yue.btakes' }] },
-        { part: 'labelled', label: 'Follow score', children: [{ part: 'token', param: 'yue.bcond' }], tiers: ['lab'] },
-        { part: 'labelled', label: 'Plan strength', children: [{ part: 'token', param: 'yue.bar' }], tiers: ['lab'] },
+        { part: 'segmented', param: 'yue.bmode', tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Takes', children: [{ part: 'token', param: 'yue.btakes' }], tiers: ['studio', 'lab'] },
+        { part: 'labelled', label: 'Follow score', tip: 'How closely each take follows the score', children: [{ part: 'token', param: 'yue.bcond' }], tiers: ['lab'] },
+        { part: 'labelled', label: 'Plan strength', tip: 'How strongly the plan steers each take', children: [{ part: 'token', param: 'yue.bar' }], tiers: ['lab'] },
       ],
-      tiers: ['studio', 'lab'],
     },
   ],
   thumb: { file: 'build' },

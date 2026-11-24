@@ -19,6 +19,7 @@ export const score = {
       type: 'text',
       label: 'Lead sheet (ABC)',
       default: '',
+      placeholder: '% empty: the planner writes one\n% e.g.  K:G   G A B d | c B A G |',
       example: 'X:1\nT:Stay a little longer\nM:4/4\nL:1/4\nK:G\n"G" G A B d | "C" c B A G | "D" A B c d | "G" B2 G2 |]',
       when: { param: 'lm.cotmode', not: 'off' },
       wire: {
@@ -40,7 +41,8 @@ export const score = {
     { part: 'textArea', param: 'yue.abc', opts: { look: 'staff' } },
     {
       part: 'abcFoot',
-      reads: ['yue.abc', 'lm.cotmode'],
+      reads: ['yue.abc', 'lm.cotmode', 'lyrics.text', 'prompt.text', 'song.title'],
+      opts: { chords: 'full' },
       actions: [
         { do: 'example', param: 'yue.abc', label: 'Insert example' },
         { do: 'bespoke', name: 'scorePreview', label: 'Preview this score' },
@@ -48,6 +50,7 @@ export const score = {
       ],
     },
     {
+      /* the concept's .ctl-row: the choice, then one line saying what it does and what it needs */
       part: 'labelled',
       label: 'Lyric timing',
       children: [
@@ -64,12 +67,19 @@ export const score = {
         },
         {
           part: 'note',
-          text: 'It needs composer CFG 1, so your CFG skips it.',
+          text: 'It needs composer CFG 1, so your {value:yue.cfg} skips it.',
           opts: { look: 'warn' },
           when: {
             all: [{ param: 'yue.timing', not: 'off' }, { param: 'yue.cfg', auto: false }, { param: 'yue.cfg', not: 1 }],
           },
           actions: [{ do: 'auto', param: 'yue.cfg', label: 'Set CFG to auto' }],
+        },
+        {
+          part: 'note',
+          text: 'Needs composer CFG 1 (auto).',
+          when: {
+            all: [{ param: 'yue.timing', not: 'off' }, { any: [{ param: 'yue.cfg', auto: true }, { param: 'yue.cfg', is: 1 }] }],
+          },
         },
       ],
       tiers: ['studio', 'lab'],

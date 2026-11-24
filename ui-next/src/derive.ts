@@ -24,3 +24,6 @@ export * from './derive/readouts.ts';
 export * from './derive/vram.ts';
 export * from './derive/instruments.ts';
 export * from './derive/workflows.ts';
+export * from './derive/build.ts';
+export * from './derive/recording.ts';
+export * from './derive/score.ts';

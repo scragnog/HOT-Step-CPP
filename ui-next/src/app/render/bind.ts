@@ -64,6 +64,8 @@ function actionsOf(def: Definition, node: Node, key: string) {
     act: (name: string, arg?: unknown) => {
       const b = bound(); if (!b) return false;
       return partAct(ix, b.node, b, desk(), name, arg, (m, undo) => {
+        /* said in the live region only, as the concept's say() (package 3c) */
+        if (undo === 'say') { useDesk.getState().say(m); return; }
         const e = undo ? useDesk.getState().undo.at(-1) : undefined, s = useDesk.getState();
         s.showToast({ text: m, ...(e ? { action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } } : {}) });
       });

@@ -8,3 +8,4 @@ export { ui, useSay } from '../i18n/index.ts';
 export { Icon } from './icons.tsx';
 export { LcdFace } from './LcdFace.tsx';
 export { onValueKey, onValueKeyUp, onWheelStep } from './value.ts';
+export { Glyph } from './glyphs.tsx';

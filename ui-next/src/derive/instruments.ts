@@ -20,6 +20,9 @@ import { nodeWord } from './strings.ts';
 import { EN, type Msg, type Slot, msg } from './messages.ts';
 import { spellKey } from './readouts.ts';
 import { nodeShown } from './desk.ts';
+import type { BuildModel } from './build.ts';
+import type { SpanModel } from './recording.ts';
+import type { AbcModel } from './score.ts';
 
 /* the core's words for these instruments, added to its table (messages.ts EN) where this file is loaded */
 Object.assign(EN, {
@@ -89,6 +92,10 @@ export interface InstrumentModel {
   region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot; ctl: boolean; one: boolean };
   /** timbreBlend: the blend as its percent. */
   blend?: { pct: Slot };
+  /** buildBoard (package 3c, derive/build.ts), recordingSpan (derive/recording.ts), abcFoot (derive/score.ts). */
+  build?: BuildModel;
+  span?: SpanModel;
+  abc?: AbcModel;
 }
 
 /** What a bespoke part draws on the desk, or undefined for a part this file does not draw. */
@@ -419,7 +426,15 @@ export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: s
   if (!f) throw new Error(`${node.part} has no act "${name}"`);
   return f({ ix, node, v, desk, arg, tell }) !== false;
 }
-export type Tell = (m: Msg, undo?: boolean) => void;
+/** `undo`: the toast offers to undo the step just taken; 'say': it is said in the live region only, as the concept's say(). */
+export type Tell = (m: Msg, undo?: boolean | 'say') => void;
+type Acts = { [name: string]: (x: ActIn) => boolean | void };
+/** Another package's bespoke part (package 3c's build board, recording span and ABC foot): what it draws and what a
+ *  hand on it does, beside the parts of this file. */
+export function defineInstrument(part: string, draw: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel, acts: Acts = {}): void {
+  if (DRAW[part] || ACTS[part]) throw new Error(`the instrument ${part} is defined twice`);
+  DRAW[part] = draw; ACTS[part] = acts;
+}
 interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
 
 /** Sets the seed and its lock in one step (the seed state's `set`): a number kept, or null for random. */
@@ -434,7 +449,7 @@ function seedList(x: ActIn): { key: string; list: SavedSeed[] } | null {
   return key && x.v.state[key] ? { key, list: cleanSeeds(x.v.state[key]!.value) } : null;
 }
 
-const ACTS: { [part: string]: { [name: string]: (x: ActIn) => boolean | void } } = {
+const ACTS: { [part: string]: Acts } = {
   keyWheel: {
     /* a key on the wheel, from the value in force */
     walk: x => {

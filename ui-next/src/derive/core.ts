@@ -87,6 +87,9 @@ export interface Desk {
   /** What the VRAM figures are worked out from beside the model files' sizes (derive/vram.ts): the card, and what
    *  each engine loads besides its model files and costs per take. Told by the models service. */
   vram?: VramFigures;
+  /** What a server session holds, as its service tells it (package 3c: the build session's takes, a recording's
+   *  length): never a step, never saved with the desk; the core reads it to draw what the server has done. */
+  sessions?: { [service: string]: Json };
 }
 
 /** The VRAM figures the server tells the page (the models service): the card's size, and for each engine the parts it

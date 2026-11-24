@@ -82,8 +82,10 @@ export const stepSeconds = (desk: Desk, steps: number): Msg => {
 
 /** The scale of a ruler spanning `span` seconds: labels on a round step (30 s, 1, 2, 3, 5 or 10 min) giving at most
  *  six, minor ticks halving it. */
+/** A time ruler's step: the roundest that gives five steps or fewer over the span (21-ruler.js rulerStep). */
+export const rulerStep = (span: number): number => [30, 60, 120, 180, 300, 600].find(s => span / s <= 5) ?? 600;
 export function rulerScale(span: number): { maj: number; min: number; labels: { at: number; text: string }[] } {
-  const st = [30, 60, 120, 180, 300, 600].find(s => span / s <= 5) ?? 600, n = Math.floor(span / st + 1e-9), pct = (v: number) => +(v / span * 100).toFixed(4);
+  const st = rulerStep(span), n = Math.floor(span / st + 1e-9), pct = (v: number) => +(v / span * 100).toFixed(4);
   return { maj: pct(st), min: pct(st / 2), labels: Array.from({ length: n + 1 }, (_, i) => ({ at: pct(i * st), text: mmss(i * st) })) };
 }
 

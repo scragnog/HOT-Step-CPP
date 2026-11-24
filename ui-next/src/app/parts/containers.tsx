@@ -13,6 +13,7 @@
 
 import { definePart, useSay, type PartView } from '../kit/index.ts';
 import { itemsOf } from './kids.ts';
+import { NoteInline } from './inline.ts';
 
 export function Row(v: PartView) {
   const kids = (v.kids ?? []).filter(k => k.shown);
@@ -63,6 +64,13 @@ export function Labelled(v: PartView) {
   /* a caption above what it holds: a strip of switches (the plans' Endings), a row of dice (Re-planning) */
   if (what === 'rack') return <div className="endings" title={tip}><span className="kl">{label}</span>{v.children}</div>;
   if (what === 'dice') return <div className="dice-cap" title={tip}><span className="kl">{label}</span>{v.children}</div>;
+  /* a choice and the notes that say what it does and needs: the concept's .ctl-row, its notes one line after it, in
+     the warning's ink while a warning is among them (the lead sheet's lyric timing; package 3c) */
+  if (what === 'segmented' && (v.kids ?? []).slice(1).length && (v.kids ?? []).slice(1).every(k => k.part === 'note')) {
+    const [choice, ...notes] = itemsOf(v.children), kids = v.kids!.slice(1), warn = kids.some(k => k.shown && k.look === 'warn');
+    const said = notes.flatMap((n, i) => (kids[i]?.shown ? [n] : [])), line = said.flatMap((n, i) => (i ? [' ', n] : [n]));
+    return <div className="ctl-row" title={tip}><span className="kl">{label}</span>{choice}<span className={`lbl${warn ? ' warn' : ''}`}><NoteInline.Provider value={true}>{line}</NoteInline.Provider></span></div>;
+  }
   return <span className="foot-ctl" title={tip}><span className="kl">{label}</span>{v.children}</span>;
 }
 
