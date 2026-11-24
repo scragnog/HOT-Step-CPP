@@ -20,8 +20,9 @@ function MiniWave({ wave }: { wave: number[] }) {
       c.width = w * dpr; c.height = h * dpr; const g = c.getContext('2d'); if (!g) return; g.scale(dpr, dpr); g.fillStyle = '#4c6fff';
       for (let i = 0; i < w / 3 && i < wave.length; i++) { const a = wave[i]! * (h / 2 - 2); g.fillRect(i * 3, h / 2 - a, 2, a * 2); }
     };
-    draw();
-    const ro = new ResizeObserver(draw); ro.observe(c); return () => ro.disconnect();
+    /* drawn now, again once the desk has placed its tile (the desk lays out after its tiles' effects), and on resize */
+    draw(); const f = requestAnimationFrame(draw);
+    const ro = new ResizeObserver(draw); ro.observe(c); return () => { cancelAnimationFrame(f); ro.disconnect(); };
   }, [wave]);
   return <canvas ref={cv} className="minwave" data-minwave="" />;
 }

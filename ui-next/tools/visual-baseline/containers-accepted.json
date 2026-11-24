@@ -75,15 +75,29 @@
    "state": "",
    "key": "",
    "field": "^only$",
-   "n": 10,
-   "why": "Empty or decorative pieces the concept draws always and the rebuild only when they hold something: a field's error line while it has no error (.ts foot, the planner seed), and the loaded sleeve's waveform canvas (the timbre module's, package 3)."
+   "n": 8,
+   "why": "Empty or decorative pieces the concept draws always and the rebuild only when they hold something: a field's error line while it has no error (.ts foot, the planner seed). (The loaded sleeve's waveform canvas is drawn now: the fix round's RD-05.)"
   },
   {
    "state": "^containers-term-mm3",
    "key": "input:1$",
-   "field": "^sem:(placeholder|aria-describedby)$",
-   "n": 2,
-   "why": "The planner seed's field (package 1's text field) says its parameter's placeholder in full (\"follows the generation seed\", the concept's own words for it in its control table) and is described by its error only while it has one."
+   "field": "^sem:aria-describedby$",
+   "n": 1,
+   "why": "The planner seed's field (package 1's text field) is described by its error only while it has one. (Its placeholder is the concept's \"follows\" now: the fix round's RD-18.)"
+  },
+  {
+   "state": "^containers-term-",
+   "key": "\\.term>div:1>span:\\d+$|\\[data-term\\]>span:\\d+$",
+   "field": "^display$",
+   "n": 7,
+   "why": "The plan text's cursor is a block (styles/rebuild/10-standards.css, the fix round's RD-07): on its own line after the plan, in standards mode a line box would be the text's 20px where the concept's quirks-mode page gives it the cursor's 13px; as a block it stands where the concept draws it, the plan block 113px as the concept's."
+  },
+  {
+   "state": "^containers-drops-loaded",
+   "key": "canvas:1$",
+   "field": "^aspect-ratio$",
+   "n": 1,
+   "why": "The loaded sleeve's waveform canvas is drawn at the width it is shown at (the fix round's RD-05); the concept's draws it once, while the sleeve is narrower (203px), and stretches that drawing to 569px when the desk is laid out."
   }
  ]
 }
