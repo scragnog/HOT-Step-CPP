@@ -410,10 +410,10 @@ tools/visual-baseline/models-accepted.json`). The models service (`services/mode
 figures behind `ModelsService` (`catalogue(engine)`, `vram()`); the simulated Engine's `models.list` reads the same
 catalogue.
 **Package 6 (generation, the go bar, Latest, the player, the song menu, the toasts)** adds `acceptance/6-generate.json`
-(44 scenarios: 24 of `scenarios/36-generate.mjs`, 10 of the concept's suite, and 10 of the concept's suite waiting on
-package 4 because they type into the prompt card), `switches/6-generate.json` (61 features), `slice-states/
-60-generate.mjs` (24 states, scope `generate`: the go bar, Latest, the song menu and the toasts, compared with
-`generate-accepted.json`). The generation service (`services/generate.ts`) is the concept's simulation behind
+(45 scenarios: 25 of `scenarios/36-generate.mjs`, 10 of the concept's suite, and 10 of the concept's suite waiting on
+package 4 because they type into the prompt card), `switches/6-generate.json` (63 features), `slice-states/
+60-generate.mjs` (23 states, scope `generate`: the go bar, Latest, the song menu and the toasts, compared with
+`generate-accepted.json`: identical but for 6 accepted kinds, 499 differences, each counted). The generation service (`services/generate.ts`) is the concept's simulation behind
 `GenerateService` (`songs`, `submit`, `cancel`, `live`, `watch`): one run renders at a time, its songs are kept in
 this browser as a server keeps them. `store/generate.ts` holds Latest's cards, the queue as the page started it and the
 player; none of it is undoable desk state, but cancelling is a step that undoes itself (`store/desk.ts recordStep`, the

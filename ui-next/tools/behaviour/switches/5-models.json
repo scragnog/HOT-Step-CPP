@@ -82,8 +82,8 @@
     {
       "feature": "meter read",
       "file": "src/derive/vram.ts",
-      "find": "read: gb1(v.refuses || v.tight ? v.need : v.models),",
-      "replace": "read: gb1(v.models),"
+      "find": "read: gb1(v.refuses || v.tight ? v.need : held),",
+      "replace": "read: gb1(held),"
     },
     {
       "feature": "quick models",
