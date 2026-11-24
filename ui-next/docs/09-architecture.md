@@ -440,9 +440,9 @@ pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a 
 (`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
 back.
 
-**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 20 of the
-concept's suite, three of them pending there: F-17, F-36, S-17; 13 of `scenarios/33-workflows.mjs`, eight of which hold
-on the concept page too; and 7 waiting on packages 2, 3, 4 and 8, each with what it needs), `switches/7-workflows.json`
+**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 21 of the
+concept's suite, three of them pending there: F-17, F-36, S-17; 14 of `scenarios/33-workflows.mjs`, nine of which hold
+on the concept page too; and 5 waiting on packages 4 and 8, each with what it needs), `switches/7-workflows.json`
 (38 features), `slice-states/70-workflows.mjs` (17 states of the Workflows panel, the row menu and the Drafts list,
 compared with `workflows-accepted.json`: `vb.mjs compare concept-workflows rebuild-workflows --accept
 tools/visual-baseline/workflows-accepted.json`) and `tools/test-workflows.ts` (68 checks, in `npm run check`). Its store is `store/workflows.ts` (the lists, the

@@ -1,12 +1,13 @@
 // Workflows, revisions, drafts and storage (package 7): the concept's claims where its own scenarios reach for
 // something the rebuild does differently or does not have yet, stated so they hold on the rebuild.
 //
-// - Eight hold on the concept page too (run them there with --page): rename-delete-menu and row-heights-hold are the
+// - Nine hold on the concept page too (run them there with --page): rename-delete-menu and row-heights-hold are the
 //   concept's 03-workflows/rename-delete-menu and 09-undo-storage/row-heights-hold with the Sampler on the workflow's
 //   desk, since the rebuild's setVal changes a value only through a control on the desk, as a person can (the concept's
 //   sets a module's value with the module off the desk, which the rebuild refuses: docs/09, "How a part is written");
 //   opening-undone-leaves-later-work, saved-says-only-what-was-saved, escape-in-the-save-row, export-then-import,
-//   the-open-workflow-is-kept and a-save-keeps-what-storage-holds state the concept's claims without the prompt card.
+//   the-open-workflow-is-kept and a-save-keeps-what-storage-holds state the concept's claims without the prompt card;
+//   revision-holds-the-guard chooses Revision in the save row (deviation P7-4).
 // - The rest run on the rebuild only: they set the description with setVal('prompt.text', ...) where the concept's type
 //   into #prompt (the prompt card is package 4's; once it lands, the concept's own scenarios, listed as waiting in
 //   acceptance/7-workflows.json, take over), or they seed the page's own keys (deviation 5: the desk is kept under
@@ -180,5 +181,21 @@ export default [
     await t.do('another tab writes a workflow, its storage event not here yet', () => { localStorage.setItem('hs3-wf', JSON.stringify({ workflows: [{ name: 'From elsewhere', tier: 'quick', mods: ['tempo'], pedals: [] }], revs: {} })); });
     await t.click('#saveBtn'); await t.click('[data-saveas="wf"]'); await t.type('From here'); await t.press('Enter');
     await t.eq('the save keeps both, and both show here', () => [JSON.parse(localStorage.getItem('hs3-wf')).workflows.map(w => w.name).sort(), S.workflows.map(w => w.name).sort()], [['From elsewhere', 'From here'], ['From elsewhere', 'From here']]);
+  } },
+  /* 15-other-engines/revision-holds-the-guard with Revision chosen in the save row: the concept's scene changes the
+     desk after opening Start fresh, which marks nothing there (its flag is set by a person's change) and marks Start
+     fresh modified here (deviation P7-4: modified is what Revert would put back), so its Save opens as a new workflow */
+  { id: 'revision-holds-the-guard', run: async t => {
+    await t.do('open a workflow', () => { loadPreset(FACTORY[0], false); });
+    await t.do('lab desk', () => { S.tier = 'lab'; S.mods = ['repetition', 'sampler']; S.pedals = []; S.backend = 'yue'; render(); });
+    await t.focus('.tile[data-m="repetition"] [data-scrub="yc.rep"]'); await t.press('ArrowUp'); await t.press('ArrowUp');
+    const v = await t.js(() => +get('yc.rep'));
+    await t.click('#saveBtn'); await t.click('[data-saveas="rev"]'); await t.type('guarded'); await t.press('Enter');
+    await t.ok('the revision holds the Repetition guard (E-03)', () => (S.revs[FACTORY[0].name] || []).some(r => r.name === 'guarded' && 'yc.rep' in r.vals));
+    await t.focus('.tile[data-m="repetition"] [data-scrub="yc.rep"]'); await t.press('Home');
+    await t.ok('a change to it marks the revision modified', () => S.revDirty === true);
+    await t.do('let the list redraw', () => {}, null, 300);
+    await t.click('.pre.rev.mod [data-rrevert]');
+    await t.eq('and Revert puts it back', () => +get('yc.rep'), v);
   } },
 ];
