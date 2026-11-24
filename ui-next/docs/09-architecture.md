@@ -402,7 +402,12 @@ on the concept page too, and 9 of the concept's suite; 9 more waiting on package
 `Repaint.tsx`, `Timbre.tsx` (recentRefs, timbreBlend), with `parts/motion.ts` (the page's motion tokens read for their
 animations); `services/references.ts` (the recent reference tracks, server-owned) and `features/references.ts` (a file a
 drop zone takes is remembered); `testing/compat/instruments.ts` (`S.seed`, `S.stars`, `S.refs`, `S.source`, `S.region`).
-The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` no longer wait.
+The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` no longer wait. What the instruments'
+modules show of others' parts is drawn as the concept draws it there: a knob's auto pill and its symbol labels, an XY
+pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a pad with a column beside it
+(`.padrow`, `.padside`) or a row of plugin pickers (`.picks`), the Sampler's well holding its pickers beside its numbers
+(`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
+back.
 
 ## Deviations from the concept's markup
 
@@ -475,7 +480,8 @@ The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure
     `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
     `recentRefs` state stays declared and holds nothing.
 30. **The Takes tile's VRAM line counts the engines' default models** until the engine panel's package gives the loaded
-    models' figures; ACE-Step has eight reels (docs/03, Takes).
+    models' figures; ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
+    rule would put eight in two rows of four, a shorter tile, and the desk would pack differently from the concept's).
 31. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
 32. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a
     region"), so the region needs no song list; the region is kept in seconds, as the real application keeps it.

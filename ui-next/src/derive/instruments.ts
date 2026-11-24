@@ -256,7 +256,9 @@ export function takesCost(ix: Index, desk: Desk, n: number): { models: number; n
 }
 function takesOf(ix: Index, node: Node, desk: Desk, key: string): NonNullable<InstrumentModel['takes']> {
   const k = node.param!, f = resolve(ix.params.get(k)!.p, desk.engine), max = f.range?.[1] ?? 1, n = Math.min(num(ix, desk, k, 1), max);
-  const cols = max <= 5 ? max : [5, 4, 3].find(c => max % c === 0) ?? Math.ceil(max / 2);
+  /* one row up to five; past that a grid as near square as the count allows (nine are three by three, as the
+     concept's; ACE-Step's eight keep that footprint, three a row: the tile stands as tall as the concept's) */
+  const cols = max <= 5 ? max : Math.ceil(Math.sqrt(max));
   const v = takesCost(ix, desk, n), over = v.need > CARD_GB, e = VRAM[desk.engine] ?? VRAM.ace!;
   const gb = (x: number) => x.toFixed(1);
   const m = over ? (v.refuses ? msg('takes.wontFit', { n: Math.max(1, Math.floor((CARD_GB - v.models) / (v.each || 1)) + 1) }) : e.split ? msg('takes.passes', { n: v.passes }) : msg('takes.tight')) : null;

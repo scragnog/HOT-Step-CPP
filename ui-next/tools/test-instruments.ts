@@ -113,7 +113,7 @@ function act(id: string, part: string, d0: Desk, name: string, arg?: unknown) {
   ok('MiniMax-Music3: four reels in one row, extra takes cost', t.max === 4 && t.cols === 4 && /per extra take/.test(s(t.cost.each)), t);
   ok('its words for one take and for more', s(t.labels[0]) === 'Take per run' && s(t.labels[1]) === 'Takes per run', t.labels.map(s));
   const a = model('takes', 'takesReels', desk('ace', 'studio', ['takes']))!.instrument!.takes!;
-  ok('ACE-Step: eight reels in two rows of four', a.max === 8 && a.cols === 4);
+  ok("ACE-Step: eight reels, three a row (the footprint of the concept's nine)", a.max === 8 && a.cols === 3);
 }
 
 /* ---- the scope */
