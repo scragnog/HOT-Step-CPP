@@ -54,7 +54,8 @@ const tell = (e: Ev) => { for (const f of heard) f(e); };
 export function startRun(spec: RunSpec): Run {
   const s = get(), id = String(s.nextId), ids = spec.songs.map((_, i) => String(s.nextId + 1 + i)), run: Run = { id, jobId: null, spec, ids };
   const cards: Card[] = spec.songs.map((x, i) => ({ id: ids[i]!, title: x.title, ...(x.take ? { take: x.take, of: x.of! } : {}), style: x.style, text: x.text, dur: x.dur, hue: x.hue, engine: spec.engine, ...(x.seed !== undefined ? { seed: x.seed } : {}), pending: { run: id, f: 0, stage: null, ready: 0, stream: spec.stream } }));
-  set({ nextId: s.nextId + 1 + ids.length, runs: [...s.runs, run], cards: [...cards, ...s.cards] });
+  /* a card that resolved keeps its ring (the class that plays it) until the next run starts or ends */
+  set({ nextId: s.nextId + 1 + ids.length, runs: [...s.runs, run], cards: [...cards, ...s.cards.map(c => (c.fresh ? { ...c, fresh: false } : c))] });
   void gen().submit(spec, ids).then(r => {
     const now = get().runs.find(x => x.id === id);
     if (!now) { void gen().cancel(r.jobId, ids); return; }
@@ -107,7 +108,7 @@ function heardJobs(jobs: Job[]): void {
     const run = get().runs.find(r => r.jobId === j.id); if (!run) continue;
     if (j.status === 'done') {
       const res = j.result ?? [], byId = new Map(res.map(x => [x.id, x]));
-      set(s => ({ runs: s.runs.filter(r => r !== run), cards: s.cards.map(c => { const r = byId.get(c.id); if (r) { const { createdAt, ...song } = r; void createdAt; return { ...song, fresh: true, unheard: true }; } return c.unheard ? { ...c, unheard: false } : c; }) }));
+      set(s => ({ runs: s.runs.filter(r => r !== run), cards: s.cards.map(c => { const r = byId.get(c.id); if (r) { const { createdAt, ...song } = r; void createdAt; return { ...song, fresh: true, unheard: true }; } return c.unheard || c.fresh ? { ...c, unheard: false, fresh: false } : c; }) }));
       tell({ kind: 'done', run, ids: res.map(x => x.id) });
     } else if (j.status === 'refused' && j.refused) {
       const first = run.ids.find(i => get().cards.some(c => c.id === i && c.pending))!, n = run.ids.length, rf = j.refused;

@@ -93,10 +93,8 @@ export function Latest() {
     }
     seen.current = now; pos.current = places(g, ':scope > .song[data-id]', key);
     /* a title cut short can still be read, in the tooltip (F-30) */
-    for (const h of g?.querySelectorAll<HTMLElement>('.song:not([hidden]) h3') ?? []) h.title = h.scrollWidth > h.clientWidth + 1 ? h.textContent ?? '' : '';
+    for (const h of g?.querySelectorAll<HTMLElement>('.song h3') ?? []) { if (h.closest('[hidden]')) h.removeAttribute('title'); else h.title = h.scrollWidth > h.clientWidth + 1 ? h.textContent ?? '' : ''; }
   }, [cards, cols, open]);
-  /* a card that has resolved keeps its ring only while it arrives */
-  useEffect(() => { if (!cards.some(c => c.fresh)) return; const t = setTimeout(() => useGen.setState(s => ({ cards: s.cards.map(c => (c.fresh ? { ...c, fresh: false } : c)) })), 1400); return () => clearTimeout(t); }, [cards]);
   const items = list.flatMap((c, i) => {
     const hid = shown.hidden[i]!, el = c.error ? <Notice key={c.id} c={c} /> : c.pending ? <Pending key={c.id} c={c} ahead={Math.max(0, runAt(c))} folded={shown.folded[i]!} hidden={hid} /> : <Song key={c.id} c={c} hidden={hid} />;
     return shown.fold && shown.fold.after === i ? [el, <button key="qfold" type="button" className="song qfold" data-qfold="" aria-expanded={shown.fold.open} onClick={toggleFold}><b>{say(shown.fold.title)}</b><small>{say(shown.fold.sub)}</small></button>] : [el];

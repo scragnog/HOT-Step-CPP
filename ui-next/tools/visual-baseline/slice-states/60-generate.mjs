@@ -26,7 +26,7 @@ export const STATES = [
   st('gen-rest-quick', scene('ace', 'quick')),
   ...[1920, 1280].map(w => st(`gen-rest-w${w}`, scene('ace', 'studio'), { w })),
   /* runs rendering: one with three takes, then a second waiting; the sweep across Generate, Cancel all, the badge */
-  st('gen-running', then(takes(3), press(1, 1200)), { shot: '.gobar' }),
+  st('gen-running', then(takes(3), press(1, 1200))),
   st('gen-queue', then(takes(3), press(2, 1200))),
   st('gen-queue-dark', then(takes(3), press(2, 1200)), { scheme: 'dark' }),
   st('gen-queue-reduced', then(takes(3), press(2, 1200)), { reduced: true }),
@@ -41,9 +41,9 @@ export const STATES = [
   st('gen-line-hidden-parked', scene('mm3', 'quick', ['sampler', 'latent', 'perf', 'repetition', 'guidance', 'planner'])),
   /* a run the engine refused: the concept refuses four takes at the card; the rebuild does not start a run certain
      not to fit (F-21), so its simulated server is given a smaller card and refuses two */
-  st('gen-notice', then(async h => { await h.js(() => { const rb = typeof mockCard === 'function'; if (rb) mockCard(30); if (S.backend !== 'mm3') enterEngine('mm3'); S.tier = 'studio'; S.mods = ['takes']; Object.assign(S.vals, { 'takes.n': rb ? 2 : 4, 'model.lm': '8B planner · F16', 'model.dit': 'Flow DiT · F16', 'model.x': 'Depth decoder · F16' }); const p = document.querySelector('#prompt'); if (p) p.value = 'big song'; S.vals['prompt.text'] = 'big song'; render(); }); await h.settle(600); }, press(1, 600)), { pseudo: true }),
+  st('gen-notice', then(async h => { await h.js(() => { const rb = typeof mockCard === 'function'; if (rb) mockCard(30); if (S.backend !== 'mm3') enterEngine('mm3'); S.tier = 'studio'; S.mods = ['takes']; Object.assign(S.vals, { 'takes.n': rb ? 2 : 4, 'model.lm': '8B planner · F16', 'model.dit': 'Flow DiT · F16', 'model.x': 'Depth decoder · F16' }); const p = document.querySelector('#prompt'); if (p) p.value = 'big song'; S.vals['prompt.text'] = 'big song'; render(); }); await h.settle(600); }, press(1, 600))),
   /* the player in the go bar, playing and paused */
-  st('gen-player', then(scene('ace', 'studio'), async h => { await h.click('#latest .song[data-id="2"] [data-play]'); await h.settle(3200); }), { shot: '.gobar' }),
+  st('gen-player', then(scene('ace', 'studio'), async h => { await h.click('#latest .song[data-id="2"] [data-play]'); await h.settle(3200); })),
   st('gen-player-dark', then(scene('ace', 'studio'), async h => { await h.click('#latest .song[data-id="2"] [data-play]'); await h.settle(1200); await h.click('#ppause'); await h.settle(400); }), { scheme: 'dark', pseudo: true }),
   st('gen-player-w1280', then(scene('ace', 'studio'), async h => { await h.click('#latest .song[data-id="4"] [data-play]'); await h.settle(1200); }), { w: 1280 }),
   /* the song menu */
