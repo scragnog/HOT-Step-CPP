@@ -438,9 +438,9 @@ and `tools/test-overlays.ts` (in `npm run check`). The `overlays` slot is drawn 
 overlay of another package registers with `features/layers.ts` and puts what it holds in the popover with
 `features/pop.ts` (above, "Adding without colliding").
 
-**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (24 scenarios that run, 9 of
-`scenarios/33-fields.mjs`, which hold on the concept page too, and 15 of the concept's suite, two of them pending there:
-F-13 and S-07; 6 more wait on packages 2, 3 and 8), `switches/4-fields.json` (27 features), `slice-states/
+**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (30 scenarios, 10 of
+`scenarios/33-fields.mjs`, which hold on the concept page too, and 20 of the concept's suite, four of them pending there:
+F-13, S-07, E-06 and S-06; the Presets & genres list is drawn in package 8's popover), `switches/4-fields.json` (27 features), `slice-states/
 40-fields.mjs` (38 states of the prompt card's column and the lyric tile, compared with `fields-accepted.json`:
 `vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json`). The
 slice's states, its parts' and package 1's now have the lyric sheet in place on both pages (it was withdrawn from the
@@ -633,8 +633,8 @@ Package 4's:
 45. **The caption dataset's default is the definition's**, the adapter's own dataset ("The adapter's dataset", value "",
     as the real application sends it); the concept's default is its first dataset (my-band-ep). The supplied caption
     reads the first dataset the server lists for "".
-46. **Presets & genres** run the named action `stylePresets`, which the popover's package (8) builds; until then it says
-    so. **Import latent** takes a chosen file; dropping one on it is drag and drop's (package 8).
+46. **Presets & genres** open in package 8's popover (features/prompt-presets.tsx); a genre already in the box is pressed
+    and a press takes it out (C-20), as the concept's. **Import latent** takes a file chosen or dropped on it.
 47. **No motion yet**: the box's height eases and a suggestion opens by height in the concept (19-text-boxes.js,
     18-motion.js blockIn); here they change at once (package 9).
 48. **Song info's open state is the card's own**, not kept with the desk (the concept saves S.songInfoOpen); it opens by

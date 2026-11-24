@@ -90,7 +90,8 @@ export function PromptBox(v: PartView) {
         <button className="tool" id="ideasBtn" aria-haspopup="dialog" aria-expanded="false" hidden={!m.tools.presets} onClick={() => act('stylePresets')}>{say(words('stylePresets')?.label)}</button>
         {tool('promptWrite', 'aiBtn', !m.tools.write)}
         <button className={`tool${any ? ' on' : ''}`} id="songInfoBtn" aria-expanded={open} aria-controls="songInfo" onClick={toggleInfo}><i className="si-dot" aria-hidden="true" />{say(ui('prompt.songInfo'))}</button>
-        <label className="tool" id="latBtn" title={say(words('importLatent')?.tip)} hidden={!m.tools.latent}>{say(words('importLatent')?.label)}
+        <label className="tool" id="latBtn" title={say(words('importLatent')?.tip)} hidden={!m.tools.latent}
+          onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { const f = e.dataTransfer.files[0]; if (!f) return; e.preventDefault(); e.stopPropagation(); act('importLatent', f.name); }}>{say(words('importLatent')?.label)}
           <input type="file" className="sr-file" accept=".latent,.hslat" data-file="latent" aria-label={say(words('importLatent')?.label)} onChange={e => { const f = e.currentTarget.files?.[0]; if (f) act('importLatent', f.name); e.currentTarget.value = ''; }} />
         </label>
         {tool('composeCaption', 'structBtn', !m.tools.compose)}
