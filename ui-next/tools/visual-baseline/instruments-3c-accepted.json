@@ -102,13 +102,6 @@
   {
    "state": "^i3c-plans-lab-dark$",
    "key": "",
-   "field": "^sem:title$",
-   "n": 3,
-   "why": "The LED switch's tip is package 3b's (the slice's ledButton carries none yet); package 2 counts the same (containers-accepted.json)."
-  },
-  {
-   "state": "^i3c-plans-lab-dark$",
-   "key": "",
    "field": "^line-height$",
    "n": 16,
    "why": "The LCD picker's arrows (.cyc) in standards mode (styles/rebuild/10-standards.css, the slice's)."
