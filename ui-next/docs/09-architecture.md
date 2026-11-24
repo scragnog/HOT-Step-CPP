@@ -263,8 +263,8 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
 | Concept globals its scenarios call | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
 | Its acceptance | `tools/behaviour/acceptance/<package>.json` | `run.mjs --slice` runs every file |
-| Its features switched off | `tools/behaviour/switches/<package>.json` | `switches.mjs` checks each makes a scenario fail |
-| Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs` | `slice-states.mjs` gathers them |
+| Its features switched off | `tools/behaviour/switches/<package>.json` | `switches.mjs` checks each makes a scenario fail, and writes what caught each to `tools/behaviour/caught/<package>.json` |
+| Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs`, ending with its `VISUAL_SET` | `slice-states.mjs` gathers them; `visual-all.mjs` runs every set |
 | Its accepted visual differences | entries of its own, passed with `--accept` | counted exactly |
 
 The core and the definitions are shared on purpose and do not collide in practice: the inventory already lists every
@@ -420,7 +420,9 @@ scene). A package's additions are a file of its own in `testing/compat/` (the sl
 npm run build:test
 set PLAYWRIGHT_MODULE=<node_modules/playwright>
 node tools/behaviour/run.mjs --slice                 # the acceptance: every file in tools/behaviour/acceptance/
-node tools/behaviour/switches.mjs                    # each slice feature switched off makes a scenario fail
+npm run switches:apply                               # each switch's text still applies exactly once (no builds)
+npm run switches                                     # each feature switched off makes a scenario fail
+npm run visual:all                                   # every package's visual set against the concept
 node tools/visual-baseline/vb.mjs capture concept-slice --states slice --scope slice --page <concept>/hotstep-tiers.html
 node tools/visual-baseline/vb.mjs capture rebuild-slice --states slice --scope slice --plan-from concept-slice
 node tools/visual-baseline/vb.mjs compare concept-slice rebuild-slice --scope slice --accept tools/visual-baseline/slice-accepted.json
@@ -847,6 +849,29 @@ Each package adds files and registers them (above, "Adding without colliding"); 
 and no other package edits them. Each is accepted when its acceptance file passes, its switches each make a scenario
 fail, its visual states match the concept with its accepted differences counted, the gallery passes with its parts in
 it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to 8 in parallel, then 9 and 10.
+
+**How a package is accepted, and how a merge is verified.** A package's three test files register themselves: its
+acceptance file is run by `run.mjs --slice`, its switches file by `switches.mjs`, and its states file, which ends with
+its visual set (`export const VISUAL_SET = { name, only, scope, accept }`: the states by id, their scope, its accepted
+differences; tools/visual-baseline/README.md, "Every set at once"), by `visual-all.mjs`. Nothing else is added to any
+runner. Then, on the package's branch and again on the tree after each merge:
+
+```
+npm run check && npm run lint
+npm run build:test && npm run behaviour -- --slice   # the whole acceptance (about 6 minutes at 2 workers)
+npm run switches:apply                               # every switch still applies exactly once (a second; merges break this most)
+npm run visual:all                                   # every package's visual set, one line each (about 21 minutes at 2 workers)
+npm run visual:all -- --reuse-concept                # the same with the kept concept recordings (SWITCHES_REUSE)
+npm run switches                                     # every switch built and tried (SWITCHES_FULL)
+node tools/visual-baseline/gallery.mjs && node tools/visual-baseline/plants.mjs
+```
+
+`visual:all` prints each set's states and `identical`, or how many differences go beyond its accepted ones, and exits 1
+if a set differs. `switches` tries each switch first against the scenarios that caught it the last time
+(`tools/behaviour/caught/<package>.json`, written by the run and committed with the package), then the rest of its own
+package's acceptance, then the rest of the acceptance, and counts a scenario as catching it only if it passes with the
+feature on; the verdict for each switch is the one the whole acceptance would give (tools/behaviour/README.md,
+"Switches"). A package's own switches alone: `npm run switches -- --package "^<package>$"`.
 
 | Package | Adds (files of its own) | Registers | Slice files it owns and edits |
 | --- | --- | --- | --- |
