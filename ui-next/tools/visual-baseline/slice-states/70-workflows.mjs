@@ -1,14 +1,12 @@
 // Package 7's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the Workflows
-// panel, its save row, its row menu, the Drafts list and the Saved read-out, compared where the concept draws them, as
+// panel, its save row, its row menu, the Drafts list and the Saved read-out, where the page draws them, as
 // parts on their own (vb.mjs `parts`: each and everything under it, with its role, name, words and attributes): the
 // panel fresh, with user workflows and revisions (a long name, a revision of yours under a factory workflow), modified
 // rows (yours: Revert and Update; the factory's: Save as…), a revision's details on a modified revision, the save row
 // as a revision (with the warning of a changed desk) and as a workflow (a refused name), a rename refused, the row menu
 // (and Delete armed), the drafts empty and with drafts of two engines, and the read-out after a refused write.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-workflows --states slice --only "^wf-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-workflows --states slice --only "^wf-" --plan-from concept-workflows
-//   node tools/visual-baseline/vb.mjs compare concept-workflows rebuild-workflows --accept tools/visual-baseline/workflows-accepted.json
+//   npm run visual:all -- --only "^workflows$"            (and visual:approve, README.md)
 
 /* a desk and the lists: user workflows and revisions in the concept's shape (testing/compat/workflows.ts reads them) */
 const scene = (o = {}) => async h => {
@@ -60,5 +58,5 @@ export const STATES = [
 ];
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'workflows', only: '^wf-', accept: 'workflows-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'workflows', only: '^wf-' };

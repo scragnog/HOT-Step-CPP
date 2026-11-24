@@ -30,7 +30,7 @@ export default [
   { id: 'bpm-drag-shows-the-value', w: 1920, h: 1080, run: async t => {
     await desk('quick', ['tempo'])(t);
     await t.click('.tile[data-m="tempo"] [data-auto="tempo.bpm"]');
-    const lcd = () => { const el = document.querySelector('input[data-num="tempo.bpm"]'); return (el.value === numVal('tempo.bpm') && !el.dataset.editing) || `shows ${el.value}, BPM ${get('tempo.bpm')}, editing ${el.dataset.editing}`; };
+    const lcd = () => { const el = document.querySelector('input[data-num="tempo.bpm"]'); return (el.value === String(Math.round(+get('tempo.bpm'))) && !el.dataset.editing) || `shows ${el.value}, BPM ${get('tempo.bpm')}, editing ${el.dataset.editing}`; };
     for (let i = 0; i < 3; i++) {
       await t.mouseDrag('input[data-num="tempo.bpm"]', [[0, -10], [0, -10], [0, -10], [0, -10], [0, -10], [0, -10]]);
       await t.ok(`drag ${i + 1}: the BPM figure shows the BPM, and is not left in typing mode (Q-02)`, lcd);

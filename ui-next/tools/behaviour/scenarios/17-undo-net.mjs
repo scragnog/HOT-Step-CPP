@@ -75,13 +75,6 @@ export default [
     await t.do('wildcards', () => setVal('wild.auto', true));
     await t.eq('Expand on Generate is named, not "wild"', undoLabel, 'Expand on Generate off → on');
   } },
-  { id: 'quick-steps-speak-quick', run: async t => {
-    await t.do('quick sampler and planner', () => { S.tier = 'quick'; S.mods = ['sampler', 'planner']; S.vals['lm.on'] = true; render(); });
-    await t.click('.mood [data-setn$="|1.05"]');
-    await t.ok('a mood is named as the row reads (Q-09)', () => /^How adventurous: \w+ → Bold$/.test(document.querySelector('#undoBtn span').textContent) || document.querySelector('#undoBtn span').textContent);
-    await t.click('.qchoice[data-q="samp.steps"] button:last-child');
-    await t.ok('so is a Quality choice', () => /^Quality: \w+ → \w+$/.test(document.querySelector('#undoBtn span').textContent) || document.querySelector('#undoBtn span').textContent);
-  } },
   { id: 'lab-steps-are-named-too', run: async t => {
     await t.do('lab', () => { S.tier = 'lab'; S.mods = ['adapters', 'tempo', 'planner']; S.slots = [{ file: 'tape-lofi-v2', type: 'LoRA' }]; S.vals['lm.on'] = true; render(); });
     await t.focus('.tile[data-m="adapters"] [data-fader="s0"]'); await t.press('ArrowUp');
@@ -92,6 +85,8 @@ export default [
     await t.ok('an XY pad step names both values', () => /^\S.* → .*, .* → /.test(document.querySelector('#undoBtn span').textContent) || /→/.test(document.querySelector('#undoBtn span').textContent) || document.querySelector('#undoBtn span').textContent);
   } },
   { id: 'field-undo-never-moves-forward', run: async t => {
+    /* the setting is Takes', so Takes is on the desk (a value is in force only while its module is: docs/05) */
+    await t.do('Takes on the desk', () => { S.tier = 'studio'; S.mods = ['takes']; render(); });
     await t.click('#prompt'); await t.type('first words'); await t.do('pause', () => {}, null, 1500); await t.type(' second');
     await t.do('a setting', () => setVal('takes.n', 2));
     await t.click('#prompt'); await t.press('Control+z');

@@ -20,7 +20,7 @@ const file = path.resolve(ui, opt('page', 'dist-test/index.html')), only = opt('
 const ACE = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes', 'guidance', 'latent', 'perf', 'post'];
 const PEDS = ['ss', 'lift', 'gain', 'norm', 'nat'];
 const full = (tier, mods = ACE, pedals = PEDS) => new Function(`S.tier = ${JSON.stringify(tier)}; S.mods = ${JSON.stringify(mods)}; S.pedals = ${JSON.stringify(pedals)}; S.pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = true; render(); scrollTo(0, 0);`);
-/* a full Quick desk long enough to fold (the concept's two stand-ins), folded or open */
+/* a full Quick desk long enough to fold (the test build's two stand-ins), folded or open */
 const folded = open => new Function(`['tx1', 'tx2'].forEach((id, i) => { defineModule(id, { at: 300 + i, name: 'Stand-in ' + (i + 1), cat: 'Engine', w: 1, keys: [] }); defineFace(id, () => '<span>stand-in</span>'); }); S.tier = 'quick'; S.mods = ${JSON.stringify([...ACE, 'tx1', 'tx2'])}; S.pedals = ${JSON.stringify(PEDS)}; S.pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = ${open}; render(); scrollTo(0, 0);`);
 const LINES = 'a\nb\nc\nd\ne\nf';
 const COSTS = [

@@ -11,9 +11,7 @@ const INIT = `(() => { let s = 0x2545F491; Math.random = () => { s |= 0; s = s +
   const inst = o => (o && typeof o === 'object' && o.behavior === 'smooth') ? { ...o, behavior: 'instant' } : o;
   for (const P of [Element.prototype, window]) for (const m of ['scrollTo', 'scrollBy', 'scroll']) { const f = P[m]; if (f) P[m] = function (a, b) { return typeof a === 'object' ? f.call(this, inst(a)) : f.call(this, a, b); }; }
   const siv = Element.prototype.scrollIntoView; Element.prototype.scrollIntoView = function (o) { return siv.call(this, inst(o)); };
-  const bh = window.__bh = { downloads: [], blobs: {}, cov: {} };
-  /* coverage: the data-* keys carried by what each click landed on (the delegated handlers dispatch on these) */
-  document.addEventListener('click', e => { for (let el = e.target; el && el !== document; el = el.parentElement) if (el.dataset) for (const k of Object.keys(el.dataset)) bh.cov[k] = (bh.cov[k] || 0) + 1; if (e.target.id) bh.cov['#' + e.target.id] = 1; }, true);
+  const bh = window.__bh = { downloads: [], blobs: {} };
   const cou = URL.createObjectURL; URL.createObjectURL = function (b) { const u = cou.call(this, b); bh.blobs[u] = b; return u; };
   const ac = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) { bh.downloads.push({ name: this.download, blob: bh.blobs[this.href] }); return; } return ac.call(this); };
   bh.finish = () => { for (let round = 0; round < 4; round++) { document.body && document.body.offsetWidth; let moved = 0;
@@ -72,12 +70,12 @@ export async function runScenario(browser, sc, url, o = {}) {
        move of its own, on its own clock: the harness moves the mouse to where it is, so they arrive now, every run */
     if (mouse) { await page.mouse.move(mouse.x, mouse.y); await frame(); } };
   /* every undo step the page makes is written down, so the end of the scenario can check how each one is named */
-  const boot = async () => { await page.evaluate(() => { const raf = window.requestAnimationFrame; window.requestAnimationFrame = cb => raf(() => cb(performance.now()));
-    const pu = window.pushUndo; if (pu) window.pushUndo = function (label, ...rest) { (window.__bh.labels = window.__bh.labels || []).push(label); return pu.call(this, label, ...rest); }; }); await settle(1500); };
+  /* (the test layer writes every undo step's words to __bh.labels itself: testing/compat.ts) */
+  const boot = async () => { await page.evaluate(() => { const raf = window.requestAnimationFrame; window.requestAnimationFrame = cb => raf(() => cb(performance.now())); }); await settle(1500); };
   if (sc.storage) await page.addInitScript(st => { if (!sessionStorage.getItem('__bh_seeded')) { sessionStorage.setItem('__bh_seeded', '1'); for (const [k, v] of Object.entries(st)) localStorage.setItem(k, v); } }, sc.storage);
   await page.goto(url);
   await boot();
-  let step = 0; const cov = [];
+  let step = 0;
   const snap = async label => { if (!o.trace) return; trace.push({ step: step++, label, ...(await page.evaluate(f => window.__bh.snap(f), !!o.dump)) }); };
   /* the page scrolls the element into view itself; the scroll events that sends arrive with the browser's next frames, so
      they are let in before the pointer acts, every time */
@@ -88,7 +86,7 @@ export async function runScenario(browser, sc, url, o = {}) {
     js: (fn, arg) => page.evaluate(fn, arg),
     /* a change the scenario makes from inside the page sets the scene: it is not a person's gesture, so the page's undo
        history takes it as where things stand (any event it dispatched is a gesture, and is recorded as one) */
-    do: async (label, fn, arg, ms) => { await page.evaluate(() => { if (typeof vsG === 'number') { if (typeof vsSoonT !== 'undefined' && vsSoonT) vsCatch(); vsG++; } }); await page.evaluate(fn, arg); await page.evaluate(() => { if (typeof vsCatch !== 'function') { if (typeof vsSettle === 'function') vsSettle(); return; } if (vsSoonT) vsCatch(); else vsSettle(); }); await settle(ms); await snap(label); },
+    do: async (label, fn, arg, ms) => { await page.evaluate(fn, arg); await settle(ms); await snap(label); },
     /* a real mouse click at the element's centre (or at fx, fy of its box), after the page scrolled it into view itself */
     click: async (sel, ms, at) => { let r = await where(sel); if (!r) { results.push([false, 'click ' + sel, 'no such element']); return; }
       /* an action that shows only while its row is hovered (a workflow row's buttons): point at the row first, as a hand would */
@@ -127,7 +125,7 @@ export async function runScenario(browser, sc, url, o = {}) {
       const r = el.getBoundingClientRect(), o = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 4, clientY: r.top + 4 }; el.dispatchEvent(new DragEvent('dragover', o)); el.dispatchEvent(new DragEvent('drop', o)); }, [sel, name, type]); await settle(ms); await snap('drop ' + name); },
     file: async (sel, name, mime, text, ms) => { await page.setInputFiles(sel, { name, mimeType: mime, buffer: Buffer.from(text ?? 'x') }); await settle(ms); await snap('file ' + name); },
     resize: async (w, h, ms) => { await page.setViewportSize({ width: w, height: h || 1080 }); await settle(ms); await snap('resize ' + w); },
-    reload: async () => { cov.push(await page.evaluate(() => window.__bh.cov)); await page.reload(); await freeze(); await boot(); await snap('reload'); },
+    reload: async () => { await page.reload(); await freeze(); await boot(); await snap('reload'); },
     toast: () => page.evaluate(() => document.querySelector('#toast').hidden ? '' : document.querySelector('#toast .toast-msg').textContent),
     download: () => page.evaluate(async () => { const d = window.__bh.downloads.pop(); return d ? { name: d.name, text: d.blob ? await d.blob.text() : '' } : null; }),
     ok: async (label, fn, arg) => { let v, detail = ''; try { v = await page.evaluate(fn, arg); } catch (e) { v = false; detail = String(e.message).split('\n')[0]; }
@@ -140,7 +138,6 @@ export async function runScenario(browser, sc, url, o = {}) {
   try { await sc.run(t); } catch (e) { results.push([false, 'scenario threw', String(e.stack || e).split('\n').slice(0, 3).join(' | ')]); }
   await settle(600);
   await snap('end');
-  cov.push(await page.evaluate(() => window.__bh.cov));
   /* Two checks on every scenario (L-01, L-09, Q-04). Every change a person makes to the desk is an undo step: the page
      writes down, in vsStray, any change it found between gestures that is not one it makes itself, so a control that
      changes the desk without a step fails here wherever a scenario uses it. And every step is named in the page's own
@@ -152,5 +149,5 @@ export async function runScenario(browser, sc, url, o = {}) {
   results.push([!bad.length, "every undo step is named in the page's words", bad.join(' | ').slice(0, 400)]);
   results.push([!errs.length, 'no console errors or warnings', errs.join(' | ').slice(0, 600)]);
   await ctx.close();
-  return { id: sc.id, results, trace, cov: Object.assign({}, ...cov) };
+  return { id: sc.id, results, trace };
 }

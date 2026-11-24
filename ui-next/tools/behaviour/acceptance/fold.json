@@ -1,5 +1,5 @@
 {
- "about": "Quick's fold (A-28, Q-05: past six modules Quick shows six and a button names the rest; the Pedalboard, a source and a module holding a set value are never folded; its open state is kept with the session), built after the consolidation round: the concept's two scenarios about it, moved here from fix-core.json's excluded, and the fold's own (38-fold.mjs), each reaching its state by real input once the concept's two stand-in modules are on the desk. 38-fold.mjs holds on the concept page too but for the one its `why` names (--page hotstep-tiers.html).",
+ "about": "Quick's fold (A-28, Q-05: past six modules Quick shows six and a button names the rest; the Pedalboard, a source and a module holding a set value are never folded; its open state is kept with the session): the fold's own scenarios (38-fold.mjs), each reaching its state by real input once the test build's two stand-in modules are on the desk, and the two older ones about it.",
  "scenarios": [
   {
    "id": "01-desk/quick-more-parked-empty",
@@ -23,7 +23,7 @@
   },
   {
    "id": "38-fold/the-fold-is-kept-over-a-reload",
-   "why": "Open and closed, each kept over a reload. On the concept page its stand-ins (registered by script) are gone after the reload, so its tiles' counts fail there; its S.qAll comes back."
+   "why": "Open and closed, each kept over a reload."
   },
   {
    "id": "38-fold/only-quick-folds",

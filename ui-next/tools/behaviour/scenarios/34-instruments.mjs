@@ -1,9 +1,8 @@
-// The instruments of package 3a, each in the module the concept draws it in, as scenarios that hold on the concept
-// page too (run them there with --page): Tempo's key wheel, TAP and the prompt chips; the Seed's split-flap and its
+// The instruments of package 3a, each in the module that draws it:
+// Tempo's key wheel, TAP and the prompt chips; the Seed's split-flap and its
 // saved seeds; the Takes reels and what they cost; the Sampler's scope and its interval handles; the latent curve;
 // the repaint region; the timbre reference's recent files and its blend; Performance trades' corner words; and the knob
-// that can be automatic. Each uses only what both pages share (S, render, get, setVal, UNDO, the markup's data-*
-// hooks and the concept's own classes, which the instruments emit).
+// that can be automatic.
 
 const desk = (tier, mods, vals = {}, backend = 'ace', more = {}) => async t => {
   await t.js(() => { window.__i = { toast: () => (document.querySelector('#toast').hidden ? '' : document.querySelector('#toast .toast-msg')?.textContent || ''),

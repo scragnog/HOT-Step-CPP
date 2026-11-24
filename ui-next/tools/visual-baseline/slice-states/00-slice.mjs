@@ -1,13 +1,10 @@
 // The slice's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs; each work package
-// adds a file of its own). The concept's matrix (states.mjs) cut to what the rebuild draws so far. Each state puts on the
-// desk only the modules, pedals and side units the slice builds (docs/03, "Shared parts only"), on the same engines,
-// tiers, widths, schemes and motion settings as the concept's own states, and is run on both pages with the same
-// setup, the lyric sheet at the head of the desk where the concept puts it (package 4 draws it; until then it was
-// withdrawn from the concept page). SCOPES names the regions of the page compared: the elements the slice draws.
+// adds a file of its own). Each state puts on the desk the modules, pedals and side units the slice builds (docs/03,
+// "Shared parts only"), on every engine and tier, at the desktop and narrow widths, in both themes and with reduced
+// motion, with the lyric sheet at the head of the desk. SCOPES names the regions of the page compared: the elements
+// the slice draws.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-slice --states slice --scope slice --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-slice --states slice --scope slice --plan-from concept-slice
-//   node tools/visual-baseline/vb.mjs compare concept-slice rebuild-slice --scope slice
+//   npm run visual:all -- --only "^slice$"            (and visual:approve, README.md)
 
 const ENGINES = ['ace', 'mm3', 'yue', 'sa3', 'hm'];
 const TIERS = ['quick', 'studio', 'lab'];
@@ -82,5 +79,5 @@ export const SCOPES = {
 };
 
 /** This file's visual set (the slice's states and 01-parts.mjs's (all named slice-)), for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'slice', only: '^slice-', scope: 'slice', accept: 'slice-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'slice', only: '^slice-', scope: 'slice' };

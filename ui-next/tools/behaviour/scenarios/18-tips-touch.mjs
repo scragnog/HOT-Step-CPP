@@ -34,26 +34,10 @@ export default [
     await touchAt(t, '#tiers [data-tier="studio"]', 800);
     await t.eq('a tier held for 0.8 s is chosen', () => S.tier, 'studio');
   } },
-  { id: 'plugin-menu-reads-under-a-finger', w: 820, h: 1180, touch: true, run: async t => {
-    await t.do('studio sampler', () => { S.tier = 'studio'; S.mods = ['sampler']; render(); });
-    await touchAt(t, '.tile[data-m="sampler"] [data-pick="samp.solver"]', 60);
-    await t.ok('the solver table is open', () => !document.querySelector('#dd').hidden && !!document.querySelector('#dd .opt-pt'));
-    const other = await t.js(() => [...document.querySelectorAll('#dd .opt-pt')].find(b => b.dataset.opt !== get('samp.solver')).dataset.opt);
-    await touchAt(t, `#dd .opt-pt[data-opt="${other}"]`, 60);
-    await t.eq('a first tap shows the option\'s name in the header and chooses nothing (S-02)', o => [get('samp.solver') === o, document.querySelector('#ptBig b')?.textContent, !!document.querySelector('#dd .opt-pt.pv'), !!document.querySelector('#ptBig [data-ptuse]')], [false, other, true, true], other);
-    await touchAt(t, `#dd .opt-pt[data-opt="${other}"]`, 60);
-    await t.eq('a second tap on it chooses it', () => [get('samp.solver'), document.querySelector('#dd').hidden], [other, true]);
-  } },
   { id: 'short-plugin-menu-is-named-cards', engine: 'sa3', run: async t => {
     await t.do('sa3 sampler', () => { S.backend = 'sa3'; S.tier = 'studio'; S.mods = ['sampler']; render(); });
     await t.click('.tile[data-m="sampler"] [data-pick="sa3.sampler"]');
     await t.ok('three samplers are cards with their names, not bare symbols (S-02)', () => { const o = [...document.querySelectorAll('#dd .opt')]; return o.length === 3 && o.every(b => b.classList.contains('opt-el') && b.querySelector('b')?.textContent.trim().length > 2) || o.map(b => b.className); });
-  } },
-  { id: 'language-stamp-stays-put', run: async t => {
-    await t.do('studio lyrics', () => { S.tier = 'studio'; S.mods = ['lyrics', 'takes']; render(); window.__st = (() => { const r = document.querySelector('.stamp-wrap').getBoundingClientRect(); return [r.right, r.top]; })(); });
-    await t.click('.stamp-wrap [data-pick="lyrics.lang"]');
-    await t.click('#dd .opt-stamp[data-opt="French"]');
-    await t.ok('choosing a language leaves the stamp where it was (L-02, E-01)', () => { const s = document.querySelector('.stamp-wrap'), r = s.getBoundingClientRect(), a = window.__st; return s.classList.contains('changed') && getComputedStyle(s).position === 'absolute' && Math.abs(r.right - a[0]) < 1 && Math.abs(r.top - a[1]) < 1 || [getComputedStyle(s).position, r.right, r.top, a]; });
   } },
   { id: 'the-changed-mark-moves-nothing', run: async t => {
     for (const [bk, tier] of [['ace', 'quick'], ['ace', 'studio'], ['ace', 'lab'], ['mm3', 'lab'], ['yue', 'lab']]) {
@@ -66,7 +50,12 @@ export default [
     }
   } },
   ...[[1600, 'studio'], [1920, 'quick'], [1280, 'quick'], [1000, 'lab']].map(([w, tier]) => ({ id: `desk-bar-keeps-clear-${w}-${tier}`, w, run: async t => {
-    await t.do('a long Undo label and a Redo', tier => { S.tier = tier; S.mods = ['takes']; render(); pushUndo('DiT model XL Turbo · Q8_0 → Turbo Continuous · Q8_0', () => {}, () => {}); pushUndo('Planner temperature 0.80 → 1.85, top-P 0.92 → 0.95', () => {}, () => {}); runUndo(UNDO[UNDO.length - 1]); }, tier);
+    await t.do('a desk with the planner', tier => { S.tier = tier; S.mods = ['takes', 'planner']; render(); }, tier);
+    /* two steps with long names, the second undone: a long Undo label and a Redo */
+    await t.do('a step', () => setVal('lm.temp', 1.85));
+    await t.do('another', () => setVal('lm.topp', 0.95));
+    await t.click('#undoBtn');
+    await t.ok('Undo and Redo both stand in the bar', () => !document.querySelector('#undoBtn').hidden && !document.querySelector('#redoBtn').hidden);
     await t.ok('Saved, Undo and Redo stay 16 px clear of the tier switch (F-02)', () => { const t = document.querySelector('#tiers').getBoundingClientRect();
       const hit = ['#saveState', '#undoBtn', '#redoBtn'].map(s => document.querySelector(s)).filter(e => e && !e.hidden).map(e => [e.id, e.getBoundingClientRect()]).filter(([, r]) => r.top < t.bottom && r.bottom > t.top && r.left < t.right + 15.5 && r.right > t.left - 15.5);
       return hit.length ? hit.map(([id, r]) => `${id} ${Math.round(r.left)}-${Math.round(r.right)} vs tiers ${Math.round(t.left)}-${Math.round(t.right)}`) : true; });

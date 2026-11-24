@@ -1,10 +1,8 @@
-// The containers and read-outs (package 2), each in the module the concept draws it in, as scenarios that hold on the
-// concept page too (run them there with --page): the terminal and its lines (flags, the lines Lab adds, the plan the
+// The containers and read-outs (package 2), each in the module that draws it:
+// the terminal and its lines (flags, the lines Lab adds, the plan the
 // planner starts from, the planner off), a repetition guard that is off, Tempo's LCD rows (the beat lamps, the trim
 // held), the rack groups (a power chip, a pill, token pairs, the plan strength curve), the plans deck, the re-planning
-// dice, the flow windows, the speed gauge, the side units' objects, the drop zones, and the fader bank. Each uses only
-// what both pages share (S, render, get, setVal, toast, the markup's data-* hooks and the concept's own classes,
-// which the containers emit).
+// dice, the flow windows, the speed gauge, the side units' objects, the drop zones, and the fader bank.
 
 const desk = (tier, mods, vals = {}, backend = 'ace', pedals = [], more = {}) => async t => {
   await t.js(() => { window.__c = { toast: () => (document.querySelector('#toast').hidden ? '' : document.querySelector('#toast .toast-msg')?.textContent || ''),

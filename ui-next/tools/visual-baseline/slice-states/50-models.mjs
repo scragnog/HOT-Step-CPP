@@ -4,9 +4,7 @@
 // that will be refused) and tight (one that does not fit at once). The desk is empty, or holds the Takes tile only, and
 // is not compared: the scope `models` is the panel, the meter and the dropdown.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-models --states slice --scope models --only "^models-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-models --states slice --scope models --only "^models-" --plan-from concept-models
-//   node tools/visual-baseline/vb.mjs compare concept-models rebuild-models --scope models --accept tools/visual-baseline/models-accepted.json
+//   npm run visual:all -- --only "^models$"            (and visual:approve, README.md)
 
 const scene = (bk, tier, mods = [], vals = {}) => async h => {
   await h.js(([bk, tier, mods, vals]) => { if (bk !== S.backend) { if (typeof enterEngine === 'function') enterEngine(bk); else S.backend = bk; } S.backend = bk; S.tier = tier; S.mods = mods; S.pedals = []; Object.assign(S.vals, vals); render(); }, [bk, tier, mods, vals]);
@@ -46,5 +44,5 @@ export const STATES = [
 export const SCOPES = { models: ['#engPanel', '#engMeter', '#dd'] };
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'models', only: '^models-', scope: 'models', accept: 'models-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'models', only: '^models-', scope: 'models' };

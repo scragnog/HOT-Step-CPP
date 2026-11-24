@@ -136,13 +136,13 @@ export default [
   } },
   { id: 'theme-nav', run: async t => {
     await t.click('#themeSeg [data-themeset="light"]');
-    await t.eq('the Light segment sets Light (C-40: three segments, each one press away)', () => [document.documentElement.dataset.theme, localStorage.getItem('hs3-theme'), document.querySelector('#themeSeg [aria-checked="true"]').dataset.themeset], ['light', 'light', 'light']);
+    await t.eq('the Light segment sets Light (C-40: three segments, each one press away)', () => [document.documentElement.dataset.theme, localStorage.getItem('hotstep.theme'), document.querySelector('#themeSeg [aria-checked="true"]').dataset.themeset], ['light', 'light', 'light']);
     await t.click('#themeSeg [data-themeset="dark"]');
     await t.eq('Dark is one press from Light', () => document.documentElement.dataset.theme, 'dark');
     await t.reload();
     await t.eq('the theme is kept', () => [document.documentElement.dataset.theme, document.querySelector('#themeSeg [aria-checked="true"]').dataset.themeset], ['dark', 'dark']);
     await t.focus('#themeSeg [data-themeset="dark"]'); await t.press('ArrowRight');
-    await t.eq('arrow keys move round to System', () => [document.documentElement.dataset.theme, localStorage.getItem('hs3-theme'), document.activeElement.dataset.themeset], [undefined, null, 'system']);
+    await t.eq('arrow keys move round to System', () => [document.documentElement.dataset.theme, localStorage.getItem('hotstep.theme'), document.activeElement.dataset.themeset], [undefined, null, 'system']);
     for (const nav of ['Library', 'Studios', 'Training', 'Settings']) {
       await t.click(`[data-nav="${nav}"]`);
       await t.ok(`${nav} shows its own page`, nav => document.querySelector('#app').hidden && !document.querySelector('#other').hidden && document.querySelector('#other h2').textContent === nav && document.querySelector(`[data-nav="${nav}"]`).getAttribute('aria-current') === 'page', nav);

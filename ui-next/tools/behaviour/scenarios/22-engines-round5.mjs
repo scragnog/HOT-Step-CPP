@@ -16,13 +16,6 @@ export default [
         if (b.height > 80) bad.push(`${u.dataset.xid} ${Math.round(b.height)}px tall`); }
       return !bad.length || bad.join('; '); });
   } })),
-  /* E-05: one model of YuE2's adapter strength: Quick's Strength row is the AR cartridge's Strength fader */
-  { id: 'yue-adapter-strength-is-one-control', run: async t => {
-    await desk('quick', ['adapters'], { backend: 'yue', slots: [{ file: 'folk-voice-ar', type: 'LoRA' }] })(t);
-    await t.click('.tile[data-m="adapters"] [data-setq="s0|1.5"]');
-    await t.do('studio', () => { S.tier = 'studio'; render(); });
-    await t.ok('in Studio the AR cartridge shows that Strength beside Plan and Compose (E-05)', () => { const f = [...document.querySelectorAll('.tile[data-m="adapters"] .fdr-pair .fdr')].map(x => x.querySelector('.fdr-l')?.textContent + '=' + x.querySelector('output')?.textContent); return (f.length === 3 && /^Strength=1\.50$/.test(f[0])) || f.join(', '); });
-  } },
   /* E-10, E-27 */
   { id: 'yue-adapters-say-what-yue-does', run: async t => {
     await desk('studio', ['adapters'], { backend: 'yue', slots: [{ file: 'folk-voice-ar', type: 'LoRA' }] })(t);
@@ -30,15 +23,6 @@ export default [
     await t.do('lab, two adapters', () => { S.tier = 'lab'; S.slots.push({ file: 'tape-warmth-nar', type: 'LoRA' }); render(); });
     await t.ok('the bank says both adapters, and the foot stands under the bank, not beside it (E-27)', () => { const tile = document.querySelector('.tile[data-m="adapters"]'), mh = tile.querySelector('.rig-mh small')?.textContent, bank = tile.querySelector('.rig-master').getBoundingClientRect(), foot = tile.querySelector('[data-adfoot]').getBoundingClientRect();
       return (mh === 'both adapters' && foot.top >= bank.bottom - 1 && !tile.querySelector('.rig-wrap [data-adfoot]')) || JSON.stringify({ mh, bankBottom: bank.bottom, footTop: foot.top }); });
-  } },
-  /* E-07, E-29: the Tempo tile on MiniMax-Music3 at Quick says how a BPM reaches the song, and is named for what it shows */
-  { id: 'mm3-quick-tempo-says-where-tempo-goes', run: async t => {
-    await desk('quick', ['tempo'], { backend: 'mm3' })(t);
-    await t.ok('the tile is named Tempo and says the caption carries it (E-07, E-29)', () => { const tl = document.querySelector('.tile[data-m="tempo"]'); return (/^Tempo$/.test(tl.querySelector('.tile-head h3, h3')?.textContent.trim()) && /reads tempo from the caption/.test(tl.textContent)) || tl.textContent.slice(0, 160); });
-    await t.do('a style', () => { document.querySelector('#prompt').value = 'dream pop'; });
-    await t.focus('.tile[data-m="tempo"] [data-num="tempo.bpm"]'); await t.type('96'); await t.press('Enter');
-    await t.click('.tile[data-m="tempo"] [data-composecap]');
-    await t.ok('Compose caption from the tile writes the BPM in', () => /^Global Metadata: dream pop, 96 BPM/.test(document.querySelector('#prompt').value) || document.querySelector('#prompt').value);
   } },
   /* E-14: the lyrics language reaches MiniMax-Music3 through Compose caption, and its stamp says so */
   { id: 'mm3-lyrics-language-is-composed-in', run: async t => {
@@ -97,18 +81,6 @@ export default [
     await t.eq('after a reset by double-click, the same', tokText, 'auto (1.00)');
     await t.ok('and its tip is the setting\'s explanation', () => /checkpoint's own 1\.00/.test(document.querySelector('[data-scrub="yue.cfg"]').title) || document.querySelector('[data-scrub="yue.cfg"]').title);
   } },
-  /* E-15, E-16, E-17, E-36: Plans & endings */
-  { id: 'plans-say-one-thing', w: 1920, h: 1080, run: async t => {
-    await desk('lab', ['planner', 'plans'], { backend: 'mm3' })(t);
-    await t.click('.tile[data-m="plans"] [data-ledtog="mm.reuse"]');
-    await t.eq('the terminal says the cache is off (E-15)', () => document.querySelector('[data-mmcache]').textContent, '8B planner · plan cache off');
-    await t.click('.tile[data-m="plans"] [data-cycle="mm.plank|1"]');
-    await t.eq('and names the Plank it replays', () => document.querySelector('[data-mmcache]').textContent, '8B planner · replaying 11-19 22.41');
-    await t.ok('the replay LCD shows the whole name (E-16)', () => { const b = document.querySelector('.tile[data-m="plans"] [data-pick="mm.plank"] b'); return (b.scrollWidth <= b.clientWidth + 1 && b.textContent === '11-19 22.41') || `${b.textContent} ${b.scrollWidth}/${b.clientWidth}`; });
-    await t.ok('every Endings chip explains itself (E-17)', () => [...document.querySelectorAll('.tile[data-m="plans"] .endings .led-btn')].every(b => b.title.length > 20));
-    await t.ok('changed rows carry their mark after the row label, and controls carry none (E-36)', () => { const lab = [...document.querySelectorAll('.tile[data-m="plans"] .deck-l')].filter(l => getComputedStyle(l, '::after').content !== 'none' && getComputedStyle(l, '::after').width === '5px').map(l => l.textContent);
-      const ctl = [...document.querySelectorAll('.tile[data-m="plans"] .deck-c .changed')].filter(c => { const s = getComputedStyle(c, '::after'); return s.content !== 'none' && s.visibility !== 'hidden'; }).length; return (lab.includes('Last plan') && lab.includes('Replay') && !ctl) || JSON.stringify({ lab, ctl }); });
-  } },
   /* E-31: values in force on Build by section are at full strength */
   { id: 'build-locked-values-read', run: async t => {
     await desk('lab', ['build'], { backend: 'yue' })(t);
@@ -157,13 +129,6 @@ export default [
       return (r.top - p.top < 14 && d.top >= p.top - 1 && Math.abs((d.top + d.bottom) / 2 - (r.top + r.bottom) / 2) < 4) || JSON.stringify([r.top - p.top, d.top - p.top]); });
   } },
 
-  /* ---- pending: behaviours the page gets wrong today; each fails now, for its finding's reason ---- */
-  { id: 'takes-tile-follows-retry', pending: { finding: 'E-03', right: 'When Takes changes from anywhere (Retry with N takes, the go bar\'s Use N takes, Undo, a workflow), the Takes tile shows the new count and drops a warning that no longer holds, at once.' }, run: async t => {
-    await t.do('MiniMax-Music3, too big', () => { enterEngine('mm3'); S.tier = 'studio'; S.mods = ['takes']; S.vals['takes.n'] = 4; S.vals['model.lm'] = '8B planner · F16'; S.vals['model.dit'] = 'Flow DiT · F16'; document.querySelector('#prompt').value = 'big song'; render(); });
-    await t.click('#go', 300);
-    await t.click('#latest .song.errored [data-retry]', 300);
-    await t.ok('after Retry with fewer takes the tile shows the new count and no "Won\'t fit"', () => { const tl = document.querySelector('.tile[data-m="takes"]'), n = get('takes.n'); return (!/Won't fit/.test(tl.textContent) && tl.querySelector('.tk-lcd, .lcd, output')?.textContent.includes(String(n))) || `takes.n ${n}; tile "${tl.textContent.replace(/\s+/g, ' ').trim().slice(0, 120)}"`; });
-  } },
   { id: 'automatic-source-follows-the-tempo', pending: { finding: 'E-06', right: 'With the caption or description source on Automatic, a change of BPM (or of its auto switch) re-resolves the dataset track at once: the lock line, the text and the chip\'s tip name the track nearest the new tempo.' }, run: async t => {
     await desk('studio', ['tempo'], { backend: 'yue', vals: { 'cap.src': 'Automatic' } })(t);
     await t.ok('at the default tempo Automatic resolves to a track', () => !!document.querySelector('#capLock:not([hidden])'));

@@ -1,14 +1,12 @@
 // Package 3c's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the instruments of
-// YuE2 and MiniMax-Music3 compared where the concept draws them, as parts on their own (vb.mjs `parts`): Build by section
+// YuE2 and MiniMax-Music3 where the page draws them, as parts on their own (vb.mjs `parts`): Build by section
 // empty, planned, with takes and a keep (its settings locked), at Quick and with a keep sung to old words; Continue from
 // recording with its selection and ruler; the Lead sheet with its foot and the lyric-timing line; the score preview of a
 // healthy, a long and a runaway plan and of a pasted sheet; and the Lab modules of the two engines (Flow renderer, Plans &
-// endings, Re-planning, Plan adherence, Throughput). A build is given as a scene (S.build, takes included), so both pages
-// draw the same takes.
+// endings, Re-planning, Plan adherence, Throughput). A build is given as a scene (S.build, takes included), so every run
+// draws the same takes.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-3c --states slice --only "^i3c-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-3c --states slice --only "^i3c-" --plan-from concept-3c
-//   node tools/visual-baseline/vb.mjs compare concept-3c rebuild-3c --accept tools/visual-baseline/instruments-3c-accepted.json
+//   npm run visual:all -- --only "^instruments-3c$"            (and visual:approve, README.md)
 
 /* the concept's page as it is, its lyric sheet in place (package 4 draws it) */
 const scene = (bk, tier, mods, vals = {}, more = {}, after = null) => async h => {
@@ -56,5 +54,5 @@ export const STATES = [
 ];
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'instruments-3c', only: '^i3c-', accept: 'instruments-3c-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'instruments-3c', only: '^i3c-' };

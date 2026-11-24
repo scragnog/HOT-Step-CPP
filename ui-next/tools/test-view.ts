@@ -1,7 +1,7 @@
 // Tests of what the React layer relies on that is not the concept's derivations already checked by test-core.ts:
 // the desk's layout as a pure function against the layouts the concept page chose (tools/fixtures/pack.json, recorded
-// by tools/concept/collect-pack.mjs), and the core's selectors the view asks (src/derive/desk.ts and the additions to
-// strings.ts, tiers.ts, view.ts and records.ts made for it).
+// before the cutover; its collector is in the tag rebuild-parity), and the core's selectors the view asks
+// (src/derive/desk.ts and the additions to strings.ts, tiers.ts, view.ts and records.ts made for it).
 //
 //   node tools/test-view.ts        exit 1 on a failure
 

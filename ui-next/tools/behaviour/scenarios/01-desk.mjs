@@ -33,10 +33,10 @@ export default [
   } },
   { id: 'engine-switch-effects', run: async t => {
     await studio(['tempo', 'takes'])(t);
-    await t.do('nine takes', () => { S.vals['takes.n'] = 9; render(); });
+    await t.do('eight takes', () => { S.vals['takes.n'] = 8; render(); });
     await t.click('#engBtn'); await t.click('#engPanel [data-backend="sa3"]');
-    await t.eq('takes read the engine limit', () => [S.vals['takes.n'], S.eng.hold['takes.n'].v], [1, 9]);
-    await t.ok('and a toast says the 9 come back (B-11; worded so on purpose, S-12)', () => /Takes capped at 1; your 9 takes wait on ACE-Step 1\.5/.test(document.querySelector('#toast .toast-msg')?.textContent || ''));
+    await t.eq('takes read the engine limit', () => [S.vals['takes.n'], S.eng.hold['takes.n'].v], [1, 8]);
+    await t.ok('and a toast says the 8 come back (B-11; worded so on purpose, S-12; eight at most, design decision 27)', () => /Takes capped at 1; your 8 takes wait on ACE-Step 1\.5/.test(document.querySelector('#toast .toast-msg')?.textContent || ''));
     await t.press('Escape');
     await t.do('repaint source', () => { S.backend = 'ace'; S.source = { song: 1 }; S.mods = ['repaint', 'tempo']; render(); });
     await t.click('#engBtn'); await t.click('#engPanel [data-backend="mm3"]');

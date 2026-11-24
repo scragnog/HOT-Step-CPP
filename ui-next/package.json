@@ -26,10 +26,12 @@
     "thumb": "node tools/thumb.ts",
     "core": "node tools/test-core.ts",
     "view": "node tools/test-view.ts",
-    "concept": "node tools/concept/collect.mjs",
     "behaviour": "node tools/behaviour/run.mjs --page dist-test/index.html",
     "baseline": "node tools/visual-baseline/vb.mjs",
     "visual:all": "node tools/visual-baseline/visual-all.mjs",
+    "visual:approve": "node tools/visual-baseline/visual-all.mjs --approve",
+    "motion": "node tools/motion/frames.mjs",
+    "motion:approve": "node tools/motion/frames.mjs --approve",
     "switches": "node tools/behaviour/switches.mjs",
     "switches:apply": "node tools/behaviour/switches.mjs --applies",
     "perf": "node tools/perf/run-all.mjs"

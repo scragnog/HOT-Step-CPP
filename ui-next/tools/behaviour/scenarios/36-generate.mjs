@@ -1,7 +1,6 @@
 // Package 6's own claims: Generate from press to finished card, the queue (several runs, cancelling one or all, with
 // Undo), the go bar's line and Generate's words in every state, Latest's cards, the song menu, the player and the toast
-// stack. Each holds on the concept page too (--page hotstep-tiers.html), except those marked pending (the concept's
-// own pending findings, which the rebuild builds) and the two that need the rebuild's simulated server (mockCard).
+// stack. Two need the simulated server's own hook (mockCard).
 // Checks run in the page, so they use no helper of this file. A scene writes the description both where the concept keeps it (#prompt) and where the definitions do (prompt.text).
 const prompt = v => t => t.do('a description', v => { const p = document.querySelector('#prompt'); if (p) p.value = v; S.vals['prompt.text'] = v; render(); }, v);
 const desk = (tier, mods, extra = {}) => t => t.do(`${tier} desk`, ([tier, mods, extra]) => { if (extra.backend && extra.backend !== S.backend) enterEngine(extra.backend); S.tier = tier; S.mods = mods; S.pedals = extra.pedals || []; Object.assign(S.vals, extra.vals || {}); render(); }, [tier, mods, extra]);

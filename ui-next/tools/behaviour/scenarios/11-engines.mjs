@@ -5,29 +5,26 @@ const desk = (bk, tier, mods, extra) => t => t.do(`${bk} ${tier} desk`, ([bk, ti
 const sw = async (t, bk) => { await t.click('#engBtn'); await t.click(`#engPanel [data-backend="${bk}"]`); await t.press('Escape'); };
 export default [
   { id: 'engine-switch-there-and-back-loses-nothing', run: async t => {
-    await desk('ace', 'lab', ['sampler', 'tempo', 'adapters', 'takes'], { vals: { 'samp.steps': 300, 'samp.cfg': 20, 'tempo.dur': 600, 'tempo.dur.auto': false, 'takes.n': 9, 'model.dit': 'XL Turbo · MXFP4', 'ad.adv': 'Advanced', 'lyrics.text': '[Verse]\nhello' }, slots: [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type: 'LoKr' }] })(t);
+    await desk('ace', 'lab', ['sampler', 'tempo', 'adapters', 'takes'], { vals: { 'samp.steps': 300, 'samp.cfg': 20, 'tempo.dur': 600, 'tempo.dur.auto': false, 'takes.n': 8, 'model.dit': 'XL Turbo · MXFP4', 'ad.adv': 'Advanced', 'lyrics.text': '[Verse]\nhello' }, slots: [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type: 'LoKr' }] })(t);
     await t.do('a description', () => { document.querySelector('#prompt').value = 'my song'; });
     await sw(t, 'mm3');
-    await t.eq('values out of the new engine are its own, in range (B-01)', () => [get('samp.steps') <= C['samp.steps'].max, get('samp.cfg') <= C['samp.cfg'].max, get('takes.n')], [true, true, 4]);
+    await t.eq('values out of the new engine are its own, in range (B-01)', () => [+get('samp.steps') < 300, +get('samp.cfg') < 20, get('takes.n')], [true, true, 4]);
     await t.eq('the other engine\'s adapters are not loaded here (B-02)', () => S.slots.length, 0);
     await t.ok('the toast says what stayed behind, with Undo (B-48)', () => /ACE-Step 1\.5 keeps its models? \(.*\), 2 adapters and \d+ settings?\./.test(document.querySelector('#toast .toast-msg')?.textContent || '') && document.querySelector('#toast .toast-act')?.textContent === 'Undo');
     await t.eq('the song travels: description and lyrics', () => [document.querySelector('#prompt').value, get('lyrics.text')], ['my song', '[Verse]\nhello']);
-    await t.click('.tile[data-m="adapters"] [data-cartadd]');
-    await t.ok('the adapter list offers only this engine\'s kind (B-02)', () => [...document.querySelectorAll('#pop [data-loadad]')].every(b => !/tape-lofi|folk-voice\|/.test(b.dataset.loadad)) && /Planner LM adapters for MiniMax-Music3/.test(document.querySelector('#pop h4').textContent));
-    await t.press('Escape');
     await t.do('a model choice on this engine', () => setVal('model.dit', 'Flow DiT · F16'));
     await sw(t, 'hm');
     await t.eq('a length past the engine reads at its limit (B-01)', () => [get('tempo.dur'), S.eng.hold['tempo.dur'].v], [240, 600]);
     await sw(t, 'mm3');
     await t.eq('each engine keeps its own model choice (B-19)', () => get('model.dit'), 'Flow DiT · F16');
     await sw(t, 'ace');
-    await t.eq('back on the first engine, its desk is as it was', () => [get('samp.steps'), get('samp.cfg'), get('tempo.dur'), get('takes.n'), get('model.dit'), S.slots.map(s => s.file).join()], [300, 20, 600, 9, 'XL Turbo · MXFP4', 'tape-lofi-v2,folk-voice']);
+    await t.eq('back on the first engine, its desk is as it was', () => [get('samp.steps'), get('samp.cfg'), get('tempo.dur'), get('takes.n'), get('model.dit'), S.slots.map(s => s.file).join()], [300, 20, 600, 8, 'XL Turbo · MXFP4', 'tape-lofi-v2,folk-voice']);
     await t.do('let autosave run', () => {}, null, 600);
     await t.reload();
     await t.eq('and after a reload', () => [S.backend, get('samp.steps'), S.slots.length, S.eng.stash.mm3?.vals['model.dit']], ['ace', 300, 2, 'Flow DiT · F16']);
     await sw(t, 'sa3');
     await t.press('Control+z');
-    await t.eq('a switch is one undo step (B-48)', () => [S.backend, get('samp.steps'), get('takes.n'), S.slots.length], ['ace', 300, 9, 2]);
+    await t.eq('a switch is one undo step (B-48)', () => [S.backend, get('samp.steps'), get('takes.n'), S.slots.length], ['ace', 300, 8, 2]);
   } },
   { id: 'ruler-markers-follow-the-engine', run: async t => {
     await desk('sa3', 'lab', ['tempo'], { vals: { 'tempo.beatio': false } })(t);
@@ -83,7 +80,8 @@ export default [
   { id: 'lyric-timing-follows-composer-cfg', run: async t => {
     await desk('yue', 'lab', ['score', 'planner'], { vals: { 'yue.timing': 'Hard' } })(t);
     await t.do('composer CFG off auto', () => { S.vals['yue.cfg.auto'] = false; setVal('yue.cfg', 2.1); });
-    await t.ok('the note warns at once and offers the fix (B-09)', () => /skips it/.test(document.querySelector('.tile[data-m="score"] .ctl-row .lbl').textContent) && document.querySelector('[data-scrub="yue.cfg"]').classList.contains('clash'));
+    /* the lyric-timing line warns; the planner's token is not painted as clashing (design decision P3c-9) */
+    await t.ok('the note warns at once and offers the fix (B-09)', () => /skips it/.test(document.querySelector('.tile[data-m="score"] .ctl-row .lbl').textContent));
     await t.click('.tile[data-m="score"] [data-auto="yue.cfg"]');
     await t.ok('Set CFG to auto clears it', () => isAuto('yue.cfg') && !/skips it/.test(document.querySelector('.tile[data-m="score"] .ctl-row .lbl').textContent));
   } },

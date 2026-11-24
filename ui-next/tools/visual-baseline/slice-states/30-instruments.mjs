@@ -1,13 +1,11 @@
 // Package 3a's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the instruments
-// compared where the concept draws them, as parts on their own (vb.mjs `parts`: each and everything under it, with its
+// where the page draws them, as parts on their own (vb.mjs `parts`: each and everything under it, with its
 // role, name, words and attributes): Tempo's LCD and key wheel on every engine and at Quick, the prompt chips, the
 // split-flap with its lock, Roll and Random and the saved seeds, the reels and their cost, the Sampler's scope with its
 // handles and read-out, the latent curve, the repaint region, the timbre blend and its recent files, Performance
 // trades' corner words, and the Sampler's knobs (the auto pill, the symbol labels).
 //
-//   node tools/visual-baseline/vb.mjs capture concept-instruments --states slice --only "^instruments-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-instruments --states slice --only "^instruments-" --plan-from concept-instruments
-//   node tools/visual-baseline/vb.mjs compare concept-instruments rebuild-instruments --accept tools/visual-baseline/instruments-accepted.json
+//   npm run visual:all -- --only "^instruments$"            (and visual:approve, README.md)
 
 /* the concept's page as it is, its lyric sheet in place (package 4 draws it) */
 const scene = (bk, tier, mods, vals = {}, more = {}) => async h => {
@@ -48,5 +46,5 @@ export const STATES = [
 ];
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'instruments', only: '^instruments-', accept: 'instruments-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'instruments', only: '^instruments-' };

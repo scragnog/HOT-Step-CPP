@@ -1,5 +1,5 @@
 {
-  "about": "The slice's acceptance: every scenario whose subject is something the slice builds (the shell, the desk, the pure-data modules, the Pedalboard with its pure-data pedals and side unit, undo and redo, the autosave, the theme, the tiers, adding, removing and moving). Each must pass on every run (tools/behaviour/run.mjs --slice). A work package adds a file of its own beside this one (acceptance/<package>.json); none edits another's. `excluded` lists scenarios that look like the slice's but are left out, each with the reason, so that a reader can check the choice. tools/behaviour/switches.mjs proves the list has teeth: each slice feature switched off makes at least one of these fail.",
+  "about": "The slice: the shell, the desk, the pure-data modules, the Pedalboard with its pure-data pedals and side unit, undo and redo, the autosave, the theme, the tiers, adding, removing and moving. Each entry says what its scenario exercises; tools/behaviour/switches.mjs proves the list has teeth (switches/slice.json).",
   "scenarios": [
     { "id": "01-desk/engines-panel", "why": "The engine button and its panel's five cards: arrows, Enter, Escape, a click outside." },
     { "id": "01-desk/add-by-keyboard", "why": "Adding from the Modules panel with the keyboard." },
@@ -29,8 +29,8 @@
     { "id": "20-lab-round5/a-content-change-keeps-every-width-4", "why": "Same, another desk." },
     { "id": "20-lab-round5/a-content-change-keeps-every-width-5", "why": "Same, another desk." },
     { "id": "20-lab-round5/a-content-change-keeps-every-width-6", "why": "Same, another desk." },
-    { "id": "21-chrome-round5/rapid-tier-and-theme-switching-is-quiet", "why": "Pending (F-20) in the concept, right here: rapid tier and theme switching leaves no error." },
-    { "id": "21-chrome-round5/adding-from-the-panel-answers-one-way", "why": "Pending (F-25) in the concept, right here: adding from the Modules panel keeps focus on the card; a parked module's toast carries Undo." },
+    { "id": "21-chrome-round5/rapid-tier-and-theme-switching-is-quiet", "why": "F-20: rapid tier and theme switching leaves no error." },
+    { "id": "21-chrome-round5/adding-from-the-panel-answers-one-way", "why": "F-25: adding from the Modules panel keeps focus on the card; a parked module's toast carries Undo." },
     { "id": "22-engines-round5/engine-switch-toast-is-short", "why": "The engine switch's toast: a few sentences, naming what is new on the engine and nothing already on the desk (E-11, E-19)." },
     { "id": "30-slice/knob-keys-keep-the-value-contract", "why": "A number control's keys: arrows, Shift, Page, Home and End, each a named step; past an end it stays and says nothing." },
     { "id": "30-slice/undo-and-redo-by-key-and-button", "why": "Undo and redo by Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, the buttons and the toast, each said in the toast and the live region." },
@@ -39,12 +39,5 @@
     { "id": "30-slice/engine-switch-from-its-panel", "why": "An engine switch from its panel: the toast with Undo, said, a module the engine does not use parked." },
     { "id": "30-slice/tier-keys-and-the-tier-switch", "why": "Alt+1, 2, 3, the switch's arrows and clicks; a tier is not an undo step." },
     { "id": "30-slice/add-and-remove-with-undo", "why": "Adding from a starter and a card, adding what is there rings it, removing with Undo, focus, the Pedalboard coming and going with its pedals." }
-  ],
-  "excluded": [
-    { "id": "21-chrome-round5/picker-wall-fits-1920", "why": "Vacuous here: it presses F9 and checks the picker fits; the rebuild has no picker yet, and nothing to fit passes. The picker's package (8) adds it." },
-    { "id": "21-chrome-round5/picker-wall-fits-1600", "why": "Vacuous, as above." },
-    { "id": "21-chrome-round5/picker-wall-fits-1536", "why": "Vacuous, as above." },
-    { "id": "21-chrome-round5/picker-wall-fits-1440", "why": "Vacuous, as above." },
-    { "id": "22-engines-round5/quick-hides-the-unused-dataset-chip", "why": "Vacuous here: it checks the prompt card has no From chip; the rebuild has no prompt card. The prompt's package (4)." }
   ]
 }

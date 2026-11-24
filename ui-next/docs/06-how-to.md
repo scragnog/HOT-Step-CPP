@@ -171,7 +171,7 @@ shows one plain choice of three presets that set all three; Studio adds the thre
 
 **Four files: 26 lines of definition written as above (about 68 with one field a line), 1 in `parts.ts`, 2 in the
 index, a drawing.** **What else to run**: `npm run docs`; then the browser acceptance (`npm run build:test`,
-`node tools/behaviour/run.mjs --page dist-test/index.html --slice`): a module joins the factory workflow "Everything" by
+`npm run behaviour`): a module joins the factory workflow "Everything" by
 itself, and the layout scenarios (`12-desk-layout/factory-desks-compose-*`) check that every factory desk composes.
 Dynamics at the end of it left a hole at every width; one word, its id in `ORDER` in `factory.ts` where the desk
 composes (after `avoid`), put it right. Which parts give which look: [01](01-parts-inventory.md)'s
@@ -358,7 +358,7 @@ condition, an action, a read, a `beside`, a factory revision), and says saved da
 | Rename a definition's id | The new id, its file name, `was: ['old']` on the definition | Saved workflows and desks read it |
 | Rename a state key | The new key, `was: ['old']` on the state | Saved revisions read it |
 | Move a parameter to another module | Cut and paste; if its owner or what saves it changes, `npm run docs` records the change once you mean it | `tools/fixtures/shipped.json`: the validator says where it was kept and where it is now |
-| Remove a module, pedal or unit | Delete the file and its two index lines; add its id, its keys and its state keys to `retired.ts`; take it out of what the validator names (a factory workflow that lists it, another definition's condition or action that names it: Timbre's removal names two notes of the Mastering pedal; a role it played: a role nothing plays is a note saying what the page does without it, or an error for a role the page needs); `npm run docs`; `npm run core -- --recount` (the concept comparison's accepted differences that now cover fewer cases are recounted, and one that covers none is taken out). The core's tests skip, and say so, the sections that name it. Then the browser acceptance: the scenarios that use it fail naming it ("no such element .tile[data-m=\"timbre\"]": for Timbre, 12 scenarios, 27 checks): move each to its acceptance file's `excluded` with the reason "uses <module>, removed"; a visual state that draws it is taken out of its states file | The validator names what refers to it, and what saved data may hold; `npm run check` passes |
+| Remove a module, pedal or unit | Delete the file and its two index lines; add its id, its keys and its state keys to `retired.ts`; take it out of what the validator names (a factory workflow that lists it, another definition's condition or action that names it: Timbre's removal names two notes of the Mastering pedal; a role it played: a role nothing plays is a note saying what the page does without it, or an error for a role the page needs); `npm run docs`; `npm run core -- --recount` (the concept comparison's accepted differences that now cover fewer cases are recounted, and one that covers none is taken out). The core's tests skip, and say so, the sections that name it. Then the browser acceptance: the scenarios that use it fail naming it ("no such element .tile[data-m=\"timbre\"]": for Timbre, 12 scenarios, 27 checks): rewrite each without it, or delete it and its acceptance entry when the module was its subject; a visual state that draws it is taken out of its states file, and the sets whose states drew it are approved again (section 13) | The validator names what refers to it, and what saved data may hold; `npm run check` passes |
 
 ## 9. Add an engine
 
@@ -407,6 +407,34 @@ When a wire's fields cannot say a packing (several parameters into one field) or
 `transforms.ts` with `send` and `read`, named by `via` on every parameter it packs. Its line in `tools/existing-ui.ts`
 says how the existing page holds the same values; the request comparison then compares it over the value space and
 fails until every branch of its `send` is reached.
+
+## 13. Approve a change the page shows
+
+The visual sets and the motions compare the page with recordings approved earlier (`tools/visual-baseline/approved/`,
+`tools/motion/approved/`, committed). A change meant to show (a module added, a part restyled, a motion retimed) makes
+them fail, naming what changed; approving records the current build as the new reference, set by set.
+
+1. `npm run build:test`, then `npm run visual:all` (and `npm run motion` for a change to motion). Each set prints
+   `identical` or its differences, each as `state: element property: approved -> now`, and the log's path.
+2. Read the differences. Every set that differs must be one the change was meant to reach, and every difference one it
+   was meant to make; anything else is a defect to fix, not to approve. A module added at the end of the desk reaches
+   the sets whose states put every module of an engine on the desk (`slice` among them, and the picker's `overlays`,
+   which lists it); a new part reaches the sets that draw it.
+3. Look at it: the screenshots of the current capture are in `tools/visual-baseline/out/now-<set>/shots/`, the approved
+   ones in `approved/<set>/shots/`; `node tools/motion/frames.mjs --only "^<id>$" --shots` writes each step of a motion.
+4. Approve those sets alone: `npm run visual:approve -- --only "^(slice|overlays)$"`; a motion:
+   `npm run motion:approve -- --only "^<id>$"`. A set with a new state (a new file of `slice-states/`, or a state
+   added to one) fails as "states changed since approved" until it is approved.
+5. Run `npm run visual:all` once more (every set `identical`), and commit `approved/` with the change.
+
+**For a module added (section 3)**, measured with the Dynamics module of section 3 on a scratch tree: three sets of the
+thirteen differ, each for a reason the new module gives. `slice` and `overlays`: the Modules panel, which lists every
+module, is a card longer (`#browser grid-template-rows: "33.5px 2495px" -> "33.5px 2634px"`, 133 and 21
+differences); `workflows`: the factory workflow "Everything" holds one module more ("35 modules · Lab" -> "36 modules ·
+Lab", 13). The motions are unchanged. So: read those, then `npm run visual:approve -- --only
+"^(slice|workflows|overlays)$"` (about 3 minutes 20), and `npm run visual:all` again. A visual state that shows the new
+module itself is a state added to a file of `slice-states/` (or a file of its own with its set), approved the same
+way.
 
 ## Smaller jobs
 

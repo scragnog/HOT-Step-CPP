@@ -1,5 +1,5 @@
 {
-  "about": "Package 9, motion: the tier change as one View Transition (shell/tier.ts), the desk's own transition (features/motion.ts: tiles and pedals arriving, leaving and moving, the landing after a drop, the cables drawing out), the blocks that push what follows (features/motion-blocks.ts) and the small motions on a change of state (features/motion-kicks.ts), with reduced motion as the concept designs it. The scenarios of scenarios/38-motion.mjs sample positions and animations over time; most hold on the concept page too.",
+  "about": "Motion: the tier change as one View Transition (shell/tier.ts), the desk's own transition (features/motion.ts: tiles and pedals arriving, leaving and moving, the landing after a drop, the cables drawing out), the blocks that push what follows (features/motion-blocks.ts) and the small motions on a change of state (features/motion-kicks.ts), with reduced motion. The scenarios of 38-motion.mjs read the page at moments of each motion with the timeline held; tools/motion/frames.mjs compares every 16ms of each with its approved samples.",
   "scenarios": [
     {
       "id": "19-desk-round5/tier-change-is-one-object-per-part",
@@ -27,7 +27,7 @@
     },
     {
       "id": "38-motion/a-tile-moved-by-key-slides",
-      "why": "A tile moved by an arrow key starts where it stood and slides through the places between. (The concept's tile moved up jumps up at once, then slides sideways: this check does not hold there.)"
+      "why": "A tile moved by an arrow key starts where it stood and slides through the places between."
     },
     {
       "id": "38-motion/a-drop-lands-from-its-preview",
@@ -67,7 +67,7 @@
     },
     {
       "id": "38-motion/the-fold-opens-and-folds-again-by-moving",
-      "why": "Quick's fold (merged from ui-next 43be87c2) moves as every change of which tiles show: opened, a tile it shows arrives by its entrance and what it moves starts where it stood; folded again, a tile it hides fades where it stood, and nothing is left. (The concept's fading tile stands 92px off where it stood at 1600, its exit layer's padding: that check does not hold there, P9-7.)"
+      "why": "Quick's fold (merged from ui-next 43be87c2) moves as every change of which tiles show: opened, a tile it shows arrives by its entrance and what it moves starts where it stood; folded again, a tile it hides fades where it stood, and nothing is left."
     }
   ]
 }

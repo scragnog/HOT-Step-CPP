@@ -1,0 +1,18 @@
+{
+ "set": "fold",
+ "at": "2026-11-24T20:04:38.438Z",
+ "commit": "3e66102542",
+ "states": [
+  "fold-closed-light",
+  "fold-closed-dark",
+  "fold-open-light",
+  "fold-open-dark",
+  "fold-set-value",
+  "fold-closed-w1920",
+  "fold-closed-w1440",
+  "fold-closed-w1280",
+  "fold-closed-w1000",
+  "fold-open-w1920",
+  "fold-open-w1280"
+ ]
+}

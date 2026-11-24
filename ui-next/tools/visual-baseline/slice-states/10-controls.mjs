@@ -1,13 +1,11 @@
 // Package 1's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the shared
-// controls compared where the concept draws them, as parts on their own (vb.mjs `parts`: each control and everything
+// controls where the page draws them, as parts on their own (vb.mjs `parts`: each control and everything
 // under it, with its role, name, words and attributes), since the tiles around them still hold parts later packages
 // build: Tempo's length ruler (on auto, set, on HeartMuLa, with Beat I/O and trim), the Sampler's number box and plugin
 // pickers, its Quick rows (a value between its choices), the Planner's Quick pill and How adventurous, Build's foot of
 // tokens, a side unit's chip selector, and the plugin lists open (the periodic table, the grid of curves, the cards).
 //
-//   node tools/visual-baseline/vb.mjs capture concept-controls --states slice --only "^controls-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-controls --states slice --only "^controls-" --plan-from concept-controls
-//   node tools/visual-baseline/vb.mjs compare concept-controls rebuild-controls --accept tools/visual-baseline/controls-accepted.json
+//   npm run visual:all -- --only "^controls$"            (and visual:approve, README.md)
 
 /* the lyric sheet stands at the head of the desk on both pages, as the concept puts it (package 4) */
 const scene = (bk, tier, mods, vals = {}, pedals = []) => async h => {
@@ -44,5 +42,5 @@ export const STATES = [
 export const SCOPES = {};
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'controls', only: '^controls-', accept: 'controls-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'controls', only: '^controls-' };

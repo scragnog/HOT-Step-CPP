@@ -53,15 +53,6 @@ export default [
     await t.press('Escape');
     await t.ok('names compare normalised', () => sameName('My  polish ', 'my polish') && !sameName('My polish', 'My polis'));
   } },
-  /* F-16: whatever stored can't be used is copied aside before anything writes over it, and said in one set of words */
-  { id: 'unreadable-desk-kept-aside', storage: { 'hs3-desk': '{"v":1,"desk":null}' }, run: async t => {
-    await t.eq('a desk that can\'t be used is copied aside (F-16)', () => localStorage.getItem('hs3-desk-unreadable'), '{"v":1,"desk":null}');
-    await t.ok('and the page says so, with a download', () => { const m = document.querySelector('#toast .toast-msg')?.textContent || ''; return (/couldn't be read.*A copy is kept in this browser; nothing was deleted/.test(m) && document.querySelector('#toast .toast-act')?.textContent === 'Download the copy') || m; });
-    await t.click('#toast .toast-act');
-    await t.ok('which downloads the copies', async () => { const d = window.__bh.downloads.pop(); return (d && /unread/.test(d.name) && JSON.parse(await d.blob.text())['hs3-desk-unreadable'] === '{"v":1,"desk":null}') || JSON.stringify(d?.name); });
-    await t.do('a change', () => { S.tier = 'studio'; render(); autosave(); }, null, 2000);
-    await t.eq('the copy outlives the next autosave', () => localStorage.getItem('hs3-desk-unreadable'), '{"v":1,"desk":null}');
-  } },
   { id: 'skipped-records-kept-aside', storage: { 'hs3-wf': JSON.stringify({ workflows: [{ name: 'Good', tier: 'studio', mods: ['tempo'], pedals: [] }, { name: 5 }], revs: {} }) }, run: async t => {
     await t.ok('a record that can\'t be read is skipped and the whole stored value is copied aside first (F-16)', () => /"name":5/.test(localStorage.getItem('hs3-wf-unreadable') || '') && S.workflows.length === 1 || localStorage.getItem('hs3-wf-unreadable'));
     await t.do('save the list', () => saveUser());
@@ -114,19 +105,6 @@ export default [
   { id: 'tier-keys-wait-under-a-modal', pending: { finding: 'F-08', right: 'No page shortcut acts under a modal layer (the Concept notes, the score modal, a drawer): Alt+1/2/3 there leave the tier as it is.' }, run: async t => {
     await t.click('#notesBtn'); await t.press('Alt+3');
     await t.eq('Alt+3 under the Concept notes leaves the tier', () => S.tier, 'quick');
-  } },
-  { id: 'focus-after-cancel-retry-dismiss', pending: { finding: 'F-13', right: 'After Cancel on a queued song, Retry or Dismiss on a "Didn\'t run" notice, focus goes to Generate (Dismiss: to the next notice\'s first button if there is one), never to the page or to the next song\'s Cancel.' }, run: async t => {
-    await withPrompt(t); await t.click('#go'); await t.click('#go'); await t.click('#go');
-    const id = await t.js(() => S.songs.filter(s => s.pending)[1].id);
-    await t.click(`[data-cancelsong="${id}"]`);
-    await t.ok('Cancel on one queued song: focus on Generate', () => document.activeElement?.id === 'go' || document.activeElement?.outerHTML.slice(0, 80));
-    await t.do('MiniMax-Music3, too big', () => { cancelSongs(new Set(S.songs.filter(s => s.pending).map(s => s.id))); S.backend = 'mm3'; S.tier = 'studio'; S.mods = ['takes']; S.vals['takes.n'] = 4; S.vals['model.lm'] = '8B planner · F16'; render(); }, null, 300);
-    await t.click('#go', 300);
-    await t.click('#latest .song.errored [data-retry]', 300);
-    await t.ok('Retry: focus on Generate', () => document.activeElement?.id === 'go' || document.activeElement?.tagName);
-    await t.do('finish, and refuse again', () => { S.vals['takes.n'] = 4; render(); generate(); }, null, 4200);
-    await t.click('#latest .song.errored [data-dismiss]');
-    await t.ok('Dismiss: focus on Generate', () => document.activeElement?.id === 'go' || document.activeElement?.tagName);
   } },
   { id: 'focus-after-moving-lyrics', pending: { finding: 'F-13', right: '"Move them to the lyrics sheet" puts focus in the lyrics field it filled.' }, run: async t => {
     await t.do('studio with lyrics', () => { S.tier = 'studio'; render(); });

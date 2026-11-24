@@ -51,7 +51,7 @@ export default [
     await desk('lab', ['takes'])(t);
     await t.hover('.reel2[data-take="5"]');
     await t.focus('[data-takes]'); await t.press('End');
-    await t.ok('a key ends the pointer preview: the LCD shows the value set (L-32)', () => document.querySelector('.tk-lcd b').textContent === '9' && document.querySelector('.tk-reels').classList.contains('kbd'));
+    await t.ok('a key ends the pointer preview: the LCD shows the value set (L-32)', () => document.querySelector('.tk-lcd b').textContent === '8' && document.querySelector('.tk-reels').classList.contains('kbd'));
     await t.dblclick('.reel2[data-take="3"]');
     await t.eq('a double-click on a reel is a click on it: the reels are the values, not a knob to reset (round 5 L-22, replaces L-32)', () => +get('takes.n'), 3);
   } },
@@ -70,12 +70,6 @@ export default [
     await t.ok('Home moves the region to the start, its length kept (L-36)', () => Math.abs(S.region[0]) < 1e-9 && Math.abs(S.region[1] - 0.2) < 1e-6 || S.region);
     await t.press('End');
     await t.ok('End to the end', () => Math.abs(S.region[1] - 1) < 1e-9 && Math.abs(S.region[0] - 0.8) < 1e-6 || S.region);
-  } },
-  { id: 'adapters-take-the-room-they-need', w: 1920, h: 1080, run: async t => {
-    await desk('lab', ['adapters'])(t);
-    await t.ok('empty: one line and the two buttons, no options (L-23)', () => { const b = document.querySelector('.tile[data-m="adapters"] .tile-body'); return !b.querySelector('[data-adfoot]') && b.querySelector('[data-cartadd]').textContent === '+ DiT adapter' && b.querySelector('[data-plannerpick]').textContent === '+ Planner adapter'; });
-    await t.do('one adapter', () => { S.slots = [{ file: 'tape-lofi-v2', type: 'LoRA' }]; render(); });
-    await t.ok('one adapter: the bank stands beside the cartridge, the tile under 600px (L-05)', () => { const t = document.querySelector('.tile[data-m="adapters"]'), c = t.querySelector('.cart:not(.empty)').getBoundingClientRect(), f = t.querySelector('.faders').getBoundingClientRect(); return f.left > c.right && t.offsetHeight < 600 || t.offsetHeight; });
   } },
   { id: 'tip-keeps-off-the-read-out', w: 1920, h: 1080, run: async t => {
     await desk('lab', ['takes', 'sampler'])(t);

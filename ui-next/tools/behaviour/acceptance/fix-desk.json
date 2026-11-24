@@ -1,5 +1,5 @@
 {
- "about": "The desk's fix round (review r1, RD-01 to RD-18; review r3's RA-23): every scenario that checks one of its fixes, each driven the way a person reaches it (a card in the Modules panel, the engine panel, the tier keys, a file field, a control's keys). 37-fix-desk.mjs holds on the concept page too but for the three the concept gets wrong, named in their `why` (--page hotstep-tiers.html). The first-use sweep that found the score preview's (every action button of every module, pedal and side unit, from empty, on every engine and tier, against the concept) is a probe in the round's notes, not a scenario.",
+ "about": "The desk's fix round (review r1, RD-01 to RD-18; review r3's RA-23): every scenario that checks one of its fixes, each driven the way a person reaches it (a card in the Modules panel, the engine panel, the tier keys, a file field, a control's keys).",
  "scenarios": [
   {
    "id": "37-fix-desk/first-adapter-from-the-empty-strip",
@@ -51,11 +51,11 @@
   },
   {
    "id": "37-fix-desk/a-pedal-knob-step-names-its-pedal",
-   "why": "RD-11 and RD-18: a board knob's generic label names its pedal; Pre-VST gain's Gain is said once (derive/steps.ts stepName). The concept fails the second check (its fault)."
+   "why": "RD-11 and RD-18: a board knob's generic label names its pedal; Pre-VST gain's Gain is said once (derive/steps.ts stepName)."
   },
   {
    "id": "37-fix-desk/a-key-at-the-end-of-the-range-is-no-step",
-   "why": "RD-14: a key at the end of the range records nothing (derive/parts.ts). The concept fails it (its fault)."
+   "why": "RD-14: a key at the end of the range records nothing (derive/parts.ts)."
   },
   {
    "id": "37-fix-desk/yue-cfg-rescale-steps-by-hundredths",
@@ -75,11 +75,11 @@
   },
   {
    "id": "37-fix-desk/cover-art-subject-field-holds-its-words",
-   "why": "RD-17: the Cover art unit's subject field at Lab holds its placeholder whole, inside the unit (styles/rebuild/28-side-units.css). The concept does not lay the subject out on the unit (docs/03), so this one is the rebuild's own."
+   "why": "RD-17: the Cover art unit's subject field at Lab holds its placeholder whole, inside the unit (styles/rebuild/28-side-units.css)."
   },
   {
    "id": "37-fix-desk/side-unit-lip-focus-is-a-whole-ring",
-   "why": "RD-15: a side unit's power button shows its keyboard focus as a whole ring inside it (styles/rebuild/28-side-units.css). The concept fails it (its fault)."
+   "why": "RD-15: a side unit's power button shows its keyboard focus as a whole ring inside it (styles/rebuild/28-side-units.css)."
   },
   {
    "id": "14-lab-desk/off-settings-show-at-once",
@@ -108,6 +108,22 @@
   {
    "id": "20-lab-round5/pedals-with-nothing-to-run",
    "why": "\"set in Lab\" goes to Lab and to the reference slot: a link that rings a file rings its drop zone and puts focus in it (view.ts ringKeys, shell/tier.ts; Q-10, Q-28). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "19-desk-round5/factory-desks-leave-no-empty-desk-1600",
+   "why": "The factory workflows' desks at 1600 leave no more than the engine's share of the desk empty (Q-23, L-08, RD-04)."
+  },
+  {
+   "id": "19-desk-round5/factory-desks-leave-no-empty-desk-1536",
+   "why": "The same at 1536 (RD-04)."
+  },
+  {
+   "id": "19-desk-round5/factory-desks-leave-no-empty-desk-1440",
+   "why": "The same at 1440 (RD-04)."
+  },
+  {
+   "id": "19-desk-round5/factory-desks-leave-no-empty-desk-1280",
+   "why": "The same at 1280 (RD-04)."
   }
  ]
 }

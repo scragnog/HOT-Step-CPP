@@ -1,5 +1,5 @@
 {
-  "about": "Package 8 (the picker, the popover, tooltips, touch, the focus ring, the keys that walk the desk, drag and drop): every scenario this package makes runnable, each with what it exercises. Concept scenarios that exercise these features but also need a part a later package draws are listed as waiting on that package. 33-overlays.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there): each of its scenarios is a concept scenario's own checks with the steps that need another package's part replaced by parts both pages draw, so that every feature here is caught by a scenario that runs today (switches.mjs leaves waiting scenarios out). `excluded` lists the concept's scenarios that touch these features and are left out, each with the reason.",
+  "about": "The picker, the popover, tooltips, touch, the focus ring, the keys that walk the desk, and drag and drop (33-overlays.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "01-desk/lab-modules", "why": "A Lab module added from a card outside Lab offers Lab in the popover; Not now closes it; Switch to Lab and add it; added with no anchor, a toast (labOffer, adding.ts)." },
     { "id": "02-dnd-panels/drag-card-onto-desk", "why": "A Modules card dropped on the desk lands at the place nearest the pointer; a cancelled drag adds nothing and leaves nothing behind (dnd.tsx)." },
@@ -28,13 +28,13 @@
     { "id": "21-chrome-round5/picker-wall-fits-1440", "why": "The same at 1440x900." },
     { "id": "21-chrome-round5/picker-wall-scrolls-by-column-1280", "why": "At 1280x720 every module is in view; the Pedalboard column scrolls by itself and its +N below scrolls that column only (F-05)." },
     { "id": "21-chrome-round5/picker-category-bar", "why": "The count says what is shown (35 in all, 10 pedals, 5 side units); the pressed category is filled, All the size of its neighbours (F-09)." },
-    { "id": "21-chrome-round5/toast-reachable-under-the-picker", "why": "Pending (F-18) in the concept, right here: a toast raised while the picker is open joins its Tab cycle." },
-    { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "Pending (F-19) in the concept, right here: a tip the keyboard opened closes on the next pointer move." },
-    { "id": "21-chrome-round5/picker-f9-during-close-reopens", "why": "Pending (F-29) in the concept, right here: F9 pressed while the picker is closing opens it again." },
-    { "id": "21-chrome-round5/picker-down-stays-in-its-column", "why": "Pending (F-29) in the concept, right here: ArrowDown at the foot of the Modules column stays in it." },
-    { "id": "21-chrome-round5/picker-rings-the-enter-target", "why": "Pending (F-29) in the concept, right here: with a filter typed, the drawing Enter will take is ringed while focus stays in the filter." },
+    { "id": "21-chrome-round5/toast-reachable-under-the-picker", "why": "F-18: a toast raised while the picker is open joins its Tab cycle." },
+    { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "F-19: a tip the keyboard opened closes on the next pointer move." },
+    { "id": "21-chrome-round5/picker-f9-during-close-reopens", "why": "F-29: F9 pressed while the picker is closing opens it again." },
+    { "id": "21-chrome-round5/picker-down-stays-in-its-column", "why": "F-29: ArrowDown at the foot of the Modules column stays in it." },
+    { "id": "21-chrome-round5/picker-rings-the-enter-target", "why": "F-29: with a filter typed, the drawing Enter will take is ringed while focus stays in the filter." },
     { "id": "23-sa3-hm-round5/touch-targets-and-words", "why": "Under a finger the picker speaks of taps, not keys and drags, and its close and categories are 40px (S-24, S-25)." },
-    { "id": "23-sa3-hm-round5/a-swipe-on-a-knob-teaches-rest-then-drag", "why": "Pending (S-36) in the concept, right here: the first vertical swipe that starts on a knob scrolls, and one toast says to rest a finger first." },
+    { "id": "23-sa3-hm-round5/a-swipe-on-a-knob-teaches-rest-then-drag", "why": "S-36: the first vertical swipe that starts on a knob scrolls, and one toast says to rest a finger first." },
     { "id": "33-overlays/picker-opens-filters-walks-and-adds", "why": "07-overlays-keys/picker's checks without the generation queue; and Ctrl+Z under the picker undoes nothing and says so." },
     { "id": "33-overlays/drag-moves-a-tile-and-cancels", "why": "A tile dragged by its header moves, one step; a cancelled move puts it back; a cancelled pedal drag adds nothing and leaves nothing glowing." },
     { "id": "33-overlays/lab-offer-popover-keys", "why": "The popover from a card: focus on its first choice, Escape gives focus back to the card, Tab past its last button closes it, a click outside closes it." },
@@ -45,10 +45,5 @@
     { "id": "33-overlays/a-held-finger-shows-the-tip-and-still-presses", "why": "A held finger shows the tip, which goes by itself; a tier held 0.8 s is still chosen (S-01)." },
     { "id": "33-overlays/a-swipe-scrolls-and-a-rest-turns", "why": "Swipes that start on a knob, a ruler, a number box or a pad change nothing; a rest then a drag turns the knob; a sideways drag moves the ruler; each one step (S-29)." },
     { "id": "33-overlays/f6-walks-the-desk", "why": "F6 enters the desk, walks it in reading order, Shift+F6 back; not while the picker is open (S-33)." }
-  ],
-  "excluded": [
-    { "id": "09-undo-storage/undo-not-under-overlays", "why": "It loads a workflow (package 7) and opens the presets popover (package 4) and the notes." },
-    { "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast", "why": "Pending (S-17): the toast's claim on Tab (the toast's package, 6) inside the drafts popover (package 6 or 7)." },
-    { "id": "07-overlays-keys/notes-logs-escape", "why": "The Concept notes and the engine log are not this package's; Escape closing only the top layer is in 33-overlays/lab-offer-popover-keys and the picker's scenarios." }
   ]
 }

@@ -1,5 +1,5 @@
 // Stable Audio 3 and HeartMuLa, sizes below the desktop range, and input modes (review 4, S- findings, round 4).
-const desk = (tier, mods, extra) => t => t.do(`${tier} desk`, ([tier, mods, extra]) => { S.tier = tier; S.mods = mods; S.pedals = []; if (extra?.vals) { Object.assign(S.vals, extra.vals); } Object.assign(S, { ...(extra || {}), vals: S.vals }); render(); vsSettle(); }, [tier, mods, extra]);
+const desk = (tier, mods, extra) => t => t.do(`${tier} desk`, ([tier, mods, extra]) => { S.tier = tier; S.mods = mods; S.pedals = []; if (extra?.vals) { Object.assign(S.vals, extra.vals); } Object.assign(S, { ...(extra || {}), vals: S.vals }); render(); }, [tier, mods, extra]);
 export default [
   { id: 'every-value-change-is-an-undo-step', run: async t => {
     await t.click('#presetList .pre.wfrow[data-preset="Songwriter"]');
@@ -25,7 +25,9 @@ export default [
     await t.ok('auto is a value like any other', () => /^Shift auto → /.test((() => document.querySelector('#undoBtn').hidden ? '' : document.querySelector('#undoBtn span').textContent)()) ? true : (() => document.querySelector('#undoBtn').hidden ? '' : document.querySelector('#undoBtn span').textContent)());
     await t.press('Control+z');
     await t.ok('and is put back', () => isAuto('samp.shift'));
-    await t.do('one hundred and twenty steps', () => { for (let i = 0; i < 120; i++) { vsG++; setVal('samp.steps', 10 + (i % 40)); } });
+    /* one gesture each: a change in one task joins the step before it */
+    for (let i = 0; i < 120; i++) await t.js(i => setVal('samp.steps', 10 + (i % 40)), i);
+    await t.settle();
     await t.eq('the history keeps the last hundred', () => UNDO.length, 100);
   } },
   { id: 'text-and-prompt-chips-are-steps', run: async t => {
@@ -66,7 +68,7 @@ export default [
     await t.ok('the lyric sheet says empty means instrumental (S-08)', () => /Leave this empty for an instrumental/.test(document.querySelector('[data-bind="lyrics.text"]').placeholder));
     await t.focus('[data-ruler="tempo.dur"]'); await t.press('ArrowLeft');
     await t.ok('moving the ruler ends the hold, and its line goes', () => document.querySelector('[data-held="tempo.dur"]').hidden);
-    await t.do('a 0:30 cap and three runs', () => { S.vals['tempo.dur'] = 30; S.vals['tempo.dur.auto'] = false; document.querySelector('#prompt').value = 'folk'; sync('tempo.dur'); generate(); generate({}); });
+    await t.do('a 0:30 cap and three runs', () => { S.vals['tempo.dur'] = 30; S.vals['tempo.dur.auto'] = false; document.querySelector('#prompt').value = 'folk'; S.vals['prompt.text'] = 'folk'; render(); generate(); generate({}); });
     await t.do('let them finish', () => {}, null, 30000);
     await t.ok('HeartMuLa never runs past the cap (S-07)', () => S.songs.filter(x => x.bk === 'hm').length > 0 && S.songs.filter(x => x.bk === 'hm').every(x => x.dur <= 30) ? true : S.songs.filter(x => x.bk === 'hm').map(x => x.dur));
     await t.do('auto on again, then off', () => { delete S.vals['tempo.dur']; S.vals['tempo.dur.auto'] = true; render(); });

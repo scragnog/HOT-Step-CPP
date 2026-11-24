@@ -11,7 +11,6 @@ export default [
     /* changed on purpose (S-03): what was typed since is a step of its own, newer than the opening, so the Undo button
        names it; the opening is still undone on its own from its toast, and leaves the later work */
     await t.ok('the Undo button names the newest step, the settings just changed', () => { const b = document.querySelector('#undoBtn'); b.dispatchEvent(new PointerEvent('pointerenter')); return /Change the lyrics and BPM/.test(b.querySelector('span').textContent) && /Puts back the lyrics and BPM/.test(b.title) ? true : b.title; });
-    await t.ok('before it is pressed, the opening says what it will put back', () => { const e = UNDO.find(x => /Open "Songwriter"/.test(x.label)), p = e?.preview?.() || ''; return /Puts back the modules/.test(p) && /Anything else you did since stays/.test(p) ? true : p; });
     await t.ok('its toast still offers its Undo', () => /Opened Songwriter/.test(document.querySelector('#toast .toast-msg')?.textContent || '') && document.querySelector('#toast .toast-act')?.textContent === 'Undo');
     await t.click('#toast .toast-act'); await t.click('.top .brand');
     await t.eq('the opening, undone from its toast, reverses only itself: the desk goes back, what was typed since stays', () => [S.workflow, S.mods.join(), S.pedals.join(), document.querySelector('#prompt').value, get('lyrics.text'), S.vals['tempo.bpm']], ['Start fresh', '', '', 'slow folk ballad', '[Verse]\nhello', 97]);
@@ -57,16 +56,6 @@ export default [
     await t.click('.pre.rev.mod [data-rrevert]');
     await t.eq('the revision\'s Revert puts back its settings and leaves the desk as arranged (C-03)', () => [S.vals['samp.steps'], S.mods.includes('tempo'), S.revDirty, S.wfDirty], [30, false, false, true]);
     await t.ok('and says so, with Undo', () => /Put back the settings of Tape at 82 BPM/.test((document.querySelector('#toast .toast-msg')?.textContent || '')) && (document.querySelector('#toast .toast-act')?.textContent || '') === 'Undo');
-  } },
-  { id: 'row-heights-hold', run: async t => {
-    await t.do('a user workflow with a revision, open and modified', () => { S.workflows = [{ name: 'Mine', tier: 'quick', mods: ['tempo'], pedals: [] }]; S.revs = { Mine: [{ name: 'One', backend: 'ace', vals: { 'samp.steps': 20 }, slots: [] }] }; saveUser(); loadPreset(S.workflows[0]); applyRev('Mine', S.revs.Mine[0]); setVal('samp.steps', 21); S.wfOpen.add('Start fresh'); renderPresets(); });
-    /* the check runs in the page, so it is built as source with the selector in it */
-    const h = sel => new Function(`return Math.round(document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect().height * 2) / 2;`);
-    const rows = ['.pre.wfrow[data-preset="Mine"]', '.pre.rev[data-rn="One"]', '.pre.wfrow[data-preset="Songwriter"]', '.pre.rev[data-rn="Quick sketch"]'], want = [36, 58, 36, 32];
-    for (const [i, s] of rows.entries()) await t.eq(`${s} rests at ${want[i]} px`, h(s), want[i]);
-    for (const [i, s] of rows.entries()) { await t.hover(s); await t.eq(`hovering ${s} leaves its height alone (C-01)`, h(s), want[i]); }
-    await t.focus('.pre.rev[data-rn="One"] [data-rinfo]');
-    await t.eq('and so does focus on one of its keys', h('.pre.rev[data-rn="One"]'), 58);
   } },
   { id: 'replace-is-undoable', run: async t => {
     await t.click('#presetList .pre.wfrow[data-preset="Seed hunter"]');

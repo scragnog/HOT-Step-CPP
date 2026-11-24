@@ -1,4 +1,4 @@
-// Parts the slice's own modules do not draw, compared where the concept draws them, as parts on their own (vb.mjs
+// Parts the slice's own modules do not draw, where the page draws them, as parts on their own (vb.mjs
 // `parts`: each control and everything under it, keyed from its selector, with its role, name, words and attributes):
 // MiniMax-Music3's Flow at Lab (its rack of LED switches, its foot with two labelled segmented choices), the
 // Mastering pedal's VU meter, and a Quick choice row (the Sampler's). The tiles around them hold parts later packages

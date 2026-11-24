@@ -1,9 +1,9 @@
 # The React layer: architecture, the slice, and the plan for the rest
 
 This page is for the people who build the rest of the Create page and for the maintainer. It says how the React layer
-sits on the core ([05](05-what-the-definition-drives.md)), what the first slice built and how it was proved against
-the concept, what the page does differently from the concept's markup and why, and how the remaining work splits into
-packages that can be built in parallel.
+sits on the core ([05](05-what-the-definition-drives.md)), what the first slice built, how the page is checked, the
+design decisions that explain why it behaves as it does, and how the remaining work splits into packages that can be
+built in parallel.
 
 The one rule, from [05](05-what-the-definition-drives.md) "What the view may decide": **the view decides nothing about
 a value.** A component draws what the core returns and hands back what the user did. If a component needs to know a
@@ -80,11 +80,12 @@ ui-next/
   tools/
     perf/                  the performance measurements (npm run perf: every action, the load, idle, memory, the
                            motions; README.md)
-    motion/                frames.mjs (each motion against the concept, step by step), cost.mjs (what each costs the
-                           main thread), motions.mjs, accepted.json (package 9)
-    behaviour/             the concept's behaviour suite; acceptance/*.json (one per package), scenarios/30-slice.mjs
-                           (the slice's own claims, which pass on the concept too), switches.mjs + switches/*.json
-    visual-baseline/       the concept's visual baseline; slice-states/*.mjs (one per package), slice-accepted.json,
+    motion/                frames.mjs (each motion against its approved samples, step by step), approved/*.json,
+                           cost.mjs (what each costs the main thread), motions.mjs (package 9)
+    behaviour/             the behaviour suite; acceptance/*.json (one per area), scenarios/*.mjs, switches.mjs +
+                           switches/*.json, caught/*.json
+    visual-baseline/       the visual baseline; slice-states/*.mjs (one per area, each with its visual set),
+                           approved/<set>/ (the approved recordings), visual-all.mjs,
                            gallery.mjs (every part on every surface), plants.mjs + plants/*.json (planted defects)
     test-view.ts           the layout, the core's selectors and models, the parts' contract at run time
     test-parts-contract.mjs  the parts' contract in the lint: the review's planted part refused
@@ -337,8 +338,8 @@ rings as still outlines).
   6, 8 and 11); a playhead or the VRAM meter, which move on every frame, are set on the page from the animation loop
   (`parts/Build.tsx`, `parts/Recording.tsx`, `shell/TopBar.tsx`), never by drawing the component again.
 
-Checked against the concept step by step (`tools/motion/frames.mjs`: 20 motions, every running animation moved to 0,
-16, 32 ... ms on both pages and the moving boxes compared within 2px; 5 accepted entries, `tools/motion/accepted.json`)
+Checked step by step (`tools/motion/frames.mjs`: 20 motions, every running animation moved to 0, 16, 32 ... ms and the
+moving boxes compared with their approved samples within 0.5px; until `rebuild-parity`, with the concept's within 2px)
 and in the acceptance (`scenarios/38-motion.mjs`, which reads the page at moments of each motion). What each costs the
 main thread on a full desk is `tools/motion/cost.mjs` (package 9's notes give the numbers before and after).
 
@@ -377,13 +378,13 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | View state a reload brings back (a fold or a section standing open) | its own file, or a part's | `keptState(name, fallback, take)` or `keptFlag(name)` (kit/session.ts): kept with the session under one key, never a step and never in the desk's record; `useKept(k)` in a component. The test layer gives them the concept's names (`testing/compat/fold.ts`) |
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
 | Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
-| Concept globals its scenarios call | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
+| Handles its scenarios and states drive the page by | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
 | A part of the page that takes part in the tier change | `shell/tier.ts` | one line in `PARTS`: its selector, its name, its class (package 9) |
 | A change to the desk's make-up made outside the store | its own file | `transition(fn)` (features/motion.ts): what fn adds, removes or moves animates as the desk's own changes do |
-| Its acceptance | `tools/behaviour/acceptance/<package>.json` | `run.mjs --slice` runs every file |
+| Its acceptance | `tools/behaviour/acceptance/<package>.json` | `run.mjs` runs every file; every scenario is in one |
 | Its features switched off | `tools/behaviour/switches/<package>.json` | `switches.mjs` checks each makes a scenario fail, and writes what caught each to `tools/behaviour/caught/<package>.json` |
-| Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs`, ending with its `VISUAL_SET` | `slice-states.mjs` gathers them; `visual-all.mjs` runs every set |
-| Its accepted visual differences | entries of its own, passed with `--accept` | counted exactly |
+| Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs`, ending with its `VISUAL_SET` | `slice-states.mjs` gathers them; `visual-all.mjs` runs every set against `approved/<set>/` |
+| Its approved recording | `tools/visual-baseline/approved/<set>/` | `npm run visual:approve -- --only "^<set>$"`, committed with the change |
 
 The core and the definitions are shared on purpose and do not collide in practice: the inventory already lists every
 part the packages build (`PARTS`, 73 parts, 73 used), every definition exists, and a package changes a definition only
@@ -412,8 +413,7 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
 - `derive/desk.ts`: `nodeShown`, `usedHere`, `tileAtTier`, `tileName`, `deskStep` (with what Undo puts back),
   `engineStep`, `removedWords`, `parkedOn`, `boardCount`, `arrivalChange`; `derive/engine.ts newOn` (the first switch to
   an engine says what it brings); `derive/strings.ts pickMsg`, `splitUnit`, and the rest the view asks.
-- The definitions: an option's `pick` words (what an LCD picker prints where it differs from a read-out: closed
-  deviations 3 and 4), a module's `starter` (the empty desk's offers and the words it names the first with),
+- The definitions: an option's `pick` words (what an LCD picker prints where it differs from a read-out), a module's `starter` (the empty desk's offers and the words it names the first with),
   `CATEGORIES` (the Modules panel's groups, in one place), an engine's `tag`, the power button's `name`.
 - `derive/controls.ts` (package 1): what the shared controls draw beyond their parameters (`controlModel`, given to a
   part as `PartModel.control`): a number box's text and its words while empty, the seconds a step count takes
@@ -562,562 +562,273 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   - **One motion helper, one icon set, one convenience store**: `kit/motion.ts` (`reduced`, `mtime`, `motionVar`,
     `easing`), `kit/icons.tsx`, `kit/storage.ts` (`readPref`, `writePref`; the records stay `store/stored.ts`'s).
 
-## The test layer, and running the tools against the rebuild
+## The test layer
 
-`src/app/testing/compat.ts` gives the two tools what they reach into the concept page for, on top of the store, in the
-test build only: `S` (set it, then `render()` applies it as a scene, not a step), `render`, `setVal`, `get`, `toast`, the
-catalogue, `UNDO` and `REDO`, and `vsStray`, which detects a change to the desk that no undo or redo recorded (outside a
-scene). A package's additions are a file of its own in `testing/compat/` (the slice's: `addItem`, `switchEngine`,
-`enterEngine`, `setTier`, `shown`, `removeMod`, `paintUndo`, `S.eng`).
+The rebuild is its own reference. Its browser checks compare it with itself: the behaviour suite with what each
+scenario says is right, the visual baseline and the motion samples with recordings of the page approved after they were
+looked at. Until the tag `rebuild-parity` they compared it with the concept page it was ported from; that tag marks the
+last commit proved against the concept (every visual set identical with its accepted differences, every motion within
+2px of the concept's, the concept's own scenarios run or excluded with their reasons), and nothing after it is.
+
+`src/app/testing/compat.ts` is the test build's compatibility layer, the handles the tools drive the page by, on top of
+the store, in the test build only: `S` (set it, then `render()` applies it as a scene, not a step), `render`, `setVal`,
+`get`, `toast`, the catalogue, `UNDO` and `REDO`, and `vsStray`, which detects a change to the desk that no undo or redo
+recorded (outside a scene). Its names are the concept's, which the scenarios and states were first written in (an
+engine by its short id, a choice by its label); it translates both ways. An area's additions are a file of its own in
+`testing/compat/` exporting `install()` (`addItem`, `switchEngine`, `enterEngine`, `setTier`, `S.slots`, `S.build`,
+...).
 
 ```
 npm run build:test
 set PLAYWRIGHT_MODULE=<node_modules/playwright>
-node tools/behaviour/run.mjs --slice                 # the acceptance: every file in tools/behaviour/acceptance/
+node tools/behaviour/run.mjs --workers 6              # the acceptance: every scenario of every acceptance file
 npm run switches:apply                               # each switch's text still applies exactly once (no builds)
 npm run switches                                     # each feature switched off makes a scenario fail
-npm run visual:all                                   # every package's visual set against the concept
-node tools/visual-baseline/vb.mjs capture concept-slice --states slice --scope slice --page <concept>/hotstep-tiers.html
-node tools/visual-baseline/vb.mjs capture rebuild-slice --states slice --scope slice --plan-from concept-slice
-node tools/visual-baseline/vb.mjs compare concept-slice rebuild-slice --scope slice --accept tools/visual-baseline/slice-accepted.json
+npm run visual:all                                   # every visual set against its approved recording
+npm run visual:approve -- --only "^<set>$"           # after a deliberate change: approve that set again
+node tools/motion/frames.mjs                         # every motion against its approved samples
 node tools/visual-baseline/gallery.mjs               # every part on every surface, both themes, every tier
-node tools/visual-baseline/plants.mjs                # each planted defect is caught
+node tools/visual-baseline/plants.mjs                # each planted visual defect is caught
 ```
 
-- **Behaviour.** `acceptance/slice.json` lists 38 scenarios, every one whose subject is something the slice builds: 31
-  of the concept's suite and 7 of the slice's own (`scenarios/30-slice.mjs`: knob keys, undo and redo by key, button and
-  toast with what they say, the autosave and its restore, the theme, an engine switch, the tier keys, adding and
-  removing; each passes on the concept page too). 10 that look like the slice's are excluded, each with its reason (4
-  vacuous without a picker, 1 without a prompt card, 2 that contradict F-25, 3 that need later packages). All 38 pass.
-  `switches.mjs` builds the page with each of 11 slice features switched off in turn (undo, redo, autosave, restore,
-  knob keys, keyboard moves, add, remove, tier switch, engine switch, theme) and runs the acceptance: each makes 1 to 6
-  scenarios fail.
-- **Looks, against the concept.** 161 states (the concept's matrix cut to the slice, the dropdown open, the engine
-  toast, and three that record parts the slice's modules do not draw where the concept does: Flow's rack and foot, the
-  Mastering VU meter, a Quick choice row), in standards mode, compared on every element's computed style (with forced
-  hover, focus and active), its role, accessible name, own words and attributes, 11 screenshots of the desk, and the
-  parts on their own; the scope is the desk, the bars' slice, the Modules panel, the toast and the dropdown. Result:
-  **identical**, with the differences accepted on purpose (`slice-accepted.json`, each with its reason and its exact
-  count, so a new one of an accepted kind fails).
+- **Behaviour.** `tools/behaviour/acceptance/*.json`, one file per area of the page, list every scenario of
+  `scenarios/`, each with what it exercises (`run.mjs` refuses a scenario in no list). The files numbered below 30 are
+  the page's oldest scenarios, written against the concept during the design rounds and kept because each checks
+  something the rebuild does; those that only drove the concept's own script, or held the concept's behaviour where the
+  rebuild decided otherwise, were rewritten to the rebuild's behaviour or removed at the cutover (commit 1f974479 lists
+  which). Every scenario ends with three checks: every change to the desk was an undo step, every step is named in the
+  page's words, no console error. `switches/*.json` switch each feature off in turn (`HS_SWITCH`, `vite.config.ts`):
+  each must make a scenario fail that passes with it on.
+- **Looks.** Each file of `tools/visual-baseline/slice-states/` adds states and ends with its visual set
+  (`export const VISUAL_SET = { name, only, scope }`); `visual-all.mjs` captures every set (every element's computed
+  style with forced hover, focus and active, its role, accessible name, own words and attributes, the parts on their
+  own, and screenshots) and compares it with the set's approved recording in `tools/visual-baseline/approved/<set>/`,
+  committed. Computed styles and semantics must be identical; screenshots have one tolerance for anti-aliasing
+  (tools/visual-baseline/README.md, "The tolerance").
+- **Motion.** `tools/motion/frames.mjs` sets off each motion of `motions.mjs`, holds every animation and moves it to 0,
+  16, 32 ... ms, and compares the moving boxes and opacities at each step with the motion's approved samples
+  (`tools/motion/approved/<motion>.json`, committed) within 0.5px and 0.01 of opacity. `cost.mjs` measures what each
+  costs the main thread (a measure, not a check).
 - **Every part on every surface.** `gallery.mjs` draws the parts gallery (`testing/gallery.ts`: every control and
-  read-out of the inventory, generated from it, in a tile's body, a row, a rack, a well, an LCD, a tile's foot, a
-  labelled pairing, on a pedal and on a side unit, plus a bare new part's markup on each), both themes, every tier,
-  values changed: drawn inside its container, words at 3:1, the page's label, a changed mark, a choice that says which
-  is chosen, the concept's type and colours where the concept has the same part on the same kind of surface (20
-  references), and every look as it was recorded (`tools/fixtures/gallery.json`).
-- **Planted defects.** `plants.mjs` plants 15 defects one at a time (the review's 0 to 11, and three of a part's look off
-  its concept surface) and runs the comparison and the gallery: 15 caught. The review's 12 (knob keys dead) is
-  behaviour, caught by the switches.
+  read-out of the inventory in a tile's body, a row, a rack, a well, an LCD, a tile's foot, a labelled pairing, on a
+  pedal and on a side unit, plus a bare new part's markup on each), both themes, every tier, values changed: drawn
+  inside its container, words at 3:1, the page's label, a changed mark, a choice that says which is chosen, and every
+  look as it was recorded (`tools/fixtures/gallery.json`).
+- **Planted defects.** `plants.mjs` plants each defect of `plants/*.json` one at a time and runs the slice's visual set
+  and the gallery on it: each must be caught.
 
-**Package 1 (shared controls)** adds `acceptance/1-controls.json` (24 scenarios: 10 of `scenarios/31-controls.mjs`, which
-hold on the concept page too, 8 of `scenarios/32-controls-gallery.mjs`, which drive the controls no module draws yet in
-the parts gallery, and 6 of the concept's suite, three of them pending there: S-18 twice and S-31), `switches/
-1-controls.json` (25 features), `slice-states/10-controls.mjs` (18 states of the controls on their own where the concept
-draws them, compared with `controls-accepted.json`: `vb.mjs compare concept-controls rebuild-controls --accept
-tools/visual-baseline/controls-accepted.json`) and `tools/test-controls.ts` (in `npm run check`). The gallery draws a
-part with variants once in each (`testing/gallery.ts`).
-**Package 8 (the picker, the popover, tooltips, touch, the focus ring, F6, drag and drop)** adds
-`acceptance/8-overlays.json` (43 scenarios: 10 of `scenarios/33-overlays.mjs`, which hold on the concept page too, each a
-concept scenario's checks with the steps that need another package's part replaced by parts both pages draw; 33 of the
-concept's suite, six of them pending there, F-18, F-19, F-29 three times and S-36; nine of those wait on packages 3, 6
-and 7 for a part they draw), `switches/8-overlays.json` (32 features), `slice-states/80-overlays.mjs` (22 states: the picker in
-both themes, at four sizes, filtered, by category, a Lab module's offer and an arrival; the Lab offer and a tile's moves
-in the popover; the tip by keyboard and by pointer; four drags in progress; compared with `overlays-accepted.json`:
-`vb.mjs compare concept-overlays rebuild-overlays --scope overlays --accept tools/visual-baseline/overlays-accepted.json`)
-and `tools/test-overlays.ts` (in `npm run check`). The `overlays` slot is drawn at the page's root (`App.tsx`); an
-overlay of another package registers with `features/layers.ts` and puts what it holds in the popover with
-`features/pop.ts` (above, "Adding without colliding").
+**After a deliberate change that shows** (a module added, a part restyled, a motion retimed), the checks that see it
+fail, naming what changed. Read the differences, look at the screenshots (`out/now-<set>/shots/`, `frames.mjs
+--shots`), then approve the sets and motions that were meant to change, and only those, and commit the approved files
+with the change ([06](06-how-to.md), "Approve a change the page shows").
 
-**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (31 scenarios, 11 of
-`scenarios/33-fields.mjs`, which hold on the concept page too, and 20 of the concept's suite, four of them pending there:
-F-13, S-07, E-06 and S-06; the Presets & genres list is drawn in package 8's popover), `switches/4-fields.json` (28 features), `slice-states/
-40-fields.mjs` (38 states of the prompt card's column and the lyric tile, compared with `fields-accepted.json`:
-`vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json`). Every
-package's states now have the lyric sheet in place on both pages (it was withdrawn from the concept page until it was
-built); `01-desk/add-by-keyboard` passes with it and is a normal entry again.
+The core's tests (`tools/test-core.ts`, `tools/test-view.ts`, in `npm run check`) still read what the concept page's
+own functions returned on recorded desks (`tools/fixtures/concept.json`, `concept-tiers.json`, `pack.json`), recorded
+before the cutover; they are the core's expected outputs now, with `concept-differences.json` saying where the core
+returns something else on purpose. The scripts that recorded them from the concept are in the tag `rebuild-parity`.
 
-An acceptance entry may wait on a later package (`"waiting": { "package", "because" }`, tools/behaviour/README.md):
-`run.mjs --slice` reports it apart and fails if it passes, `switches.mjs` leaves it out. The slice's
-`10-desk-modules/undo-covers-structure` waits on package 3 (Tempo's LCD rows and key wheel decide the tile heights its
-moves need).
+## Design decisions
 
-**Package 2 (containers and read-outs)** adds `acceptance/2-containers.json` (17 scenarios: 11 of `scenarios/33-containers.mjs`,
-which hold on the concept page too, and 6 of the concept's suite, one of them pending there: S-28), `switches/2-containers.json`
-(39 features), `slice-states/20-containers.mjs` (35 states of the containers and read-outs on their own, compared with
-`containers-accepted.json`), the parts gallery's seven new surfaces (a terminal's line and its bar, an LCD's row, a rack
-group, a strip, a plugin's controls, a deck: `testing/gallery.ts`, `gallery.mjs`) and `tools/test-containers.ts` (in `npm
-run check`). `testing/compat/containers.ts` gives the scenarios the drop zones' files (`S.timbreFile`, `S.contFile`,
-`S.masterRef`), the adapters loaded (`S.slots`) and `isAuto`.
-**Package 5 (engine panel and models)** adds `acceptance/5-models.json` (12 scenarios: 9 of `scenarios/35-models.mjs`,
-which hold on the concept page too, and 3 of the concept's suite), `switches/5-models.json` (17 features) and
-`slice-states/50-models.mjs` (the panel, a model's list and the meter, compared in the scope `models` with
-`models-accepted.json`: `vb.mjs compare concept-models rebuild-models --scope models --accept
-tools/visual-baseline/models-accepted.json`). The models service (`services/models.ts`) is the concept's catalogue and
-figures behind `ModelsService` (`catalogue(engine)`, `vram()`); the simulated Engine's `models.list` reads the same
-catalogue.
-**Package 6 (generation, the go bar, Latest, the player, the song menu, the toasts)** adds `acceptance/6-generate.json`
-(45 scenarios: 25 of `scenarios/36-generate.mjs`, 10 of the concept's suite, and 10 of the concept's suite waiting on
-package 4 because they type into the prompt card), `switches/6-generate.json` (63 features), `slice-states/
-60-generate.mjs` (23 states, scope `generate`: the go bar, Latest, the song menu and the toasts, compared with
-`generate-accepted.json`: identical but for 6 accepted kinds, 499 differences, each counted). The generation service (`services/generate.ts`) is the concept's simulation behind
-`GenerateService` (`songs`, `submit`, `cancel`, `live`, `watch`): one run renders at a time, its songs are kept in
-this browser as a server keeps them. `store/generate.ts` holds Latest's cards, the queue as the page started it and the
-player; none of it is undoable desk state, but cancelling is a step that undoes itself (`store/desk.ts recordStep`,
-package 7's record steps): Undo queues the cancelled songs again with the settings they started with. The views are in
-`src/app/generate/` (the go bar, Latest, the song menu, the player), filled into `centre.gobar` and `centre.latest`
-(`features/generate.tsx`); the toast stack is `shell/Toast.tsx`. It tells the engine log the queue (`tellQueue`), the
-song menu is one of the page's layers (`features/layers.ts`), and Latest's "in sight" and the toast stack stand on the
-docked log (`placeToast.ts dockH`). `switches.mjs --scenarios <regex>` runs only some of
-the acceptance's scenarios for each switch.
+What the rebuild does on purpose where a reader might expect otherwise, and why. Each keeps the number it had in the
+list of deviations from the concept that stood here until the cutover (code comments, acceptance entries and
+[08](08-open-questions.md) cite them by it); the deviations that only recorded a difference from the concept, or that
+later work closed, went with the cutover and are in the tag `rebuild-parity`.
 
-**Package 3a (the instruments of Tempo, Seed, Takes, the Sampler, Repaint, Timbre reference, Latent & correction and
-Performance trades)** adds `acceptance/3a-instruments.json` (22 scenarios: 13 of `scenarios/34-instruments.mjs`, which hold
-on the concept page too, and 9 of the concept's suite; 9 more waiting on packages 4, 6 and 8), `switches/3a-instruments.json`
-(38 features), `slice-states/30-instruments.mjs` (24 states of the instruments on their own, compared with
-`instruments-accepted.json`) and `tools/test-instruments.ts` (in `npm run check`). Its parts are `parts/Tempo.tsx`
-(keyWheel, tapTempo, capChips), `Seed.tsx` (splitFlap, savedSeeds), `Takes.tsx`, `Scope.tsx` (samplerScope, latentCurve),
-`Repaint.tsx`, `Timbre.tsx` (recentRefs, timbreBlend), with `parts/motion.ts` (the page's motion tokens read for their
-animations); `services/references.ts` (the recent reference tracks, server-owned) and `features/references.ts` (a file a
-drop zone takes is remembered); `testing/compat/instruments.ts` (`S.seed`, `S.stars`, `S.refs`, `S.source`, `S.region`).
-The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` no longer wait. What the instruments'
-modules show of others' parts is drawn as the concept draws it there: a knob's auto pill and its symbol labels, an XY
-pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a pad with a column beside it
-(`.padrow`, `.padside`) or a row of plugin pickers (`.picks`), the Sampler's well holding its pickers beside its numbers
-(`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
-back.
-
-**Package 3b (the Adapters' cartridges; the planner's XY pad: its top-p off rail and its fade with the planner off)** adds
-`acceptance/3b-cartridges.json` (18 scenarios: 10 of `scenarios/36-cartridges.mjs`, which hold on the concept page too,
-and 8 of the concept's suite), `switches/3b-cartridges.json` (46 features), `slice-states/31-cartridges.mjs` (17
-states, compared with `cartridges-accepted.json`) and `tools/test-cartridges.ts` (in `npm run check`). Its parts are
-`parts/Cartridges.tsx` (cartridges, placing its node's children: Quick's strength row, the stack bar, the fader banks,
-the foot) and `parts/CartArt.tsx` (the label art); `features/adapters.tsx` runs the named actions `loadAdapter` and
-`loadPlannerAdapter` (the adapter list, in the page's popover: package 8's `features/pop.ts openPop`) and
-tells the page the installed adapters (`services/adapters.ts`) and what another engine keeps (`adaptersAway`, from the
-engines' book; `store/desk.ts told` takes it). The Adapters' face is restructured: the cartridges node holds what stands
-around the cartridges. The Repetition guard, Mastering and the side units were drawn whole by packages 1 and 2 and match
-the concept. Parts of others given what these modules show: the fader bank's heading (its small words and the rebase
-row on its line), a labelled pairing's `rebase` look, a symbol label and the `forced` mark, a segmented choice's disabled
-options and forced note, the fader's tape tip and name, the LED switch's tip, the XY pad's rail and standing back,
-Quick's How adventurous standing back with its note.
-
-**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 21 of the
-concept's suite, three of them pending there: F-17, F-36, S-17; 14 of `scenarios/33-workflows.mjs`, nine of which hold
-on the concept page too; and 5 waiting on packages 4 and 8, each with what it needs), `switches/7-workflows.json`
-(38 features), `slice-states/70-workflows.mjs` (17 states of the Workflows panel, the row menu and the Drafts list,
-compared with `workflows-accepted.json`: `vb.mjs compare concept-workflows rebuild-workflows --accept
-tools/visual-baseline/workflows-accepted.json`) and `tools/test-workflows.ts` (68 checks, in `npm run check`). Its store is `store/workflows.ts` (the lists, the
-open workflow and revision, registered as the undoable `workflow`) and `store/stored.ts` (every store's reads and
-writes: what cannot be read is copied aside before anything writes over it, and a refused write is reported, so the
-read-out says Not saved). Opening a workflow, loading a revision or a draft is a desk step (`deskStep`); replacing,
-updating, renaming, deleting and importing a record change no desk, so they are **record steps**
-(`store/desk.ts recordStep(words, run, back)`: the entry carries its own undo and redo, which act by name on the lists as
-they are then and say what they left alone; C-02, C-07). The shell gained four slots for it: `panel.workflows.head`
-(Save and Import after the panel's heading), `panel.workflows.save` (the save row, between the head and the list),
-`centre.drafts` (the go bar's Drafts) and `centre.saveState` (the read-out before Undo).
-
-**Package 11 (the Concept notes and the engine log)** adds `acceptance/11-notes-logs.json` (14 scenarios: 10 of
-`scenarios/36-notes-logs.mjs`, nine of which hold on the concept page too, the tenth being the concept's pending F-18 for
-the notes; the concept's pending F-08, `21-chrome-round5/tier-keys-wait-under-a-modal`; and 3 waiting on packages 4 and
-6, each for the prompt card or generation), `switches/11-notes-logs.json` (30 features), `slice-states/110-notes-logs.mjs`
-(15 states of the drawer and the log, compared in the scope `notes` with `notes-accepted.json`: `vb.mjs compare
-concept-notes rebuild-notes --scope notes --accept tools/visual-baseline/notes-accepted.json`) and
-`tools/test-notes-logs.ts` (17 checks, in `npm run check`). The notes are drawn into the skeleton's `#notes`
-(`features/notes.tsx`, opened and closed by `notes-open.ts` through `layers.ts`), the log into `#logs`
-(`features/logs.tsx`, `logs-dock.ts`), both always drawn, as the concept paints them; what the log says is the core's
-(`derive/logs.ts`) from the logs service (`services/logs.ts`) and the queue the generation package tells
-(`store/notes-logs.ts tellQueue`).
-**No id is on the page twice** (found by package 11's full visual run after packages 7 and 8 merged): a drawing that
-stands in several places at once carries ids of its own in each. An engine's mark takes the place it stands in
-(`shell/engines.ts logoOf(engine, size, place)`: the engine button, the engine panel's card, a revision's or a draft's
-row), which numbers its gradient's id; a thumbnail takes its place (`thumbs/index.ts thumbOf(..., place)` and
-`thumbBare`: `card`, the picker's `pk`, a drag's `drag`), and every id inside it and every reference to it carry the
-definition and the place (`ownIds`). Before, HeartMuLa's gradient (`hmRainbow`) stood in the engine panel and in every
-HeartMuLa revision's row, and a module drawing's fixed `thg13` beside a pedal's counted one: a gradient inside a hidden
-element leaves every other drawing that names it unpainted. Every state of every package's visual set was checked for
-a repeated id: none. A new drawing with ids of its own goes through `ownIds` or a place in the same way.
-
-**Package 3c (the instruments of YuE2 and MiniMax-Music3: Build by section, Continue from recording, the Lead sheet and
-its score preview, and the Flow renderer's row)** adds `acceptance/3c-instruments.json` (25 entries: 12 of
-`scenarios/36-instruments-3c.mjs`, ten of which hold on the concept page too, the other two being its pending E-46 and
-E-47 stated in full; 11 of the concept's suite, five of them pending there: E-09, E-23, E-24, E-46, E-47; and 2 waiting on
-packages 4 and 6), `switches/3c-instruments.json` (47 features), `slice-states/32-instruments-3c.mjs` (24 states,
-compared with `instruments-3c-accepted.json`) and `tools/test-instruments-3c.ts` (in `npm run check`). Its parts are
-`parts/Build.tsx` (buildBoard), `Recording.tsx` (recordingSpan), `Score.tsx` (abcFoot); the build session is a service
-(`services/build.ts`, server-owned: the takes as they land and the section looked at, told to the desk by
-`store/build.ts` as `desk.sessions.build`), as is a recording's length (`services/recording.ts`) and the planner's score
-for the preview (`services/score.ts`, with `scoreRuns`, which generation registers to render a score with its seed).
-What the user decides about a build is the module's record state `build` (its session, seed, plan, keeps, discards and
-the songs it rendered), changed only by the board's hands through the core, each a step; a section looked at and a take
-arriving are none. The score preview is `features/score-preview.tsx` with its state in `score/state.ts`, drawn into
-`#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
-The play, stop and padlock icons are the kit's (`kit/icons.tsx`, the one icon set).
-
-**Package 9 (motion: the tier change, the desk's own transition, what pushes what follows, the small motions; above,
-"Motion")** adds `acceptance/9-motion.json` (17 scenarios: 14 of `scenarios/38-motion.mjs`, which read the page at moments
-of each motion with the timeline held and hold on the concept page too, and 3 of
-the concept's suite: the two tier-change scenarios that waited on it and the excluded S-27; two checks of
-38-motion's hold on the rebuild only, P9-5 and P9-7), `switches/9-motion.json`
-(25 features, each switched off on its own) and `tools/motion/` (`frames.mjs`, each motion against the concept at 16ms
-steps; `cost.mjs`, what each costs the main thread). Its files are `features/motion.ts`, `motion-blocks.ts`,
-`motion-kicks.ts`, `testing/compat/motion.ts`, and the plan's `shell/tier.ts`, `desk/layout.ts`, `board/cables.ts`.
-
-**The consolidation round's core share (review r3)** adds `acceptance/fix-core.json` (the defects it fixed, driven as a
-user reaches them, `scenarios/37-fix-core.mjs`, and every concept scenario no package ran after the merge, re-read: those
-that pass are listed, the rest excluded with today's reason; `run.mjs --slice` now refuses a concept scenario in no
-list), `switches/fix-core.json`, and `tools/test-code.ts` (in `npm run check`: no key, state or id named in the code;
-every part a definition names has a component and every action a runner). `npm run check` ends with
-`switches.mjs --applies`; `visual-all.mjs` fails on a state that belongs to no set; an accepted screenshot difference
-says how many pixels it accepts.
-
-- The desk's fix round (review r1's RD- findings and RA-23, `notes` of the round): `derive/desk.ts nodeShown` keeps a
-  control with a `dim` only while the dim's condition holds (RD-02) and draws a bespoke housing that binds and reads
-  nothing only while a child is drawn (RD-04); `leavesWith` (a source module's state leaves the desk with it: removed or
-  left behind on an engine switch, RA-23); `tileModel` gives a source module the `source` class (RD-09) and a strip the
-  held note of its own values (`TileModel.strip.held`, RD-03). `derive/engine.ts heldNote` reads the book's holds from
-  the desk (`Desk.told.hold`, told by `features/held.ts`), and `ParamModel.held` carries it to the reels and the length
-  ruler (RD-03). `StateModel.wave` and the dropZone's `wave` option (RD-05); the note's `plugin` look and `head`, and its
-  `after` on the `cap` look (RD-06, RD-10); the textField's `placeholder` (RD-18). `derive/parts.ts`: a setting that
-  leaves the value in force is no step (RD-14). `strings.ts stepFromTo`: a state step that says its value before and
-  after is undone "back to" it (RD-13). `derive/score.ts scoreAsk` reads the lead sheet on the engine whether or not it
-  is on the desk (the planner's own "score preview"). The validator refuses a strip that keeps its width but not at
-  Quick (RD-04). From the core round's re-reading: a state's `tells` may name `clear` (said with Undo, `render/bind.ts`),
-  a file state's `title` (how a replacement is said), Format `percent`, a node action's `item` on its link (an `add`),
-  `view.ts ringKeys` (a link to another tier rings a file at its drop zone), the named action `moreRefs`
-  (`features/refs-more.tsx`) and `features/hit-areas.ts` (a click in an enlarged pad goes to the nearer control, A-12). Tested by `tools/behaviour/scenarios/37-fix-desk.mjs`, `acceptance/fix-desk.json`,
-  `switches/fix-desk.json`.
-- Quick's fold (A-28, Q-05; built after the consolidation round, found missing by the desk's round): `derive/fold.ts`
-  (`FOLD`, the rule's numbers: six shown, from nine tiles, three or more folded; `neverFolded`: the board's module, a
-  source, a module holding a changed value; `foldedOf`; `foldModel`: the tiles drawn and the button's words, "Show 4
-  more: Seed, Takes, …" closed and "Show fewer modules" open, the words added to the core's table as the file loads).
-  `deskModel(ix, desk, mods, open)` takes whether the fold stands open and gives `DeskModel.fold` (null when nothing
-  folds); its `make` carries `open`, as the concept's deskMake carries S.qAll. The note of modules hidden at this tier
-  names no folded module (they are on the desk and in force), and the Concept notes' Quick sentence ("Past six modules,
-  when three or more would be hidden, a button names the rest…") now holds. The button is `desk/Fold.tsx`, drawn by
-  `desk/Desk.tsx` after the tiles and the empty desk, before the parked tray, with the concept's `.moretiles` markup and
-  stylesheet (no rule of the rebuild's own); whether it stands open is `store/fold.ts deskFold`, view state kept with
-  the session through a new registration point, `kit/session.ts keptState` (the concept's sessionState and the quiet
-  keys of its desk save), which Song info's open state uses too (deviation 53 closed). `features/fold.ts` opens the
-  fold where the page sends a person to something it holds: a ring aimed at a folded tile, or a module that arrives
-  alone only to be folded away (FO-1). No factory desk folds on any engine (no engine has enough modules Quick shows);
-  the test build indexes two stand-in modules (`testing/standins.ts`), as the concept's suite registers two, and the
-  test layer's `defineModule` names them. Tested by `tools/test-fold.ts` (in `npm run check`), `scenarios/38-fold.mjs`,
-  `acceptance/fold.json` (with the concept's `01-desk/quick-more-parked-empty` and
-  `08-persistence-cables/reload-keeps-the-desk`, both from fix-core.json's excluded), `switches/fold.json` and
-  `slice-states/37-fold.mjs`. Its motion (the tiles that slide as it opens or folds, the concept's transition) is
-  package 9's.
-
-## Deviations from the concept's markup
+The page and its markup:
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
-   the dropdown are portals into the concept's elements; the overlays' containers are empty until their packages fill
-   them (the `overlays` slot, drawn at the root by `App.tsx`; the picker portals into `#pickerWrap`, the popover into
-   `#pop`). Package 10 undoes this when the page moves into the real application's root.
-2. **Adding a Lab module outside Lab offers Lab in the popover by its card**, as the concept does (package 8): closed.
-3. **The engine panel holds the five engine cards only**: closed (package 5 draws the taglines, specs and models).
-4. **An XY pad changed from elsewhere is drawn where it is**, as the concept draws a pad it has just rebuilt; it springs
-   only while it is being worked.
+   the dropdown are portals into the skeleton's elements; the overlays' containers are filled through the `overlays`
+   slot (the picker portals into `#pickerWrap`, the popover into `#pop`). Package 10 undoes this when the page moves
+   into the real application's root.
 5. **The page keeps its records under its own keys** (`hotstep.create.desk`, `hotstep.create.engines`,
-   `hotstep.theme`); the core reads the concept's saved shape (`migrate`, version 0) for when importing is built.
-6. **A knob says its value with its unit to a screen reader** (`aria-valuetext`), and a segmented choice is a named
-   group; every button and input says its type. The concept's give the bare number and no names.
-7. **Adding from the Modules panel keeps focus on the card** (F-25, found by the review loop); the concept moves it to
-   the new tile (two of its scenarios, excluded from the acceptance with that reason).
-8. **An XY pad's key run is a step of its own**, and a double-click reset is a "Reset" step; the concept merges keys
-   pressed soon after a drag into the drag's step and lets a reset back to the start of a run cancel it. Each gesture
-   one step is what every other control does here.
-9. **The toasts are a stack of three** (F-12) that Tab reaches (C-13, F-11): closed by package 6, with the concept's
-   pending F-18 (a plain message never pushes out an Undo; Escape on a toast's button dismisses it) and S-17 (a toast
-   claims Tab only while focus is where it was when it appeared and no layer has opened since).
-10. **The concept's delegation hooks are absent** (`data-sig`, `data-toast`, `data-luaon`, `data-setq`, `data-base`):
-    the rebuild's buttons run their own actions. A dropdown option's `data-opt` is its value, not its label.
-11. **A Quick row's marker for a value between its choices**: built (package 1); closed.
-12. **A tile moved up or down by the keyboard moves its top** that way; the concept compares the middles of the places
-    it could take, which a shorter place in the same row can pass as "up". The same on every layout the concept's
-    suite checks.
+   `hotstep.create.session`, `hotstep.create.langRecent`, `hotstep.theme`, and P7-2's); the core reads the concept's
+   saved shape (`migrate`, version 0) for importing an older file.
+6. **Every control says what it is to a screen reader**: a knob its value with its unit (`aria-valuetext`), a segmented
+   choice is a named group, every button and input says its type (the picker's, the Lab offer's, a grip's moves, the
+   notes' × and the log's Close too).
+10. **No delegation hooks.** The buttons run their own actions; a dropdown option's `data-opt` is its value, not its
+    label. Scenarios find an option by its value or by `aria-selected`.
+15. **The switches inside a module's look name their parameter** (aria-label "Chain of thought", not "--cot"), and every
+    one carries the changed mark.
+18. **A plugin's family, symbol, file and curve** are tables keyed by the option's words as the server lists them
+    (`src/definitions/option-faces.ts`); the simulated engine lists the same plugins and languages.
+24. **A control none of whose parameters applies is not drawn** (`nodeShown`); a node that should stay and stand back
+    says so with `dim`.
+22. **A terminal that stands back says why through the definition's `dim`s** (the repetition guard's "planner off"),
+    not spans written by hand; 23, **a note's words come from its own `{value:...}`** (the planner's bar saying what
+    Plans & endings set), not from a paint hook.
+21. **A note in a terminal's bar is in the bar's own ink** (#a39cae), which reads at 3:1.
+26. **A drop zone names its file field and its clear button by its state's noun** ("Choose the timbre reference").
+39. **A drag's preview is an inert copy**: the tile's own face without ids or drag handles of its own, `inert` and
+    hidden from screen readers, so no id is on the page twice while it shows. A pedal or side unit dragged while the
+    Pedalboard is not on the desk previews the Pedalboard holding its drawing.
+43. **The empty Adapters tile is its definition's strip**, drawn by the tile; its buttons run the named actions.
+45. **Apply as while runtime is forced** is the definition's `forced` (ParamFace), drawn by the segmented choice
+    wherever a choice has one; what is sent does not change (the server forces runtime itself).
+P11-3. **An overlay's exit copy carries no ids** (`ovOut`), so no id is on the page twice while it plays.
+The page is in standards mode; `styles/rebuild/10-standards.css` keeps the two boxes that would move (the engine caret
+and the LCD picker's arrows) where the design draws them.
+
+Controls and steps:
+
+4. **An XY pad changed from elsewhere is drawn where it is**; it springs only while it is being worked.
+8. **An XY pad's key run is a step of its own**, and a double-click reset is a "Reset" step: each gesture one step, as
+   every other control.
+12. **A tile moved up or down by the keyboard moves its top** that way (comparing middles lets a shorter place in the
+    same row pass as "up").
 13. **Delete or Backspace resets a value control** (a knob, a token, a fader, a ruler, the look-back strip), as a
-    double-click does: the concept's pending S-18, in the value contract (`kit/value.ts`). The controls' tips keep the
-    concept's words; S-18's sentence about the tip is not done.
+    double-click does (S-18), in the value contract (`kit/value.ts`).
 14. **A hand moves some values by a rule of its own**: dragging a length ruler snaps to 5 s (15 s above 2:00) and to a
-    labelled tick within 6px (pending S-31); a token over a range of more than 500 steps moves with the value, a
-    hundredth of it a pixel (one at 100, ten at 1000; pending S-28). Both are the core's (`derive/controls.ts`
-    `rulerSnap`, `scrubValue`, reached through the setters `along` and `scrub`).
-15. **The switches inside a module's look name their parameter** to a screen reader (a flag, an LCD's lit word, the
-    record button, a power chip: aria-label "Chain of thought" where the concept's says "--cot"), and every one
-    carries the changed mark (the concept's power chip and its rulers without auto have none; a look-back strip off a
-    terminal carries it after its box). The record button off the plans deck has a paper face.
-16. **The LCD number says "type it, or drag up or down"**: the concept's says "or tap" because Tempo's TAP stands
-    beside it; here TAP is another part (package 3).
-17. **The language stamp remembers the languages used last** under the page's own key (`hotstep.create.langRecent`,
-    deviation 5), so the concept's 04-controls/language-stamp, which reads `hs3-lang-recent`, cannot pass as written.
-18. **A plugin's family, symbol, file and curve** are the concept's tables (`src/definitions/option-faces.ts`), keyed
-    by the option's words as the server lists them; the simulated engine lists the concept's plugins and languages.
-19. **A side unit's chip selector carries its own caps label** (the concept's `chipsw`): the board lays it out without
-    the LCD selector it gives a pick (`board/Board.tsx`, one line).
-39. **A drag's preview is an inert copy** (package 8): the tile's own face, as the concept's, but without ids or drag
-    handles of its own, `inert` and hidden from screen readers, so no id is on the page twice while it shows. A pedal
-    or side unit dragged while the Pedalboard is not on the desk previews the Pedalboard holding its drawing (the
-    picker's), where the concept draws the whole pedal. (The landing is built: the tile that lands settles from the
-    preview's box with a lift and a shadow, package 9.)
-40. **The picker's buttons, the Lab offer's and a grip's moves say their type** (deviation 6).
+    labelled tick within 6px (S-31); a token over a range of more than 500 steps moves with the value, a hundredth of it
+    a pixel (S-28). Both are the core's (`derive/controls.ts` `rulerSnap`, `scrubValue`, through the setters `along`
+    and `scrub`).
 41. **A move from a grip's menu merges with a key move on the same grip made in the last two seconds**: one rule of
-    the store's (`move`) for a run of moves on one grip; the concept's menu moves are steps of their own.
+    the store's (`move`) for a run of moves on one grip.
+48. **A text field's own Ctrl+Z** (F-22) is kept by the page for every text field (`store/fields.ts`,
+    `features/field-undo.ts`); a page step that a field's Ctrl+Z took back to where it started goes. A field bound to
+    nothing (a number box's typing, a filter) starts its history afresh when the page draws it again.
+FD-1. **A setting that leaves the value in force is no step** (RD-14): a key pressed at the end of a range.
+FD-3. **An owner whose name ends with the label is said once** ("Pre-VST gain 0.0 dB → 0.5 dB", RD-18).
+FD-5. **A cleared file's toast names the file** ("Cleared take-2.flac"), with Undo.
+FD-6. **The reference blend is a percent everywhere** (Format `percent`), its Also set line too.
+38. **A seed's refusal, the saved seeds' update and delete, and the plain loads say what they did in a toast through
+    the core** (`partAct`'s words), the update and delete with Undo.
+
+Keys, focus and layers:
+
+7. **Adding from the Modules panel keeps focus on the card** (F-25), so several can be added in a row; a starter of the
+   empty desk moves it to the new tile.
+9. **The toasts are a stack of three** (F-12) that Tab reaches (C-13, F-11); a plain message never pushes out an Undo,
+   Escape on a toast's button dismisses it (F-18), and a toast claims Tab only while focus is where it was when it
+   appeared and no layer has opened since (S-17).
+30. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys).
 42. **Escape in the Modules panel opened over the desk at 1280 closes the panel too while a popover is open from one
     of its cards**: the panel's own Escape (`shell/panelState.ts`) runs before the layers' (`features/layers.ts`).
+P11-1. **The Concept notes say what the page does**: Alt+1, 2 and 3 choose a tier "from anywhere while no dialog is
+    open"; Ctrl+Z changes nothing under a dialog, the engine panel aside (30); the held takes read "Your 8 takes return
+    on ACE-Step 1.5" (27); a knob's "double-click or Delete still resets it" (13).
+P11-4. **A toast that shows while any modal layer is open joins its Tab cycle** (F-18; `layers.ts` for every modal
+    layer, the picker's keys for the picker).
+P11-5. **The tier keys wait under a modal layer or a side panel open as a drawer** (F-08): `modal-keys.ts`.
+P6-9. **Ctrl+Enter is heard on the window in the capture phase**, before any row's or card's own Enter (F-07), not
+    through `onKey` (which the page dispatches after its controls'); FC-3, **in a field whose Enter is its own** (the save
+    row's name, a rename, the draft's name: `register/keys.ts ownEnter`) it is that Enter (RC-09).
 
-20. **A terminal line hangs under its first flag wherever it stands** (the planner's rule, L-24): a repetition guard's
-    line is the same part, so it carries `--hi` too; its stylesheet takes the hang off a bar-less terminal's first line,
-    so it is drawn as the concept's plain line.
-21. **A note in a terminal's bar is in the bar's own ink** (#a39cae, the flags' and chips'), which reads at 3:1; the
-    concept's quiet ink reads at 2.88:1.
-22. **With the planner off, the repetition guard says "planner off" through its terminal's standing back**, its line
-    through its own: two `dim`s in the definition (the terminal's and its line's) where the concept wrote two spans by
-    hand; MiniMax-Music3's guard, whose terminal never stands back, has no "planner off" span.
-23. **The planner's bar says what Plans & endings set** through the note's own words (`{value:mm.reuse}`, a line per
-    replay), not a paint hook; the plan text's MiniMax-Music3 line is the concept's ("plan --model 8B").
-24. **A control none of whose parameters applies is not drawn** (`nodeShown`), as the concept leaves out what `ok()`
-    refuses; a node that should stay and stand back says so with `dim`. Package 1 flagged the gap.
-25. **(Closed by package 6: the cover swatch shows the newest song's colour.)** It showed the concept's colour for no song (300) until the generation package listed songs; the
-    concept's page has its demo songs (215).
-26. **A drop zone names its file field and its clear button by its state's noun** ("Choose the timbre reference"); the
-    concept wrote each by hand ("Choose a reference track").
-27. **ACE-Step's card says ×8**, the most takes the definitions give it (the server takes 8 at most); the concept
-    says ×9.
+Modules:
+
+27. **ACE-Step's card says ×8**, the most takes the definitions give it (the server takes 8 at most); 34, **ACE-Step has
+    eight reels**, three a row (docs/03, Takes), whose tile has the footprint the desk's packing was designed around.
 28. **A model left at "" (the engine's default) is the file the server has selected**: the row shows that file, its
-    list has no "Engine default" row while the server lists it, a step names it, and choosing it stores "" (question
-    5). The concept's default is the first file of the list; with the simulated server, which selects the first, the
-    page looks and behaves the same.
-29. **(Closed by package 6.)** The VRAM meter swings while a run renders and shows another engine rendering (B-34).
-    Its click opens the engine log, and its `aria-expanded` says whether the log is open (package 11).
-30. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys); the concept's does nothing there.
-31. **LM seed follows stands on the Seed tile while the planner is on the desk**: it is the planner's switch, and with the
-    planner off the desk it would change nothing that is sent (the value in force). The concept shows it at Lab always.
+    list has no "Engine default" row while the server lists it, a step names it, and choosing it stores "" (question 5).
+31. **LM seed follows stands on the Seed tile while the planner is on the desk**: it is the planner's switch, and with
+    the planner off the desk it would change nothing that is sent (the value in force).
 32. **The saved seeds are the desk's state, and every change of them is a step** (save, update, star, unstar, delete),
-    as every change of the desk is; the concept's save and star are no steps. The test page starts with the concept's two
-    demo seeds (`testing/compat/instruments.ts`); the product starts with none.
+    as every change of the desk is. The test build starts with two demo seeds (`testing/compat/instruments.ts`); the
+    product starts with none.
 33. **The recent references are the server's reference tracks** (`services/references.ts`, as the existing frontend's
     `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
     `recentRefs` state stays declared and holds nothing.
-34. **(The VRAM half closed in the consolidation round, RA-01: the Takes tile's line is `vramNeed`'s, the meter's and the
-    go bar's one figure, for the models chosen.)** ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
-    rule would put eight in two rows of four, a shorter tile, and the desk would pack differently from the concept's).
-35. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
-36. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a
-    region"), so the region needs no song list; the region is kept in seconds, as the real application keeps it.
-37. **At Studio Repaint's mode and crossfade stand in a row (`.knobs`) beside the wave**, where the concept draws a
-    `.rp-ctl`; at Lab they stand on the wave's caption line, as the concept's.
-38. **A seed's refusal, the saved seeds' update and delete, and the plain loads say what they did in a toast through
-    the core** (`partAct`'s words), the update and delete with Undo; the concept's Update toast offered Undo too.
-Package 7's (numbered P7- so that the packages built beside it number theirs without a clash):
-
-- P7-1. **(Closed in the fix round: RA-04.)** The row menu and the Drafts list were a popover of the package's own
-  (`workflows/pop.tsx`, `popPlace.ts`); they open in the page's one popover (`features/pop.ts openPop`, the drafts as its
-  fixed panel with focus in the name field), so they are layers like every other.
-- P7-2. **Saved records are kept under the page's own keys and in its own shapes** (deviation 5): `hotstep.create.
-  workflows` (`{ v: 1, workflows, revisions }`, a revision naming its workflow), `hotstep.create.drafts`,
-  `hotstep.create.workflow` (the open workflow and revision, the workflows whose revisions show). The concept's stored
-  list (version 0) and its revision files are read. The test layer reads the concept's keys as the page's.
-- P7-3. **A revision holds every setting of its engine, defaults included** (`revisionOf`), so its details list those
-  not at their default; the concept's holds the values that were set, and lists those.
-- P7-4. **"Modified" is worked out for a workflow too**: its layout differs from the desk's (what Revert would put back,
-  F-04). The concept's flag is set by any change to the layout and cleared only by Revert or Update, so a module added
-  and taken off again reads modified there and not here.
-- P7-5. **Content held as empty text replaces nothing on load**: the concept's rule for the lyrics and the caption, for
-  every content text.
-- P7-6. **The export file is the page's record**: `{ format: 'hotstep-revision', v, workflow, revision }`, the revision
-  naming its engine (`engine`), the file named with the engine's short id (`.mm3.json`); the concept's file (`backend`,
-  `slots`, `content`) imports.
-- P7-7. **A workflow renamed in another tab is followed** (pending F-17) when a workflow of the same tier, modules and
-  board appears there as the open one goes.
-- P7-8. **The Workflows list's keys** (pending F-36): F2 renames a row of yours, Delete opens its menu with Delete armed,
-  a letter moves to the next row whose name starts with it.
-
-Package 11's (the Concept notes and the engine log):
-
-- P11-1. **The notes say what the rebuild does where it differs on purpose.** Four sentences changed: Alt+1, 2 and 3
-  choose a tier "from anywhere while no dialog is open" (pending F-08, built); Ctrl+Z changes nothing under a dialog
-  "(the engine panel aside: there it is the page's Undo)" (deviation 30); the held takes read "Your 8 takes return on
-  ACE-Step 1.5" (deviation 27: 8 at most); a knob's "double-click or Delete still resets it" (deviation 13). Every other
-  sentence holds of the rebuild as written; the tier change's ("each tile is one object that grows or shrinks in place
-  ...") since package 9 built the transition (RC-11, RC-12).
-- P11-2. **The log tags the engine's models line with the engine's short id** (`engines.ts short`: `[yue2]`), where the
-  concept writes its own (`[yue]`); ACE-Step, MiniMax-Music3, Stable Audio 3 and HeartMuLa read the same.
-- P11-3. **An overlay's exit copy carries no ids** (`ovOut`), so no id is on the page twice while it plays (deviation
-  39); the concept's keeps them.
-- P11-4. **A toast that shows while any modal layer is open joins its Tab cycle** (pending F-18, for the picker and the
-  notes; `layers.ts` does it for every modal layer, the picker's keys for the picker).
-- P11-5. **The tier keys wait under a modal layer or a side panel open as a drawer** (pending F-08): `modal-keys.ts`.
-- P11-6. **(Closed by package 6, which tells the queue as runs come and go: `store/generate.ts`.)** The log's queue line said idle until the generation package told the queue (`tellQueue`); the concept's
-  counts its songs rendering and waiting.
-- P11-7. **The notes' × and the log's Close say their type** (deviation 6). The notes button and the VRAM meter open
-  their overlays with their own click (`shell/TopBar.tsx`: `openNotes`, `toggleLogs`; the delegated listeners of the
-  package's time went in the consolidation round, RA-13), the meter's `aria-expanded` set by the log as it opens and
-  closes; the same markup and behaviour as the concept's.
-
-43. **The empty Adapters tile is its definition's strip**, drawn by the tile: its buttons run the named actions and carry
-    none of the concept's hooks (`data-cartadd`, `data-plannerpick` on the strip; deviation 10). The cartridges' own
-    buttons keep them.
-44. **A phase window's and a section mask's steps** are named as the concept names them (L-01, L-09). Several masks
-    painted in one drag join their files in the core's English ("Section masks of a and b"). (Their Undo and Redo toasts
-    now say "… back to 0–100%" as the concept's do: every state step that says its value before and after is undone
-    "back to" it, the fix round's RD-13.)
-45. **Apply as while runtime is forced** is the definition's `forced` (ParamFace): the segmented choice draws it,
-    wherever a choice has one; what is sent does not change (the server forces runtime itself).
-46. **The LED switch carries its parameter's tip** wherever it has one (E-17: the plans' Endings); the concept wrote
-    those three by hand.
+35. **A seed is typed up to 2^64-1**, the application's range, and the field takes 20 digits.
+36. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint
+    a region"), so the region needs no song list; the region is kept in seconds, as the real application keeps it.
 47. **The planner adapter's list holds the server's planner LM adapters** (`adapters.lm`, told by
-    features/adapters.tsx from services/adapters.ts), as `ad.planner`'s options; their value is the file, their words
-    the concept's ("folk-voice-planner (LoRA)").
+    `features/adapters.tsx` from `services/adapters.ts`), as `ad.planner`'s options: their value is the file.
+50. **The caption dataset's default is the definition's**, the adapter's own dataset ("The adapter's dataset", value
+    "", as the real application sends it); the supplied caption reads the first dataset the server lists for "".
+54. **Compose caption writes the key as the page writes it** ("F# major": keys are stored with sharps).
+FD-4. **An empty box is not drawn**: HeartMuLa's planner terminal at Lab ends after its sample line, as HeartMuLa has
+    no Lab tokens or flags.
+P3c-1. **A build is the user's record and the server's session.** The record (state `build`) holds what Undo covers:
+    the session, the score's seed, the sections planned, the keeps, the takes discarded and the songs rendered; the
+    session holds the takes and the section looked at. The first plan is a step ("Plan the score").
+P3c-2. **Discard and Re-plan leave the server's takes alone**: a discarded take is marked so in the record, and Re-plan
+    opens a new session; Undo of either brings the takes back from the session that still holds them.
+P3c-3. **Undoing a render withdraws its song from the Library** through the build session (`store/build.ts` keeps the
+    record's songs among Latest's cards while their render stands).
+P3c-4. **Follow score and Plan strength are locked while any section is kept**, worked out from the keeps, so
+    discarding the last kept take frees them (E-24).
+P3c-5. **Play kept** beside Render (E-46) and **Continue's play button** (E-47); the simulated server plays no sound,
+    the playhead runs.
+P3c-6. **A recording's length is what the page is told of it** (`services/recording.ts`; the simulated one is two to
+    four minutes by its name), said on the sleeve ("3:51 long"). The part chosen is kept while the recording holds it.
+P3c-7. **With Chain of Thought off the lead sheet's paper stands back and says why** (its text is not sent then).
+P3c-8. **The score preview is a modal layer** in `#scoreModal` (Tab goes round it, Escape and the scrim close it, focus
+    goes back to what opened it). Continue with this score renders it with its seed through `scoreRuns`.
+P3c-9. **The planner's composer CFG token is not painted as clashing** by the lead sheet (no cross-module paint); the
+    lyric-timing line warns, in the warning's ink, with Set CFG to auto.
+P3c-10. **A tile that is a strip says what is set at another tier** (its Also set line), as every tile does.
+FD-2. **A side unit's lip buttons draw their keyboard ring inside the button** (RD-15, the owner's rule 1).
 
-Package 6's (numbered P6 so that packages built at the same time do not collide):
+Generation:
 
-- P6-1. **Generate does not start a run certain not to fit** (F-21, pending in the concept): the line's "Use N takes"
-  pulses and the line is said. A "Didn't run" notice comes only from a refusal the server makes (the simulated server
-  checks its own card; `mockCard` makes it smaller in the test build). So 06-prompt-generate/generate-engines' first
-  check and the pending F-13 and E-03 scenarios, which get their notice from pressing Generate, cannot pass as written.
-- P6-2. **The document's title while songs render is "(3) " before the page's own title** ("HOT-Step"), not
-  "(3) HOT-Step Tiers".
-- P6-3. **A double-click on Generate is one press, and separate presses each queue** (F-22): the click's own count,
-  where the concept ignores any press within 350ms.
-- P6-4. **The song menu opens above its button and never over the go bar** (F-28): with no room on either side the page
-  moves first; with no page to move it stands beside its card, level with its button, between the go bar and the
-  window's foot (the concept's F-34), and scrolls inside only for what that room lacks (RC-04: at 1920x1080 it shows 293
-  of its 340px). The concept opens it below and moves the page, and beside its card over the go bar.
-- P6-5. **The queue is the server's**: after a reload the page says the songs the server no longer has (F-27, pending
-  in the concept); the simulated server loses its queue on a reload, as the concept page does, so that is every song
-  that was rendering. Leaving while songs render asks first (F-37).
-- P6-6. **Songs are the server's**: the simulated server keeps them under `hotstep.mock.songs`; the page's "not played
-  yet" marks are not kept over a reload (the concept keeps them in its autosave).
-- P6-7. **The cover swatch follows the newest song as it arrives**; the concept repaints it only when the board is drawn
-  again.
-- P6-8. **"N changes" counts the built-in boxes' switches and choices, not their text** (`changedKeys`): the concept's
-  list differs in the trigger word (text, not counted here) and MiniMax-Music3's and YuE2's caption source and dataset
-  (choices, counted here).
-- P6-9. **Ctrl+Enter is heard on the window in the capture phase**, before any row's or card's own Enter (F-07, pending
-  in the concept), not through `onKey` (which the page dispatches after its controls').
-- P6-10. **(Closed in the consolidation round, RA-20.)** The request is `createIntent`, which the generation service's
-  real adapter builds with the application's resolver (package 10); the simulated server sends none.
-- P6-11. **(Closed in the fix round: RC-01.)** The top bar's pages, the brand and "Open the Library" show the
-  concept's stand-in for each other page (`shell/screens.ts`, `features/screens.tsx`).
+P6-1. **Generate does not start a run certain not to fit** (F-21): the line's "Use N takes" pulses and the line is said.
+    A "Didn't run" notice comes only from a refusal the server makes (the simulated server checks its own card;
+    `mockCard` makes it smaller in the test build).
+P6-2. **The document's title while songs render is "(3) " before the page's own title** ("HOT-Step").
+P6-3. **A double-click on Generate is one press, and separate presses each queue** (F-22): the click's own count.
+P6-4. **The song menu opens above its button and never over the go bar** (F-28): with no room on either side the page
+    moves first; with no page to move it stands beside its card, level with its button, between the go bar and the
+    window's foot (F-34), and scrolls inside only for what that room lacks (RC-04).
+P6-5. **The queue is the server's**: after a reload the page says the songs the server no longer has (F-27); the
+    simulated server loses its queue on a reload. Leaving while songs render asks first (F-37).
+P6-6. **Songs are the server's**: the simulated server keeps them under `hotstep.mock.songs`; the page's "not played
+    yet" marks are not kept over a reload.
+P6-7. **The cover swatch follows the newest song as it arrives.**
+P6-8. **"N changes" counts the built-in boxes' switches and choices, not their text** (`changedKeys`).
 
-Package 4's:
+Workflows and storage:
 
-48. **A text field's own Ctrl+Z** (package 4, F-22) is kept by the page for every text field (store/fields.ts,
-    features/field-undo.ts) as the concept's is; where the concept keeps a page step that a field's Ctrl+Z took back
-    to where it started (an entry that then undoes nothing), the step goes. A field bound to nothing (a number box's
-    typing, a filter) starts its history afresh when the page draws it again, as the concept's field drawn anew does.
-49. **The vocal gender beside Instrumental is the generic labelled pairing** (`labelled` holding `segmented`): the
-    segments are the named group, the pairing carries no `gender` class (its segments' padding is the concept's,
-    styles/rebuild/25-prompt.css) and no tip yet (the pairing's housing is package 2's).
-50. **The caption dataset's default is the definition's**, the adapter's own dataset ("The adapter's dataset", value "",
-    as the real application sends it); the concept's default is its first dataset (my-band-ep). The supplied caption
-    reads the first dataset the server lists for "".
-51. **Presets & genres** open in package 8's popover (features/prompt-presets.tsx); a genre already in the box is pressed
-    and a press takes it out (C-20), as the concept's. **Import latent** takes a file chosen or dropped on it.
-52. **(Closed by package 9, differently: P9-1.)** The box's height eases and a suggestion opens smoothly.
-53. **(Closed by the fold: Song info's open state is kept with the session, kit/session.ts, as the concept keeps
-    S.songInfoOpen.)** It opens by itself when info arrives from outside, as the concept's does.
-54. **Compose caption writes the key as the page writes it** ("F# major"); the concept spells it with ♯ and flats
-    (Tempo's spellKey, package 3).
+P7-2. **Saved records are kept under the page's own keys and in its own shapes** (5): `hotstep.create.workflows`
+    (`{ v: 1, workflows, revisions }`, a revision naming its workflow), `hotstep.create.drafts`,
+    `hotstep.create.workflow` (the open workflow and revision, the workflows whose revisions show). The concept's
+    stored list (version 0) and its revision files are read.
+P7-3. **A revision holds every setting of its engine, defaults included** (`revisionOf`), so its details list those not
+    at their default.
+P7-4. **"Modified" is worked out, for a workflow too**: its layout differs from the desk's (what Revert would put back,
+    F-04), so a module added and taken off again does not read modified.
+P7-5. **Content held as empty text replaces nothing on load**, for every content text.
+P7-6. **The export file is the page's record**: `{ format: 'hotstep-revision', v, workflow, revision }`, the revision
+    naming its engine (`engine`), the file named with the engine's short id (`.mm3.json`); the concept's file
+    (`backend`, `slots`, `content`) imports.
+P7-7. **A workflow renamed in another tab is followed** (F-17) when a workflow of the same tier, modules and board
+    appears there as the open one goes.
+P7-8. **The Workflows list's keys** (F-36): F2 renames a row of yours, Delete opens its menu with Delete armed, a
+    letter moves to the next row whose name starts with it.
+FC-1. **A tab reloads with its own desk** (RC-08): each tab keeps the desk it last showed in `sessionStorage` beside
+    the shared one, so a reload shows that desk when another tab has written since, and offers the newer one. A new tab
+    opens with the desk changed last.
+FC-2. **A desk step puts back the tier it changed** (Use that desk, Open in its tier): the tier is one of the undo's
+    paths (`store/desk.ts flatOf`).
 
-Package 3c's:
+Motion:
 
-- P3c-1. **A build is the user's record and the server's session.** The record (state `build`) holds what Undo covers:
-  the session, the score's seed, the sections planned, the keeps, the takes discarded and the songs rendered; the session
-  holds the takes and the section looked at. The concept keeps both in `S.build`. The first plan is a step ("Plan the
-  score"); the concept's makes none.
-- P3c-2. **Discard and Re-plan leave the server's takes alone**: a discarded take is marked so in the record, and Re-plan
-  opens a new session; Undo of either brings the takes back from the session that still holds them.
-- P3c-3. **Undoing a render withdraws its song from the Library** through the build session (the record's songs follow
-  Undo and Redo; `store/build.ts` keeps them among Latest's cards, package 6's, while their render stands).
-- P3c-4. **Follow score and Plan strength are locked while any section is kept**, worked out from the keeps, so
-  discarding the last kept take frees them (pending E-24).
-- P3c-5. **Play kept** beside Render (E-46) and **Continue's play button** (E-47), added as the review asked; the
-  simulated server plays no sound, the playhead runs; the player's audio is package 6's.
-- P3c-6. **A recording's length is what the page is told of it** (`services/recording.ts`; the simulated one is two to four
-  minutes by its name, the concept's a random length each load), said on the sleeve ("3:51 long"). The part chosen is kept
-  while the recording holds it, so replacing the recording with a long enough one keeps it (the concept goes back to the
-  first 20 seconds).
-- P3c-7. **With Chain of Thought off the lead sheet's paper stands back and says why** (its text is not sent then), with
-  the concept's placeholder; the concept leaves it at full strength.
-- P3c-8. **The score preview is a modal layer** in `#scoreModal` (package 8's layers: Tab goes round it, Escape and the
-  scrim close it, focus goes back to what opened it; package 11's exit). Continue with this score renders it with its
-  seed through `scoreRuns` (registered with package 6's `generate({ seed })`, which then does not preview it again).
-- P3c-9. **The planner's composer CFG token is not painted as clashing** by the lead sheet (the concept's cross-module
-  paint, B-09); the lyric-timing line warns, in the warning's ink, with Set CFG to auto.
-- P3c-10. **A tile that is a strip says what is set at another tier** (its Also set line), as every tile of the concept's
-  does; the slice left it out on strips.
+P9-1. **What pushes what follows moves on the compositor** (the owner's rule for motion: no property that lays the
+    page out is animated): the prompt box's height, a suggestion, Song info and the save row change at once, and what
+    follows slides from where it stood (`transform`) while the card is revealed down to its new edge (`clip-path`); a
+    block that opens is at its full height from the first frame and fades in, one that closes leaves a copy fading
+    where it stood.
+P9-2. **The prompt box eases when it is typed into**, by more than a line and a half (F-09), as when Undo or a tool
+    sets the text.
+P9-3. **The player joins the go bar on the compositor**: the line beside it slides over (`transform`) and the player is
+    revealed from its left edge (`clip-path`).
+P9-4. **Under reduced motion every tile that arrives is rung** with the still outline (an add, a drop, an Undo or Redo
+    that brings one back), so every change of state still shows (S-27).
+P9-5. **A tile moved by an arrow key starts where it stood**, also when it moves up a row.
+P9-6. **The playheads and the VRAM meter are set on the page from the animation loop**, not drawn again by React on
+    each frame (Build by section's take, Continue's recording, the meter's LEDs): the same markup at every moment.
+P9-7. **A tile or pedal that leaves fades exactly where it stood** at every width.
+FO-1. **A module that arrives on the desk alone, only to be folded away, opens the fold**, whether it was added or
+    brought back by Undo or Redo: nothing just put on the desk is hidden. A make-up that brings several at once (a
+    workflow, a scene) leaves the fold as it is.
+FO-2. **The fold's open state is view state kept with the session** (`hotstep.create.session`), not part of the
+    desk's record: a workflow, a revision, a draft or another tab's desk never opens or closes it.
 
-The fix round around the desk's (numbered FC-, review-r2 and RA-04):
+The performance pass (none changes what the page shows or does; above, "Rendering"):
 
-- FC-1. **A tab reloads with its own desk** (RC-08): each tab keeps the desk it last showed in `sessionStorage` beside
-  the shared one, so a reload shows that desk when another tab has written since, and offers the newer one ("Another
-  tab has a newer desk. This one still shows its own."). The concept reads the shared desk on a reload, so its reload
-  shows whichever tab wrote last. A new tab opens with the desk changed last, as the concept's.
-- FC-2. **A desk step puts back the tier it changed** (Use that desk, Open in its tier): the tier is one of the
-  undo's paths (`store/desk.ts flatOf`), as the concept's `deskEntry` has it.
-- FC-3. **Ctrl+Enter in a field whose Enter is its own** (the save row's name, a rename, the draft's name: `register/keys.ts ownEnter`)
-  is that Enter (RC-09), as the concept's field stops it; everywhere else it is Generate (P6-9).
-
-The desk's fix round's (numbered FD- so that the round's three shares do not collide):
-
-- FD-1. **A setting that leaves the value in force is no step** (RD-14): a key pressed at the end of a range, End at the
-  end. The concept records "Mix 100% → 100%".
-- FD-2. **A side unit's lip buttons draw their keyboard ring inside the button** (RD-15, the owner's rule 1); the
-  concept's ring is clipped to a red line along the bottom.
-- FD-3. **"Pre-VST gain 0.0 dB → 0.5 dB"**: an owner whose name ends with the label is said once (RD-18); the concept
-  says "Pre-VST gain gain".
-- FD-4. **HeartMuLa's planner terminal at Lab ends after its sample line**: the concept draws its Lab flags block
-  (`.tparams`, a dashed rule and 9px) there empty, as HeartMuLa has no Lab tokens or flags; an empty box is not drawn
-  here (a node with nothing in it is not drawn), so HeartMuLa's Lab desks with the Planner stand 17px shorter under it.
-- FD-5. **A cleared file's toast names the file** ("Cleared take-2.flac", the step's own redo words) where the concept's
-  says "Cleared the file"; both offer Undo.
-- FD-6. **The reference blend is a percent everywhere** (Format `percent`), its Also set line too ("Reference blend 95%");
-  the concept's Also set line alone writes 0.95.
-
-Package 9's (motion; numbered P9- so that the packages built beside it number theirs without a clash):
-
-- P9-1. **What pushes what follows moves on the compositor** (the owner's rule for motion: no property that lays the
-  page out is animated): the prompt box's height, a suggestion, Song info and the save row change at once, and what
-  follows slides from where it stood (`transform`) while the card is revealed down to its new edge (`clip-path`); a
-  block that opens is at its full height from the first frame and fades in, one that closes leaves a copy fading where it
-  stood. The concept animates their height. What follows stands where the concept's does at every step
-  (`tools/motion/frames.mjs`, `prompt-shrinks-on-undo`, `suggestion-opens`, `song-info-opens`); the block's own box is
-  accepted as different there.
-- P9-2. **The prompt box eases when it is typed into, too**, by more than a line and a half (F-09); the concept's input
-  handler measures the box twice, the second measure cancelling the first's ease, so it eases only when Undo or a tool
-  sets the text.
-- P9-3. **The player joins the go bar on the compositor**: the line beside it slides over (`transform`) and the player is
-  revealed from its left edge (`clip-path`), where the concept animates its `max-width` (package 6 had built the
-  concept's).
-- P9-4. **Under reduced motion every tile that arrives is rung** with the still outline (an add, a drop, an Undo or Redo
-  that brings one back), not an add alone (S-27): every change of state still shows.
-- P9-5. **A tile moved by an arrow key starts where it stood**; the concept's tile moved up a row jumps up at once and
-  then slides sideways (its FLIP loses the vertical part).
-- P9-6. **The playheads and the VRAM meter are set on the page from the animation loop**, not drawn again by React on each
-  frame (Build by section's take, Continue's recording, the meter's LEDs): the same markup at every moment.
-- P9-7. **A tile or pedal that leaves fades exactly where it stood** at every width; the concept's stands off by its exit
-  layer's padding where the desk has one (92px at 1600 wide).
-
-Quick's fold's (numbered FO-):
-
-- FO-1. **A module that arrives on the desk alone, only to be folded away, opens the fold**, whether it was added (as
-  the concept's flash does) or brought back by Undo or Redo (the concept leaves those folded): nothing just put on the
-  desk is hidden. A make-up that brings several at once (a workflow, a scene) leaves the fold as it is.
-- FO-2. **The fold's open state is view state kept with the session** (`hotstep.create.session`, deviation 5), not part
-  of the desk's record: a workflow, a revision, a draft or another tab's desk never opens or closes it.
-
-The performance pass's (numbered PF-; above, "Rendering"; none changes what the page shows or does):
-
-- PF-1. **Every web font is loaded as the page opens** (`features/fonts.ts`), each face of the stylesheet; the concept's
-  browser loads a face the first time a word needs it, and lays the page out again then.
-- PF-2. **A workflow's name cut short leads its row's tooltip once the list is painted** (F-05), and again when the
-  list's rows change; the concept sets it as it draws the list (which made the browser lay the page out in the middle of
-  drawing it).
-
-The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
-the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
-3, 4 (an LCD picker's words) and 9 (Avoid's ellipsis) are closed.
+PF-1. **Every web font is loaded as the page opens** (`features/fonts.ts`), each face of the stylesheet, not the first
+    time a word needs one (which lays the whole page out again then).
+PF-2. **A workflow's name cut short leads its row's tooltip once the list is painted** (F-05), and again when the
+    list's rows change, not while the list is drawn (which made the browser lay the page out in the middle of drawing).
 
 ## Adding from the how-to, on a copy
 
@@ -1162,32 +873,32 @@ runs on an instance of its own, so it cannot take over the application's i18next
 
 Each package adds files and registers them (above, "Adding without colliding"); it owns the slice files named for it,
 and no other package edits them. Each is accepted when its acceptance file passes, its switches each make a scenario
-fail, its visual states match the concept with its accepted differences counted, the gallery passes with its parts in
-it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to 8 in parallel, then 9 and 10.
+fail, its visual sets match their approved recordings (approved once its screenshots look right), the gallery passes
+with its parts in it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to 8 in parallel, then 9 and 10.
 
 **How a package is accepted, and how a merge is verified.** A package's three test files register themselves: its
-acceptance file is run by `run.mjs --slice`, its switches file by `switches.mjs`, and its states file, which ends with
-its visual set (`export const VISUAL_SET = { name, only, scope, accept }`: the states by id, their scope, its accepted
-differences; tools/visual-baseline/README.md, "Every set at once"), by `visual-all.mjs`. Nothing else is added to any
+acceptance file is run by `run.mjs`, its switches file by `switches.mjs`, and its states file, which ends with
+its visual set (`export const VISUAL_SET = { name, only, scope }`: the states by id and their scope;
+tools/visual-baseline/README.md), by `visual-all.mjs`. Nothing else is added to any
 runner. Then, on the package's branch and again on the tree after each merge:
 
 ```
 npm run check && npm run lint
-npm run build:test && npm run behaviour -- --slice --workers 6   # the whole acceptance (under 3 minutes)
+npm run build:test && npm run behaviour -- --workers 6   # the whole acceptance (about 4 minutes 20)
 npm run switches:apply                               # every switch still applies exactly once (a second; merges break this most)
-npm run visual:all                                   # every package's visual set, one line each (about 13 minutes)
-npm run visual:all -- --reuse-concept                # the same with the kept concept recordings (about 7 minutes)
+npm run visual:all                                   # every visual set against its approved recording (about 7 minutes)
+npm run motion                                       # every motion against its approved samples (about 15 seconds)
 npm run switches                                     # every switch built and tried (about an hour once caught/ is filled)
 node tools/visual-baseline/gallery.mjs && node tools/visual-baseline/plants.mjs
 ```
 
 The times are at the tools' default of 6 workers (half of a 12-thread machine; `--workers` lowers it). A switch
 costs about 9 seconds once `caught/` names what catches it, about 16 seconds (more for a large package) when it starts
-from its own package's acceptance, and a whole acceptance run (about 2 minutes 40) when only another package's scenarios
+from its own package's acceptance, and a whole acceptance run (about 4 minutes 20) when only another package's scenarios
 catch it; the old way, the whole acceptance for every switch, would take about 18 hours for the 387 switches.
 
-`visual:all` prints each set's states and `identical`, or how many differences go beyond its accepted ones, and exits 1
-if a set differs. `switches` tries each switch first against the scenarios that caught it the last time
+`visual:all` prints each set's states and `identical`, or how many differences it has from its approved recording, and
+exits 1 if a set differs; a merge where both sides re-approved a set approves it again on the merged tree. `switches` tries each switch first against the scenarios that caught it the last time
 (`tools/behaviour/caught/<package>.json`, written by the run and committed with the package), then the rest of its own
 package's acceptance, then the rest of the acceptance, and counts a scenario as catching it only if it passes with the
 feature on; the verdict for each switch is the one the whole acceptance would give (tools/behaviour/README.md,

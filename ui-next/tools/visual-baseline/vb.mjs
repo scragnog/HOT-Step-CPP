@@ -1,40 +1,44 @@
 // Visual baseline: records the computed style of every element (and its ::before, ::after, ::placeholder) in every state
-// of states.mjs, plus forced :hover/:focus/:focus-visible/:focus-within/:active, plus screenshots; then compares
-// two recordings. See README.md in this folder.
+// of slice-states.mjs, plus forced :hover/:focus/:focus-visible/:focus-within/:active, plus what computed styles miss
+// (page-lib.js vb.semantics: every element's role, accessible name, ARIA states, title, own words and attributes),
+// plus screenshots; then compares two recordings. visual-all.mjs runs it set by set against the approved recordings.
+// See README.md in this folder.
 //
-//   node tools/visual-baseline/vb.mjs capture <name> [--page file.html] [--only regex] [--workers n] [--plan-from name] [--no-shots]
-//   node tools/visual-baseline/vb.mjs compare <a> <b> [--max n] [--accept file.json]
+//   node tools/visual-baseline/vb.mjs capture <name|dir> [--page file.html] [--only regex] [--scope name] [--workers n] [--plan-from name|dir] [--no-shots] [--slim]
+//   node tools/visual-baseline/vb.mjs compare <a> <b> [--only regex] [--scope name] [--max n]
 //   node tools/visual-baseline/vb.mjs check <base> [--only regex]      (capture "<base>-now" with base's plan, then compare)
 //   node tools/visual-baseline/vb.mjs list
 //
-// In ui-next (changes from the concept's copy, docs/09-architecture.md "The test layer"): the page is the rebuild's test
-// build (dist-test/index.html) unless --page names another (the concept's hotstep-tiers.html); --states slice runs the
-// slice's matrix (slice-states.mjs) instead of the concept's; --scope <name> plans forced states and compares only
-// inside the regions that scope names (slice-states.mjs SCOPES), the parts of the page the rebuild draws so far.
-// Each record also holds what computed styles miss (page-lib.js vb.semantics: every element's role, accessible name,
-// ARIA states, title, own words and attributes), compared like a property; a state may record parts on their own
-// (`parts: [selector]`, keyed from the selector, compared wherever each page puts them) and a screenshot of one
-// element (`shot: '#bento'`). `--accept <file>` names the differences accepted on purpose, each with the number of
-// times it occurs: a difference it covers is not listed, and a count that changes fails the comparison.
+// A recording is named (out/<name>/) or given as a folder (a path: approved/<set>/). The page is the test build
+// (dist-test/index.html) unless --page names another. --scope <name> plans forced states and compares only inside the
+// regions that scope names (slice-states.mjs SCOPES). A state may record parts on their own (`parts: [selector]`,
+// keyed from the selector, compared wherever the page puts them) and a screenshot of one element (`shot: '#bento'`).
+// --slim keeps only what a comparison reads, inside the scope: what an approved recording holds.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { STATES as CONCEPT_STATES } from './states.mjs';
-import { STATES as SLICE_STATES, SCOPES } from './slice-states.mjs';
+import { fileURLToPath } from 'node:url';
+import { STATES, SCOPES } from './slice-states.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '..', '..');
 const OUT = path.join(here, 'out');
+/* a recording by name (out/<name>/) or by folder (a path: approved/<set>/) */
+const dirOf = n => /[\\/]/.test(n) || path.isAbsolute(n) ? path.resolve(n) : path.join(OUT, n);
+/* The one tolerance, for rasterising, which is not bit-exact between runs (anti-aliasing on an edge, a level or two on
+   a blurred shadow or a gradient): a pixel differs when a channel moves by more than PIXEL_DELTA of 255, and a
+   screenshot differs when more than NOISE_PIXELS of its pixels do (measured: the Avoid note's paper and shadow came out
+   149 pixels apart, by up to 31 of 255, in two captures of one build). Computed styles, roles, names, words and
+   attributes have none. */
+const PIXEL_DELTA = 8, NOISE_PIXELS = 256;
 const require = createRequire(import.meta.url);
 const loadPW = () => { for (const m of [process.env.PLAYWRIGHT_MODULE, 'playwright'].filter(Boolean)) { try { return require(m); } catch (e) {} } throw new Error('Playwright not found: run npm install (devDependency), or set PLAYWRIGHT_MODULE to a playwright folder'); };
 
 const args = process.argv.slice(2), cmd = args[0];
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i < 0 ? d : args[i + 1]; };
 const flag = k => args.includes('--' + k);
-const STATES = opt('states') === 'slice' ? SLICE_STATES : CONCEPT_STATES;
 /* a key is in scope when it is one of the scope's roots or lies under one */
 const SCOPE = opt('scope') ? SCOPES[opt('scope')] : null;
 if (opt('scope') && !SCOPE) throw new Error(`no scope ${opt('scope')}: ${Object.keys(SCOPES).join(', ')}`);
@@ -52,6 +56,8 @@ const INIT = `(() => { let s = 0x2545F491; Math.random = () => { s |= 0; s = s +
 function customProps(html) { const set = new Set(); for (const m of html.matchAll(/--[a-zA-Z_][\w-]*/g)) set.add(m[0]); return [...set].filter(x => !/^--(check|only|page|workers|plan|max|no)/.test(x)); }
 
 let classMap = null; // --classmap <json>: [[name, regex source]], for vb.nesting (analysis only)
+const slim = flag('slim');
+const kept = k => !k.startsWith('html>head:') && inScope(k);
 async function runState(browser, st, pageUrl, custom, planIn, shotsDir, propsIn) {
   const ctx = await browser.newContext({ viewport: { width: st.w, height: st.h }, colorScheme: st.scheme, reducedMotion: st.reduced ? 'reduce' : 'no-preference', deviceScaleFactor: 1 });
   await ctx.route(u => !u.href.startsWith(pageUrl), r => r.abort());
@@ -105,7 +111,7 @@ async function runState(browser, st, pageUrl, custom, planIn, shotsDir, propsIn)
   const parts = {}; for (const sel of st.parts || []) parts[sel] = await page.evaluate(s => window.__vb.recordPart(s), sel);
   const props = await page.evaluate(() => window.__vb.props);
   const nesting = classMap ? await page.evaluate(m => window.__vb.nesting(m), classMap) : null;
-  const matches = await page.evaluate(() => window.__vb.matches()), classSets = await page.evaluate(() => window.__vb.classSets());
+  const matches = slim ? null : await page.evaluate(() => window.__vb.matches()), classSets = slim ? null : await page.evaluate(() => window.__vb.classSets());
   lap('record');
   /* the screenshot shows the state that was recorded: the forced pass below runs fake time and moves the page on */
   if (st.shot && shotsDir) {
@@ -115,7 +121,9 @@ async function runState(browser, st, pageUrl, custom, planIn, shotsDir, propsIn)
     else await page.screenshot({ path: path.join(shotsDir, st.id + '.png') });
   }
   lap('shot');
-  const rec ={ id: st.id, partsOnly: !!st.partsOnly, props, mode: full.mode, els: full.els, sem, parts, errs, fails, forced: {}, plan: null, tm, matches, classSets, nesting };
+  /* --slim: only what a comparison reads, inside the scope (the analysis fields tm, matches, classSets and nesting go) */
+  const rec = slim ? { id: st.id, partsOnly: !!st.partsOnly, props, mode: full.mode, els: st.partsOnly ? [] : full.els.filter(([k]) => kept(k)), sem: st.partsOnly ? [] : sem.filter(([k]) => kept(k)), parts, errs, fails, forced: {}, plan: null }
+    : { id: st.id, partsOnly: !!st.partsOnly, props, mode: full.mode, els: full.els, sem, parts, errs, fails, forced: {}, plan: null, tm, matches, classSets, nesting };
   if (st.pseudo) {
     const plan = planIn || { fprops: await page.evaluate(() => window.__vb.forcedPropList()), batches: (await page.evaluate(() => window.__vb.plan())).batches.map(b => b.map(({ els, force, region, sib }) => ({ els, force, region, sib })).filter(t => t.els.every(inScope))).filter(b => b.length) };
     rec.plan = plan;
@@ -142,7 +150,7 @@ async function runState(browser, st, pageUrl, custom, planIn, shotsDir, propsIn)
       await quiet();
       const delta = [];
       if (recs) for (const [k, ps, v] of recs) { const b = base.get(k + '|' + ps) || {}, d = {}; let n = 0; for (let i = 0; i < v.length; i++) { const j = fidx[i], bv = j in b ? b[j] : full.mode[j]; if (v[i] !== bv) { d[j] = v[i]; n++; } } if (n) delta.push([k, ps, d]); }
-      rec.forced[bkey] = recs ? delta : 'missing';
+      rec.forced[bkey] = recs ? (slim ? delta.filter(([k]) => kept(k)) : delta) : 'missing';
     }
     await page.evaluate(() => window.__vb.finish()); lap('forced');
   }
@@ -166,11 +174,11 @@ async function capture(name, o = {}) {
   if (o.classmap) classMap = JSON.parse(fs.readFileSync(o.classmap, 'utf8'));
   const file = path.resolve(o.page || path.join(repo, 'dist-test', 'index.html'));
   const html = fs.readFileSync(file, 'utf8'), custom = customProps(html);
-  const dir = path.join(OUT, name), shots = path.join(dir, 'shots');
+  const dir = dirOf(name), shots = path.join(dir, 'shots');
   fs.mkdirSync(shots, { recursive: true });
   const only = o.only ? new RegExp(o.only) : null;
   const list = STATES.filter(s => !only || only.test(s.id));
-  const planDir = o.planFrom ? path.join(OUT, o.planFrom) : null;
+  const planDir = o.planFrom ? dirOf(o.planFrom) : null;
   const server = await serve(file);
   const browser = await pw.chromium.launch();
   const workers = +(o.workers || 6); let next = 0, done = 0; const t0 = Date.now(), problems = [];
@@ -186,9 +194,9 @@ async function capture(name, o = {}) {
     }
   }));
   await browser.close(); server.close();
-  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ page: file, at: new Date().toISOString(), states: list.map(s => s.id) }, null, 1));
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ page: path.relative(repo, file), at: new Date().toISOString(), states: list.map(s => s.id) }, null, 1));
   console.log(`\ncaptured ${list.length} states into ${path.relative(repo, dir)} in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
-  if (problems.length) console.log('setup notes (same in both captures is fine):\n  ' + problems.join('\n  '));
+  if (problems.length) console.log('setup notes (the same in both recordings compares as identical; read them before approving):\n  ' + problems.join('\n  '));
 }
 
 /* absolute values per key|pseudo. Elements inside <head> are left out: they are never rendered, and a new <meta> renumbers them */
@@ -198,18 +206,10 @@ const absolute = rec => { const m = new Map(); for (const [k, ps, d] of rec.els)
 const SEP = String.fromCharCode(0x241f);
 const semFields = d => { const [role, name, text, ...rest] = (d ?? '').split(SEP); const o = { role, name, text }; for (const r of rest) { const i = r.indexOf('='); o[i < 0 ? r : r.slice(0, i)] = i < 0 ? '' : r.slice(i + 1); } return o; };
 async function compare(a, b, o = {}) {
-  const A = path.join(OUT, a), B = path.join(OUT, b), max = +(o.max || 40);
+  const A = dirOf(a), B = dirOf(b), max = +(o.max || 40);
   const ids = fs.readdirSync(A).filter(f => f.endsWith('.json.gz')).map(f => f.slice(0, -8)).filter(id => !o.only || new RegExp(o.only).test(id));
   let states = 0, elRecs = 0, forcedRecs = 0, semRecs = 0, partRecs = 0, diffs = 0; const lines = [], byProp = new Map();
-  /* accepted differences: { state, key, field, why, n }, each a regular expression but why and n */
-  const accepted = o.accept ? JSON.parse(fs.readFileSync(o.accept, 'utf8')).accepted.map(x => ({ ...x, re: [x.state, x.key, x.field].map(r => new RegExp(r || '')), seen: 0 })) : [];
-  /* an accepted screenshot difference says how many pixels it accepts at most (`pixels`), so a later change of any
-     size in that shot is not taken for it (RA-17); one without a bound accepts nothing */
-  const note = (st, s, key, field, amount) => {
-    const hit = key !== undefined && accepted.find(x => x.re[0].test(st) && x.re[1].test(key) && x.re[2].test(field) && (field !== 'pixels' || (typeof x.pixels === 'number' && typeof amount === 'number' && amount <= x.pixels)));
-    if (hit) { hit.seen++; if (field === 'pixels') (hit.shots ||= []).push(`${st} ${amount}`); return; }
-    diffs++; if (lines.length < max) lines.push(st + ': ' + s);
-  };
+  const note = (st, s) => { diffs++; if (lines.length < max) lines.push(st + ': ' + s); };
   for (const id of ids) {
     const fb = path.join(B, id + '.json.gz'); if (!fs.existsSync(fb)) { note(id, 'missing in ' + b); continue; }
     const ra = ungz(path.join(A, id + '.json.gz')), rb = ungz(fb); states++;
@@ -255,24 +255,18 @@ async function compare(a, b, o = {}) {
   if (fs.existsSync(sa)) for (const f of fs.readdirSync(sa)) { if (o.only && !new RegExp(o.only).test(f.replace(/.png$/, ''))) continue; const g = path.join(sb, f); shots++;
     if (!fs.existsSync(g)) { note('shot ' + f, 'missing in ' + b); continue; }
     const x = fs.readFileSync(path.join(sa, f)), y = fs.readFileSync(g); if (!x.equals(y)) pixel.push([f, x, y]); }
+  if (fs.existsSync(sb)) for (const f of fs.readdirSync(sb)) { if (o.only && !new RegExp(o.only).test(f.replace(/.png$/, ''))) continue; if (!fs.existsSync(path.join(sa, f))) note('shot ' + f, 'only in ' + b); }
   if (pixel.length) { const pw = loadPW(), br = await pw.chromium.launch(), pg = await br.newPage();
-    for (const [f, x, y] of pixel) { const n = await pg.evaluate(async ([x, y]) => { const load = s => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = 'data:image/png;base64,' + s; });
+    for (const [f, x, y] of pixel) { const n = await pg.evaluate(async ([x, y, delta]) => { const load = s => new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = 'data:image/png;base64,' + s; });
         const [i1, i2] = await Promise.all([load(x), load(y)]); if (i1.width !== i2.width || i1.height !== i2.height) return `size ${i1.width}x${i1.height} vs ${i2.width}x${i2.height}`;
         const c = new OffscreenCanvas(i1.width, i1.height), g = c.getContext('2d'); g.drawImage(i1, 0, 0); const d1 = g.getImageData(0, 0, c.width, c.height).data; g.clearRect(0, 0, c.width, c.height); g.drawImage(i2, 0, 0); const d2 = g.getImageData(0, 0, c.width, c.height).data;
-        /* rasterising is not bit-exact between runs (a level or two on blurred shadows and gradients): a pixel counts
-           when a channel moves by more than 8 of 255 */
-        let n = 0; for (let i = 0; i < d1.length; i += 4) if (Math.max(Math.abs(d1[i] - d2[i]), Math.abs(d1[i + 1] - d2[i + 1]), Math.abs(d1[i + 2] - d2[i + 2]), Math.abs(d1[i + 3] - d2[i + 3])) > 8) n++; return n; }, [x.toString('base64'), y.toString('base64')]);
-      /* and a few dozen such pixels (antialiasing on an edge) are noise: listed, not counted */
-      if (typeof n === 'string' || n > 64) note(f.replace(/\.png$/, ''), `shot: ${n} pixels differ`, 'shot', 'pixels', n); else if (n) noise.push(`${f}: ${n} pixels`); }
+        /* a pixel counts when a channel moves by more than PIXEL_DELTA of 255 */
+        let n = 0; for (let i = 0; i < d1.length; i += 4) if (Math.max(Math.abs(d1[i] - d2[i]), Math.abs(d1[i + 1] - d2[i + 1]), Math.abs(d1[i + 2] - d2[i + 2]), Math.abs(d1[i + 3] - d2[i + 3])) > delta) n++; return n; }, [x.toString('base64'), y.toString('base64'), PIXEL_DELTA]);
+      /* and NOISE_PIXELS such pixels or fewer (anti-aliasing on an edge) are noise: listed, not counted */
+      if (typeof n === 'string' || n > NOISE_PIXELS) note(f.replace(/\.png$/, ''), `shot: ${n} pixels differ`); else if (n) noise.push(`${f}: ${n} pixels`); }
     await br.close(); }
   console.log(`compared ${states} states, ${elRecs} element records, ${semRecs} role/name/text/attribute records, ${partRecs} part records, ${forcedRecs} forced-state records, ${shots} screenshots`);
-  if (noise.length) console.log('screenshot noise (64 pixels or fewer, ignored): ' + noise.join(', '));
-  if (accepted.length) {
-    console.log('accepted on purpose (' + path.basename(o.accept) + '):');
-    /* a screenshot difference within its bound may also not occur (rasterising an edge is not the same every run): its
-       count is the most it accepts */
-    for (const x of accepted) { const ok = typeof x.pixels === 'number' ? x.seen <= x.n : x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}${x.shots ? ` [screenshots, at most ${x.pixels} pixels: ${x.shots.join(', ')}]` : ''}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
-  }
+  if (noise.length) console.log(`screenshot noise (${NOISE_PIXELS} pixels or fewer, ignored): ` + noise.join(', '));
   if (!diffs) { console.log('RESULT: identical'); return 0; }
   console.log(`RESULT: ${diffs} differences` + (diffs > lines.length ? ` (first ${lines.length} shown)` : ''));
   for (const l of lines) console.log('  ' + l);
@@ -281,7 +275,7 @@ async function compare(a, b, o = {}) {
 }
 
 if (cmd === 'list') { for (const s of STATES) console.log(`${s.id}  ${s.w}x${s.h} ${s.scheme}${s.reduced ? ' reduced' : ''}${s.pseudo ? ' +pseudo' : ''}${s.shot ? ' +shot' : ''}`); console.log(STATES.length + ' states'); }
-else if (cmd === 'capture' && args[1]) await capture(args[1], { page: opt('page'), only: opt('only'), workers: opt('workers'), planFrom: opt('plan-from'), noShots: flag('no-shots'), classmap: opt('classmap') });
-else if (cmd === 'compare' && args[2]) process.exitCode = await compare(args[1], args[2], { max: opt('max'), only: opt('only'), accept: opt('accept') });
+else if (cmd === 'capture' && args[1]) await capture(args[1], { page: opt('page'), only: opt('only'), workers: opt('workers'), planFrom: opt('plan-from'), noShots: flag('no-shots'), classmap: opt('classmap'), quiet: flag('quiet') });
+else if (cmd === 'compare' && args[2]) process.exitCode = await compare(args[1], args[2], { max: opt('max'), only: opt('only') });
 else if (cmd === 'check' && args[1]) { const now = args[1] + '-now'; fs.rmSync(path.join(OUT, now), { recursive: true, force: true }); await capture(now, { page: opt('page'), only: opt('only'), workers: opt('workers'), planFrom: args[1], noShots: flag('no-shots') }); process.exitCode = await compare(args[1], now, { max: opt('max'), only: opt('only') }); }
-else { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 9).join('\n')); process.exitCode = 2; }
+else { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(0, 15).join('\n')); process.exitCode = 2; }

@@ -1,10 +1,9 @@
-// The engine panel and the models (package 5), as scenarios that hold on the concept page too (run them there with
-// --page): each engine's card (its tagline, output rate, songs per Generate, the testing badge), the models' heading
+// The engine panel and the models (package 5), as scenarios: each engine's card (its tagline, output rate, songs per Generate, the testing badge), the models' heading
 // and rows at each tier on each engine, a model row's file, quantisation, size and share of the card, its list and a
 // choice from it (the step named by the model's role, the panel left open, the meter following), the panel's keys with
 // a model row in it, and the VRAM meter's figures: what is loaded, what the next Generate needs, its LEDs and peak, and
-// when a run will be refused or will not fit at once. Each uses only what both pages share (S, render, get, setVal,
-// UNDO, the markup's ids and data-* hooks); an option is found by its words, which are its value in both mocks.
+// when a run will be refused or will not fit at once. An option is found by its words, which are its value in the
+// simulated server.
 
 /* what the panel and the meter show, installed in the page for the checks (which run there): the models heading, each
    row's role, file name, quantisation and size, and the meter's read-out and accessible name */
