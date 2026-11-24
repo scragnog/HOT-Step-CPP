@@ -272,6 +272,7 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | What the queue holds, for the engine log's queue line | the generation package's file | `tellQueue({ rendering, waiting, engine?, loaded? })` (store/notes-logs.ts, package 11); until it is told, the log says idle |
 | A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts); `run(arg, from)` is given what the part chose and the part, whose gesture its change joins: a bespoke part reaches it by `v.act(name, arg)` when its node lists the action |
 | State of its own | `src/app/store/<package>.ts` | its own store; `defineUndoable(name, { read, write })` when Undo covers it |
+| View state a reload brings back (a fold or a section standing open) | its own file, or a part's | `keptState(name, fallback, take)` or `keptFlag(name)` (kit/session.ts): kept with the session under one key, never a step and never in the desk's record; `useKept(k)` in a component. The test layer gives them the concept's names (`testing/compat/fold.ts`) |
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
 | Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
 | Concept globals its scenarios call | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
@@ -672,6 +673,26 @@ says how many pixels it accepts.
   `view.ts ringKeys` (a link to another tier rings a file at its drop zone), the named action `moreRefs`
   (`features/refs-more.tsx`) and `features/hit-areas.ts` (a click in an enlarged pad goes to the nearer control, A-12). Tested by `tools/behaviour/scenarios/37-fix-desk.mjs`, `acceptance/fix-desk.json`,
   `switches/fix-desk.json`.
+- Quick's fold (A-28, Q-05; built after the consolidation round, found missing by the desk's round): `derive/fold.ts`
+  (`FOLD`, the rule's numbers: six shown, from nine tiles, three or more folded; `neverFolded`: the board's module, a
+  source, a module holding a changed value; `foldedOf`; `foldModel`: the tiles drawn and the button's words, "Show 4
+  more: Seed, Takes, …" closed and "Show fewer modules" open, the words added to the core's table as the file loads).
+  `deskModel(ix, desk, mods, open)` takes whether the fold stands open and gives `DeskModel.fold` (null when nothing
+  folds); its `make` carries `open`, as the concept's deskMake carries S.qAll. The note of modules hidden at this tier
+  names no folded module (they are on the desk and in force), and the Concept notes' Quick sentence ("Past six modules,
+  when three or more would be hidden, a button names the rest…") now holds. The button is `desk/Fold.tsx`, drawn by
+  `desk/Desk.tsx` after the tiles and the empty desk, before the parked tray, with the concept's `.moretiles` markup and
+  stylesheet (no rule of the rebuild's own); whether it stands open is `store/fold.ts deskFold`, view state kept with
+  the session through a new registration point, `kit/session.ts keptState` (the concept's sessionState and the quiet
+  keys of its desk save), which Song info's open state uses too (deviation 53 closed). `features/fold.ts` opens the
+  fold where the page sends a person to something it holds: a ring aimed at a folded tile, or a module that arrives
+  alone only to be folded away (FO-1). No factory desk folds on any engine (no engine has enough modules Quick shows);
+  the test build indexes two stand-in modules (`testing/standins.ts`), as the concept's suite registers two, and the
+  test layer's `defineModule` names them. Tested by `tools/test-fold.ts` (in `npm run check`), `scenarios/38-fold.mjs`,
+  `acceptance/fold.json` (with the concept's `01-desk/quick-more-parked-empty` and
+  `08-persistence-cables/reload-keeps-the-desk`, both from fix-core.json's excluded), `switches/fold.json` and
+  `slice-states/37-fold.mjs`. Its motion (the tiles that slide as it opens or folds, the concept's transition) is
+  package 9's.
 
 ## Deviations from the concept's markup
 
@@ -883,8 +904,8 @@ Package 4's:
     and a press takes it out (C-20), as the concept's. **Import latent** takes a file chosen or dropped on it.
 52. **No motion yet**: the box's height eases and a suggestion opens by height in the concept (19-text-boxes.js,
     18-motion.js blockIn); here they change at once (package 9).
-53. **Song info's open state is the card's own**, not kept with the desk (the concept saves S.songInfoOpen); it opens by
-    itself when info arrives from outside, as the concept's does.
+53. **(Closed by the fold: Song info's open state is kept with the session, kit/session.ts, as the concept keeps
+    S.songInfoOpen.)** It opens by itself when info arrives from outside, as the concept's does.
 54. **Compose caption writes the key as the page writes it** ("F# major"); the concept spells it with ♯ and flats
     (Tempo's spellKey, package 3).
 
@@ -942,6 +963,14 @@ The desk's fix round's (numbered FD- so that the round's three shares do not col
   says "Cleared the file"; both offer Undo.
 - FD-6. **The reference blend is a percent everywhere** (Format `percent`), its Also set line too ("Reference blend 95%");
   the concept's Also set line alone writes 0.95.
+
+Quick's fold's (numbered FO-):
+
+- FO-1. **A module that arrives on the desk alone, only to be folded away, opens the fold**, whether it was added (as
+  the concept's flash does) or brought back by Undo or Redo (the concept leaves those folded): nothing just put on the
+  desk is hidden. A make-up that brings several at once (a workflow, a scene) leaves the fold as it is.
+- FO-2. **The fold's open state is view state kept with the session** (`hotstep.create.session`, deviation 5), not part
+  of the desk's record: a workflow, a revision, a draft or another tab's desk never opens or closes it.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
@@ -1033,6 +1062,7 @@ feature on; the verdict for each switch is the one the whole acceptance would gi
 | 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
 | 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
+| Quick's fold (after the consolidation round) | `derive/fold.ts`, `desk/Fold.tsx`, `store/fold.ts`, `features/fold.ts`, `kit/session.ts` (the kept-state registration point), `testing/standins.ts`, `testing/compat/fold.ts`, `tools/test-fold.ts`, its acceptance, switches, states | `keptFlag('desk.fold')`, `keptFlag('prompt.songInfo')` | `derive/models.ts deskModel` (`open`, `fold`), `desk/Desk.tsx` (draws the button, passes `open`), `features/dnd.tsx` and `model/index.ts` (one line each), `parts/PromptBox.tsx` (Song info kept), `switches/4-fields.json` (its Song info switch's text) |
 | 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log); at the coordinator's request, unique ids in drawings: `shell/engines.ts` and `thumbs/index.ts` (a place per drawing), their callers `shell/TopBar.tsx`, `workflows/List.tsx`, `workflows/Drafts.tsx`, `features/picker.tsx`, `features/dnd.tsx` (one argument each) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
