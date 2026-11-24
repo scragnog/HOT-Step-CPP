@@ -135,7 +135,7 @@ export const Yue2TokenizeCard: React.FC<{ datasetId: string; status: Yue2ArStatu
   const stage = status.stages.tokenize;
   const tokenizer: Yue2TokenizerId = stage.tokenizer ?? tokenizerPick.choice.training;
   const choices = stage.tokenizers
-    ?? (['v9', 'wannabe-v1', 'wannabe-v2'] as const).map(id => ({ id, label: YUE2_TOKENIZER_LABELS[id], installed: true, registryId: '' }));
+    ?? (Object.keys(YUE2_TOKENIZER_LABELS) as Yue2TokenizerId[]).map(id => ({ id, label: YUE2_TOKENIZER_LABELS[id], installed: true, registryId: '' }));
   const pickTokenizer = async (id: Yue2TokenizerId) => {
     await tokenizerPick.set({ training: id });
     onDone();  // the status names the chosen file and what is missing for it

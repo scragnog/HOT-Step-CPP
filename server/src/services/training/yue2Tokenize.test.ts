@@ -9,9 +9,12 @@ test('a cache is ready only for the tokenizer that made its codes', () => {
   assert.equal(yue2CodesReady(done('yue2-tok-f16.gguf'), 'wannabe-v2'), false);
   assert.equal(yue2CodesReady(done('yue2-wannabe-v2-f16.gguf'), 'wannabe-v2'), true);
   assert.equal(yue2CodesReady(done('yue2-wannabe-v2-f16.gguf'), 'wannabe-v1'), false);
+  assert.equal(yue2CodesReady(done('yue2-wannabe-v3-f16.gguf'), 'wannabe-v3'), true);
+  assert.equal(yue2CodesReady(done('yue2-wannabe-v3-f16.gguf'), 'wannabe-v2'), false);
   assert.equal(yue2CodesReady(done(), 'v9'), true);  // stamped before the choice existed
   assert.equal(yue2CodesReady({ done: false }, 'v9'), false);
   assert.equal(yue2TokenizerOfFile('C:/m/yue2/yue2-wannabe-v1-f16.gguf'), 'wannabe-v1');
+  assert.equal(yue2TokenizerOfFile('C:/m/yue2/yue2-wannabe-v3-f16.gguf'), 'wannabe-v3');
   assert.equal(yue2TokenizerOfFile('something-else.gguf'), '');
 });
 

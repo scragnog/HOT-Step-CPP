@@ -1,7 +1,7 @@
 // yue2Tokenizer.ts — which real-audio tokenizer turns audio into YuE2 codes.
 //
 // v9 (Mothersuperior's head, the default) or ManyOtherFunctions'
-// WannabeTokenizer V1/V2. Stored on the server (preferences family
+// WannabeTokenizer V1 to V3. Stored on the server (preferences family
 // `yue2-tokenizer`): `training` is what the tokenize stage uses for a dataset's
 // codes, `cover` what a cover's Follow-source guide uses. Adapters trained on
 // WannabeTokenizer codes train and render without the v9 companion decoder;
@@ -19,6 +19,7 @@ export const YUE2_TOKENIZER_LABELS: Record<Yue2TokenizerId, string> = {
   v9: 'v9 (Mothersuperior)',
   'wannabe-v1': 'WannabeTokenizer V1',
   'wannabe-v2': 'WannabeTokenizer V2',
+  'wannabe-v3': 'WannabeTokenizer V3',
 };
 
 export function useYue2Tokenizer(): { choice: Yue2TokenizerBody; set: (next: Partial<Yue2TokenizerBody>) => Promise<void> } {

@@ -118,8 +118,9 @@ export async function buildYue2Guide(srcPath: string, log: (msg: string) => void
     '--models', config.aceServer.models];
   const ff = getFFmpegPath();
   if (ff) args.push('--ffmpeg', ff);
-  // WannabeTokenizer reads a track at its own level (its reference never
-  // normalises), so the engine's -14 LUFS default is turned off for it.
+  // WannabeTokenizer's reference never brings a track to -14 LUFS (V3 levels
+  // into its own band, which the engine reads from the GGUF), so the engine's
+  // -14 LUFS default is turned off for it.
   if (tokenizer !== 'v9') args.push('--tok', resolveYue2TokenizerModel(tokenizer), '--lufs', '0');
   log(`[YuE2] Reading the source for Follow source (${YUE2_TOKENIZERS[tokenizer].label}): ${path.basename(srcPath)}`);
   const started = Date.now();

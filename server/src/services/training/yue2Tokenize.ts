@@ -62,6 +62,7 @@ export const YUE2_TOKENIZERS: Record<Yue2TokenizerId, { prefix: string; registry
   v9: { prefix: 'yue2-tok-', registryId: 'yue2-tok-f16', label: 'v9 (Mothersuperior)' },
   'wannabe-v1': { prefix: 'yue2-wannabe-v1-', registryId: 'yue2-wannabe-v1-f16', label: 'WannabeTokenizer V1' },
   'wannabe-v2': { prefix: 'yue2-wannabe-v2-', registryId: 'yue2-wannabe-v2-f16', label: 'WannabeTokenizer V2' },
+  'wannabe-v3': { prefix: 'yue2-wannabe-v3-', registryId: 'yue2-wannabe-v3-f16', label: 'WannabeTokenizer V3' },
 };
 
 /** Which tokenizer a file name belongs to (the manifest's codec_ids_tokenizer),

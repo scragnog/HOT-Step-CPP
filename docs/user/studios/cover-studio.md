@@ -744,10 +744,13 @@ it; the composer then leans toward those. **Source adherence** (0 to 1, default
 0.5) is the share of each moment taken from the source: on a 20-second test, 0.5
 kept 83% of the render on the source's top codes and 1.0 kept all of it.
 **Source tokenizer**, below it, picks the real-audio tokenizer that reads the
-recording: v9 (`yue2-tok-f16`, the default) or WannabeTokenizer V1 or V2 by
-ManyOtherFunctions (`yue2-wannabe-v1-f16`, `yue2-wannabe-v2-f16`). Each is a
-separate download from the Model Manager. WannabeTokenizer reads the recording at
-its own level, where v9 first brings it to -14 LUFS. Reading a recording takes a
+recording: v9 (`yue2-tok-f16`, the default) or WannabeTokenizer V1, V2 or V3 by
+ManyOtherFunctions (`yue2-wannabe-v1-f16`, `yue2-wannabe-v2-f16`,
+`yue2-wannabe-v3-f16`). Each is a separate download from the Model Manager. v9
+first brings the recording to -14 LUFS. WannabeTokenizer V1 and V2 read it at its
+own level. V3 moves a recording whose gated RMS level is outside -19 to -13 dBFS
+to the nearer edge of that range, with one gain for the whole song, and reads
+anything inside it as it is. Reading a recording takes a
 few seconds the first time and is cached after that, separately per tokenizer. Follow
 source switches itself off while the pitch is shifted or a BPM is set, because
 the guide carries the source's own key and timing and would pull the render back
