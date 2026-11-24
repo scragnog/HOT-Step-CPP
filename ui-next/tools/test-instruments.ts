@@ -6,7 +6,7 @@
 //   node tools/test-instruments.ts        exit 1 on a failure
 
 import { DEFINITIONS } from '../src/definitions/index.ts';
-import type { EngineId, Node, Tier } from '../src/definitions/types.ts';
+import type { EngineId, Node, Tier, Value } from '../src/definitions/types.ts';
 import {
   bindPart, capHas, capToggle, distOf, indexOf, nodeKeys, nodeShown, partAct, partModel, regionMove, seedTyped, sigmasOf, takesCost, wheelWalk,
   type Change, type Desk, type Msg,
@@ -33,7 +33,7 @@ const model = (id: string, part: string, d: Desk) => partModel(ix, def(id), node
 /** Acts on a part, as the page does, and returns the steps it took and what it said. */
 function act(id: string, part: string, d0: Desk, name: string, arg?: unknown) {
   let d = d0; const steps: Change[] = [], told: string[] = [];
-  const props = bindPart(ix, def(id), node(id, part), () => d, c => { steps.push(c); d = { ...d, vals: { ...d.vals, ...Object.fromEntries(Object.entries(c.vals).filter(([, v]) => v !== null)) }, auto: { ...d.auto, ...c.auto }, state: { ...d.state, ...c.state } }; });
+  const props = bindPart(ix, def(id), node(id, part), () => d, c => { steps.push(c); d = { ...d, vals: { ...d.vals, ...Object.fromEntries(Object.entries(c.vals).filter((e): e is [string, Value] => e[1] !== null)) }, auto: { ...d.auto, ...c.auto }, state: { ...d.state, ...c.state } }; });
   const done = partAct(ix, props.node, props, d, name, arg, m => told.push(s(m)));
   return { steps, told, done, desk: d };
 }
@@ -145,10 +145,10 @@ function act(id: string, part: string, d0: Desk, name: string, arg?: unknown) {
   const d = distOf(0, 1);
   ok('at rest the two curves are one', d.before === d.after && d.zero === 150);
   ok('shifted, the green curve moves', distOf(1, 1).after !== d.before);
-  ok('a key moves the region a hundredth', J(regionMove(0.35, 0.55, { key: 'ArrowRight' }).map(x => +x.toFixed(4))) === J([0.36, 0.56]));
+  ok('a key moves the region a hundredth', J(regionMove(0.35, 0.55, { key: 'ArrowRight' })!.map(x => +x.toFixed(4))) === J([0.36, 0.56]));
   ok('Shift moves its end, never narrower than a fiftieth', J(regionMove(0.35, 0.36, { key: 'ArrowLeft', shift: true })) === J([0.35, 0.37]));
-  ok('Home and End keep its length (L-36)', J(regionMove(0.3, 0.5, { key: 'End' }).map(x => +x.toFixed(4))) === J([0.8, 1]));
-  ok('a drag inside carries it whole', J(regionMove(0.3, 0.5, { kind: 'body', x0: 0.4, x: 0.6 }).map(x => +x.toFixed(4))) === J([0.5, 0.7]));
+  ok('Home and End keep its length (L-36)', J(regionMove(0.3, 0.5, { key: 'End' })!.map(x => +x.toFixed(4))) === J([0.8, 1]));
+  ok('a drag inside carries it whole', J(regionMove(0.3, 0.5, { kind: 'body', x0: 0.4, x: 0.6 })!.map(x => +x.toFixed(4))) === J([0.5, 0.7]));
   ok('a drag outside draws a new one', J(regionMove(0.3, 0.5, { kind: 'out', x0: 0.8, x: 0.6 })) === J([0.6, 0.8]));
   const src = { song: 1, title: 'S', style: 'lo-fi', dur: 100, hue: 215 };
   const r = act('repaint', 'repaintRegion', desk('ace', 'studio', ['repaint'], {}, {}, { source: src, region: { start: 35, end: 55 } }), 'move', { key: 'ArrowRight' });
