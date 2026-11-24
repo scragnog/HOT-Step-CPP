@@ -39,6 +39,41 @@ Each record also keeps, for analysis, which elements every selector of the style
 lists seen on elements (`classSets`) and, with `--classmap`, which named groups of classes were seen inside which
 (`nesting`). Those are what you need to argue that two rules can never meet on one element.
 
+## Every set at once (the rebuild)
+
+In the rebuild, each work package adds a visual set: a file of `slice-states/` with its states, the regions they
+compare (`SCOPES`) and, last, its set:
+
+```
+export const VISUAL_SET = { name: 'models', only: '^models-', scope: 'models', accept: 'models-accepted.json' };
+```
+
+`only` picks the set's states by id (from any file: the slice's set takes `01-parts.mjs`'s `slice-parts-` states too),
+`scope` is optional (a set without one compares every element of its states, or their parts), `accept` is the set's
+accepted differences beside this README. `visual-all.mjs` finds every set and runs each the way its package did:
+
+```
+npm run visual:all                                   # every set: capture the concept and the rebuild, compare
+npm run visual:all -- --reuse-concept                # use the kept concept recordings (below)
+npm run visual:all -- --only "^(models|overlays)$"   # some sets, by name
+npm run visual:all -- --list                         # the sets, their states, scopes and accepted files
+npm run visual:all -- --page some.html               # another build of the rebuild (default dist-test/index.html)
+npm run visual:all -- --concept <file>               # default $HOTSTEP_CONCEPT/hotstep-tiers.html, else HOT-Step-UI beside the repository
+npm run visual:all -- --workers 3                    # pages at once (default: half the machine's threads, 6 on 12)
+```
+
+For each set it runs `vb.mjs capture` on the concept with the set's `--only` and `--scope`, `capture` on the rebuild
+with the concept's plan (`--plan-from`), and `compare` with `--scope` and `--accept`; it prints one line per set (its
+states, and `identical` or the number of differences beyond the accepted ones, with the first few and the log's path)
+and a verdict, and exits 1 if any set differs or a state of `slice-states/` belongs to no set. It builds the test page
+first when it is missing or older than the sources (`tools/test-build.mjs`). Logs go to `out/all-logs/`.
+
+The concept page does not change, so its recordings are kept (`out/all-concept-<set>-<key>`, one per set) and
+`--reuse-concept` uses one instead of capturing again. The key is a hash of the concept file's content and of what else
+decides the recording: the set's name, states expression and scope, the files its states come from, `slice-states.mjs`,
+`vb.mjs`, `page-lib.js` and Playwright's version; a change to any of them captures the concept again. A package adding a
+set adds nothing to the runner.
+
 ## What it covers
 
 `states.mjs` is the matrix; add a state there when you add a screen or a state the matrix cannot reach. Today it has:

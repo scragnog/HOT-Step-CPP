@@ -38,3 +38,7 @@ export const STATES = [
 
 /** The regions compared: the notes drawer and its scrim, the engine log, the VRAM meter that opens it. */
 export const SCOPES = { notes: ['#notes', '#notesScrim', '#notesClose', '#notesTitle', '#logs', '#logEngine', '#logsClose', '#logText', '#engMeter', '#emBar', '#emRead', '#emUse'] };
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'notes', only: '^nl11-', scope: 'notes', accept: 'notes-accepted.json' };

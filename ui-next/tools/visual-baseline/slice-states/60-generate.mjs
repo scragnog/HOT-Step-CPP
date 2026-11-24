@@ -57,3 +57,7 @@ export const STATES = [
 /** The regions compared, by their keys: the go bar and what it holds (the player, the line, Drafts, Cancel,
  *  Generate), Latest and its grid, the song menu, the newest toast and the one above it. */
 export const SCOPES = { generate: ['#centre>div:4', '#player', '#meter', '#draftsBtn', '#cancelGo', '#go', '#centre>section:5', '#songCount', '#latest', '#menu', '#toast', 'html>body:1>div:13'] };
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'generate', only: '^gen-', scope: 'generate', accept: 'generate-accepted.json' };

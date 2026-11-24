@@ -54,3 +54,7 @@ export const STATES = [
   st('i3c-adhere-lab', scene('yue', 'lab', ['adhere', 'sampler'], { 'yue.pcfg': 1.5 }), lab('adhere')),
   st('i3c-yuebatch-lab-dark', scene('yue', 'lab', ['yuebatch', 'takes'], { 'yue.chunk': 60 }), lab('yuebatch'), dark),
 ];
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'instruments-3c', only: '^i3c-', accept: 'instruments-3c-accepted.json' };

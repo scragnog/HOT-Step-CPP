@@ -71,6 +71,58 @@ N, but it passes"): whoever lands that package removes the `waiting` field, so e
 `switches.mjs` ignores waiting scenarios altogether, so a feature switched off is caught only by a scenario that passes
 with the feature on. Keep the list short: a scenario that fails for any other reason is a failure, not a wait.
 
+## Switches: every feature is caught by a scenario
+
+In the rebuild, each work package lists its features in `switches/<package>.json`, each with one small change to its
+source that switches it off (`{ feature, file, find, replace }`; the test build applies it when `HS_SWITCH` names the
+feature, `vite.config.ts`, into `dist-switch/`). `switches.mjs` proves the acceptance has teeth: each feature switched
+off must make at least one scenario fail that passes with the feature on.
+
+```
+npm run switches:apply                               # no builds: each switch's text is found exactly once (a second)
+npm run switches                                     # every switch, built and tried (below)
+npm run switches -- --package "^(slice|5-models)$"   # the switches of some packages (switches/<name>.json)
+npm run switches -- --only "^cancel"                 # the switches whose feature matches
+npm run switches -- --whole                          # the old way: the whole acceptance for every switch
+```
+
+**`--applies`** (`npm run switches:apply`) builds nothing: for every switch, and every planted defect of
+`tools/visual-baseline/plants/`, it applies the changes as the build does (in order, with the file's line endings) and
+checks that each `find` is found exactly once in its file and changes something. A merge breaks this more often than
+anything else (a switched line reworded by another package), and the check takes under a second; run it after every
+merge. It cannot see a file the build does not include; the full run can.
+
+**The full run** builds the page once per switch (about a second) and runs scenarios on it, which is where the time
+goes. A switch need not be tried against the whole acceptance, only against the scenarios that can catch it, so each is
+tried in stages, stopping at the first that catches it:
+
+1. **recorded**: the scenarios that caught it the last time (`caught/<package>.json`, which every run writes);
+2. **own**: the rest of its own package's acceptance (`acceptance/<package>.json`);
+3. **rest**: the rest of the whole acceptance, one other package's acceptance file at a time.
+
+A scenario counts as catching a switch only if it fails with the feature off **and passes with it on**: each scenario
+that fails on a switched build is run once on the test build (`dist-test/index.html`, built first when missing or
+older than the sources) to know, and one that fails there too is named on the switch's line and not counted. A
+scenario the harness could not run (the browser gone, the page not loaded) is run again; if it does not run twice it
+counts neither way, and a switch nothing else catches is reported as not known, which fails the run. Waiting
+scenarios catch nothing. A stage that runs fewer scenarios can only miss a catch, never invent one, and a miss sends the
+switch on to the next stage, so a switch is reported caught exactly when the whole acceptance would catch it; what
+differs from `--whole` is only how many of its catching scenarios are listed. Every switch gets a line (caught or not,
+at which stage, by which scenarios, how many were run, how long it took), the summary counts the stages, and
+`out/switches-last.json` keeps every switch's full result. `--scenarios <regex>` limits every stage to some scenarios
+(and then nothing is recorded); `--no-record` leaves `caught/` as it is; `--workers` is passed to `run.mjs` (default: half the machine's threads, 6 on a 12-thread machine; lower it to leave more
+for other work).
+
+`caught/<package>.json` is written only when what caught a switch changes; commit it with the package's work. A package
+that adds switches adds nothing else: a switch with no record starts at its own package's acceptance.
+
+Measured on the slice's and package 5's 28 switches (24 November 2026): with `caught/` filled, 4 min 20 s at 6 workers
+(about 9 s a switch, 2.9 scenarios run for each); starting from each package's own acceptance (`--fresh`), 7 min 25 s
+at 6 workers, 16 min 20 s at 2. The old way took 6 to 7 minutes a switch at 2 workers (70 min for the slice's 11), and
+every scenario the staged run named as a catcher was one the old way named too. For all 387 switches that is about an
+hour once `caught/` is filled, against about 18 hours for the old way at 6 workers (a whole acceptance is about
+2 min 40 there).
+
 ## Proving a refactor changes nothing
 
 ```

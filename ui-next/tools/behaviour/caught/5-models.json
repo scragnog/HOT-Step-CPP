@@ -1,0 +1,22 @@
+{
+ "about": "The scenarios that caught each switch of switches/5-models.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "model rows": ["15-other-engines/model-list-as-wide-as-its-row","35-models/a-model-row-names-its-file-and-its-share-of-the-card","35-models/choosing-a-model-from-its-list","35-models/models-follow-the-tier-and-the-engine","35-models/the-panel-follows-an-engine-switch","35-models/the-panels-keys-with-a-model-row-in-it"],
+  "panel models": ["15-other-engines/model-list-as-wide-as-its-row","35-models/a-model-row-names-its-file-and-its-share-of-the-card","35-models/choosing-a-model-from-its-list","35-models/models-follow-the-tier-and-the-engine","35-models/the-panel-follows-an-engine-switch","35-models/the-panels-keys-with-a-model-row-in-it"],
+  "models service": ["15-other-engines/model-list-as-wide-as-its-row","21-chrome-round5/model-steps-named-by-role","35-models/a-model-row-names-its-file-and-its-share-of-the-card","35-models/choosing-a-model-from-its-list","35-models/models-follow-the-tier-and-the-engine","35-models/the-panel-follows-an-engine-switch","35-models/the-panels-keys-with-a-model-row-in-it","35-models/the-vram-meter-adds-up-the-engine","35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "fixed parts": ["35-models/choosing-a-model-from-its-list","35-models/the-panel-follows-an-engine-switch","35-models/the-vram-meter-adds-up-the-engine","35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "take cost": ["35-models/choosing-a-model-from-its-list","35-models/the-vram-meter-adds-up-the-engine","35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "refused run": ["35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "selected file": ["21-chrome-round5/model-steps-named-by-role","35-models/a-model-row-names-its-file-and-its-share-of-the-card","35-models/choosing-a-model-from-its-list","35-models/models-follow-the-tier-and-the-engine","35-models/the-panel-follows-an-engine-switch","35-models/the-vram-meter-adds-up-the-engine","35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "model roles": ["35-models/a-model-row-names-its-file-and-its-share-of-the-card","35-models/choosing-a-model-from-its-list","35-models/models-follow-the-tier-and-the-engine","35-models/the-panel-follows-an-engine-switch"],
+  "card words": ["35-models/engine-cards-say-what-each-engine-is"],
+  "card specs": ["35-models/engine-cards-say-what-each-engine-is"],
+  "list keeps panel": ["35-models/choosing-a-model-from-its-list"],
+  "panel key guard": ["35-models/the-panels-keys-with-a-model-row-in-it"],
+  "meter leds": ["35-models/the-vram-meter-adds-up-the-engine"],
+  "meter read": ["35-models/the-vram-meter-says-when-a-run-will-not-fit"],
+  "quick models": ["35-models/models-follow-the-tier-and-the-engine"],
+  "narrow strip": ["35-models/a-narrow-panel-brings-its-engine-into-view"],
+  "model names whole": ["15-other-engines/switch-toast-names-models-and-counts-settings"]
+ }
+}

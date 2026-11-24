@@ -31,7 +31,11 @@ const PAGE = path.resolve(opt('page', path.join(repo, 'dist-test', 'index.html')
 const CONCEPT = opt('concept', 'C:/Users/sneth/misc/HOT-Step-UI/hotstep-tiers.html');
 const OUT = path.join(here, 'out', 'gallery'); fs.mkdirSync(OUT, { recursive: true });
 
-const serve = file => new Promise(res => { const body = fs.readFileSync(file); const s = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(body); }); s.listen(0, '127.0.0.1', () => res({ url: `http://127.0.0.1:${s.address().port}/p.html`, close: () => s.close() })); });
+/* the ports Chromium refuses to load from (net::ERR_UNSAFE_PORT, its kRestrictedPorts): the system can hand one out
+   for port 0 (6669 was, and every scenario of that run failed at page.goto), so the server listens again elsewhere */
+const UNSAFE_PORTS = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+const listenSafe = srv => new Promise(res => { const go = () => srv.listen(0, '127.0.0.1', () => { if (!UNSAFE_PORTS.has(srv.address().port)) return res(srv.address().port); srv.close(() => go()); }); go(); });
+const serve = file => new Promise(res => { const body = fs.readFileSync(file); const s = http.createServer((q, r) => { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(body); }); listenSafe(s).then(port => res({ url: `http://127.0.0.1:${port}/p.html`, close: () => s.close() })); });
 
 /* a part's root on the page, by its markup */
 const ROOTS = { newPart: '.zz-new', knob: '.kn', ledButton: '.led-btn', segmented: '.seg', pick: '.pk-lcdwrap', choiceRow: '.qchoice', textField: 'input[data-bind]', meter: '.vu', note: '.lbl:not([data-seam]), .pnote', lcdValue: '.bigval', button: '.pbtn', powerButton: '.master', textArea: 'textarea', xyPad: '.xy', labelled: '.foot-ctl, .lcdsel, .ts, .dice-cap, .endings, .tk-pair, .ad-foot, .pc-i' };
