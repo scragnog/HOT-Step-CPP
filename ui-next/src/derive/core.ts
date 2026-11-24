@@ -86,7 +86,7 @@ export interface Desk {
   /** The lists the server gives for server-listed choices (parts.ts OPTION_SOURCES), with their words, so a value
    *  from one is written by its name ("DPM++ 3M" for dpm3m). A model bucket's list is the engine's own, under
    *  `models.<engine>.<bucket>` (listKey), and each file carries its size in GB. */
-  lists?: { [source: string]: { value: string | number; label: string; gb?: number }[] };
+  lists?: { [source: string]: { value: string | number; label: string; gb?: number; kind?: string }[] };
   /** What the VRAM figures are worked out from beside the model files' sizes (derive/vram.ts): the card, and what
    *  each engine loads besides its model files and costs per take. Told by the models service. */
   vram?: VramFigures;

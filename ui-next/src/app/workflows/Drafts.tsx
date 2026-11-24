@@ -56,7 +56,7 @@ function DraftsList() {
       <div className="drafts" ref={list}>
         {m.rows.length ? m.rows.map((d, i) => (
           <div key={d.id} className="draft">
-            <span className="rev-eng" style={{ '--ec': ENGINE_COLOUR[d.engine] } as CSSProperties} title={engineName(d.engine)} dangerouslySetInnerHTML={{ __html: logoOf(d.engine, 12) }} />
+            <span className="rev-eng" style={{ '--ec': ENGINE_COLOUR[d.engine] } as CSSProperties} title={engineName(d.engine)} dangerouslySetInnerHTML={{ __html: logoOf(d.engine, 12, `draft ${d.id}`) }} />
             <span className="dr-t"><b title={say(d.title)}>{say(d.title)}</b><small>{say(d.sub)}</small></span>
             <button type="button" className="small-btn" data-draftload={i} {...(d.other ? { title: say({ id: 'draft.load.title', slots: { engine: engineName(d.engine) } }) } : {})} onClick={() => { closePop(false); loadDraft(d.id); }}>{say(ui('draft.load'))}</button>
             <button type="button" className="jump ico-btn" data-draftdel={i} aria-label={say({ id: 'draft.delete.label', slots: { name: d.title } })} title={say(ui('draft.delete'))}

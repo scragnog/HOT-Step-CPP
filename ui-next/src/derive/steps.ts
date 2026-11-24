@@ -96,7 +96,8 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
     if (!def) throw new Error(`${n.key} has no step "${n.step}"`);
     const slots: { [k: string]: Slot } = { ...n.slots };
     if (ix.params.has(n.key)) slots.name = stepName(ix, n.key, after);
-    if (ix.states.has(n.key)) { const s = ix.states.get(n.key)!.s; slots.noun = stateWords(ix, n.key).noun; slots.from = stateText(ix, n.key, before); slots.to = stateText(ix, n.key, after); void s; }
+    /* a state's step says its value before and after, unless the part says them (a phase window's span) */
+    if (ix.states.has(n.key)) { slots.noun = stateWords(ix, n.key).noun; if (!('from' in slots)) slots.from = stateText(ix, n.key, before); if (!('to' in slots)) slots.to = stateText(ix, n.key, after); }
     const label = fillMsg(ix, stepKey(ix, n.key, n.step), stepSays(def), after);
     return { label: { ...label, slots: { ...label.slots, ...slots } }, put };
   }

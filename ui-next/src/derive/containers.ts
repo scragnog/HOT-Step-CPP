@@ -9,7 +9,7 @@ import type { Node } from '../definitions/types.ts';
 import { type Desk, type Index, editsOf, has, nodeAt } from './core.ts';
 import { nodeShown } from './desk.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
-import { childKeys, nodeWord, paramWords } from './strings.ts';
+import { childKeys, forcedOf, nodeWord, paramWords } from './strings.ts';
 import { dimOf } from './view.ts';
 
 export interface KidModel {
@@ -26,6 +26,8 @@ export interface KidModel {
   extra: boolean;
   /** The parameters it edits, or its own children edit, on the engine in use (a guard's line: its penalty first). */
   keys: string[];
+  /** A choice it edits is run at another value meanwhile (ParamFace.forced): its pairing is marked forced. */
+  forced?: true;
 }
 
 /** A container's children on the desk, in the order the renderer draws them. `node` is the container's node as the
@@ -41,6 +43,7 @@ export function kidsOf(ix: Index, node: Node, desk: Desk, key: string): KidModel
       inner: at ? (at.children ?? []).filter(g => nodeShown(ix, g, desk)).map(g => g.part) : [],
       extra: !!c.tiers && (!node.tiers || node.tiers.some(t => !c.tiers!.includes(t))),
       keys: at ? [...editsOf(at), ...(at.children ?? []).flatMap(g => editsOf(g))].filter(x => has(ix, x, desk.engine)) : [],
+      ...(at && [...editsOf(at), ...(at.children ?? []).flatMap(g => editsOf(g))].some(x => forcedOf(ix, x, desk)) ? { forced: true as const } : {}),
     };
   });
 }

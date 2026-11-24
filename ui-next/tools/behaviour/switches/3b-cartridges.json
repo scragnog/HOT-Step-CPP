@@ -1,0 +1,281 @@
+{
+ "about": "Package 3b's features (the cartridges, the adapter list, a choice run at another value, the XY pad's off rail and fade), each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+ "switches": [
+  {
+   "feature": "carts part",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "  if (!m) return null;",
+   "replace": "  return null;"
+  },
+  {
+   "feature": "carts flat",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "  if (m.look === 'flat') {",
+   "replace": "  if (m.look === 'flat' && m.carts.length > 9) {"
+  },
+  {
+   "feature": "carts art",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "<div className={`label-art${art.still ? ' still' : ''}`} data-adart={key} style={(art.spin ? { '--p': art.p, '--spin': art.spin } : { '--p': art.p }) as unknown as CSSProperties}><CartArt a={art} /></div>",
+   "replace": "<div className=\"label-art\" data-adart={key}><CartArt a={art} /></div>"
+  },
+  {
+   "feature": "carts names",
+   "file": "src/derive/cartridges.ts",
+   "find": "  return s.split(/(?<=[-_.])/);",
+   "replace": "  return [s.toUpperCase()];"
+  },
+  {
+   "feature": "carts kinds",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const named = !quick && (!s.switchHere || !!s.planner);",
+   "replace": "  const named = false;"
+  },
+  {
+   "feature": "carts max",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const max = quick ? 1 : s.adv1 ? kinds.length : 1, shown = slots.slice(0, max);",
+   "replace": "  const max = 3, shown = slots.slice(0, max);"
+  },
+  {
+   "feature": "carts one",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const one = !quick && shown.length === 1 && !stacked;",
+   "replace": "  const one = false;"
+  },
+  {
+   "feature": "carts side words",
+   "file": "src/derive/cartridges.ts",
+   "find": "    note: max > 1 || !s.switchHere ? sideWords ?? null : null,",
+   "replace": "    note: null,"
+  },
+  {
+   "feature": "carts second",
+   "file": "src/derive/cartridges.ts",
+   "find": "    second: s.switchHere && !s.adv1 && slots.length === 1 ? { label: kindAt(1) ? msg('carts.second.kind', { kind: kindAt(1) }) : msg('carts.second'), tip: msg('carts.second.tip') } : null,",
+   "replace": "    second: null,"
+  },
+  {
+   "feature": "carts sends",
+   "file": "src/derive/cartridges.ts",
+   "find": "      eff: stacked && blend ? msg('carts.sends', { v: eff(i).toFixed(2) }) : null, phase,",
+   "replace": "      eff: null, phase,"
+  },
+  {
+   "feature": "carts unused",
+   "file": "src/derive/cartridges.ts",
+   "find": "    return { text: msg('carts.unused.single', { names, n: rest.length, stack: pw.label, single }), stack: { label: formatMsg(ix, s.adv, desk, s.stackedValue), value: s.stackedValue, key: s.adv } };",
+   "replace": "    return null;"
+  },
+  {
+   "feature": "carts away",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const away = String(factOf(ix, 'adaptersAway', desk) ?? '').replace(/^\\s*·\\s*/, '');",
+   "replace": "  const away = '';"
+  },
+  {
+   "feature": "away told",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const away = Object.entries(book.stash).filter(([e, st]) => e !== engine && Array.isArray(st.state?.[key]) && (st.state[key] as Json[]).length);",
+   "replace": "  const away: [string, { state: { [k: string]: Json } }][] = [];"
+  },
+  {
+   "feature": "carts more",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const more = quick && slots.length > 1 ? msg(",
+   "replace": "  const more = quick && slots.length > 9 ? msg("
+  },
+  {
+   "feature": "carts housing",
+   "file": "src/derive/cartridges.ts",
+   "find": "const housingOf = (kind: string | Slot): 'sound' | 'plan' => (/^(Planner|AR\\b|Global)/.test(typeof kind === 'string' ? kind : (kind as Msg).en ?? '') ? 'plan' : 'sound');",
+   "replace": "const housingOf = (kind: string | Slot): 'sound' | 'plan' => (kind === '-' ? 'plan' : 'sound');"
+  },
+  {
+   "feature": "carts list filter",
+   "file": "src/derive/cartridges.ts",
+   "find": "  const files = (desk.lists?.[`adapters.${desk.engine}.${n}`] ?? []).filter(x => !s.slots.some(y => y.file === String(x.value)) && !(plan && x.kind === 'DoRA'));",
+   "replace": "  const files = (desk.lists?.[`adapters.${desk.engine}.${n}`] ?? []);"
+  },
+  {
+   "feature": "carts load stacks",
+   "file": "src/derive/cartridges.ts",
+   "find": "    const also = s.switchHere && !s.adv1 && s.slots.length === 1 && s.adv && s.stackedValue !== null ? { [s.adv]: s.stackedValue } : undefined;",
+   "replace": "    const also = undefined;"
+  },
+  {
+   "feature": "carts strengths up",
+   "file": "src/derive/cartridges.ts",
+   "find": "    for (let k = i; k < keys.length; k++) {",
+   "replace": "    for (let k = keys.length; k < keys.length; k++) {"
+  },
+  {
+   "feature": "carts renumber",
+   "file": "src/derive/cartridges.ts",
+   "find": "    if (lyr !== null && s.lyrics) also[s.lyrics] = lyr;",
+   "replace": "    void lyr;"
+  },
+  {
+   "feature": "carts removed toast",
+   "file": "src/derive/cartridges.ts",
+   "find": "    x.tell(msg(directivesOf(left).some(Boolean) ? 'carts.removed.renumbered' : 'carts.removed', { file: gone.file }), true);",
+   "replace": "    void left;"
+  },
+  {
+   "feature": "phase keys",
+   "file": "src/derive/cartridges.ts",
+   "find": "    out[h] = clamp(ph[h] + d, h ? ph[0] + 5 : 0, h ? 100 : ph[1] - 5);",
+   "replace": "    out[h] = clamp(ph[h] + d * 2, 0, 100);"
+  },
+  {
+   "feature": "phase drag",
+   "file": "src/derive/cartridges.ts",
+   "find": "    if (h === 0) out[0] = Math.min(v, ph[1] - 5); else out[1] = Math.max(v, ph[0] + 5);",
+   "replace": "    out[0] = v;"
+  },
+  {
+   "feature": "phase drawn",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "        {c.phase ? phase(c) : null}",
+   "replace": "        {null}"
+  },
+  {
+   "feature": "mask write",
+   "file": "src/derive/cartridges.ts",
+   "find": "    const ws = Array.from({ length: n }, (_, x) => (cur ? cur[x] ?? 0 : 1)); ws[i] = w;",
+   "replace": "    const ws = Array.from({ length: n }, (_, x) => (cur ? cur[x] ?? 0 : 1)); ws[0] = w;"
+  },
+  {
+   "feature": "mask steps",
+   "file": "src/derive/cartridges.ts",
+   "find": "const nextWeight = (w: number) => STEPW[(STEPW.indexOf(w >= 0.75 ? 1 : w > 0 ? 0.5 : 0) + 1) % 3]!;",
+   "replace": "const nextWeight = (w: number) => (w > 0 ? 0 : 1);"
+  },
+  {
+   "feature": "mask tags",
+   "file": "src/derive/cartridges.ts",
+   "find": "  return same.length > 1 ? me + secs.slice(0, j + 1).filter(x => ini(x.name) === me).length : me;",
+   "replace": "  return me;"
+  },
+  {
+   "feature": "mask drag",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "onPointerOver={e => { const p = paint.current; if (p && e.buttons) v.act('mask', { i: k.i, j: k.j, w: p.w, from: p.from }); }}",
+   "replace": "onPointerOver={() => undefined}"
+  },
+  {
+   "feature": "mask keys",
+   "file": "src/app/parts/Cartridges.tsx",
+   "find": "onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); v.act('mask', { i: k.i, j: k.j, w: k.next }); } }}",
+   "replace": "onKeyDown={() => undefined}"
+  },
+  {
+   "feature": "directive renumber",
+   "file": "src/derive/cartridges.ts",
+   "find": "    const ks = Object.keys(w).map(Number).filter(x => x !== i).sort((a, b) => a - b), ws = ks.map(x => [x > i ? x - 1 : x, w[x]!] as const), rest = l.replace(DIRECTIVE, '$1');",
+   "replace": "    const ks = Object.keys(w).map(Number).filter(x => x !== i).sort((a, b) => a - b), ws = ks.map(x => [x, w[x]!] as const), rest = l.replace(DIRECTIVE, '$1');"
+  },
+  {
+   "feature": "forced",
+   "file": "src/derive/strings.ts",
+   "find": "  const i = (f.forced || []).findIndex(x => holds(ix, x.when, desk));",
+   "replace": "  const i = -1;"
+  },
+  {
+   "feature": "forced disables",
+   "file": "src/app/parts/Segmented.tsx",
+   "find": "disabled={o.off !== undefined}",
+   "replace": "disabled={false}"
+  },
+  {
+   "feature": "forced note",
+   "file": "src/app/parts/Segmented.tsx",
+   "find": "  return p.forced ? <>{seg}<span className=\"forced-note\">{say(p.forced.note)}</span></> : seg;",
+   "replace": "  return seg;"
+  },
+  {
+   "feature": "list opens",
+   "file": "src/app/features/adapters.tsx",
+   "find": "defineAction('loadAdapter', toggle('slot'));",
+   "replace": "defineAction('loadAdapter', () => undefined);"
+  },
+  {
+   "feature": "list keys",
+   "file": "src/app/features/adapters.tsx",
+   "find": "    e.preventDefault(); all[Math.min(all.length - 1, Math.max(0, j))]!.focus();",
+   "replace": "    void j;"
+  },
+  {
+   "feature": "list closes",
+   "file": "src/app/features/adapters.tsx",
+   "find": "    closePop(false);",
+   "replace": "    void closePop;"
+  },
+  {
+   "feature": "list load focus",
+   "file": "src/app/features/adapters.tsx",
+   "find": "      if (useDesk.getState().desk !== before) useDesk.getState().setFocus(",
+   "replace": "      if (useDesk.getState().desk === before) useDesk.getState().setFocus("
+  },
+  {
+   "feature": "planner list",
+   "file": "src/app/features/adapters.tsx",
+   "find": "defineAction('loadPlannerAdapter', toggle('planner'));",
+   "replace": "defineAction('loadPlannerAdapter', () => undefined);"
+  },
+  {
+   "feature": "adapter lists told",
+   "file": "src/app/features/adapters.tsx",
+   "find": "    ...ENGINES.map(e => adapters.slots(e.id).then(s => useDesk.getState().told({ lists: adapterLists(e.id, s) }))),",
+   "replace": "    ...ENGINES.map(e => adapters.slots(e.id).then(() => undefined)),"
+  },
+  {
+   "feature": "narrow tile",
+   "file": "src/derive/models.ts",
+   "find": "  if (size.narrowWhen && desk.tier !== 'lab' && holds(ix, size.narrowWhen, desk)) w = '';",
+   "replace": "  void holds;"
+  },
+  {
+   "feature": "bank heading",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "{v.words.text ? <small>{say(v.words.text)}</small> : null}{head}</div>",
+   "replace": "</div>"
+  },
+  {
+   "feature": "fader tape",
+   "file": "src/app/parts/Fader.tsx",
+   "find": "{v.label !== undefined ? <span className=\"fdr-l\" title={f.tape !== null ? say(f.tape) : undefined}>{say(v.label)}</span> : null}",
+   "replace": "<span className=\"fdr-l\">{say(v.label)}</span>"
+  },
+  {
+   "feature": "fader name",
+   "file": "src/app/parts/Fader.tsx",
+   "find": "aria-label={say(f.name)}",
+   "replace": "aria-label={say(v.label)}"
+  },
+  {
+   "feature": "xy rail",
+   "file": "src/derive/cartridges.ts",
+   "find": "  return v <= lo ? { off: true, at: 1 } : { off: false, at: clamp((v - lo - step) / (hi - lo - step), 0, 1) };",
+   "replace": "  return { off: false, at: clamp((v - lo) / (hi - lo), 0, 1) };"
+  },
+  {
+   "feature": "xy rail keys",
+   "file": "src/derive/cartridges.ts",
+   "find": "  if (v <= lo) return d > 0 ? lo : hi;",
+   "replace": "  if (v <= lo) return d > 0 ? lo + step : lo;"
+  },
+  {
+   "feature": "xy dim",
+   "file": "src/app/parts/XyPad.tsx",
+   "find": "{...(v.dim ? { 'data-dim': '' } : {})} tabIndex={0}",
+   "replace": "tabIndex={0}"
+  },
+  {
+   "feature": "mood dim",
+   "file": "src/app/parts/ChoiceRow.tsx",
+   "find": "  return v.dim ? <>{row0}<p className=\"qhint lm-note\">{say(v.dim)}</p></> : row0;",
+   "replace": "  return row0;"
+  }
+ ]
+}

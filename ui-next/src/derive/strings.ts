@@ -63,6 +63,7 @@ export function stringsOf(d: Definition): Str[] {
       add(`${k}.label${at}`, f.label); add(`${k}.short${at}`, f.short); add(`${k}.undoName${at}`, f.undoName); add(`${k}.tip${at}`, f.tip);
       add(`${k}.placeholder${at}`, f.placeholder); add(`${k}.check${at}`, f.check?.message); add(`${k}.keepInvalid${at}`, f.check?.keepInvalid);
       if (f.auto) { add(`${k}.auto${at}`, f.auto.says); add(`${k}.autoTip${at}`, f.auto.tip); }
+      (f.forced || []).forEach((x, i) => { add(`${k}.forced.${i}.says${at}`, x.says); add(`${k}.forced.${i}.tip${at}`, x.tip); });
       if (f.format) { add(`${k}.template${at}`, f.format.template); (f.format.words || []).forEach(w => add(`${k}.w.${keyPart(w.value)}${at}`, w.text)); }
       if (Array.isArray(f.options)) for (const o of f.options) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.short${at}`, o.short); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); add(`${ok}.detail${at}`, o.detail); }
       else for (const o of f.options?.include || []) { const ok = `${k}.o.${keyPart(o.value)}`; add(`${ok}.label${at}`, o.label); add(`${ok}.tip${at}`, o.tip); add(`${ok}.lcd${at}`, o.lcd); add(`${ok}.pick${at}`, o.pick); }
@@ -140,7 +141,7 @@ export function nodeKeys(d: Definition): Map<Node, string> {
    in its language (messages.ts). The key is the one stringsOf() gives the line the words come from on the desk. */
 
 import type { Desk, Index } from './core.ts';
-import { choiceLists, countOf, factOf, fill, formatValue, has, holds, isAuto, isEngineLine, modelDefault, valueOf, wordsOf, SLOT } from './core.ts';
+import { choiceLists, countOf, factOf, fill, formatValue, has, holds, isAuto, isEngineLine, modelDefault, resolve, valueOf, wordsOf, SLOT } from './core.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
 import type { ParamFace } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
@@ -328,4 +329,17 @@ export function actionWords(ix: Index, n: Node, desk: Desk, key: string): { acti
 export function splitUnit(text: string): { main: string; unit: string | null } {
   const unit = Object.keys(UNITS).find(u => u.length > 1 && text.toLocaleUpperCase().endsWith(' ' + u.toLocaleUpperCase()) && /^[−-]?[\p{Nd}.,]+$/u.test(text.slice(0, -u.length - 1)));
   return unit ? { main: text.slice(0, -unit.length - 1), unit } : { main: text, unit: null };
+}
+
+/** A choice the engine runs at another value while one of its `forced` lines holds (types.ts ParamFace.forced): that
+ *  value, why the others are disabled, and what is said beside them (with what returns after, when the choice differs).
+ *  Null while none holds. */
+export function forcedOf(ix: Index, key: string, desk: Desk): { value: Value; tip: Msg; note: Msg } | null {
+  if (!has(ix, key, desk.engine)) return null;
+  const { p, d } = ix.params.get(key)!, f = resolve(p, desk.engine), at = (p.per || []).some(l => 'engines' in l && l.engines?.includes(desk.engine) && (l as Partial<ParamDef>).forced) ? `@${((p.per || []).find(l => 'engines' in l && l.engines?.includes(desk.engine)) as { engines: string[] }).engines.join('+')}` : '';
+  const i = (f.forced || []).findIndex(x => holds(ix, x.when, desk));
+  if (i < 0) return null;
+  const x = f.forced![i]!, k = `create.${d.id}.p.${dashed(key)}.forced.${i}`, v = valueOf(ix, key, desk)!;
+  const says = fillMsg(ix, `${k}.says${at}`, x.says, desk), tip = fillMsg(ix, `${k}.tip${at}`, x.tip, desk);
+  return { value: x.value, tip, note: v === x.value ? says : msg('forced.returns', { says, value: formatMsg(ix, key, desk, v) }) };
 }

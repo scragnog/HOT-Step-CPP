@@ -232,7 +232,7 @@
   {
    "feature": "container kids",
    "file": "src/derive/models.ts",
-   "find": "  if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);",
+   "find": "  if ((spec?.kind === 'container' || (spec?.kind === 'bespoke' && node0.children?.length)) && key) m.kids = kidsOf(ix, node0, desk, key);",
    "replace": ""
   }
  ]

@@ -46,9 +46,9 @@
   {
    "state": "^controls-planner-quick-set-dark$",
    "key": "\\.mood$",
-   "field": "^(opacity|transition-(duration|property|timing-function))$",
-   "n": 4,
-   "why": "With the planner off the concept stands its tile's planner-only parts back (25-module-planner.js lm-off, a class on the Planner's tile): the Planner tile's own state, which its package builds; the row itself is the same."
+   "field": "^sem:data-dim$",
+   "n": 1,
+   "why": "With the planner off How adventurous stands back by its own mark (data-dim, styles/rebuild/25-planner.css: package 3b) where the concept fades it from the Planner tile's lm-off class: the same opacity and words."
   },
   {
    "state": "^controls-build-tokens",

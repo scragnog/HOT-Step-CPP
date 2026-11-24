@@ -53,7 +53,7 @@ function Song({ c, hidden }: { c: Card; hidden: boolean }) {
   return (
     <article className={`song${c.fresh ? ' new' : ''}${c.unheard ? ' unheard' : ''}${playing ? ' playing' : ''}`} data-id={c.id} hidden={hidden} style={pp}>
       <div className="art" style={{ background: songArt(c.id, c.hue) }}>
-        <span className="eng-mark" title={w.engine} aria-label={w.engine} dangerouslySetInnerHTML={{ __html: logoOf(c.engine, 14) }} />
+        <span className="eng-mark" title={w.engine} aria-label={w.engine} dangerouslySetInnerHTML={{ __html: logoOf(c.engine, 14, `song-${c.id}`) }} />
         {c.unheard ? <i className="new-dot" title={say(ui('gen.newDot'))}><span className="sr-only">{say(ui('gen.new'))}</span></i> : null}
         {w.take ? <span className="take-no" title={say(w.takeTip)}>{say(w.take)}</span> : null}
         <span className="dur">{w.dur}</span>
