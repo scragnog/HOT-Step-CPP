@@ -28,7 +28,10 @@
     "view": "node tools/test-view.ts",
     "concept": "node tools/concept/collect.mjs",
     "behaviour": "node tools/behaviour/run.mjs --page dist-test/index.html",
-    "baseline": "node tools/visual-baseline/vb.mjs"
+    "baseline": "node tools/visual-baseline/vb.mjs",
+    "visual:all": "node tools/visual-baseline/visual-all.mjs",
+    "switches": "node tools/behaviour/switches.mjs",
+    "switches:apply": "node tools/behaviour/switches.mjs --applies"
   },
   "dependencies": {
     "i18next": "^26.0.10",

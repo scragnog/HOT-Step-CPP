@@ -60,3 +60,7 @@ export const STATES = [
 
 /** No region of the page is compared whole: every state compares its parts. */
 export const SCOPES = {};
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'containers', only: '^containers-', accept: 'containers-accepted.json' };

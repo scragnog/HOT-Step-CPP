@@ -47,3 +47,7 @@ export const STATES = [
   st('instruments-timbre-loaded-dark', scene('ace', 'studio', ['timbre'], { 'timbre.str': 0.6 }, { refs: ['a.wav', 'b.wav', 'c.wav', 'd.wav'], timbreFile: 'b.wav' }), ['.tile[data-m="timbre"] .refs', '.tile[data-m="timbre"] .venn', '.tile[data-m="timbre"] .venn-cap'], dark),
   st('instruments-perf-corners', scene('ace', 'lab', ['sampler', 'perf']), ['.tile[data-m="perf"] .xy-frame']),
 ];
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'instruments', only: '^instruments-', accept: 'instruments-accepted.json' };

@@ -44,3 +44,7 @@ export const STATES = [
   st('cartridges-xy-planner-off-dark', scene('ace', 'lab', ['planner'], { 'lm.on': false }), ['.tile[data-m="planner"] .xy-frame'], dark),
   st('cartridges-mood-planner-off', scene('ace', 'quick', ['planner'], { 'lm.on': false }), ['.tile[data-m="planner"] .tile-body']),
 ];
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'cartridges', only: '^cartridges-', accept: 'cartridges-accepted.json' };

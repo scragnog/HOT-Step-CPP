@@ -61,3 +61,7 @@ export const STATES = [
   st('wf-drafts-empty', withRevs(then(scene({ tier: 'quick' }), click('#draftsBtn'))), POP),
   st('wf-drafts-two-engines-dark', withRevs(then(scene({ tier: 'quick' }), h => h.js(() => { S.drafts = [{ id: 'a', name: 'named one', backend: 'yue', at: Date.parse('2026-11-23T10:00:00'), prompt: 'other words here', vals: {} }, { id: 'b', name: '', backend: 'ace', at: Date.parse('2026-01-02T09:30:00'), prompt: 'first draft', vals: { 'lyrics.text': '[Verse]\nhello there' } }]; saveDrafts(); }), click('#draftsBtn'))), POP, { scheme: 'dark' }),
 ];
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'workflows', only: '^wf-', accept: 'workflows-accepted.json' };
