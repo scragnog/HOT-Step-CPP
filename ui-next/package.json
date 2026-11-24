@@ -16,7 +16,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json",
     "validate": "node tools/validate-definitions.ts",
     "request": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
-    "check": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts && node tools/test-view.ts && node tools/test-controls.ts && node tools/test-containers.ts && node tools/test-instruments.ts && node tools/test-parts-contract.mjs && node tools/test-workflows.ts",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts && node tools/test-view.ts && node tools/test-controls.ts && node tools/test-containers.ts && node tools/test-instruments.ts && node tools/test-parts-contract.mjs && node tools/test-workflows.ts && node tools/test-overlays.ts",
     "docs": "node tools/validate-definitions.ts --docs",
     "ship": "node tools/validate-definitions.ts --ship",
     "record": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --record",

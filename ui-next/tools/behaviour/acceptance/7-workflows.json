@@ -40,7 +40,7 @@
     { "id": "09-undo-storage/undo-leaves-later-work", "why": "C-07, as the concept states it.", "waiting": { "package": 4, "because": "It types into #prompt after the opening and checks the description; 33-workflows/opening-undone-leaves-later-work checks the same with setVal until package 4 draws it." } },
     { "id": "33-workflows/revision-holds-the-guard", "why": "E-03: a revision holds the Repetition guard, a change to it marks the revision, Revert puts it back (15-other-engines/revision-holds-the-guard with Revision chosen in the save row). Holds on the concept too." },
     { "id": "23-sa3-hm-round5/revision-without-adapters-unloads-them", "why": "S-09: a revision without adapters unloads them, said, with Undo." },
-    { "id": "09-undo-storage/hover-tooltip", "why": "C-31: the Import button's tip is the page's own.", "waiting": { "package": 8, "because": "The page's tooltips (#tip) are package 8's." } }
+    { "id": "09-undo-storage/hover-tooltip", "why": "C-31: the Import button's tip is the page's own." }
   ],
   "excluded": [
     { "id": "15-other-engines/revision-holds-the-guard", "why": "Its scene puts Repetition and the Sampler on the desk after opening Start fresh, then presses Save expecting a revision. The concept's modified flag is set only by a person's change, so there Save opens as a revision; here modified is what Revert would put back (deviation P7-4), Start fresh reads modified, and Save opens as a new workflow (the concept's own rule for a changed desk), so it saves a workflow and no revision. The revision does hold the guard (tools/test-workflows.ts); 33-workflows/revision-holds-the-guard is the same scenario with Revision chosen, and passes on both pages." },

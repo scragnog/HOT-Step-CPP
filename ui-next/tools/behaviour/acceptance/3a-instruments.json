@@ -31,7 +31,7 @@
     { "id": "05-modules/continue-and-repaint", "why": "repaintRegion from the song menu's Repaint a region: arrows, Shift, a drag that draws a new region, removing Repaint drops the source.", "waiting": { "package": 6, "because": "Repaint arrives from Latest's song menu (package 6); its first part is Continue's recording span (another family of package 3)." } },
     { "id": "11-engines/prompt-chips-and-ranges", "why": "capChips on Stable Audio 3 and HeartMuLa, and the length's range per engine.", "waiting": { "package": 4, "because": "It writes into the prompt card's #prompt box (package 4)." } },
     { "id": "22-engines-round5/mm3-quick-tempo-says-where-tempo-goes", "why": "MiniMax-Music3's Tempo at Quick: named Tempo, its caption note, and Compose caption from the tile writing the BPM in.", "waiting": { "package": 4, "because": "It writes into #prompt and runs Compose caption (the prompt card's, package 4)." } },
-    { "id": "14-lab-desk/tip-keeps-off-the-read-out", "why": "The reels' and the knobs' tips open clear of their read-outs (L-06).", "waiting": { "package": 8, "because": "Tooltips are package 8's." } }
+    { "id": "14-lab-desk/tip-keeps-off-the-read-out", "why": "The reels' and the knobs' tips open clear of their read-outs (L-06)." }
   ],
   "excluded": [
     { "id": "05-modules/seed-manager", "why": "Every check passes but the last: it toggles LM seed follows with the planner off the desk, where the rebuild does not show that switch (it is the planner's and changes nothing while the planner is off; deviation in docs/09). 34-instruments/split-flap-rolls-and-takes-a-typed-seed toggles it with the planner on the desk; the rest is in 34-instruments/saved-seeds-save-star-search-and-delete." },
