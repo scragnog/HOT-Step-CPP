@@ -11,7 +11,7 @@
 // (package 10) registers the same interface over /api/generate and /api/songs.
 
 import type { EngineId } from '../../definitions/types.ts';
-import { attemptsAt, readyOf, refusedWords, stageOf, takeProgress, vramNeed, type Msg, type RunSpec, type Slot } from '../../derive.ts';
+import { attemptsAt, failWords, readyOf, refusedWords, stageOf, takeProgress, vramNeed, type Msg, type RunSpec, type Slot } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { defineService, service } from '../register/services.ts';
 import './models.ts';
@@ -35,7 +35,7 @@ export interface JobSong { id: string; f: number; stage: Slot; ready: number }
 /** A run in the queue, as the server reports it. */
 export interface Job {
   id: string; engine: EngineId;
-  status: 'queued' | 'running' | 'done' | 'refused' | 'cancelled';
+  status: 'queued' | 'running' | 'done' | 'refused' | 'failed' | 'cancelled';
   /** How many runs are ahead of it. */
   ahead: number;
   /** How far the run is, 0 to 1; each song's own progress, stage and how much of it can be played. */
@@ -46,6 +46,8 @@ export interface Job {
   result?: Song[];
   /** Why the server refused it, and how many takes would fit. */
   refused?: { why: Msg; more: Msg; retry: number };
+  /** Why it stopped part-way (status failed), in the server's words. */
+  failed?: { why: Slot };
 }
 
 export interface GenerateService {
@@ -79,11 +81,13 @@ function readSongs(): Song[] {
   return DEMO.map(s => ({ ...s }));
 }
 
-interface MockJob { id: string; spec: RunSpec; ids: string[]; alive: Set<string>; prog: number; status: Job['status']; att: number; attempts: number; refused?: Job['refused']; result?: Song[] }
+interface MockJob { id: string; spec: RunSpec; ids: string[]; alive: Set<string>; prog: number; status: Job['status']; att: number; attempts: number; refused?: Job['refused']; failed?: Job['failed']; fails?: boolean; result?: Song[] }
 
 /** The card the simulated server has, for a scenario that makes it refuse what the page thought would fit (the
  *  page's figures are an estimate; the server checks its own). Undefined: the models service's card. */
 export const mockCard = { gb: undefined as number | undefined };
+/** The next run the simulated server takes stops half-way, as a run whose engine fails does. */
+export const mockFail = { next: false };
 
 export function mockGenerate(): GenerateService {
   let songs = readSongs();
@@ -99,7 +103,7 @@ export function mockGenerate(): GenerateService {
       return {
         id: j.id, engine: sp.engine, status: j.status, ahead: Math.max(0, l.indexOf(j)), f, attempts: j.attempts,
         songs: j.ids.map((id, i) => ({ id, f: takeProgress(f, i), stage: stageOf(takeProgress(f, i), sp.engine, sp.steps, sp.lit), ready: sp.stream ? readyOf(takeProgress(f, i)) : 0 })).filter(s => j.alive.has(s.id)),
-        ...(j.result ? { result: j.result } : {}), ...(j.refused ? { refused: j.refused } : {}),
+        ...(j.result ? { result: j.result } : {}), ...(j.refused ? { refused: j.refused } : {}), ...(j.failed ? { failed: j.failed } : {}),
       };
     });
   };
@@ -115,8 +119,9 @@ export function mockGenerate(): GenerateService {
       const own = mockCard.gb ?? card, v = vramNeed(ix, { ...sp.desk, ...(figures ? { vram: { ...figures, card: own } } : {}) }, n);
       if (v.refuses) { head.status = 'refused'; head.refused = refusedWords(sp.engine, n, v.need, own, v.each, v.models); }
       else {
-        if (sp.tries) { head.att ||= 1 + Math.floor(Math.random() * sp.tries); head.attempts = attemptsAt(f, head.att); }
-        if (f >= 1) {
+        if (head.fails && f >= 0.5) { head.status = 'failed'; head.failed = { why: failWords(sp.engine) }; }
+        else if (sp.tries) { head.att ||= 1 + Math.floor(Math.random() * sp.tries); head.attempts = attemptsAt(f, head.att); }
+        if (head.status === 'running' && f >= 1) {
           head.status = 'done';
           head.result = head.ids.filter(id => head.alive.has(id)).map(id => { const i = head.ids.indexOf(id), s = sp.songs[i]!; return { id, title: s.title, ...(s.take ? { take: s.take, of: s.of! } : {}), style: s.style, text: s.text, dur: s.dur, hue: s.hue, engine: sp.engine, createdAt: Date.now(), ...(s.seed !== undefined ? { seed: s.seed } : {}) }; });
           songs = [...head.result, ...songs]; keep();
@@ -131,7 +136,7 @@ export function mockGenerate(): GenerateService {
     songs: async () => songs.map(s => ({ ...s })),
     submit: async (spec, ids) => {
       const id = `job-${next++}`;
-      jobs.push({ id, spec, ids, alive: new Set(ids), prog: 0, status: 'queued', att: 0, attempts: 0 });
+      jobs.push({ id, spec, ids, alive: new Set(ids), prog: 0, status: 'queued', att: 0, attempts: 0, fails: mockFail.next }); mockFail.next = false;
       run(); return { jobId: id };
     },
     cancel: async (jobId, ids) => {

@@ -325,6 +325,18 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   `khz`, `tagline` and `testing`. The engine switch's toast names a model whole (F-34).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
+- `derive/generate.ts` (package 6): what a press of Generate makes of the desk (`refusalOf`: an empty box per engine,
+  a score to preview, two modules that cannot run together, a run certain not to fit, F-21; `runOf`: the run as it is
+  started, its engine and desk kept with it, one song per take with its title, card line, length and colour, the
+  pedals that run, play while rendering, the re-planning tries; `pageIntent`: the request, the desk in real names), what
+  a run says while it renders (`stageOf`, `takeProgress`, `readyOf`, `attemptsAt`, `queueStage`), the server's refusal
+  (`refusedWords`), the go bar's line (`goLine`, `changedKeys`, `changesUnmarked`), Generate and Cancel (`goModel`,
+  `docTitle`), cancelling (`cancelWords`, `cancelBack`), Latest (`latestShown`: whole rows, the fold, the count;
+  `songCard`, `songArt`, `songWave`, `songName`), the song menu (`songMenu`, `repaintFrom`, `repaintDesk`, `reuseWords`,
+  `sentTo`) and the player (`playerWords`, `playerSeek`); the `gen.*` messages. `derive/vram.ts meterModel(ix, desk,
+  run)`: while another engine renders, what that engine holds (B-34); `meterTarget`: the needle's swing while a run
+  renders. `Desk.songs`: what the generation service tells (the newest song's colour, the tries the run has used),
+  which the cover swatch and the dice read (`readoutModel`).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -397,6 +409,18 @@ which hold on the concept page too, and 3 of the concept's suite), `switches/5-m
 tools/visual-baseline/models-accepted.json`). The models service (`services/models.ts`) is the concept's catalogue and
 figures behind `ModelsService` (`catalogue(engine)`, `vram()`); the simulated Engine's `models.list` reads the same
 catalogue.
+**Package 6 (generation, the go bar, Latest, the player, the song menu, the toasts)** adds `acceptance/6-generate.json`
+(44 scenarios: 24 of `scenarios/36-generate.mjs`, 10 of the concept's suite, and 10 of the concept's suite waiting on
+package 4 because they type into the prompt card), `switches/6-generate.json` (61 features), `slice-states/
+60-generate.mjs` (24 states, scope `generate`: the go bar, Latest, the song menu and the toasts, compared with
+`generate-accepted.json`). The generation service (`services/generate.ts`) is the concept's simulation behind
+`GenerateService` (`songs`, `submit`, `cancel`, `live`, `watch`): one run renders at a time, its songs are kept in
+this browser as a server keeps them. `store/generate.ts` holds Latest's cards, the queue as the page started it and the
+player; none of it is undoable desk state, but cancelling is a step that undoes itself (`store/desk.ts recordStep`, the
+same lines package 7 adds): Undo queues the cancelled songs again with the settings they started with. The views are in
+`src/app/generate/` (the go bar, Latest, the song menu, the player), filled into `centre.gobar` and `centre.latest`
+(`features/generate.tsx`); the toast stack is `shell/Toast.tsx`. `switches.mjs --scenarios <regex>` runs only some of
+the acceptance's scenarios for each switch.
 
 ## Deviations from the concept's markup
 
@@ -416,8 +440,9 @@ catalogue.
 8. **An XY pad's key run is a step of its own**, and a double-click reset is a "Reset" step; the concept merges keys
    pressed soon after a drag into the drag's step and lets a reset back to the start of a run cancel it. Each gesture
    one step is what every other control does here.
-9. **One toast at a time**; the concept stacks up to three (F-12) and lets Tab into a toast that carries Undo (F-11).
-   The toast's package (6) builds both.
+9. **The toasts are a stack of three** (F-12) that Tab reaches (C-13, F-11): closed by package 6, with the concept's
+   pending F-18 (a plain message never pushes out an Undo; Escape on a toast's button dismisses it) and S-17 (a toast
+   claims Tab only while focus is where it was when it appeared and no layer has opened since).
 10. **The concept's delegation hooks are absent** (`data-sig`, `data-toast`, `data-luaon`, `data-setq`, `data-base`):
     the rebuild's buttons run their own actions. A dropdown option's `data-opt` is its value, not its label.
 11. **A Quick row's marker for a value between its choices**: built (package 1); closed.
@@ -456,7 +481,7 @@ catalogue.
     replay), not a paint hook; the plan text's MiniMax-Music3 line is the concept's ("plan --model 8B").
 24. **A control none of whose parameters applies is not drawn** (`nodeShown`), as the concept leaves out what `ok()`
     refuses; a node that should stay and stand back says so with `dim`. Package 1 flagged the gap.
-25. **The cover swatch shows the concept's colour for no song** (300) until the generation package lists songs; the
+25. **(Closed by package 6: the cover swatch shows the newest song's colour.)** It showed the concept's colour for no song (300) until the generation package listed songs; the
     concept's page has its demo songs (215).
 26. **A drop zone names its file field and its clear button by its state's noun** ("Choose the timbre reference"); the
     concept wrote each by hand ("Choose a reference track").
@@ -466,10 +491,39 @@ catalogue.
     list has no "Engine default" row while the server lists it, a step names it, and choosing it stores "" (question
     5). The concept's default is the first file of the list; with the simulated server, which selects the first, the
     page looks and behaves the same.
-29. **The VRAM meter does not yet swing while a run renders, nor show another engine rendering** (B-34): both need the
+29. **(The swing and another engine rendering are closed by package 6.)** The VRAM meter did not swing while a run rendered, nor show another engine rendering (B-34): both needed the
     queue (package 6), which can feed the needle's target; and its click opens no engine log yet (the log is drawn by
     the overlays' package), so its `aria-expanded` stays false.
 30. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys); the concept's does nothing there.
+
+Package 6's (numbered P6 so that packages built at the same time do not collide):
+
+- P6-1. **Generate does not start a run certain not to fit** (F-21, pending in the concept): the line's "Use N takes"
+  pulses and the line is said. A "Didn't run" notice comes only from a refusal the server makes (the simulated server
+  checks its own card; `mockCard` makes it smaller in the test build). So 06-prompt-generate/generate-engines' first
+  check and the pending F-13 and E-03 scenarios, which get their notice from pressing Generate, cannot pass as written.
+- P6-2. **The document's title while songs render is "(3) " before the page's own title** ("HOT-Step"), not
+  "(3) HOT-Step Tiers".
+- P6-3. **A double-click on Generate is one press, and separate presses each queue** (F-22): the click's own count,
+  where the concept ignores any press within 350ms.
+- P6-4. **The song menu opens above its button and never over the go bar** (F-28): with no room on either side and no
+  page to scroll it takes the roomier side and scrolls inside. The concept opens it below and moves the page.
+- P6-5. **The queue is the server's**: after a reload the page says the songs the server no longer has (F-27, pending
+  in the concept); the simulated server loses its queue on a reload, as the concept page does, so that is every song
+  that was rendering. Leaving while songs render asks first (F-37).
+- P6-6. **Songs are the server's**: the simulated server keeps them under `hotstep.mock.songs`; the page's "not played
+  yet" marks are not kept over a reload (the concept keeps them in its autosave).
+- P6-7. **The cover swatch follows the newest song as it arrives**; the concept repaints it only when the board is drawn
+  again.
+- P6-8. **"N changes" counts the built-in boxes' switches and choices, not their text** (`changedKeys`): the concept's
+  list differs in the trigger word (text, not counted here) and MiniMax-Music3's and YuE2's caption source and dataset
+  (choices, counted here).
+- P6-9. **Ctrl+Enter is heard on the window in the capture phase**, before any row's or card's own Enter (F-07, pending
+  in the concept), not through `onKey` (which the page dispatches after its controls').
+- P6-10. **The request is `pageIntent`** (the desk in the real application's names, request.ts realState), not
+  `createIntent` with the application's resolver, which needs the real application (package 10).
+- P6-11. **"Open the Library" in Latest goes nowhere**: no package of this branch builds the navigation to the stub
+  pages.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

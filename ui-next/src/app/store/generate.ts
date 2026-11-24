@@ -5,7 +5,7 @@
 // undoes itself (store/desk.ts recordStep): Undo puts the runs back in the queue as they were started (F-13).
 
 import { create } from 'zustand';
-import { cancelBack, cancelWords, lostSays, type Msg, type RunSpec, type Slot } from '../../derive.ts';
+import { cancelBack, cancelWords, lostSays, type RunSpec, type Slot } from '../../derive.ts';
 import { service } from '../register/services.ts';
 import type { GenerateService, Job, Song } from '../services/generate.ts';
 import '../services/generate.ts';
@@ -14,7 +14,7 @@ import { useDesk } from './desk.ts';
 /** A card in Latest: a song, a song still rendering (`pending`), or a run the server refused (`error`). */
 export interface Card extends Omit<Song, 'createdAt'> {
   pending?: { run: string; f: number; stage: Slot | null; ready: number; stream: boolean };
-  error?: { why: Msg; more: Msg; retry: number; n: number; spec: RunSpec };
+  error?: { why: Slot; more: Slot; retry: number; n: number; spec: RunSpec; again?: boolean };
   /** It has just finished (it resolves in its card), and it has not been played yet (C-45). */
   fresh?: boolean; unheard?: boolean;
 }
@@ -42,7 +42,7 @@ const get = () => useGen.getState();
 
 /* ---------------------------------------------------------------- what the view is told */
 
-type Ev = { kind: 'done'; run: Run; ids: string[] } | { kind: 'refused'; run: Run; id: string } | { kind: 'ready'; id: string };
+type Ev = { kind: 'done'; run: Run; ids: string[] } | { kind: 'refused' | 'failed'; run: Run; id: string } | { kind: 'ready'; id: string };
 const heard = new Set<(e: Ev) => void>();
 /** The view hears a run end (to say it when its card is out of sight) and a song become playable while it renders. */
 export const onRun = (fn: (e: Ev) => void): (() => void) => { heard.add(fn); return () => { heard.delete(fn); }; };
@@ -120,6 +120,16 @@ function heardJobs(jobs: Job[]): void {
         return { runs: s.runs.filter(r => r !== run), cards: s.cards.filter(c => !same(c) && !(run.ids.includes(c.id) && c.id !== first)).map(c => (c.id === first ? err : c)) };
       });
       tell({ kind: 'refused', run, id: first });
+    } else if (j.status === 'failed' && j.failed) {
+      /* a run that stopped part-way: its first song becomes the notice, Run it again queues it as it was started */
+      const first = run.ids.find(i => get().cards.some(c => c.id === i && c.pending)) ?? run.ids[0]!, n = run.ids.length, why = j.failed.why;
+      set(s => {
+        const e0 = s.cards.find(c => c.id === first); if (!e0) return { runs: s.runs.filter(r => r !== run) };
+        const err: Card = { ...e0, title: n > 1 ? `${e0.title} · ${n} takes` : e0.title, take: 0, of: 0, error: { why, more: '', retry: n, n, spec: run.spec, again: true } };
+        delete err.pending;
+        return { runs: s.runs.filter(r => r !== run), cards: s.cards.filter(c => !(run.ids.includes(c.id) && c.id !== first)).map(c => (c.id === first ? err : c)) };
+      });
+      tell({ kind: 'failed', run, id: first });
     } else if (j.status === 'cancelled') set(s => ({ runs: s.runs.filter(r => r !== run) }));
     else {
       const by = new Map(j.songs.map(x => [x.id, x]));

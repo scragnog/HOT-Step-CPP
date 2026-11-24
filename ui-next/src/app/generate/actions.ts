@@ -58,7 +58,10 @@ export function cancelOne(id: string): void {
 /** Retry a refused run with the takes that fit: the notice goes, Takes is set (a step), and Generate runs. */
 export function retry(id: string): void {
   const c = useGen.getState().cards.find(x => x.id === id); if (!c?.error) return;
-  dismissCard(id); setValue('takes.n', c.error.retry); generate(); focus('#go');
+  dismissCard(id);
+  /* a run that stopped goes back in the queue as it was started; a refused one runs again with the takes that fit */
+  if (c.error.again) flushSyncRun(() => startRun(c.error!.spec)); else { setValue('takes.n', c.error.retry); generate(); }
+  focus('#go');
 }
 /** Dismiss a notice: focus goes to the next notice's first button, else to Generate (F-13). */
 export function dismiss(id: string): void {

@@ -42,6 +42,10 @@
    "why": "Rebuild only (the simulated server's card made smaller with mockCard): the server's refusal as a one-line notice (G-D-09), said in sight, Retry with the takes that fit and Dismiss with focus on Generate (F-13), no second identical notice (F-21)."
   },
   {
+   "id": "36-generate/a-run-that-stops-part-way",
+   "why": "Rebuild only (mockFail): a run the server stops part-way is a notice with Run it again, which queues it as it was started, and Dismiss."
+  },
+  {
    "id": "36-generate/cancel-puts-focus-on-generate",
    "why": "Pending (F-13) in the concept, right here: × on a queued song puts focus on Generate."
   },
@@ -76,6 +80,14 @@
   {
    "id": "36-generate/repaint-from-the-song-menu",
    "why": "Repaint a region from another engine: one step switching to ACE-Step with Repaint first and the song as its source, the switch toast, Generate's label, Undo (E-14; repaintDesk)."
+  },
+  {
+   "id": "36-generate/the-vram-meter-follows-the-run",
+   "why": "The VRAM meter while a run renders: the needle swings toward what it needs, the engine marked live, another engine rendering said with what it holds (B-34; package 5 left it here: meterModel with the run, meterTarget)."
+  },
+  {
+   "id": "36-generate/the-dice-and-the-cover-follow-the-runs",
+   "why": "Package 2 left them here: the re-planning dice light up with the tries the run reports, and the cover swatch takes the newest song's colour (desk.songs, readoutModel)."
   },
   {
    "id": "36-generate/the-toast-stack",

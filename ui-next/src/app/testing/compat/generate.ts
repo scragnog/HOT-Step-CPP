@@ -9,7 +9,7 @@ import { flushSync } from 'react-dom';
 import { CONCEPT_ID } from '../../shell/engines.ts';
 import { cancelCards, seekPlayer, togglePlay as toggle, useGen, type Card } from '../../store/generate.ts';
 import { cancelAll as cancelAllNow, generate as press } from '../../generate/actions.ts';
-import { mockCard } from '../../services/generate.ts';
+import { mockCard, mockFail } from '../../services/generate.ts';
 import { expose, onMirror, S } from '../compat.ts';
 
 const num = (id: string | number): string | number => (typeof id === 'string' && /^\d+$/.test(id) ? +id : id);
@@ -47,5 +47,6 @@ export function install(): void {
     cancelAll() { step(() => cancelAllNow()); },
     cancelSongs(ids: Set<unknown>) { return step(() => cancelCards(new Set([...ids].map(str)))); },
     mockCard(gb?: number) { mockCard.gb = gb; },
+    mockFail() { mockFail.next = true; },
   });
 }

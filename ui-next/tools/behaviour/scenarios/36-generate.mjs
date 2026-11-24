@@ -114,6 +114,15 @@ export default [
     await t.ok('Dismiss removes it, and focus goes to Generate (F-13)', () => !document.querySelector('#latest .song.errored') && document.activeElement?.id === 'go');
     await t.do('the server\'s own card again', () => mockCard(undefined));
   } },
+  { id: 'a-run-that-stops-part-way', run: async t => {
+    if (await t.js(() => typeof mockFail !== 'function')) return; /* the rebuild's simulated server only */
+    await desk('studio', ['takes'], { vals: { 'takes.n': 2 } })(t); await prompt('warm folk song')(t);
+    await t.do('the next run will stop half-way', () => mockFail());
+    await t.click('#go', 2400);
+    await t.ok('it is a notice with Run it again and Dismiss, and nothing is left rendering', () => { const n = document.querySelector('#latest .song.errored'); return !!n && /ACE-Step 1\.5 stopped part-way through the run\./.test(n.textContent) && n.querySelector('[data-retry]')?.textContent === 'Run it again' && !!n.querySelector('[data-dismiss]') && S.songs.filter(s => s.pending).length === 0 || n?.textContent; });
+    await t.click('#latest .song.errored [data-retry]', 300);
+    await t.ok('Run it again queues it as it was started, focus on Generate', () => !document.querySelector('#latest .song.errored') && S.songs.filter(s => s.pending).length === 2 && document.activeElement?.id === 'go');
+  } },
   { id: 'cancel-puts-focus-on-generate', pending: { finding: 'F-13', right: 'After Cancel on a queued song focus goes to Generate, never to the page or to the next song\'s Cancel.' }, run: async t => {
     await prompt('warm folk song')(t); await t.click('#go', 400); await t.click('#go', 400); await t.click('#go', 400);
     const id = await t.js(() => S.songs.filter(s => s.pending)[1].id);
@@ -200,6 +209,24 @@ export default [
     await t.ok('one press: ACE-Step with Repaint first on the desk and the song as its source, and Generate repaints', () => S.backend === 'ace' && S.mods[0] === 'repaint' && S.source?.song === 1 && /On ACE-Step 1\.5\..*Repaint is on the desk/.test(document.querySelector('#toast').textContent) && document.querySelector('#goLabel').textContent === 'Repaint region');
     await t.press('Control+z');
     await t.ok('and Undo puts back MiniMax-Music3 without Repaint', () => S.backend === 'mm3' && !S.mods.includes('repaint') && document.querySelector('#goLabel').textContent === 'Generate');
+  } },
+  { id: 'the-vram-meter-follows-the-run', run: async t => {
+    await desk('studio', [], {})(t); await prompt('a quiet tune')(t);
+    const rest = await t.js(() => document.querySelectorAll('#emBar i.on').length);
+    await t.click('#go', 1200);
+    await t.ok('while a run renders the needle swings toward what it needs, and the engine says it is live', r => document.querySelectorAll('#emBar i.on').length > r && document.querySelector('#engine').classList.contains('lg-live') || `${document.querySelectorAll('#emBar i.on').length} lit, ${r} at rest`, rest);
+    await t.do('another engine selected while it renders', () => switchEngine('sa3'), null, 200);
+    await t.ok('the meter says the engine that renders holds the card, and what the next Generate needs (B-34)', () => /^VRAM: ACE-Step 1\.5 is rendering with \d+\.\d GB loaded\. Next: Stable Audio 3, about \d+\.\d GB, on a 31\.8 GB card$/.test(document.querySelector('#engMeter').getAttribute('aria-label')) || document.querySelector('#engMeter').getAttribute('aria-label'));
+    await t.do('let it finish', () => {}, null, 4200);
+    await t.ok('then the meter is the selected engine\'s again, at rest', () => /^VRAM: \d+\.\d GB loaded/.test(document.querySelector('#engMeter').getAttribute('aria-label')) && !document.querySelector('#engine').classList.contains('lg-live'));
+  } },
+  { id: 'the-dice-and-the-cover-follow-the-runs', run: async t => {
+    await desk('lab', ['replan', 'post'], { backend: 'yue', pedals: ['art'], vals: { 'yue.replan': true, 'yue.tries': 4, 'pp.art.on': true } })(t); await prompt('a long folk ballad')(t);
+    await t.ok('no die is used before a run', () => document.querySelectorAll('[data-dice-box] .die').length === 4 && !document.querySelector('[data-dice-box] .die.used'));
+    await t.click('#go', 1200);
+    await t.ok('the dice light up as the run re-plans', () => document.querySelectorAll('[data-dice-box] .die.used').length >= 1);
+    await t.do('let it finish', () => {}, null, 4200);
+    await t.ok('the cover swatch shows the newest song\'s colour', () => +getComputedStyle(document.querySelector('.u-art')).getPropertyValue('--h') === S.songs[0].hue || `${getComputedStyle(document.querySelector('.u-art')).getPropertyValue('--h')} vs ${S.songs[0].hue}`);
   } },
   { id: 'the-toast-stack', run: async t => {
     await t.do('a message with Undo, then a plain one', () => { toast('First, with Undo', { label: 'Undo', fn: () => { window.__undo = 1; } }); toast('Second'); }, null, 100);

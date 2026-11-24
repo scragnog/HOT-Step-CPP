@@ -5,7 +5,7 @@
 // What each card says, and which show, is the core's (derive/generate.ts songCard, latestShown, queueStage).
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { latestShown, newSongs, queueStage, refusedSays, songArt, songCard, type Slot } from '../../derive.ts';
+import { failedSays, latestShown, newSongs, queueStage, refusedSays, songArt, songCard, type Slot } from '../../derive.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { onRun, setMenu, toggleFold, togglePlay, useGen, type Card } from '../store/generate.ts';
@@ -22,7 +22,7 @@ function Notice({ c }: { c: Card }) {
       <span className="err-mark" aria-hidden="true">!</span>
       <p className="err-line" title={say({ id: 'gen.notice.tip', slots: { title: c.title, why: e.why, more: e.more } })}><b>{say(ui('gen.didnt'))}</b> <span className="err-t">{c.title}</span> <span className="err-why">{say(e.why)}</span></p>
       <div className="err-acts">
-        {e.retry ? <button className="small-btn primary" data-retry={`${c.id}|${e.retry}`} onClick={() => retry(c.id)}>{say({ id: 'gen.retry', slots: { n: e.retry } })}</button> : null}
+        {e.retry ? <button className="small-btn primary" data-retry={`${c.id}|${e.retry}`} onClick={() => retry(c.id)}>{say(e.again ? { id: 'gen.again' } : { id: 'gen.retry', slots: { n: e.retry } })}</button> : null}
         <button className="small-btn" data-dismiss={c.id} onClick={() => dismiss(c.id)}>{say(ui('gen.dismiss'))}</button>
       </div>
     </article>
@@ -78,7 +78,7 @@ export function Latest() {
   useEffect(() => onRun(e => requestAnimationFrame(() => {
     const d = useDesk.getState();
     if (e.kind === 'done') { const el = document.querySelector(`#latest .song[data-id="${e.ids[0]}"]`); if (e.ids.length && (!el || !inView(el))) d.showToast({ text: newSongs(e.ids.length, e.run.spec.engine) }); }
-    else if (e.kind === 'refused') { const el = document.querySelector(`#latest .song.errored[data-id="${e.id}"]`), m = refusedSays(e.run.ids.length, e.run.spec.engine); if (!el || !inView(el)) d.showToast({ text: m }); else d.say(m); }
+    else if (e.kind === 'refused' || e.kind === 'failed') { const el = document.querySelector(`#latest .song.errored[data-id="${e.id}"]`), m = (e.kind === 'refused' ? refusedSays : failedSays)(e.run.ids.length, e.run.spec.engine); if (!el || !inView(el)) d.showToast({ text: m }); else d.say(m); }
     else { const c = useGen.getState().cards.find(x => x.id === e.id); if (c) d.say({ id: 'gen.stream.ready', slots: { name: songCard(c).name } }); }
   })), []);
   const list = cards.slice(0, Math.max(24, cards.filter(c => c.pending || c.error).length + 24));

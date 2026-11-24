@@ -189,6 +189,11 @@ export function refusedWords(e: EngineId, n: number, need: number, card: number,
   return { why: msg('gen.refused.why', { need: need.toFixed(1), n, card: cardText(card) }), more: msg('gen.refused.more', { engine: engineName(e) }), retry: Math.min(fits, n - 1) };
 }
 
+/** What the simulated server says when a run stops part-way (the real server says its own words). */
+export const failWords = (e: EngineId): Msg => msg('gen.failed.why', { engine: engineName(e) });
+/** A run that stopped part-way: the notice's words, said when it is out of sight. */
+export const failedSays = (n: number, e: EngineId): Msg => msg('gen.failed', { n, engine: engineName(e) });
+
 /* ---------------------------------------------------------------- the go bar's status line */
 
 /** How many takes the line offers when the next run will not fit (35-gobar.js paintMeter). */
