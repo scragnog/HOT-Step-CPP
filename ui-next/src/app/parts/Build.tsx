@@ -25,23 +25,25 @@ interface Playing { take: string; t0: number; dur: number; queue: { take: string
 
 export function BuildBoard(v: PartView) {
   const say = useSay(), m = v.instrument?.build, root = useRef<HTMLDivElement>(null);
-  const [play0, setPlay] = useState<Playing | null>(null), [pos, setPos] = useState(0), [busy, setBusy] = useState(false);
+  const [play0, setPlay] = useState<Playing | null>(null), [busy, setBusy] = useState(false);
   const landing = useRef(false), focusKey = useRef<string | null>(null);
-  /* the playhead: a frame at a time, a second at a time under reduced motion */
+  /* the playhead: a frame at a time, a second at a time under reduced motion; it is set on the take on the page from the
+     animation loop, never by drawing the board again (package 9, the owner's rule for motion) */
   useEffect(() => {
     const play = play0; if (!play) return;
     let raf = 0;
+    const take = () => document.querySelector<HTMLElement>(`.b-take[data-take="${CSS.escape(play.take)}"]`);
     const step = () => {
       const f = (performance.now() - play.t0) / 1000 / play.dur;
       if (f >= 1) {
         const [next, ...rest] = play.queue;
-        setPos(0); setPlay(next ? { take: next.take, section: next.section, dur: next.dur, t0: performance.now(), queue: rest } : null); return;
+        setPlay(next ? { take: next.take, section: next.section, dur: next.dur, t0: performance.now(), queue: rest } : null); return;
       }
-      setPos(reduced() ? Math.floor(f * play.dur) / play.dur : f);
+      take()?.style.setProperty('--pos', `${(reduced() ? Math.floor(f * play.dur) / play.dur : f) * 100}%`);
       raf = reduced() ? setTimeout(step, 1000) as unknown as number : requestAnimationFrame(step);
     };
     step();
-    return () => { cancelAnimationFrame(raf); clearTimeout(raf); };
+    return () => { cancelAnimationFrame(raf); clearTimeout(raf); const t = take(); t?.style.removeProperty('--pos'); if (t && !t.getAttribute('style')) t.removeAttribute('style'); };
   }, [play0]);
   /* a take that leaves the build (discarded, a re-plan, a new build) stops playing */
   const here = !!m && (m.takes.some(t => t.id === play0?.take) || m.keptOrder.some(k => k.take === play0?.take)), play = here ? play0 : null;
@@ -90,8 +92,8 @@ export function BuildBoard(v: PartView) {
   }
   const session = m.session!, cur = m.cur;
   const look = (id: string) => { service('build').look(session, id); keep(`.b-src [data-bsec="${CSS.escape(id)}"]`); };
-  const toggle = (take: string, dur: number) => { setPos(0); setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };
-  const playKept = () => { setPos(0); setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };
+  const toggle = (take: string, dur: number) => { setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };
+  const playKept = () => { setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };
   const replan = <button type="button" className="small-btn" data-breplan="" title={say(m.replanTip)} onClick={() => { keep('[data-breplan]'); doPlan(); }}>{say({ id: 'build.replan' })}</button>;
   const render = () => {
     if (!m.render || busy) return;
@@ -123,7 +125,7 @@ export function BuildBoard(v: PartView) {
         {m.takes.map(t => {
           const on = play?.take === t.id;
           return (
-            <div key={t.id} className={['b-take', t.keep ? 'keep' : '', t.ready ? '' : 'busy', on ? 'playing' : ''].filter(Boolean).join(' ')} data-take={t.id} style={on ? { '--pos': `${pos * 100}%` } as CSSProperties : undefined}>
+            <div key={t.id} className={['b-take', t.keep ? 'keep' : '', t.ready ? '' : 'busy', on ? 'playing' : ''].filter(Boolean).join(' ')} data-take={t.id}>
               <span className="b-wave" style={{ '--h': t.hue } as CSSProperties}>
                 {t.ready ? <button type="button" className="b-play" data-bplay={t.id} aria-pressed={on} aria-label={say(on ? t.stop : t.play)} title={say({ id: on ? 'build.take.stop.tip' : 'build.take.play.tip' })} onClick={() => { keep(`[data-bplay="${t.id}"]`); toggle(t.id, t.dur); }}><Icon name={on ? 'stop' : 'play'} size={14} /></button> : null}
                 <span className="b-bars">{bars(t.w).map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}<i className="b-head" aria-hidden="true" /></span>

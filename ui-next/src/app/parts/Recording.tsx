@@ -8,7 +8,7 @@
 // core's (act('move')); a drag is one step, each key another. Its play button plays the chosen part, the playhead
 // running across it (E-47). A recording chosen or replaced while it stands brings focus to it (E-23).
 
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { definePart, Icon, useSay, type PartView } from '../kit/index.ts';
 import { reduced } from '../kit/motion.ts';
 
@@ -25,16 +25,20 @@ const track = (el: HTMLElement) => { const r = el.getBoundingClientRect(); retur
 export function RecordingSpan(v: PartView) {
   const say = useSay(), m = v.instrument?.span, wave = useRef<HTMLDivElement>(null);
   const drag = useRef<{ mode: Mode; x: number; t0: number; a0: number; z0: number; moved: boolean } | null>(null);
-  const [grab, setGrab] = useState<Mode | null>(null), [played, setPlay] = useState<{ t0: number; file: string } | null>(null), [pos, setPos] = useState(0);
+  const [grab, setGrab] = useState<Mode | null>(null), [played, setPlay] = useState<{ t0: number; file: string } | null>(null), headEl = useRef<HTMLElement>(null), pos = useRef(0), now = useRef(m);
   const file = m?.file ?? '', was = useRef(file), play = played && played.file === file ? played.t0 : null;
   /* a recording chosen or replaced: focus goes to its waveform (E-23) */
   useEffect(() => { if (file && file !== was.current) wave.current?.focus({ preventScroll: true }); was.current = file; }, [file]);
   /* playing the chosen part: the playhead runs from its start to its end in its own time */
   const len = m ? m.z - m.a : 0;
+  /* the playhead is set on the page from the animation loop, never by drawing the part again (package 9, the owner's
+     rule for motion); a redraw (the part moved) puts it where it now stands */
+  const place = () => { const s = now.current; if (s) headEl.current?.style.setProperty('--p', ((s.a / s.dur + pos.current * (s.z - s.a) / s.dur) * 100).toFixed(3)); };
+  useLayoutEffect(() => { now.current = m; place(); });
   useEffect(() => {
     if (play === null) return;
     let t = 0;
-    const step = () => { const f = (performance.now() - play) / 1000 / len; if (f >= 1) { setPlay(null); setPos(0); return; } setPos(reduced() ? Math.floor(f * len) / len : f); t = reduced() ? setTimeout(step, 1000) as unknown as number : requestAnimationFrame(step); };
+    const step = () => { const f = (performance.now() - play) / 1000 / len; if (f >= 1) { setPlay(null); return; } pos.current = reduced() ? Math.floor(f * len) / len : f; place(); t = reduced() ? setTimeout(step, 1000) as unknown as number : requestAnimationFrame(step); };
     step();
     return () => { cancelAnimationFrame(t); clearTimeout(t); };
   }, [play, len]);
@@ -54,7 +58,7 @@ export function RecordingSpan(v: PartView) {
   };
   const up = () => { const d = drag.current; drag.current = null; setGrab(null); if (d?.moved) v.gesture.end('drag'); };
   const key = (e: KeyboardEvent<HTMLDivElement>) => { if (/^(Arrow(Left|Right|Up|Down)|Page(Up|Down)|Home|End)$/.test(e.key) && v.act('move', { key: e.key, shift: e.shiftKey })) e.preventDefault(); };
-  const bars = fileBars(m.file), on = play !== null, head = m.a / m.dur + pos * len / m.dur;
+  const bars = fileBars(m.file), on = play !== null;
   return (
     <>
       <div ref={wave} className={`contwave${grab ? ` grab g-${grab}` : ''}`} data-contwave="" tabIndex={0} role="slider" aria-valuemin={0} aria-valuemax={m.dur} aria-valuenow={m.a} aria-valuetext={say(m.text)}
@@ -63,11 +67,11 @@ export function RecordingSpan(v: PartView) {
         <span className="cw-bars">{bars.map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}</span>
         <span className="cw-bars hi" aria-hidden="true">{bars.map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}</span>
         <i className="cw-sel" />
-        {on ? <i className="cw-head" aria-hidden="true" style={{ '--p': (head * 100).toFixed(3) } as CSSProperties} /> : null}
+        {on ? <i className="cw-head" aria-hidden="true" ref={headEl} /> : null}
       </div>
       <div className="cw-ruler" aria-hidden="true">{m.ticks.map((t, i) => <span key={i} className={t.end ? 'end' : undefined} style={{ left: `${t.at}%` }}>{t.text}</span>)}</div>
       <div className="cap"><span>{say(m.cap)}</span>
-        <button type="button" className="small-btn cw-play" data-contplay="" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>
+        <button type="button" className="small-btn cw-play" data-contplay="" aria-pressed={on} onClick={() => { pos.current = 0; setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>
     </>
   );
 }

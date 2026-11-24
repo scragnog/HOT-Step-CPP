@@ -113,6 +113,9 @@ export function packSoon(make: () => string, content: boolean): void {
 }
 /** A re-pack waiting for the next frame runs now (a tier change lays the desk out inside its transition). */
 export function flushPack(): void { if (!raf) return; cancelAnimationFrame(raf); raf = 0; packNow(...pend); }
+/** The desk laid out now for what its tiles hold now (a tile that grew since the last pack, before the ResizeObserver
+ *  has said so): the desk's own transition measures where things end only once they are there. */
+export function settlePack(): void { if (raf) { flushPack(); return; } if (packMake) packNow(packMake); }
 
 /** A content re-pack: the tiles it moves slide from where they stood over --t-base (the concept's packDesk); not while
  *  a drag makes room its own way, a tier change runs, or a tile is already moving. */

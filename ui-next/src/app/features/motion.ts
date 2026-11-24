@@ -15,12 +15,12 @@
 
 import { useDesk } from '../store/desk.ts';
 import { BOARD } from '../model/index.ts';
-import { onPacked } from '../desk/layout.ts';
+import { onPacked, settlePack } from '../desk/layout.ts';
 import { drawOut, followCables } from '../board/cables.ts';
 import { booted, easing, mtime, reduced } from '../kit/motion.ts';
 
 type At = { el: HTMLElement; r: DOMRect };
-type Snap = { tiles: Map<string, At>; peds: Map<string, At>; added: boolean };
+type Snap = { tiles: Map<string, At>; peds: Map<string, At>; added: boolean; pedal?: boolean };
 const TILES = '#bento > .tile[data-m]', PEDALS = '[data-pedals] > .pedal[data-pid]';
 const board = () => document.querySelector<HTMLElement>('#bento > .tile[data-m] .board');
 const rects = (sel: string, key: (el: HTMLElement) => string) => new Map([...document.querySelectorAll<HTMLElement>(sel)].map(el => [key(el), { el, r: el.getBoundingClientRect() }]));
@@ -43,8 +43,9 @@ function exitGhost(old: HTMLElement, r: DOMRect, host: HTMLElement, cls: string)
 
 function play(): void {
   const was = pending; if (!was) return; pending = null;
+  settlePack();
   const calm = reduced(), out = easing('--e-out'), inn = easing('--e-in'), spring = easing('--e-spring'), land = landing; landing = null;
-  const seen = new Set<string>();
+  const seen = new Set<string>(), fresh: HTMLElement[] = [];
   document.querySelectorAll<HTMLElement>(TILES).forEach(t => {
     const m = t.dataset.m!, b = was.tiles.get(m); seen.add(m);
     if (land && m === land.id) {
@@ -54,6 +55,7 @@ function play(): void {
       return;
     }
     if (!b) {
+      fresh.push(t);
       t.animate(calm ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: calm ? 120 : mtime('--t-base'), easing: out, fill: 'backwards' });
       /* under reduced motion an arriving tile has no entrance of its own, so it carries the still ring (S-27) */
       if (calm && was.added) ringStill(t, 'flash');
@@ -71,6 +73,9 @@ function play(): void {
     b.el.animate(calm ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.97)' }], { duration: calm ? 120 : mtime('--t-fast'), easing: inn, fill: 'forwards' }).finished.then(() => layer.remove(), () => layer.remove());
   });
   playPedals(was, calm, out, inn, spring);
+  /* what was added is brought into view by the shortest scroll (the concept's flash) */
+  const bring = was.added ? fresh[0] ?? (land && document.querySelector<HTMLElement>(`${TILES}[data-m="${land.id}"]`)) : was.pedal ? document.querySelector<HTMLElement>(`${TILES}[data-m="${BOARD.id}"]`) : null;
+  bring?.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });
 }
 
 /** The pedals on the board: one that joins drops onto it, one that leaves lifts off, the others slide; the cables follow. */
@@ -116,10 +121,10 @@ const moving = () => booted() && !document.documentElement.classList.contains('t
 useDesk.subscribe((s, p) => {
   const mods = s.mods.join() !== p.mods.join(), board = s.board.join() !== p.board.join();
   if (!mods && !board && s.desk.tier === p.desk.tier && s.desk.engine === p.desk.engine) return;
-  const added = mods && s.mods.some(m => !p.mods.includes(m));
-  if (pending) { if (added) pending.added = true; return; }
+  const added = mods && s.mods.some(m => !p.mods.includes(m)), pedal = board && s.board.some(x => !p.board.includes(x));
+  if (pending) { if (added) pending.added = true; if (pedal) pending.pedal = true; return; }
   if (!moving()) return;
-  pending = snap(added);
+  pending = snap(added); pending.pedal = pedal;
   requestAnimationFrame(play);
 });
 onPacked(play);

@@ -76,8 +76,8 @@
     {
       "feature": "meter leds",
       "file": "src/app/shell/TopBar.tsx",
-      "find": "const leds = meterLeds(cur, m.est, m.card, EM_N);",
-      "replace": "const leds = meterLeds(0 * cur, m.est, m.card, EM_N);"
+      "find": "const leds = meterLeds(cur.current, m.est, m.card, EM_N);",
+      "replace": "const leds = meterLeds(0 * cur.current, m.est, m.card, EM_N);"
     },
     {
       "feature": "meter read",

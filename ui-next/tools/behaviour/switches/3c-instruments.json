@@ -28,14 +28,14 @@
   {
    "feature": "3c take play",
    "file": "src/app/parts/Build.tsx",
-   "find": "  const toggle = (take: string, dur: number) => { setPos(0); setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };",
-   "replace": "  const toggle = (take: string, dur: number) => { setPos(0); void ((p: Playing | null) => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };"
+   "find": "  const toggle = (take: string, dur: number) => { setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };",
+   "replace": "  const toggle = (take: string, dur: number) => { void ((p: Playing | null) => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };"
   },
   {
    "feature": "3c play kept",
    "file": "src/app/parts/Build.tsx",
-   "find": "  const playKept = () => { setPos(0); setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };",
-   "replace": "  const playKept = () => { setPos(0); void ((p: Playing | null) => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };"
+   "find": "  const playKept = () => { setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };",
+   "replace": "  const playKept = () => { void ((p: Playing | null) => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };"
   },
   {
    "feature": "3c render asked",
@@ -154,8 +154,8 @@
   {
    "feature": "3c span play",
    "file": "src/app/parts/Recording.tsx",
-   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>",
-   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>"
+   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { pos.current = 0; setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>",
+   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { pos.current = 0;  }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>"
   },
   {
    "feature": "3c span words",

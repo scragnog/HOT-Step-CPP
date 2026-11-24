@@ -4,7 +4,7 @@
 // is in testing) and, under them, the engine's models (the engine.panel slot, features/engine-panel.tsx). What the cards
 // and the meter say is the core's (derive/vram.ts enginePanelModel, meterModel).
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ENGINES } from '../../definitions/engines.ts';
 import type { EngineId } from '../../definitions/types.ts';
@@ -64,19 +64,22 @@ function Meter() {
   /* the run that renders (the head of the queue) holds the card: while it runs the needle swings toward what it needs,
      and when it is another engine's, the meter shows what that engine holds (B-34, package 6) */
   const head = useGen(s => s.runs[0]), run = head?.spec.desk ?? null, busy = run !== null;
-  const say = useSay(), m = useModel(s => meterModel(ix, s.desk, run), `vram-meter:${head?.id ?? ''}`), [cur, setCur] = useState(0);
-  useEffect(() => {
-    let raf = 0, at = cur;
-    const step = () => { raf = 0; const target = meterTarget(m.use, m.est, busy, Math.random); at = meterEase(at, target, reduced()); setCur(at); if (busy || Math.abs(target - at) > 0.05) raf = requestAnimationFrame(step); };
-    if (busy || Math.abs(m.use - at) > 0.05 || at !== cur) raf = requestAnimationFrame(step);
+  const say = useSay(), m = useModel(s => meterModel(ix, s.desk, run), `vram-meter:${head?.id ?? ''}`), bar = useRef<HTMLSpanElement>(null), cur = useRef(0);
+  /* the needle moves on every frame while it travels or a run renders: its LEDs are painted on the page from the
+     animation loop, never by drawing the meter again (package 9, the owner's rule for motion) */
+  useLayoutEffect(() => {
+    let raf = 0;
+    const paint = () => { const leds = meterLeds(cur.current, m.est, m.card, EM_N); bar.current?.querySelectorAll<HTMLElement>(':scope > i').forEach((el, i) => { const c = leds[i] ?? ''; if (el.className === c) return; if (c) el.className = c; else el.removeAttribute('class'); }); };
+    const step = () => { raf = 0; const target = meterTarget(m.use, m.est, busy, Math.random); cur.current = meterEase(cur.current, target, reduced()); paint(); if (busy || Math.abs(target - cur.current) > 0.05) raf = requestAnimationFrame(step); };
+    paint();
+    if (busy || Math.abs(m.use - cur.current) > 0.05) raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [m.use, m.est, busy]); // eslint-disable-line react-hooks/exhaustive-deps -- it starts from where the needle is
-  const leds = meterLeds(cur, m.est, m.card, EM_N);
+  }, [m.use, m.est, m.card, busy]);
   return (
     <button className={`eng-meter${m.over ? ' over' : ''}${m.tight ? ' tight' : ''}`} id="engMeter" type="button" aria-expanded="false" aria-describedby="emRead" onClick={() => toggleLogs()} aria-label={say(m.aria)} title={say(m.title)}>
       <span className="em-cap" aria-hidden="true">{say(ui('vram'))}</span>
-      <span className="em-bar" id="emBar" aria-hidden="true">
-        {leds.map((c, i) => <i key={i} className={c || undefined} style={{ '--i': i } as CSSProperties} />)}
+      <span className="em-bar" id="emBar" aria-hidden="true" ref={bar}>
+        {Array.from({ length: EM_N }, (_, i) => <i key={i} style={{ '--i': i } as CSSProperties} />)}
         <u className="em-peak" style={{ left: `${m.peak * 100}%` }} />
         {m.ticks.map(t => <em key={t} style={{ left: `${t * 100}%` }} />)}
       </span>

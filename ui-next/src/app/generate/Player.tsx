@@ -61,19 +61,26 @@ export function PlayerHost() {
     if (on) { pl.setAttribute('role', 'region'); pl.setAttribute('aria-label', say(ui('gen.player'))); }
     if (on === was.current) return; was.current = on;
     pl.getAnimations().forEach(a => a.cancel()); document.querySelector('.gobar > .player-out')?.remove();
+    /* the page is laid out once, at the player's new width; the status line beside it slides from where it stood
+       (transform) while the player is revealed from its left edge or folds into it (clip-path): nothing is laid out
+       again on each frame (package 9, the owner's rule for motion) */
+    const line = document.getElementById('meter'), x0 = line?.getBoundingClientRect().left ?? 0;
+    const slideLine = (time: string, ease: string) => { const dx = x0 - (line?.getBoundingClientRect().left ?? x0); if (line && Math.abs(dx) > 1) line.animate([{ transform: `translateX(${dx}px)` }, { transform: 'none' }], { duration: mtime(time), easing: easing(ease) }); };
     if (on) {
       pl.hidden = false; if (reduced()) return;
-      /* the width is animated, not a transform, so the status line beside it is carried along by the layout itself */
-      const w = pl.offsetWidth;
-      pl.animate([{ maxWidth: '0px', minWidth: 0, opacity: 0, overflow: 'hidden' }, { maxWidth: w + 'px', minWidth: 0, opacity: 1, overflow: 'hidden' }], { duration: mtime('--t-base'), easing: easing('--e-out') });
+      pl.animate([{ clipPath: 'inset(-8px 100% -8px 0)', opacity: 0 }, { clipPath: 'inset(-8px 0 -8px 0)', opacity: 1 }], { duration: mtime('--t-base'), easing: easing('--e-out') });
+      slideLine('--t-base', '--e-out');
       return;
     }
     if (reduced()) { pl.hidden = true; return; }
     /* what folds away is the player's last frame, held in place by a copy for the length of the exit */
-    const copy = pl.cloneNode(true) as HTMLElement, w = pl.offsetWidth;
+    const copy = pl.cloneNode(true) as HTMLElement, r = pl.getBoundingClientRect();
     copy.removeAttribute('id'); copy.querySelectorAll('[id]').forEach(x => x.removeAttribute('id')); copy.classList.add('player-out'); copy.inert = true; copy.setAttribute('aria-hidden', 'true');
+    copy.style.cssText += ';position:absolute;margin:0;left:0;top:0;pointer-events:none';
     pl.after(copy); pl.hidden = true;
-    copy.animate([{ maxWidth: w + 'px', minWidth: 0, opacity: 1, overflow: 'hidden' }, { maxWidth: '0px', minWidth: 0, opacity: 0, overflow: 'hidden', marginLeft: '-12px' }], { duration: mtime('--t-fast'), easing: easing('--e-in') }).finished.then(() => copy.remove(), () => copy.remove());
+    const c = copy.getBoundingClientRect(); copy.style.left = `${r.left - c.left}px`; copy.style.top = `${r.top - c.top}px`; copy.style.width = `${r.width}px`;
+    copy.animate([{ clipPath: 'inset(-8px 0 -8px 0)', opacity: 1 }, { clipPath: 'inset(-8px 100% -8px 0)', opacity: 0 }], { duration: mtime('--t-fast'), easing: easing('--e-in'), fill: 'forwards' }).finished.then(() => copy.remove(), () => copy.remove());
+    slideLine('--t-fast', '--e-in');
   }, [on, say]);
   useEffect(() => () => { hostEl()?.setAttribute('hidden', ''); }, []);
   const host = hostEl();
