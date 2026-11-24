@@ -170,7 +170,11 @@ shows one plain choice of three presets that set all three; Studio adds the thre
    inset (start from a module with similar controls).
 
 **Four files: 26 lines of definition written as above (about 68 with one field a line), 1 in `parts.ts`, 2 in the
-index, a drawing.** **What else to run**: `npm run docs`. Which parts give which look: [01](01-parts-inventory.md)'s
+index, a drawing.** **What else to run**: `npm run docs`; then the browser acceptance (`npm run build:test`,
+`node tools/behaviour/run.mjs --page dist-test/index.html --slice`): a module joins the factory workflow "Everything" by
+itself, and the layout scenarios (`12-desk-layout/factory-desks-compose-*`) check that every factory desk composes.
+Dynamics at the end of it left a hole at every width; one word, its id in `ORDER` in `factory.ts` where the desk
+composes (after `avoid`), put it right. Which parts give which look: [01](01-parts-inventory.md)'s
 table; a face at Lab is paper like Studio's (a `rack` or a `well` gives a row its hardware ground). To see it: `npm run dev`, add it from the Modules panel, and switch tiers and themes; every part
 it names already looks right on every surface (the parts gallery, section 4, step 5). Choosing parts:
 the table in [01](01-parts-inventory.md) says what each part is for, what it edits and reads, and which modules use it.
@@ -354,7 +358,7 @@ condition, an action, a read, a `beside`, a factory revision), and says saved da
 | Rename a definition's id | The new id, its file name, `was: ['old']` on the definition | Saved workflows and desks read it |
 | Rename a state key | The new key, `was: ['old']` on the state | Saved revisions read it |
 | Move a parameter to another module | Cut and paste; if its owner or what saves it changes, `npm run docs` records the change once you mean it | `tools/fixtures/shipped.json`: the validator says where it was kept and where it is now |
-| Remove a module, pedal or unit | Delete the file and its two index lines; add its id and its keys to `retired.ts`; take it out of what the validator names (a factory workflow that lists it, a role it played: a role nothing plays is a note saying what the page does without it, or an error for a role the page needs); `npm run docs`. The core's comparison with the concept page leaves its keys out (they are retired) and says which accepted differences now cover fewer cases or none: `npm run core -- --recount` records the new counts, and an entry that covers none is deleted. The core's tests skip, and say so, the sections that name it. Then the browser tools: the acceptance's scenarios that put it on the desk fail naming it (`run.mjs --slice`): move each to its file's `excluded` with the reason "uses <module>, removed"; a visual state that draws it is taken out of its states file | The validator names what refers to it, and what saved data may hold; `npm run check` passes |
+| Remove a module, pedal or unit | Delete the file and its two index lines; add its id, its keys and its state keys to `retired.ts`; take it out of what the validator names (a factory workflow that lists it, another definition's condition or action that names it: Timbre's removal names two notes of the Mastering pedal; a role it played: a role nothing plays is a note saying what the page does without it, or an error for a role the page needs); `npm run docs`; `npm run core -- --recount` (the concept comparison's accepted differences that now cover fewer cases are recounted, and one that covers none is taken out). The core's tests skip, and say so, the sections that name it. Then the browser acceptance: the scenarios that use it fail naming it ("no such element .tile[data-m=\"timbre\"]": for Timbre, 12 scenarios, 27 checks): move each to its acceptance file's `excluded` with the reason "uses <module>, removed"; a visual state that draws it is taken out of its states file | The validator names what refers to it, and what saved data may hold; `npm run check` passes |
 
 ## 9. Add an engine
 

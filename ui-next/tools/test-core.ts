@@ -432,6 +432,10 @@ for (const [name, r] of Object.entries(results)) {
 if (process.argv.includes('--recount')) {
   const file = JSON.parse(fs.readFileSync(ACCEPT_FILE, 'utf8'));
   file.differences.forEach((a: { n?: number }, i: number) => { a.n = absorbed.get(i) ?? 0; });
+  /* an entry that covers no case any more (what it accepted was removed) goes with the recount */
+  const kept = file.differences.filter((_: unknown, i: number) => used.has(i));
+  if (kept.length < file.differences.length) console.log(`concept-differences.json: ${file.differences.length - kept.length} entries that no longer occur taken out`);
+  file.differences = kept;
   fs.writeFileSync(ACCEPT_FILE, JSON.stringify(file, null, 1).split(String.fromCharCode(10)).join(String.fromCharCode(13, 10)) + String.fromCharCode(13, 10));
   console.log(`concept-differences.json: ${ACCEPT.length} counts written`);
 } else ACCEPT.forEach((a, i) => {
@@ -441,7 +445,7 @@ if (process.argv.includes('--recount')) {
   console.log(`  accepted: ${a.derivation} /${a.match}/ now covers ${n} cases, recorded with ${a.n}${n > a.n ? ': look at what changed, then npm run core -- --recount' : ' (fewer: npm run core -- --recount records it)'}`);
 });
 const gone = ACCEPT.filter((_, i) => !used.has(i));
-gone.forEach(a => { bad++; console.log(`  gone: ${a.derivation} /${a.match}/ no longer differs; take it out of concept-differences.json`); });
+if (!process.argv.includes('--recount')) gone.forEach(a => { bad++; console.log(`  gone: ${a.derivation} /${a.match}/ no longer differs: npm run core -- --recount takes it out`); });
 console.log(`parts' contract: ${contract.length ? contract.join('; ') : 'ok'}`); bad += contract.length;
 console.log(`translation keys: ${strings.join('; ')}`); if (!strings[0]!.startsWith('ok')) bad++;
 console.log(`real fields read back: ${back.join('; ')}`); if (back.length > 1) bad++;

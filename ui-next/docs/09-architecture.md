@@ -889,16 +889,21 @@ the two boxes that would move (the engine caret and the LCD picker's arrows) whe
 
 ## Adding from the how-to, on a copy
 
-On a scratch copy of `ui-next`, following [06](06-how-to.md) as it is (the trials are in the revision's notes), each
-with `npm run check` and `npm run lint` passing and looked at in both themes at every tier:
+Re-measured in the consolidation round (review r3, RA-03) on a scratch copy of the merged branch, following
+[06](06-how-to.md) as it now is, with `npm run check` and `npm run lint` after each and the browser acceptance after
+the additions and after the removal:
 
-| Job | Files written by hand | Lines | Besides |
+| Job | Files written by hand | Lines | Besides (what 06 says to run) |
 |---|---|---|---|
-| Add a parameter (APG eta on two engines) | 1 (`guidance.ts`) | 11 | `npm run docs` (2 generated docs) |
-| Add a pedal (a stereo widener) | 2 (its definition, the index) | 55 + 2 | its drawing (13 lines), written by `node tools/thumb.ts widener`; docs |
-| Add a module of existing parts, a face per tier (Dynamics) | 4 (definition, a unit in `parts.ts`, index, drawing) | 37 + 1 + 2 + 17 | docs |
-| Add a part (a stepped slider) used by two definitions | 5 (`PARTS`, component, stylesheet, the two definitions) | 4 + 24 + 17 + 1 + 1 | `gallery.mjs --record` once it looks right; docs |
-| Remove a module (Avoid) | 4 (its file deleted, index, `retired.ts`, the factory workflow naming it) | 31 deleted; 2 + 2 + 2 | docs. The slice's own browser checks add Avoid (`30-slice.mjs`, `00-slice.mjs`): removing a slice module means giving them another, as 06 says |
+| Add a parameter (YuE2's plan token limit, 06 section 1) | 1 (`planner.ts`) | 10 | `npm run docs`; the request comparison lists its field as new (question 19) |
+| Add a pedal with a knob, a choice and a switch (a stereo widener) | 2 (its definition, the index) | 24 + 2 | its drawing, written by `node tools/thumb.ts widener`; docs. The picker's counts follow (the tests count the inventory) |
+| Add a module of existing parts, a face per tier, a Quick row (Dynamics) | 4 (definition, a unit in `parts.ts`, index, drawing) | 28 + 1 + 2 + a drawing | docs; and its id in `factory.ts ORDER`, which the layout scenarios asked for ("Everything" left a hole) |
+| Add a bespoke instrument (a loudness gauge in Dynamics, 06 section 4b) | 6 (`PARTS` row, core file, the line in `src/derive.ts`, component, stylesheet, the node) | 5 + 19 + 1 + 16 + 2 + 1 | docs |
+| Remove a module (Timbre reference) | 4 (its file deleted, index, `retired.ts`, the two Mastering notes the validator named) | 84 deleted; 2 + 3 + 19 deleted | docs; `npm run core -- --recount` (took one entry out); 12 acceptance scenarios that use Timbre fail naming it, to be excluded as 06 says; one test section skipped and said |
+
+All four additions together left `npm run check`, `npm run lint` and the whole acceptance passing, but for the layout
+scenarios' hole, which the `ORDER` line closed. Not re-measured in this round: a new part's gallery run (06 section 4
+gives its numbers from the first measurement).
 
 A new part is checked on every surface by the gallery with no line written there; until its looks are recorded the
 gallery fails on it alone.
