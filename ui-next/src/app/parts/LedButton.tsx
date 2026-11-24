@@ -9,7 +9,7 @@ export function LedButton(v: PartView) {
   if (!p) return null;
   const on = p.value === true;
   return (
-    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} onClick={() => p.set(!on)}>
+    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on)}>
       <i />{say(v.label)}
     </button>
   );

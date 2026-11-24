@@ -379,6 +379,14 @@ export function adapterLists(engine: string, slots: { file: string; type: string
   return out;
 }
 
+/** The desk fact `adaptersAway` (parts.ts DESK_FACTS): the other engines that keep adapters for when you switch back,
+ *  from the engines' book, as words after a separator, or nothing (25-module-adapters.js awayText). */
+export function adaptersAway(book: { stash: { [engine: string]: { state: { [k: string]: Json } } } }, engine: string, key = 'slots'): string {
+  const away = Object.entries(book.stash).filter(([e, st]) => e !== engine && Array.isArray(st.state?.[key]) && (st.state[key] as Json[]).length);
+  if (!away.length) return '';
+  return ' · ' + away.map(([e, st]) => { const n = (st.state[key] as Json[]).length; return `${engineName(e as Parameters<typeof engineName>[0])} keeps its ${n === 1 ? 'adapter' : `${n} adapters`} for when you switch back`; }).join('; ');
+}
+
 /* ---------------------------------------------------------------- what a hand does */
 
 /** The words of a mask change, from the lyrics `a` to `b`: one section of one adapter, or several. */
@@ -455,6 +463,15 @@ export function xyRailValue(lo: number, hi: number, step: number, f: number, ove
   if (over) return lo;
   return +clamp(Math.round((lo + step + clamp(f, 0, 1) * (hi - lo - step)) / step) * step, lo + step, hi).toFixed(4);
 }
+/** Where a key takes such a value: off, up stays off and down goes to the widest; on, up past the widest is off; else a
+ *  step (Shift ten, Page ten) within the plot (21-xy-pad.js). Null for a key that does not move Y. */
+export function xyRailKey(lo: number, hi: number, step: number, v: number, key: string, shift: boolean): number | null {
+  const d = ({ ArrowDown: -1, ArrowUp: 1, PageUp: 10, PageDown: -10 } as { [k: string]: number })[key];
+  if (d === undefined) return null;
+  if (v <= lo) return d > 0 ? lo : hi;
+  if (d > 0 && v >= hi) return lo;
+  return +clamp(v + d * (/^Page/.test(key) ? 1 : shift ? 10 : 1) * step, lo + step, hi).toFixed(4);
+}
 defineInstrument('xyPad', (ix, node, desk) => {
   const y = node.params?.[1], o = (node.opts as { yOff?: string } | undefined)?.yOff;
   if (!o || !y || !has(ix, y, desk.engine)) return {} as InstrumentModel;
@@ -467,5 +484,13 @@ defineInstrument('xyPad', (ix, node, desk) => {
     const o = (x.arg ?? {}) as { f: number; over: boolean };
     if (!p || !r) return false;
     p.set(xyRailValue(r[0], r[1], r[2], o.f, o.over));
+  },
+  /* a key on such a pad's Y: true when it was one */
+  yKey: x => {
+    const k = x.node.params?.[1], p = k ? x.v.params[k] : undefined, r = k && has(x.ix, k, x.desk.engine) ? resolve(x.ix.params.get(k)!.p, x.desk.engine).range : undefined;
+    const o = (x.arg ?? {}) as { key: string; shift: boolean };
+    const to = p && r ? xyRailKey(r[0], r[1], r[2], Number(valueOf(x.ix, k!, x.desk)), o.key, o.shift) : null;
+    if (to === null) return false;
+    p!.set(to);
   },
 });

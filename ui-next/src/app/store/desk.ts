@@ -101,7 +101,7 @@ export interface DeskStore extends Parts {
   deskStep(words: StepWords, fn: () => void): void;
   /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
    *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram'] }): void;
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string }): void;
 }
 
 const UNDO_MAX = 100;
@@ -245,6 +245,8 @@ export const useDesk = create<DeskStore>()((set, get) => {
     told(o) {
       const d = get().desk;
       set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      /* the words for another engine's adapters (package 3b: features/adapters.tsx, from the engines' book) */
+      if (o.adaptersAway !== undefined && o.adaptersAway !== get().desk.told?.adaptersAway) set({ desk: { ...get().desk, told: { ...get().desk.told, adaptersAway: o.adaptersAway } } });
     },
   };
 });

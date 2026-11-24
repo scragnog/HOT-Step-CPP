@@ -12,7 +12,7 @@ import { useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { Definition, Node } from '../../definitions/types.ts';
 import { ENGINES } from '../../definitions/engines.ts';
-import { adapterLists, bindPart, instrumentModel, nodeKeys, partAct } from '../../derive.ts';
+import { adapterLists, adaptersAway, bindPart, instrumentModel, nodeAt, nodeKeys, partAct, type Desk } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { useSay } from '../i18n/index.ts';
@@ -31,6 +31,8 @@ function findCarts(): { def: Definition; node: Node; key: string } | null {
   return null;
 }
 const CARTS = findCarts();
+/** What the cartridges draw on a desk, their node as that desk shows it. */
+const cartsOn = (desk: Desk) => { const n = CARTS ? nodeAt(ix, CARTS.node, desk) : null; return n && CARTS ? instrumentModel(ix, n, desk, CARTS.key)?.carts ?? null : null; };
 
 /* which list is open, and the button it opened from */
 let open: { which: 'slot' | 'planner'; anchor: HTMLElement | null } | null = null;
@@ -58,7 +60,7 @@ function act(name: string, arg: unknown): void {
 
 export function AdapterList() {
   const say = useSay(), o = useOpen(), pop = document.getElementById('pop');
-  const m = useModel(s => (CARTS && o ? instrumentModel(ix, CARTS.node, s.desk, CARTS.key)?.carts ?? null : null), `adapter-list|${o?.which ?? ''}`);
+  const m = useModel(s => (o ? cartsOn(s.desk) : null), `adapter-list|${o?.which ?? ''}`);
   const list = o?.which === 'planner' ? m?.plannerList : m?.list;
   /* shown under its button (above it when there is more room there), within the window; focus on its first file */
   useLayoutEffect(() => {
@@ -102,7 +104,7 @@ export function AdapterList() {
     } else {
       act('load', { file: x.file, type: x.type });
       /* focus on the fader of the cartridge just loaded (E-09, L-07) */
-      const after = CARTS ? instrumentModel(ix, CARTS.node, useDesk.getState().desk, CARTS.key)?.carts : null;
+      const after = cartsOn(useDesk.getState().desk);
       const c = after?.carts.find(k => k.file === x.file), f = c?.faders[0]?.key;
       if (useDesk.getState().desk !== before) useDesk.getState().setFocus(f ? `[data-m="${CARTS!.def.id}"] [data-fader="${f}"]` : `[data-m="${CARTS!.def.id}"] [data-cartx]`);
     }
@@ -133,3 +135,11 @@ async function tell(): Promise<void> {
     .catch(() => { /* the lists stay as they were told; the real adapter says why it failed */ });
 }
 void tell();
+
+/* the words for the adapters other engines keep (the desk fact adaptersAway), told whenever the engines' book or the
+   engine changes (B-02) */
+useDesk.subscribe((st, prev) => {
+  if (st.book === prev.book && st.desk.engine === prev.desk.engine) return;
+  st.told({ adaptersAway: adaptersAway(st.book, st.desk.engine) });
+});
+useDesk.getState().told({ adaptersAway: adaptersAway(useDesk.getState().book, useDesk.getState().desk.engine) });

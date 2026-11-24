@@ -1,4 +1,4 @@
 /* The planner's look beside the concept's (package 3b): with the planner off, what only the planner reads stands back
    and says so, and stays operable (Q-17); the concept fades it from the tile's lm-off class (25-module-planner.css), here
-   the pad stands back by its own mark, as the core says it does (an XY pad's dim). */
-.xy[data-dim] { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }
+   the pad and Quick's How adventurous stand back by their own mark, as the core says they do (a node's dim). */
+:is(.xy, .mood, .qchoice)[data-dim] { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }

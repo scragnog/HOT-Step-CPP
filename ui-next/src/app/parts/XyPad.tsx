@@ -51,7 +51,8 @@ export function XyPad(v: PartView) {
     e.preventDefault();
     const p = axis ? py : px, ends = e.key === 'Home' || e.key === 'End';
     if (ends) v.gesture.end('key'); else { if (!e.repeat) v.gesture.end('key'); v.gesture.begin('key'); }
-    working(true); p.press(e.key, e.shiftKey); nudge();
+    /* Y on a pad with an off rail moves by the rail's rule (the core's) */
+    working(true); if (axis && rail) v.act('yKey', { key: e.key, shift: e.shiftKey }); else p.press(e.key, e.shiftKey); nudge();
   };
   const reset = () => { working(true); v.batch(() => { px.reset(); py.reset(); }); working(false); };
 

@@ -15,6 +15,7 @@ import { closeDrawer } from './shell/drawers.ts';
 import { usePanelStore, drawerMode } from './store/panels.ts';
 import { dispatchKey } from './register/keys.ts';
 import type { Engine } from './services/engine.ts';
+import { Slot } from './register/Slot.tsx';
 
 export function App({ engine }: { engine: Engine }) {
   const say = useSay(), panels = usePanels(), focus = useDesk(s => s.focus), drawer = usePanelStore(s => s.drawer);
@@ -61,6 +62,8 @@ export function App({ engine }: { engine: Engine }) {
       <ModulesPanel open={panels.R} set={v => panels.set('right', v)} />
       <Toast />
       <LiveRegion />
+      {/* the overlays the packages draw at the page's root (register/slots.ts): the first to need it placed it (package 3b) */}
+      <Slot name="overlays" />
     </>
   );
 }
