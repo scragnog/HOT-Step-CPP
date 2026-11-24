@@ -44,8 +44,9 @@ export function cleanValue(p: ParamDef, d: Definition, raw: unknown): Value | un
   const text = raw.slice(0, Math.min(TEXT_MAX, ...enginesOf(p, d).filter(e => d.engines.includes(e)).map(e => resolve(p, e).maxLength ?? TEXT_MAX)));
   const engs = enginesOf(p, d).filter(e => d.engines.includes(e));
   /* text that fails its check on an engine that checks it is not kept (the field keeps what was typed only while it
-     is being edited) */
-  return engs.every(e => { const c = resolve(p, e).check; return !c || CHECKS[c.rule].test(text); }) ? text : undefined;
+     is being edited); the default is always kept, so a record holding it reads back as it was written (RC-02: Custom
+     timesteps' empty default fails its own check) */
+  return engs.every(e => { const r = resolve(p, e), c = r.check; return !c || text === r.default || CHECKS[c.rule].test(text); }) ? text : undefined;
 }
 
 /** The state each kind may hold. Anything else is not kept. */

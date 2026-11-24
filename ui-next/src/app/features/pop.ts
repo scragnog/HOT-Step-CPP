@@ -1,8 +1,9 @@
 // The popover's mechanism (the concept's 17-popover.js; its view is popover.tsx): one floating panel (#pop) that opens
 // from a button, takes focus, gives it back when it closes, and closes on a click outside it, on Escape (layers.ts), on
 // Tab out of it, or when its button is redrawn away or scrolls out of its list. What it holds is drawn by whoever opens
-// it: the Lab offer (adding.ts), a tile's moves (grip-menu.tsx), and later packages' (the adapter list, the presets,
-// the drafts, a row's menu).
+// it: the Lab offer (adding.ts), a tile's moves (grip-menu.tsx), the adapter list (adapters.tsx), the presets
+// (prompt-presets.tsx), the drafts (workflows/Drafts.tsx) and a Workflows row's menu (workflows/List.tsx). It is the
+// page's one popover: one layer (layers.ts), so Escape, Tab, Undo and Ctrl+Enter treat every use alike (RA-04).
 //
 //   openPop(button, () => <MyBody />, { label: ui('...') })     toggles from `button`
 //   closePop()                                                   focus back to the button
@@ -10,8 +11,7 @@
 // placeFloat is the one placement every popover and menu uses (C-17, C-42).
 
 import type { ReactNode } from 'react';
-import type { Slot } from '../../derive.ts';
-import { usePop, type PlaceOpts } from '../store/overlays.ts';
+import { usePop, type PlaceOpts, type PopOpts } from '../store/overlays.ts';
 import { layerClosed, shown } from './layers.ts';
 
 export const popHost = (): HTMLElement | null => document.getElementById('pop');
@@ -40,12 +40,12 @@ export function placeFloat(el: HTMLElement, anchor: HTMLElement, o: PlaceOpts = 
 }
 
 /** Opens the popover from `anchor` with `body` in it; from the same anchor again, closes it. True if it opened. */
-export function openPop(anchor: HTMLElement, body: () => ReactNode, o: { label?: Slot; place?: PlaceOpts } = {}): boolean {
+export function openPop(anchor: HTMLElement, body: () => ReactNode, o: PopOpts = {}): boolean {
   const s = usePop.getState();
   if (s.body && s.anchor === anchor) { closePop(); return false; }
   if (s.body) closePop(false);
   anchor.setAttribute('aria-expanded', 'true');
-  usePop.setState({ anchor, body, label: o.label ?? null, place: o.place ?? {}, n: s.n + 1 });
+  usePop.setState({ anchor, body, label: o.label ?? null, place: o.place ?? {}, fixed: !!o.fixed, focus: o.focus ?? null, n: s.n + 1 });
   return true;
 }
 /** Closes the popover; `refocus`: focus goes back to its button (unless the user has put it elsewhere). */
@@ -53,7 +53,7 @@ export function closePop(refocus = true): void {
   const s = usePop.getState(), el = host(); if (!s.body || !el) return;
   el.hidden = true; el.classList.remove('fixedpop', 'capped-float', 'up'); el.style.maxHeight = '';
   if (s.anchor?.hasAttribute('aria-expanded')) s.anchor.setAttribute('aria-expanded', 'false');
-  usePop.setState({ anchor: null, body: null, label: null });
+  usePop.setState({ anchor: null, body: null, label: null, fixed: false, focus: null });
   layerClosed(el, refocus);
 }
 export const popOpen = (): boolean => !!usePop.getState().body;

@@ -12,7 +12,8 @@ import {
 } from '../../derive.ts';
 import { BUILT_IN, defOf, ix } from '../model/index.ts';
 import { undoables } from '../register/undoable.ts';
-import { keepAside, tellOnBoot, writeStored } from './stored.ts';
+import { keepAside, tellOnBoot } from './stored.ts';
+import { bootDesk, deskRead, writeDesk } from './desk-tabs.ts';
 
 /** Where the desk is kept between visits. */
 export const DESK_KEY = 'hotstep.create.desk';
@@ -23,7 +24,7 @@ const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) 
 
 /* ---------------------------------------------------------------- undo: what a step changed, path by path */
 
-/** The desk as paths (a value, an auto switch, a state, the modules, the board, the engine, the engines' book), each
+/** The desk as paths (a value, an auto switch, a state, the modules, the board, the engine, the tier, the engines' book), each
  *  with its JSON: a step is the paths it changed, and undoing it puts back only those that nothing has changed since. */
 type Flat = Map<string, string>;
 interface Parts { desk: Desk; book: EngineBook; mods: string[]; board: string[] }
@@ -32,7 +33,7 @@ function flatOf(p: Parts): Flat {
   for (const [k, v] of Object.entries(p.desk.vals)) f.set('v:' + k, JSON.stringify(v));
   for (const [k, v] of Object.entries(p.desk.auto)) f.set('a:' + k, JSON.stringify(v));
   for (const [k, v] of Object.entries(p.desk.state)) f.set('s:' + k, JSON.stringify(v));
-  f.set('mods', JSON.stringify(p.mods)); f.set('board', JSON.stringify(p.board)); f.set('engine', JSON.stringify(p.desk.engine)); f.set('book', JSON.stringify(p.book));
+  f.set('mods', JSON.stringify(p.mods)); f.set('board', JSON.stringify(p.board)); f.set('engine', JSON.stringify(p.desk.engine)); f.set('tier', JSON.stringify(p.desk.tier)); f.set('book', JSON.stringify(p.book));
   /* the packages' undoable state, as it is now (register/undoable.ts) */
   for (const [n, s] of undoables()) f.set('x:' + n, JSON.stringify(s.read()));
   return f;
@@ -46,10 +47,13 @@ function unflat(base: Parts, f: Flat): Parts {
     else if (p.startsWith('x:')) { const s = undoables().get(p.slice(2)); if (s && JSON.stringify(s.read()) !== j) s.write(JSON.parse(j)); }
   }
   const mods = JSON.parse(f.get('mods')!) as string[], board = JSON.parse(f.get('board')!) as string[];
-  const desk: Desk = { ...base.desk, vals, auto, state, engine: JSON.parse(f.get('engine')!) as EngineId, on: onOf(mods, board) };
+  const desk: Desk = { ...base.desk, vals, auto, state, engine: JSON.parse(f.get('engine')!) as EngineId, tier: JSON.parse(f.get('tier')!) as Tier, on: onOf(mods, board) };
   return { desk, book: JSON.parse(f.get('book')!) as EngineBook, mods, board };
 }
 const onOf = (mods: string[], board: string[]) => new Set([...BUILT_IN, ...mods, ...board]);
+/** What takes focus for a module, pedal or side unit that comes back (its grip, foot switch or power): an Undo of its
+ *  removal, a Redo of its adding. */
+export const gripOf = (d: Definition): string => (d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`);
 
 export interface Entry {
   words: StepWords;
@@ -62,6 +66,8 @@ export interface Entry {
   at: number;
   /** Where focus goes when the step is undone (a selector). */
   back?: string;
+  /** Where focus goes when the step is redone (a selector): the tile or pedal an add brings back (RC-07). */
+  forth?: string;
   /** A step that is no change to the desk (a saved record replaced, renamed or deleted: store/workflows.ts) undoes and
    *  redoes itself, by name, on the records as they are then; either may say what it left alone. */
   run?: { undo(): Slot | void; redo(): Slot | void };
@@ -113,18 +119,27 @@ export interface DeskStore extends Parts {
 const UNDO_MAX = 100;
 let gestures = 0;
 
-function initial(): Parts & { told: Msg | null } {
-  const empty: Desk = emptyDesk(ix);
-  let raw: unknown = null, text: string | null = null;
-  try { text = localStorage.getItem(DESK_KEY); raw = text ? JSON.parse(text) : null; } catch { raw = null; }
+/** A stored desk's text as the store's parts (null: it cannot be used). */
+export function deskOf(text: string | null): (Parts & { told: Msg | null }) | null {
+  let raw: unknown = null;
+  try { raw = text ? JSON.parse(text) : null; } catch { raw = null; }
   const r = raw ? readDesk(ix, raw) : null;
-  /* a desk that cannot be used is copied aside before the next autosave writes over it, and said once (F-16) */
-  if (!r && text) { keepAside(DESK_KEY, text); tellOnBoot(msg('store.desk')); }
-  if (!r) return { desk: empty, book: emptyBook(), mods: [], board: [], told: null };
+  if (!r) return null;
   const ids = [...r.desk.on];
   const mods = ids.filter(id => { const d = defOf(id); return d?.kind === 'module' && !d.builtIn; });
   const board = boardOrder(ix, ids.filter(id => defOf(id)?.kind !== 'module'));
   return { desk: { ...r.desk, on: onOf(mods, board) }, book: r.book, mods, board, told: r.told };
+}
+
+function initial(): Parts & { told: Msg | null } {
+  /* storage's desk, or this tab's own when another tab wrote since (store/desk-tabs.ts, RC-08) */
+  const text = bootDesk(DESK_KEY), r = deskOf(text);
+  /* a desk that cannot be used is copied aside before the next autosave writes over it, and said once (F-16) */
+  if (!r && text) { keepAside(DESK_KEY, text); tellOnBoot(msg('store.desk')); }
+  if (!r) return { desk: emptyDesk(ix), book: emptyBook(), mods: [], board: [], told: null };
+  /* what was read is not written back unchanged, so a tab that only looks never writes over another's newer desk */
+  deskRead(JSON.stringify(savedDeskOf(ix, r.desk, r.book)));
+  return r;
 }
 
 export const useDesk = create<DeskStore>()((set, get) => {
@@ -132,7 +147,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
   seeEngine(start.desk.engine);
   let saying = false;
   /** Records a step from the parts as they were to the parts as they are now. */
-  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named']) => {
+  const record = (prev: Parts, next: Parts, words: StepWords, back?: string, from?: string, named?: Change['named'], forth?: string) => {
     const s = get(), before = flatOf(prev), after = flatOf(next), last = s.undo[s.undo.length - 1];
     /* the gesture in progress is this change's when the change comes from the part that began it */
     const g = s.gesture && (from === undefined || s.gesture.startsWith(from + '|')) ? s.gesture : null;
@@ -142,7 +157,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       set({ ...next, undo, redo: [] });
       return;
     }
-    const entry: Entry = { words, first: prev.desk, before, after, gesture: g, at: Date.now(), ...(back ? { back } : {}) };
+    const entry: Entry = { words, first: prev.desk, before, after, gesture: g, at: Date.now(), ...(back ? { back } : {}), ...(forth ? { forth } : {}) };
     set({ ...next, undo: [...s.undo, entry].slice(-UNDO_MAX), redo: [] });
   };
   const parts = (): Parts => { const s = get(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
@@ -192,7 +207,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       if (r.did === 'there') set({ flash: { id: d.id, ring: d.kind === 'module' ? 'flash' : 'here', n: (s.flash?.n ?? 0) + 1 } });
       if (r.did !== 'added') return r.did;
       const prev = parts(), desk = d.kind === 'module' ? prev.desk : applyChange(prev.desk, arrivalChange(ix, d, prev.desk));
-      record(prev, { desk: { ...desk, on: onOf(r.mods, r.board) }, book: prev.book, mods: r.mods, board: r.board }, deskStep('add', d, prev.desk, ix));
+      record(prev, { desk: { ...desk, on: onOf(r.mods, r.board) }, book: prev.book, mods: r.mods, board: r.board }, deskStep('add', d, prev.desk, ix), undefined, undefined, undefined, gripOf(d));
       return 'added';
     },
 
@@ -202,8 +217,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const { mods, board, stood, pedals, last } = removeFrom(ix, prev.mods, prev.board, d.id);
       const gone = d.kind === 'module' ? { ...get().gone, [d.id]: stood } : get().gone;
       const words = deskStep('remove', d, prev.desk, ix);
-      const back = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
-      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, back);
+      record(prev, { ...prev, desk: { ...prev.desk, on: onOf(mods, board), state: leavesWith(d, prev.desk.state) }, mods, board }, words, gripOf(d));
       const entry = get().undo[get().undo.length - 1]!;
       set({ gone, focus: focusAfter ? [focusAfter].flat() : null });
       get().showToast({ text: removedWords(d, prev.desk, pedals, last), action: { label: { id: 'ui.undo' }, run: () => get().runUndo(entry) } });
@@ -235,7 +249,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const i = s.redo.indexOf(e); if (i < 0) return;
       set({ redo: s.redo.filter(x => x !== e), gesture: null });
       const note = e.run ? e.run.redo() : (cross(e, e.before, e.after), undefined);
-      set({ undo: [...get().undo, e] });
+      set({ undo: [...get().undo, e], ...(e.forth ? { focus: [e.forth] } : {}) });
       const said: Slot = { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } };
       get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
     },
@@ -270,16 +284,12 @@ export const useDesk = create<DeskStore>()((set, get) => {
 
 /* ---------------------------------------------------------------- the autosave
    Everything, on every change of the desk or the engines' book, as the core writes it (savedDeskOf), read back by
-   readDesk() on the next visit. A toast, a focus request or the history moving writes nothing. */
-let written = '';
-useDesk.subscribe((s, prev) => {
-  if (s.desk === prev.desk && s.book === prev.book) return;
-  const rec = savedDeskOf(ix, s.desk, s.book), text = JSON.stringify(rec);
-  if (text === written) return;
-  /* a refused write (storage full or off) is reported (store/stored.ts): the read-out says Not saved, and the desk
-     lives while the tab is open; it is written again with the next change */
-  if (writeStored(DESK_KEY, text)) written = text;
-});
+   readDesk() on the next visit; marked with the tab that wrote it (store/desk-tabs.ts). A toast, a focus request or
+   the history moving writes nothing. A refused write (storage full or off) is reported (store/stored.ts): the read-out
+   says Not saved, and the desk lives while the tab is open; it is written again with the next change, or when the tab
+   is hidden (features/desk-tabs.ts). */
+export const saveDesk = (): boolean => { const s = useDesk.getState(); return writeDesk(DESK_KEY, JSON.stringify(savedDeskOf(ix, s.desk, s.book))); };
+useDesk.subscribe((s, prev) => { if (s.desk !== prev.desk || s.book !== prev.book) saveDesk(); });
 
 /** The definitions of the modules on the desk, in the user's order. */
 export const modsOf = (s: Pick<DeskStore, 'mods'>): Definition[] => s.mods.map(id => defOf(id)).filter((d): d is Definition => !!d);

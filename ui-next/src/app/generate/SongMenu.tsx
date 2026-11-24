@@ -29,10 +29,23 @@ function place(m: HTMLElement, b: HTMLElement): void {
   const h = m.offsetHeight, w = m.offsetWidth, gap = 6;
   let k = room(b);
   if (k.up < h && k.down < h) { const can = document.documentElement.scrollHeight - innerHeight - scrollY; if (can > 0) { scrollBy({ top: Math.min(can, h - k.down), behavior: 'instant' }); k = room(b); } }
+  const c = document.getElementById('centre')?.getBoundingClientRect(), lo = c ? c.left : 12, hi = c ? c.right : document.documentElement.clientWidth - 12;
+  /* neither side has room and the page cannot move: beside its card, level with the button, between the go bar and the
+     window's foot (the concept's F-34, inside F-28's bounds), when that is roomier; so it covers neither its card nor
+     the go bar (RC-04) */
+  const card = b.closest('.song')?.getBoundingClientRect(), side = card ? (hi - card.right - gap >= w ? card.right + gap : card.left - gap - w >= lo ? card.left - gap - w : null) : null;
+  if (k.up < h && k.down < h && side !== null) {
+    const ceil = k.r.top - gap - k.up, floor = k.r.bottom + gap + k.down, tall = floor - ceil;
+    if (tall > Math.max(k.up, k.down)) {
+      if (tall < h) { m.style.maxHeight = `${tall}px`; m.style.overflowY = 'auto'; }
+      const y = Math.max(ceil, Math.min(k.r.bottom - h, floor - Math.min(h, tall)));
+      m.style.left = `${side + scrollX}px`; m.style.top = `${y + scrollY}px`;
+      return;
+    }
+  }
   const up = k.up >= h || (k.down < h && k.up > k.down), fit = up ? k.up : k.down;
   if (fit < h) { m.style.maxHeight = `${Math.max(120, fit)}px`; m.style.overflowY = 'auto'; }
   const mh = Math.min(h, fit < h ? Math.max(120, fit) : h), r = k.r;
-  const c = document.getElementById('centre')?.getBoundingClientRect(), lo = c ? c.left : 12, hi = c ? c.right : document.documentElement.clientWidth - 12;
   const left = Math.max(lo, Math.min(hi - w, r.right - w)), top = up ? r.top - gap - mh : r.bottom + gap;
   m.style.left = `${left + scrollX}px`; m.style.top = `${top + scrollY}px`; m.classList.toggle('up', up);
 }
@@ -55,12 +68,16 @@ export function SongMenu() {
     layerOpen(m, { trigger: b, close: () => close(true) });
     m.querySelector<HTMLElement>('button:not(:disabled)')?.focus({ preventScroll: true });
   }, [c?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- placed and focused when it opens
-  /* a click outside closes it (its own button toggles it) */
+  /* a click outside closes it (its own button toggles it); focus goes back to its button unless the click put it on
+     something else (layers.ts layerClosed: RC-05) */
   useEffect(() => {
     if (!id) return;
-    const down = (e: PointerEvent) => { const t = e.target as Element; if (!t.closest?.('#menu') && !t.closest?.('[data-songmenu]')) close(false); };
-    document.addEventListener('pointerdown', down, true);
-    return () => document.removeEventListener('pointerdown', down, true);
+    const out = (e: MouseEvent) => {
+      const t = e.target as Element, m = document.getElementById('menu'); if (!t.isConnected || t.closest?.('#menu') || t.closest?.('[data-songmenu]')) return;
+      close(false); if (m) layerClosed(m);
+    };
+    document.addEventListener('click', out, true);
+    return () => document.removeEventListener('click', out, true);
   }, [id]);
   useEffect(() => {
     const m = document.getElementById('menu'); if (!m) return;

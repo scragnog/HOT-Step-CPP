@@ -268,8 +268,8 @@
     {
       "feature": "menu outside",
       "file": "src/app/generate/SongMenu.tsx",
-      "find": "if (!t.closest?.('#menu') && !t.closest?.('[data-songmenu]')) close(false);",
-      "replace": "void t;"
+      "find": "    document.addEventListener('click', out, true);",
+      "replace": "    void out;"
     },
     {
       "feature": "menu off go bar",

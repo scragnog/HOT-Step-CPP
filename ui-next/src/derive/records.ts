@@ -30,7 +30,8 @@ export function revisionOf(ix: Index, desk: Desk, workflow: string, name: string
     if (resolve(p, desk.engine).auto) auto[p.key] = desk.auto[p.key] !== false;
   }
   for (const { s, d } of ix.states.values()) if (s.stored === 'settings' && d.engines.includes(desk.engine) && desk.state[s.key] !== undefined) state[s.key] = desk.state[s.key]!;
-  return { v: SAVED_VERSION, workflow, name, engine: desk.engine, vals, auto, ...(Object.keys(state).length ? { state } : {}), ...(withContent ? { withContent: true as const } : {}) };
+  /* written as it reads back (cleanRevision): no empty auto or state (RC-02) */
+  return { v: SAVED_VERSION, workflow, name, engine: desk.engine, vals, ...(Object.keys(auto).length ? { auto } : {}), ...(Object.keys(state).length ? { state } : {}), ...(withContent ? { withContent: true as const } : {}) };
 }
 
 /** A draft: one song's content for the desk's engine. */

@@ -2,6 +2,7 @@
 // and their steps are store/workflows.ts; the view is src/app/workflows/.
 
 import { fill } from '../register/slots.ts';
+import { ownEnter } from '../register/keys.ts';
 import { WorkflowList } from '../workflows/List.tsx';
 import { HeadButtons, SaveRow } from '../workflows/SaveRow.tsx';
 import { DraftsButton } from '../workflows/Drafts.tsx';
@@ -14,3 +15,5 @@ fill('centre.drafts', DraftsButton);
 fill('centre.saveState', SaveState);
 /* storage's toasts ride with the read-out, which is always drawn */
 fill('centre.saveState', StoreToasts);
+/* the save row's name, a row being renamed and the draft's name take their own Enter, Ctrl+Enter too (RC-09) */
+ownEnter('#saveName'); ownEnter('.pren'); ownEnter('#draftName');
