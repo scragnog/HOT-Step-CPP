@@ -40,6 +40,7 @@
     { "id": "33-overlays/focus-ring-and-keyboard-tips", "why": "The ring on Tab, the keyboard tip with every digit, Escape, a pointer press, a pointer-focused knob and its first arrow (M-09, G-B-04)." },
     { "id": "33-overlays/hover-tip-holds-the-title-back", "why": "The page's tip after a rest, the browser's held back, the title given back when the pointer leaves (C-31)." },
     { "id": "33-overlays/knob-tip-waits-and-keeps-off-its-value", "why": "A tip due inside the quiet after a press waits for it (L-06), and opens clear of the knob's value." },
+    { "id": "33-overlays/tip-keeps-off-the-pedals-read-outs", "why": "An idle pedal's LED: its tip opens clear of everything the pedal reads out (L-06)." },
     { "id": "33-overlays/a-held-finger-shows-the-tip-and-still-presses", "why": "A held finger shows the tip, which goes by itself; a tier held 0.8 s is still chosen (S-01)." },
     { "id": "33-overlays/a-swipe-scrolls-and-a-rest-turns", "why": "Swipes that start on a knob, a ruler, a number box or a pad change nothing; a rest then a drag turns the knob; a sideways drag moves the ruler; each one step (S-29)." },
     { "id": "33-overlays/f6-walks-the-desk", "why": "F6 enters the desk, walks it in reading order, Shift+F6 back; not while the picker is open (S-33)." }

@@ -107,11 +107,20 @@ export default [
   { id: 'knob-tip-waits-and-keeps-off-its-value', w: 1920, h: 1080, run: async t => {
     await desk('lab', ['sampler', 'guidance'])(t);
     await t.click('.tile[data-m="guidance"] .tile-head h3');
-    await t.hover('.tile[data-m="sampler"] [data-knob="samp.cfg"]', 300);
+    await t.hover('.tile[data-m="sampler"] [data-knob="samp.cfg"]', 700);
     await t.ok('no tip yet, inside the quiet after the press', () => { const tip = document.querySelector('#tip'); return !tip || tip.hidden; });
     await t.do('rest', () => {}, null, 2000);
     await t.ok('the tip opens once the quiet is over, the pointer still resting (L-06)', () => { const tip = document.querySelector('#tip'); return (!!tip && !tip.hidden && tip.textContent.length > 3) || 'no tip'; });
     await t.ok('and it never covers the knob\'s value (L-06)', () => { const a = document.querySelector('#tip').getBoundingClientRect(), b = document.querySelector('[data-out="samp.cfg"]').getBoundingClientRect(); return a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom || JSON.stringify([a, b]); });
+  } },
+  /* 14-lab-desk/tip-keeps-off-the-read-out where it matters: an idle pedal's LED, whose tip would open over the pedal's
+     knobs and labels above it */
+  { id: 'tip-keeps-off-the-pedals-read-outs', w: 1440, h: 900, run: async t => {
+    await desk('lab', ['post'], ['vst', 'gain'])(t);
+    await t.hover('.pedal[data-pid="vst"] .led', 900);
+    await t.ok('the idle LED tip opens clear of everything its pedal reads out (L-06)', () => { const tip = document.querySelector('#tip'); if (!tip || tip.hidden) return 'no tip'; const a = tip.getBoundingClientRect();
+      const hit = [...document.querySelectorAll('.pedal[data-pid="vst"] :is(output, [data-out], .lcd, .kl)')].map(e => e.getBoundingClientRect()).filter(b => b.width && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom));
+      return !hit.length || JSON.stringify([a, hit]); });
   } },
   /* 07-overlays-keys/touch-tips and 18-tips-touch/a-held-press-still-presses, on the tier switch */
   { id: 'a-held-finger-shows-the-tip-and-still-presses', w: 820, h: 1180, touch: true, run: async t => {

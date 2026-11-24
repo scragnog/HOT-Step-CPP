@@ -361,6 +361,17 @@ the parts gallery, and 6 of the concept's suite, three of them pending there: S-
 draws them, compared with `controls-accepted.json`: `vb.mjs compare concept-controls rebuild-controls --accept
 tools/visual-baseline/controls-accepted.json`) and `tools/test-controls.ts` (in `npm run check`). The gallery draws a
 part with variants once in each (`testing/gallery.ts`).
+**Package 8 (the picker, the popover, tooltips, touch, the focus ring, F6, drag and drop)** adds
+`acceptance/8-overlays.json` (43 scenarios: 10 of `scenarios/33-overlays.mjs`, which hold on the concept page too, each a
+concept scenario's checks with the steps that need another package's part replaced by parts both pages draw; 33 of the
+concept's suite, six of them pending there, F-18, F-19, F-29 three times and S-36; nine of those wait on packages 3, 6
+and 7 for a part they draw), `switches/8-overlays.json` (32 features), `slice-states/80-overlays.mjs` (22 states: the picker in
+both themes, at four sizes, filtered, by category, a Lab module's offer and an arrival; the Lab offer and a tile's moves
+in the popover; the tip by keyboard and by pointer; four drags in progress; compared with `overlays-accepted.json`:
+`vb.mjs compare concept-overlays rebuild-overlays --scope overlays --accept tools/visual-baseline/overlays-accepted.json`)
+and `tools/test-overlays.ts` (in `npm run check`). The `overlays` slot is drawn at the page's root (`App.tsx`); an
+overlay of another package registers with `features/layers.ts` and puts what it holds in the popover with
+`features/pop.ts` (above, "Adding without colliding").
 An acceptance entry may wait on a later package (`"waiting": { "package", "because" }`, tools/behaviour/README.md):
 `run.mjs --slice` reports it apart and fails if it passes, `switches.mjs` leaves it out. The slice's
 `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` wait on package 3 (Tempo's LCD rows and key wheel
