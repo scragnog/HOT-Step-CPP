@@ -23,3 +23,4 @@ export * from './derive/containers.ts';
 export * from './derive/readouts.ts';
 export * from './derive/vram.ts';
 export * from './derive/instruments.ts';
+export * from './derive/workflows.ts';

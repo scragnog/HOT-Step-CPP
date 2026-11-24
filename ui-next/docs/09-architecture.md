@@ -338,6 +338,19 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   houses Tempo's LCD).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
+- `derive/workflows.ts` (package 7): the user's saved work. One rule for names (`normName`, `nameKey`, `sameName`: NFC,
+  trimmed, a run of white space as one, any capitals; F-02, F-10) and the clashes it decides (`wfNameClash`,
+  `revNameClash`, `saveCheck`); the lists as pure operations by name (`putWorkflow`, `dropWorkflow`, `putRevision`,
+  `dropRevision`, `renameWorkflow`, `renameRevision`); reading a stored list record by record, the page's shape and the
+  concept's (`readSaved`, `cleanWorkflow`, `cleanRevision`, `readDrafts`, `cleanDraft`: C-08); the merge with what another
+  tab saved (`merge3`, `mergeSaved`, `mergeDrafts`: C-09); a workflow on the desk (`layoutOf`, `workflowModified`) and a
+  revision against it (`revisionDiff`, `revisionModified`, `revisionDetail`: F-04, C-36); the list as the panel draws it
+  (`listModel`) and the save row's hint (`saveHint`); the steps' words (`openStep`, `loadStep`, `recordStep`,
+  `draftStep`, `putWords`, `loadedWords`, `unloadedFiles`); a revision as a file and back (`exportFile`,
+  `importRevision`: C-24, F-20); drafts (`draftSub`, `draftTitle`, `draftWhen`, `sameDraft`, `applyDraft`,
+  `draftsAbout`); storage's words (`saveState`, `storeFailed`, `storeSkipped`, `storeUnreadable`, `storeTold`: F-15,
+  F-16). Its words are added to the core's table (messages.ts `EN`) as the file loads. `derive/records.ts loadRevision`:
+  content a revision holds as empty text replaces nothing. Tested by `tools/test-workflows.ts` (in `npm run check`).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -426,6 +439,21 @@ pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a 
 (`.padrow`, `.padside`) or a row of plugin pickers (`.picks`), the Sampler's well holding its pickers beside its numbers
 (`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
 back.
+
+**Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 20 of the
+concept's suite, three of them pending there: F-17, F-36, S-17; 13 of `scenarios/33-workflows.mjs`, eight of which hold
+on the concept page too; and 7 waiting on packages 2, 3, 4 and 8, each with what it needs), `switches/7-workflows.json`
+(38 features), `slice-states/70-workflows.mjs` (17 states of the Workflows panel, the row menu and the Drafts list,
+compared with `workflows-accepted.json`: `vb.mjs compare concept-workflows rebuild-workflows --accept
+tools/visual-baseline/workflows-accepted.json`) and `tools/test-workflows.ts` (68 checks, in `npm run check`). Its store is `store/workflows.ts` (the lists, the
+open workflow and revision, registered as the undoable `workflow`) and `store/stored.ts` (every store's reads and
+writes: what cannot be read is copied aside before anything writes over it, and a refused write is reported, so the
+read-out says Not saved). Opening a workflow, loading a revision or a draft is a desk step (`deskStep`); replacing,
+updating, renaming, deleting and importing a record change no desk, so they are **record steps**
+(`store/desk.ts recordStep(words, run, back)`: the entry carries its own undo and redo, which act by name on the lists as
+they are then and say what they left alone; C-02, C-07). The shell gained four slots for it: `panel.workflows.head`
+(Save and Import after the panel's heading), `panel.workflows.save` (the save row, between the head and the list),
+`centre.drafts` (the go bar's Drafts) and `centre.saveState` (the read-out before Undo).
 
 ## Deviations from the concept's markup
 
@@ -517,6 +545,28 @@ back.
     `.rp-ctl`; at Lab they stand on the wave's caption line, as the concept's.
 38. **A seed's refusal, the saved seeds' update and delete, and the plain loads say what they did in a toast through
     the core** (`partAct`'s words), the update and delete with Undo; the concept's Update toast offered Undo too.
+Package 7's (numbered P7- so that the packages built beside it number theirs without a clash):
+
+- P7-1. **The row menu and the Drafts list are a popover of the package's own** (`workflows/pop.tsx`, drawn into the
+  skeleton's `#pop` with the concept's placement, Escape and outside press); package 8's popover takes them over.
+- P7-2. **Saved records are kept under the page's own keys and in its own shapes** (deviation 5): `hotstep.create.
+  workflows` (`{ v: 1, workflows, revisions }`, a revision naming its workflow), `hotstep.create.drafts`,
+  `hotstep.create.workflow` (the open workflow and revision, the workflows whose revisions show). The concept's stored
+  list (version 0) and its revision files are read. The test layer reads the concept's keys as the page's.
+- P7-3. **A revision holds every setting of its engine, defaults included** (`revisionOf`), so its details list those
+  not at their default; the concept's holds the values that were set, and lists those.
+- P7-4. **"Modified" is worked out for a workflow too**: its layout differs from the desk's (what Revert would put back,
+  F-04). The concept's flag is set by any change to the layout and cleared only by Revert or Update, so a module added
+  and taken off again reads modified there and not here.
+- P7-5. **Content held as empty text replaces nothing on load**: the concept's rule for the lyrics and the caption, for
+  every content text.
+- P7-6. **The export file is the page's record**: `{ format: 'hotstep-revision', v, workflow, revision }`, the revision
+  naming its engine (`engine`), the file named with the engine's short id (`.mm3.json`); the concept's file (`backend`,
+  `slots`, `content`) imports.
+- P7-7. **A workflow renamed in another tab is followed** (pending F-17) when a workflow of the same tier, modules and
+  board appears there as the open one goes.
+- P7-8. **The Workflows list's keys** (pending F-36): F2 renames a row of yours, Delete opens its menu with Delete armed,
+  a letter moves to the next row whose name starts with it.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
