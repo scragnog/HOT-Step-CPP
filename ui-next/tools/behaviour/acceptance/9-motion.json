@@ -1,0 +1,8 @@
+{
+  "about": "Package 9, motion: the tier change as one View Transition (shell/tier.ts), the desk's own transition (features/motion.ts: tiles and pedals arriving, leaving and moving, the landing after a drop, the cables drawing out), the blocks that push what follows (features/motion-blocks.ts) and the small motions on a change of state (features/motion-kicks.ts), with reduced motion as the concept designs it. The scenarios of scenarios/38-motion.mjs sample positions and animations over time; most hold on the concept page too.",
+  "scenarios": [
+    {"id": "19-desk-round5/tier-change-is-one-object-per-part", "why": "The tier change as one object per part (Q-13): a View Transition in which the page does not cross-fade, the tier switch takes no part, a tile's header does not fade, a tile's old and new faces are never shown together, the prompt card's words do not fade, and nothing is left named after it. (Waited on package 9 in fix-core.json.)"},
+    {"id": "19-desk-round5/tier-change-keeps-the-place-pointer", "why": "The tile under the pointer keeps its top edge through each tier change (Q-14): the anchor takes the pointer's tile. (Waited on package 9 in fix-core.json.)"},
+    {"id": "23-sa3-hm-round5/reduced-motion-arrivals-are-ringed", "why": "S-27: under reduced motion a tile that arrives carries the still ring. (Excluded in fix-core.json as motion's.)"}
+  ]
+}

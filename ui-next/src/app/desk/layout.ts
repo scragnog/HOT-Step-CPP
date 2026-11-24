@@ -2,7 +2,10 @@
 // where the pure layout (pack.ts) puts them (packNow), with the concept's rule for when the widths are kept: a change
 // that leaves the desk's make-up alone (the same tiles, order, tier, engine and window width: a value set, a line
 // appearing in a tile) keeps every tile's width and column (Q-29); any other change chooses afresh. 11-render.js.
+// A re-pack that a tile's content set off slides the tiles it moves (the concept's packDesk, M-02); a change to the
+// desk's make-up is the desk's own transition's (features/motion.ts), told when the desk has been laid out (onPacked).
 
+import { easing, mtime, reduced, booted } from '../kit/motion.ts';
 import { deskPlace, deskSettle, deskSolve, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
 import { BOARD, LEAD } from '../model/index.ts';
 
@@ -10,6 +13,11 @@ interface Measured { cols: number; tiles: HTMLElement[]; items: PackItem[] }
 let packMake = '', packFresh = 0;
 const state = new WeakMap<HTMLElement, { sig: string; plan: Plan[] } | null>();
 let meas: Measured | null = null;
+const packedFns: (() => void)[] = [];
+/** Runs fn after the desk (or the board) has been laid out, once the drawing that set it off is complete. */
+export const onPacked = (fn: () => void): void => { packedFns.push(fn); };
+/** The desk or the board was laid out: what waits for it runs once the commit that drew it is over. */
+export const packed = (): void => { queueMicrotask(() => packedFns.forEach(f => f())); };
 /** The last measurement of the desk, for the keyboard moves (deskSlots). */
 export const lastMeasure = (): Measured | null => meas;
 
@@ -88,10 +96,11 @@ export function packNow(make: string, keep = make === packMake && performance.no
     });
     g.style.minHeight = '';
   }));
+  packed();
 }
 
 /** A content change (a tile's body changed size, the window resized): re-place, keeping widths while the make-up holds. */
-let raf = 0;
+let raf = 0, pend: [string, boolean] = ['', false];
 export function packSoon(make: () => string, content: boolean): void {
   const now = make();
   if (!content && now !== packMake) { packFresh = performance.now(); }
@@ -99,7 +108,25 @@ export function packSoon(make: () => string, content: boolean): void {
      does: the same desk at the same width gives the same layout (RD-08) */
   const keep = content || now === packMake ? performance.now() - packFresh > 700 : false;
   packMake = now;
-  if (!raf) raf = requestAnimationFrame(() => { raf = 0; packNow(now, keep); });
+  pend = [now, keep];
+  if (!raf) raf = requestAnimationFrame(() => { raf = 0; slidePack(() => packNow(...pend)); });
+}
+/** A re-pack waiting for the next frame runs now (a tier change lays the desk out inside its transition). */
+export function flushPack(): void { if (!raf) return; cancelAnimationFrame(raf); raf = 0; packNow(...pend); }
+
+/** A content re-pack: the tiles it moves slide from where they stood over --t-base (the concept's packDesk); not while
+ *  a drag makes room its own way, a tier change runs, or a tile is already moving. */
+function slidePack(fn: () => void): void {
+  const still = !booted() || reduced() || document.body.classList.contains('dnd') || document.documentElement.classList.contains('tier-morph');
+  const tiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')];
+  const was = still ? null : new Map(tiles().map(t => [t.dataset.m!, t.getBoundingClientRect()]));
+  fn();
+  if (!was) return;
+  tiles().forEach(t => {
+    const b = was.get(t.dataset.m!); if (!b || t.getAnimations().some(a => a.playState === 'running')) return;
+    const r = t.getBoundingClientRect(), dx = b.left - r.left, dy = b.top - r.top;
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-base'), easing: easing('--e-out') });
+  });
 }
 
 /** Where a tile would stand at each place among the others (index k is a place among the desk's tiles, not before the

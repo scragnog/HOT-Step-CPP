@@ -14,7 +14,7 @@
     {"feature": "fix rc06 the engine panel is a layer", "file": "src/app/shell/TopBar.tsx", "find": "    layerOpen(pn, { trigger: document.getElementById('engBtn'), undo: true, close: () => closeNow.current(true) });\n", "replace": "    void pn;\n"},
     {"feature": "fix rc07 redo focuses what came back", "file": "src/app/store/desk.ts", "find": "...(e.forth ? { focus: [e.forth] } : {})", "replace": ""},
     {"feature": "fix rc10 an add from a drawer focuses it", "file": "src/app/shell/Panels.tsx", "find": " useDesk.getState().setFocus(gripOf(d)); }", "replace": " }"},
-    {"feature": "fix rc11 the tile being read stays put", "file": "src/app/shell/tier.ts", "find": "  keep();\n  requestAnimationFrame(() => {\n    keep();", "replace": "  requestAnimationFrame(() => {"},
+    {"feature": "fix rc11 the tile being read stays put", "file": "src/app/shell/tier.ts", "find": "flushPack(); keep(); };", "replace": "flushPack(); };"},
     {"feature": "fix rc13 an empty filter says so", "file": "src/app/shell/Panels.tsx", "find": "{groups.length ? groups.map(", "replace": "{groups.length || true ? groups.map("},
     {"feature": "fix rc14 hidden modules in desk order", "file": "src/derive/view.ts", "find": ".sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));", "replace": ";"},
     {"feature": "fix rc15 an earlier toast stays out", "file": "src/app/features/layers.ts", "find": " && toasts > l.toasts ?", "replace": " ?"},

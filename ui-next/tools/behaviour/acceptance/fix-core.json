@@ -21,9 +21,7 @@
     {"id":"21-chrome-round5/quick-player-names-its-song-1280","why":"The same at 1280. (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"22-engines-round5/side-units-fit-a-narrow-board-mm3","why":"Side units fit a narrow board on MiniMax-Music3. (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"22-engines-round5/side-units-fit-a-narrow-board-yue","why":"The same on YuE2. (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
-    {"id":"19-desk-round5/tier-change-is-one-object-per-part","why":"The tier change as one object per part, keeping the place read (Q-14). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)","waiting":{"package":9,"because":"The tier change has no transition and does not anchor what is read until motion (package 9) is built (RC-11)."}},
     {"id":"19-desk-round5/tier-change-keeps-the-place-reading","why":"The tile being read keeps its place over a tier change (Q-14), since the chrome round (RC-11). (RA-06)"},
-    {"id":"19-desk-round5/tier-change-keeps-the-place-pointer","why":"The tier change as one object per part, keeping the place read (Q-14). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)","waiting":{"package":9,"because":"The tier change has no transition and does not anchor what is read until motion (package 9) is built (RC-11)."}},
     {"id":"19-desk-round5/tier-change-keeps-the-place-focus","why":"The tile being read keeps its place over a tier change (Q-14), since the chrome round (RC-11). (RA-06)"},
     {"id":"06-prompt-generate/songs-player","why":"The song menu and the player as the concept drives them, Open the Library included (since RC-01). (RA-06)"},
     {"id":"17-undo-net/ctrl-z-under-an-overlay-edits-nothing","why":"Ctrl+Z under an overlay and on another page edits nothing (since RC-01). (RA-06)"},
@@ -101,7 +99,6 @@
     {"id":"20-lab-round5/section-masks-stay-in-their-cartridge-1920","why":"It calls a global of the concept's script that the test layer does not give (sections). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"20-lab-round5/section-masks-stay-in-their-cartridge-1280","why":"It calls a global of the concept's script that the test layer does not give (sections). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"20-lab-round5/side-units-say-their-actions","why":"It calls a global of the concept's script that the test layer does not give (sameAsLabel). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
-    {"id":"23-sa3-hm-round5/reduced-motion-arrivals-are-ringed","why":"A tile that arrives under reduced motion is not ringed (S-27): motion, package 9's, or the chrome share's. (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"23-sa3-hm-round5/tiled-decoder-says-it-needs-lua","why":"It drives the concept's own hooks, which the rebuild's controls do not carry (deviation 10) ([data-luaon]). (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"},
     {"id":"23-sa3-hm-round5/guidance-pad-is-painted-when-it-appears","why":"Pending in the concept (S-03). It chooses APG by its label (data-opt=\"APG\", deviation 10: the rebuild's data-opt is the value); the pad is drawn by the generic renderer with the rest of the face. (Re-read in the consolidation round, RA-06: it was in no acceptance list.)"}
   ]

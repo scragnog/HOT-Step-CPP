@@ -32,7 +32,7 @@ export function sayParked(id: string, entry: Entry | null): void {
 /** "Switch to Lab and add it": the tier changes, the module arrives; in the picker, the keys stay on it. */
 export function labAdd(id: string): void {
   closePop();
-  setTierFromView('lab');
+  setTierFromView('lab', { instant: true });
   const r = useDesk.getState().add(id);
   if (r.did === 'added') sayParked(id, r.step);
   if (!usePicker.getState().open) return;

@@ -11,3 +11,9 @@ export const motionVar = (name: string): string => root().getPropertyValue(name)
 export const mtime = (name: string): number => { const v = motionVar(name); return v.endsWith('ms') ? parseFloat(v) || 0 : v.endsWith('s') ? (parseFloat(v) || 0) * 1000 : 0; };
 /** A motion token's curve; the browser's ease-out for one the page does not set. */
 export const easing = (name: string): string => motionVar(name) || 'ease-out';
+let boot = false;
+const settled = () => { if (!document.getElementById('bento')) { requestAnimationFrame(settled); return; } requestAnimationFrame(() => requestAnimationFrame(() => { boot = true; })); };
+requestAnimationFrame(settled);
+/** The page has drawn its first desk: what it does from then on moves (the concept's booted); what it draws as it loads
+ *  just appears. */
+export const booted = (): boolean => boot;

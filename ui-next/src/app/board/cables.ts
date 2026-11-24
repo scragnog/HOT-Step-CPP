@@ -1,15 +1,18 @@
 // The board's geometry (27-pedalboard.js): Lab pedals stand on one line, each as tall as its controls rounded up to a
 // 32 px step (snapPedals); a chain that needs two rows or more wraps into balanced rows (balanceRows); and the cables,
 // measured on screen so they land on the jacks, each link a <g data-k="a>b"> updated in place (fixCables). How things
-// are drawn and move; nothing here is about a value.
+// are drawn and move; nothing here is about a value. A cable that already exists never redraws; a new one draws out of
+// its jacks when the board has just changed (drawOut, features/motion.ts), and one that is no longer needed retracts;
+// while pedals slide, the cables follow them frame by frame (followCables).
 
-import { reduced } from '../kit/motion.ts';
+import { easing, mtime, reduced } from '../kit/motion.ts';
+import { packed } from '../desk/layout.ts';
 const PED_STEP = 32, JACKY = 36, PLUGW = 10, CABR = 10;
 
 export function snapPedals(board: HTMLElement | null, lab: boolean): void {
   const pd = board?.querySelector<HTMLElement>('[data-pedals]'); if (!pd) return;
   const ps = [...pd.querySelectorAll<HTMLElement>(':scope > .pedal')];
-  ps.forEach(p => { p.style.minHeight = ''; }); balanceRows(pd, ps); if (!lab) return;
+  ps.forEach(p => { p.style.minHeight = ''; }); balanceRows(pd, ps); packed(); if (!lab) return;
   const hs = ps.map(p => p.offsetHeight); ps.forEach((p, i) => { p.style.minHeight = Math.ceil(hs[i]! / PED_STEP) * PED_STEP + 'px'; });
 }
 
@@ -47,11 +50,20 @@ function cableLinks(ps: P[], W: number, jb: number): Link[] {
 const plugSVG = ([x, y, right]: [number, number, number]) => `<rect class="plug" x="${right ? x - 8 : x}" y="${y - 5}" width="8" height="10" rx="2"/><rect class="plug-c" x="${right ? x - 2 : x}" y="${y - 3.5}" width="2" height="7" rx="1"/>`;
 
 type G = SVGGElement & { _d?: string; _gone?: boolean };
+let draw = false, follow = 0, until = 0;
+/** The next cables drawn are new links of a board that has just changed: they draw out of their jacks. */
+export const drawOut = (): void => { draw = true; };
+/** The cables are measured on screen, so they follow pedals while those are mid-animation: redrawn every frame for ms. */
+export function followCables(board: () => HTMLElement | null, ms: number): void {
+  until = performance.now() + ms;
+  if (!follow) follow = requestAnimationFrame(function step() { fixCables(board()); follow = performance.now() < until ? requestAnimationFrame(step) : 0; if (!follow) window.setTimeout(() => fixCables(board()), 40); });
+}
 export function fixCables(board: HTMLElement | null): void {
   const pd = board?.querySelector<HTMLElement>('[data-pedals]'), svg = board?.querySelector<SVGSVGElement>('.cables'); if (!pd || !svg) return;
   const sr = svg.getBoundingClientRect(), W = sr.width; if (!W) return;
   const ps = [...pd.querySelectorAll<HTMLElement>(':scope > .pedal')].map(p => { const r = p.getBoundingClientRect(); return { id: p.dataset.pid!, l: r.left - sr.left, r: r.right - sr.left, t: r.top - sr.top, b: r.bottom - sr.top }; });
   const jb = parseFloat(getComputedStyle(board!).getPropertyValue('--jb')) || 0;
+  const out = draw, ease = easing('--e-out'), dur = mtime('--t-base'), delay = mtime('--t-land') + 60; draw = false;
   const links = cableLinks(ps, W, jb), have = new Map([...svg.children].map(g => g as G).filter(g => g.dataset.k && !g._gone).map(g => [g.dataset.k!, g]));
   links.forEach(l => {
     let g = have.get(l.k);
@@ -64,6 +76,9 @@ export function fixCables(board: HTMLElement | null): void {
     g = document.createElementNS('http://www.w3.org/2000/svg', 'g') as G; g.dataset.k = l.k; g._d = l.d; g.setAttribute('class', 'lk');
     g.innerHTML = `<path class="cb" d="${l.d}" pathLength="1"/><path class="cb-hi" d="${l.d}" pathLength="1"/><path class="cb-sig" d="${l.d}" pathLength="100"/><g class="plugs">${plugs}</g>${l.label ? `<text class="cb-lbl" x="${l.label[1]}" y="${l.label[2]}" text-anchor="${l.label[3]}">${l.label[0]}</text>` : ''}`;
     svg.appendChild(g);
+    if (!out || reduced()) return;
+    g.querySelectorAll('.cb, .cb-hi').forEach(p => p.animate([{ strokeDasharray: '1 2', strokeDashoffset: 1 }, { strokeDasharray: '1 2', strokeDashoffset: 0 }], { duration: dur, delay, easing: ease, fill: 'backwards' }));
+    g.querySelectorAll('.plugs, .cb-lbl').forEach(p => p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: dur * 0.6, delay, easing: ease, fill: 'backwards' }));
   });
   /* the links stand in the chain's order in the drawing, whatever order they came in */
   const order = links.map(l => [...svg.children].find(g => (g as G).dataset.k === l.k && !(g as G)._gone)).filter((g): g is Element => !!g);
@@ -71,7 +86,8 @@ export function fixCables(board: HTMLElement | null): void {
   have.forEach(g => {
     g._gone = true;
     if (reduced()) { g.remove(); return; }
-    g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }).finished.then(() => g.remove(), () => g.remove());
+    g.querySelectorAll('.cb, .cb-hi').forEach(p => p.animate([{ strokeDasharray: '1 2', strokeDashoffset: 0 }, { strokeDasharray: '1 2', strokeDashoffset: -1 }], { duration: mtime('--t-fast'), easing: easing('--e-in'), fill: 'forwards' }));
+    g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: mtime('--t-fast'), easing: easing('--e-in'), fill: 'forwards' }).finished.then(() => g.remove(), () => g.remove());
   });
 }
 

@@ -22,7 +22,7 @@ export function HiddenNote() {
   const say = useSay(), note = useModel(s => deskModel(ix, s.desk, s.mods).hidden, 'hidden');
   return (
     <div className="hidden-note" id="hiddenNote" hidden={!note}>
-      {note ? <><span>{say(note)}</span> <button className="small-btn" data-tier="lab" onClick={() => setTierFromView('lab')}>{say(ui('hidden.show'))}</button></> : null}
+      {note ? <><span>{say(note)}</span> <button className="small-btn" data-tier="lab" onClick={() => setTierFromView('lab', { reveal: true })}>{say(ui('hidden.show'))}</button></> : null}
     </div>
   );
 }
