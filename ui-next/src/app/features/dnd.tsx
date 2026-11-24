@@ -30,6 +30,9 @@ import { reduced } from '../kit/motion.ts';
 type Place = { k: number; x: number; y: number; w: number; h: number };
 let dragId: string | null = null, ghost: HTMLElement | null = null, ghostKey: string | null = null;
 let dropBefore: { k: number; m: string | null } | null = null, dragRects: Place[] | null = null;
+/* a moved tile's places, worked out as the drag starts (the tile and the others as they stand then, which is what the
+   preview is placed among): its first move over the desk only places the preview */
+let early: { key: string; rects: Place[] } | null = null;
 /** Every place the dragged tile could take, as the preview chooses among them (the test layer reads it). */
 export const currentDragRects = (): Place[] | null => dragRects;
 
@@ -103,7 +106,7 @@ function ghostFor(id: string): HTMLElement | null {
 
 /** Ends a drag: the preview goes, the moved tile is back in the desk's flow, nothing glows or is lifted. */
 function clearDrag(): void {
-  ghost?.remove(); ghost = null; dropBefore = null; ghostKey = null; dragRects = null;
+  ghost?.remove(); ghost = null; dropBefore = null; ghostKey = null; dragRects = null; early = null;
   document.querySelectorAll<HTMLElement>('.tile[data-mo]').forEach(t => { t.dataset.m = t.dataset.mo; delete t.dataset.mo; });
   document.querySelectorAll('.tile.moving, .tile.glow').forEach(t => t.classList.remove('moving', 'glow'));
   document.querySelectorAll('.lift').forEach(x => x.classList.remove('lift'));
@@ -130,6 +133,8 @@ document.addEventListener('dragstart', e => {
     if (!id.startsWith('move:')) el.classList.add('lift');
     document.body.classList.add('dnd');
     if (usePicker.getState().open) flushSync(() => usePicker.setState({ peek: true }));
+    const g = bento(), m = id.startsWith('move:') ? id.slice(5) : null, it = m ? lastMeasure()?.items.find(x => x.key === m) : null;
+    early = g && m && it && !it.lead ? { key: m, rects: deskSlots(g, m, it) } : null;
   }, 0);
 });
 /* a cancelled move: the tile comes back into its place and its neighbours slide aside for it */
@@ -146,7 +151,7 @@ document.addEventListener('dragover', e => {
   if (!ghost) return;
   const key = ghost.dataset.gm!, tail = () => g.querySelector(':scope > .desk-empty, :scope > .q-empty, :scope > .moretiles, :scope > .parked');
   if (!ghost.isConnected) { const gh = ghost; slideRoom(() => g.insertBefore(gh, tail())); dragRects = null; dropBefore = null; }
-  if (!dragRects) { const it = lastMeasure()?.items.find(x => x.key === key); dragRects = it ? deskSlots(g, key, it) : []; }
+  if (!dragRects) { const it = lastMeasure()?.items.find(x => x.key === key); dragRects = early?.key === key ? early.rects : it ? deskSlots(g, key, it) : []; early = null; }
   /* the preview stands where the pointer is, else at the nearest place; while the pointer stays inside it, it stays */
   const px = e.clientX + scrollX, py = e.clientY + scrollY, inside = (s: Place) => px >= s.x && px <= s.x + s.w && py >= s.y && py <= s.y + s.h;
   const cur = dropBefore && dragRects.find(s => s.k === dropBefore!.k);

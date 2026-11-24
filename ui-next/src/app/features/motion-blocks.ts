@@ -70,6 +70,9 @@ const ro = new ResizeObserver(es => es.forEach(e => {
   else if (was.h && !h && was.copy && was.r) blockOut(el, was.copy, was.r);
 }));
 const seen = new WeakSet<Element>();
-/** The box and the blocks are drawn by their parts and kept; they are found as they appear. */
-const watch = () => document.querySelectorAll(`${BOX}, ${BLOCKS}`).forEach(el => { if (!seen.has(el)) { seen.add(el); ro.observe(el); } });
-new MutationObserver(watch).observe(document.documentElement, { childList: true, subtree: true });
+/** The box and the blocks are drawn by their parts and kept; they are found as they appear (looked for in what was
+ *  added, not in the whole page again). */
+const SEL = `${BOX}, ${BLOCKS}`;
+const take = (el: Element) => { if (!seen.has(el)) { seen.add(el); ro.observe(el); } };
+new MutationObserver(rs => { for (const r of rs) for (const n of r.addedNodes) if (n instanceof Element) { if (n.matches(SEL)) take(n); n.querySelectorAll(SEL).forEach(take); } }).observe(document.documentElement, { childList: true, subtree: true });
+document.querySelectorAll(SEL).forEach(take);

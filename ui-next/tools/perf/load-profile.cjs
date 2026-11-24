@@ -1,5 +1,5 @@
 // Where the load's time goes, on the instrumented build: a CPU profile from navigation to 3 s after, mapped to the
-// source, with the layout counters. PERF_BUILD=../ui-instr node load-profile.cjs [desk]
+// source, with the layout counters. npx vite build --mode file --config tools/perf/vite.instr.ts; PERF_BUILD=tools/perf/results/instr node tools/perf/load-profile.cjs [desk]
 const fs = require('fs'), path = require('path');
 const { launch, openWith } = require('./lib.cjs');
 const { digest } = require('./prof-lib.cjs');
@@ -10,7 +10,7 @@ const { digest } = require('./prof-lib.cjs');
   await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 100 }); await cdp.send('Profiler.start');
   await page.goto(url); await page.waitForTimeout(3000);
   const { profile } = await cdp.send('Profiler.stop');
-  const d = digest(profile), cnt = await page.evaluate(() => window.__cnt);
+  const d = digest(profile), cnt = await page.evaluate(() => window.__TALLY);
   console.log('busy', d.busy, 'ms; counts', JSON.stringify(cnt));
   console.log('files:', d.files.slice(0, 14).map(([f, ms]) => `${f} ${ms}`).join(' | '));
   console.log('self:'); for (const [l, ms] of d.self.slice(0, 20)) console.log(`  ${String(ms).padStart(7)}  ${l}`);

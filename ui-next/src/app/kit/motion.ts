@@ -5,8 +5,11 @@
 const root = () => getComputedStyle(document.documentElement);
 /** Motion is reduced: each animation draws its designed alternative (M-08). */
 export const reduced = (): boolean => matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* the tokens are the stylesheet's constants (00-tokens.css sets each once, on :root): each is read once, not on every
+   motion, where reading it would make the browser work out the page's style in the middle of a change */
+const tokens = new Map<string, string>();
 /** A motion token's value as the page's stylesheet sets it ("cubic-bezier(...)", "200ms"). */
-export const motionVar = (name: string): string => root().getPropertyValue(name).trim();
+export const motionVar = (name: string): string => { let v = tokens.get(name); if (v === undefined) { v = root().getPropertyValue(name).trim(); if (v) tokens.set(name, v); } return v; };
 /** A motion token's time, in milliseconds ("180ms", ".3s"); 0 for a token the page does not set. */
 export const mtime = (name: string): number => { const v = motionVar(name); return v.endsWith('ms') ? parseFloat(v) || 0 : v.endsWith('s') ? (parseFloat(v) || 0) * 1000 : 0; };
 /** A motion token's curve; the browser's ease-out for one the page does not set. */

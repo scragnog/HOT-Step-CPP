@@ -61,14 +61,14 @@ export default [
     await t.click('.tile[data-m="avoid"] .tile-head .x');
     const n = await counted(t);
     await t.eq('the tile is gone', () => !!document.querySelector('.tile[data-m="avoid"]'), false);
-    await within(t, 'tiles measured for a removal', n['measure.tiles'], 2);
-    await within(t, 'layouts forced to measure for a removal', n['measure.layouts'], 2);
+    await within(t, 'tiles measured for a removal', n['measure.tiles'], 1);
+    await within(t, 'layouts forced to measure for a removal', n['measure.layouts'], 1);
     await within(t, 'notifications of the desk store for a removal', n.notify, 2);
     await reset(t);
     await t.press('Control+z');
     const u = await counted(t);
     await t.eq('Undo brings it back', () => !!document.querySelector('.tile[data-m="avoid"]'), true);
-    await within(t, 'tiles measured when Undo brings a tile back (the tile itself)', u['measure.tiles'], 3);
+    await within(t, 'tiles measured when Undo brings a tile back (the tile itself)', u['measure.tiles'], 2);
   } },
   { id: 'a-move-by-key-measures-nothing-and-solves-each-place-once', run: async t => {
     await full()(t);

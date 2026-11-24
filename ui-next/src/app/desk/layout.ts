@@ -47,7 +47,8 @@ interface Kept { el: HTMLElement; look: string; geo: string; nat: number; hs: Ma
 const kept = new WeakMap<HTMLElement, Map<string, Kept>>();
 /** Tiles whose content changed since they were measured. */
 let stale = new WeakSet<HTMLElement>();
-/** Tiles the layout moved or restyled since the ResizeObserver last spoke: a change of their body's size is the layout's. */
+/** Tiles moved or restyled since the ResizeObserver last spoke (the layout placed them, a drag lifted them, a tier change
+ *  named them): a change of their body's size is that, not their content's. */
 let placed = new WeakSet<HTMLElement>();
 /** What the layout last wrote on each tile. */
 const wrote = new WeakMap<HTMLElement, string>();
@@ -58,25 +59,30 @@ const lookOf = (t: HTMLElement) => [...t.classList].filter(c => !PASSING.has(c))
 const tileOf = (g: HTMLElement, n: Node | null): HTMLElement | null => { while (n && n.parentNode !== g) n = n.parentNode; return n instanceof HTMLElement ? n : null; };
 
 const observed = new WeakMap<HTMLElement, MutationObserver>();
-/* a change inside a tile (React drew it again, a part set a size) marks the tile; a change of the tile's own attributes
-   does not (the layout's style and classes, a drag's marks: what of them a measurement depends on is the tile's look,
-   lookOf), nor the desk's children coming and going (a new element is measured as new) */
+/* a change inside a tile (React drew it again, a part set a size) marks the tile. Not: a change of the tile's own
+   attributes (the layout's style and classes, a drag's marks: what of them a measurement depends on is the tile's look,
+   lookOf); the desk's children coming and going (a new element is measured as new); the board's cables, drawn over it;
+   a style set back to what it was, or changed only in what names it for the tier change (view-transition-*) */
+const VT_DECL = /view-transition-[a-z]+:[^;]*;?/g;
+const sameStyle = (a: string | null, b: string | null) => (a ?? '').replace(VT_DECL, '').trim() === (b ?? '').replace(VT_DECL, '').trim();
 function noteMutations(g: HTMLElement, rs: MutationRecord[]): void {
   for (const r of rs) {
     if (r.target === g) continue;
     const t = tileOf(g, r.target); if (!t) continue;
-    if (r.type === 'attributes' && r.target === t) continue;
+    if (r.type === 'attributes' && r.target === t) { placed.add(t); continue; }
+    if (r.type === 'attributes' && r.attributeName === 'style' && sameStyle(r.oldValue, (r.target as Element).getAttribute('style'))) continue;
+    if (stale.has(t) || (r.target as Element).closest?.('.cables') || r.target.parentElement?.closest('.cables')) continue;
     stale.add(t);
   }
 }
 function watchContent(g: HTMLElement): void {
   if (observed.has(g)) { noteMutations(g, observed.get(g)!.takeRecords()); return; }
   const mo = new MutationObserver(rs => noteMutations(g, rs));
-  mo.observe(g, { childList: true, subtree: true, attributes: true, characterData: true });
+  mo.observe(g, { childList: true, subtree: true, attributes: true, attributeOldValue: true, characterData: true });
   observed.set(g, mo);
 }
-/* a web font that arrives changes what every tile needs */
-document.fonts?.addEventListener?.('loadingdone', () => { stale = new WeakSet(); fontGen++; });
+/* a web font that arrives changes what every tile needs (one that could not load changes nothing) */
+document.fonts?.addEventListener?.('loadingdone', e => { if ((e as FontFaceSetLoadEvent).fontfaces.length) { stale = new WeakSet(); fontGen++; } });
 let fontGen = 0;
 
 /** Measures the tiles in `need` as the concept's deskMeasure does (each tile's natural width, then its height at each
