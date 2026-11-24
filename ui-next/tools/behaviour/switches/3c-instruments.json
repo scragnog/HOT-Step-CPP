@@ -274,7 +274,7 @@
   {
    "feature": "3c sheet stays",
    "file": "src/derive/desk.ts",
-   "find": "  if (spec?.kind === 'control' && !at.dim && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;",
+   "find": "  if (spec?.kind === 'control' && !(at.dim && holds(ix, at.dim.when, desk)) && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;",
    "replace": "  if (spec?.kind === 'control' && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;"
   },
   {
