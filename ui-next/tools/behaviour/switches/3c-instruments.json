@@ -40,8 +40,20 @@
   {
    "feature": "3c render asked",
    "file": "src/app/parts/Build.tsx",
-   "find": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });",
-   "replace": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes }).then(r => { setBusy(false); void r; });"
+   "find": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });",
+   "replace": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); void r; });"
+  },
+  {
+   "feature": "3c library songs",
+   "file": "src/app/store/build.ts",
+   "find": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));",
+   "replace": "  const add = songs.filter(x => false), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));"
+  },
+  {
+   "feature": "3c library withdraws",
+   "file": "src/app/store/build.ts",
+   "find": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));",
+   "replace": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => !x).map(x => x.id));"
   },
   {
    "feature": "3c keep",

@@ -107,7 +107,7 @@ export interface DeskStore extends Parts {
   recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
   /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
    *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string }): void;
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string; songs?: Desk['songs'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -259,7 +259,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
       /* the words for another engine's adapters (package 3b: features/adapters.tsx, from the engines' book) */
       if (o.adaptersAway !== undefined && o.adaptersAway !== get().desk.told?.adaptersAway) set({ desk: { ...get().desk, told: { ...get().desk.told, adaptersAway: o.adaptersAway } } });
     },

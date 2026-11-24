@@ -3,7 +3,10 @@
 // build when HS_SWITCH names it, into dist-switch/), and the acceptance (run.mjs --slice) is run on it. Each feature
 // switched off must make at least one scenario fail; the run fails if one does not, or if a switch no longer applies.
 //
-//   node tools/behaviour/switches.mjs [--only <regex>] [--workers n]
+//   node tools/behaviour/switches.mjs [--only <regex>] [--workers n] [--scenarios <regex>]
+//
+// --scenarios runs only the acceptance's scenarios whose id matches (run.mjs --only), to try a package's switches
+// against its own scenarios quickly; a switch caught there is caught by the whole acceptance too.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -22,7 +25,7 @@ for (const f of features) {
   const t0 = Date.now();
   const b = spawnSync(process.execPath, [vite, 'build', '--mode', 'test', '--logLevel', 'error'], { cwd: repo, env: { ...process.env, HS_SWITCH: f }, encoding: 'utf8' });
   if (b.status !== 0) { rows.push([f, 'BUILD FAILED', (b.stderr || b.stdout).split('\n').filter(l => /error|switch/i.test(l)).slice(0, 2).join(' / ')]); bad++; process.stdout.write(`${f.padEnd(16)} ${rows[rows.length - 1].slice(1).join('  ')}\n`); continue; }
-  const r = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--slice', '--page', path.join(repo, 'dist-switch', 'index.html'), '--workers', opt('workers', '10')], { cwd: repo, env: process.env, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--slice', '--page', path.join(repo, 'dist-switch', 'index.html'), '--workers', opt('workers', '10'), ...(opt('scenarios') ? ['--only', opt('scenarios')] : [])], { cwd: repo, env: process.env, encoding: 'utf8' });
   /* a scenario waiting on a later package (acceptance, "waiting") catches nothing: it is left out, passing or failing */
   const failed = [...new Set((r.stdout.match(/^FAIL (\S+)/gm) || []).map(l => l.slice(5)))].filter(id => !WAITING.has(id));
   rows.push([f, failed.length ? `${failed.length} scenarios fail` : 'NOTHING FAILS', failed.slice(0, 4).join(', ') + (failed.length > 4 ? ', ...' : ''), ((Date.now() - t0) / 1000).toFixed(0) + ' s']);

@@ -11,6 +11,7 @@ import type { Json } from '../../definitions/types.ts';
 import { useDesk } from './desk.ts';
 import { buildSession } from '../services/build.ts';
 import { recordings } from '../services/recording.ts';
+import { useGen } from './generate.ts';
 
 /** The state whose record is the build, and the file whose length the recording span needs. */
 const BUILD = 'build', RECORDING = 'contFile';
@@ -31,6 +32,18 @@ buildSession.subscribe(() => { told(); tell(); });
 recordings.subscribe(() => { recording = recordings.known(); tell(); });
 
 const songsOf = (rec: Json | undefined): string[] => { const s = (rec as { songs?: unknown } | null | undefined)?.songs; return Array.isArray(s) ? s.filter((x): x is string => typeof x === 'string') : []; };
+/* the build's rendered songs are in the Library while their render stands (Latest's cards, package 6): one rendered is
+   added, one withdrawn by Undo leaves, and after a reload the server's songs are joined by the build's again */
+const library = () => {
+  const songs = buildSession.state().songs, cards = useGen.getState().cards, have = new Set(cards.map(c => c.id));
+  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));
+  if (!add.length && !cards.some(c => gone.has(c.id))) return;
+  useGen.setState(s => ({ cards: [...add.map(x => ({ id: x.id, title: x.title, style: x.style, text: '', dur: x.dur, hue: x.hue, engine: x.engine })), ...s.cards.filter(c => !gone.has(c.id))] }));
+};
+buildSession.subscribe(library);
+useGen.subscribe((s, prev) => { if (s.cards !== prev.cards) library(); });
+library();
+
 useDesk.subscribe((s, prev) => {
   tell();
   if (s.desk.state[BUILD] === prev.desk.state[BUILD]) return;

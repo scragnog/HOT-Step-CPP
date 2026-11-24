@@ -10,12 +10,13 @@
 // rendering when the page closed is lost, as the concept's. The real adapter is package 10's.
 
 import { useSyncExternalStore } from 'react';
+import type { EngineId } from '../../definitions/types.ts';
 import { defineService } from '../register/services.ts';
 
 export interface Take { id: string; ready: boolean; hue: number; dur: number; w: number; words: string; note: string }
 interface Session { seed: number; takes: { [section: string]: Take[] }; cur?: string }
 /** A song the session rendered, and whether the page has withdrawn it (its render undone). */
-export interface BuiltSong { id: string; title: string; style: string; dur: number; hue: number; sections: number; withdrawn: boolean }
+export interface BuiltSong { id: string; title: string; style: string; dur: number; hue: number; sections: number; withdrawn: boolean; engine: EngineId }
 export interface BuildState { planning: boolean; sessions: { [id: string]: Session }; songs: BuiltSong[] }
 
 const KEY = 'hotstep.create.buildSessions', PLAN_MS = 700, TAKE_MS = 700, TAKE_GAP = 600;
@@ -68,11 +69,11 @@ export const buildSession = defineService('build', {
   /** The section the page is looking at in a session. */
   look(session: string, section: string): void { if (state.sessions[session]?.cur !== section) withSession(session, s => ({ ...s, cur: section })); },
   /** Renders a song from the kept takes, in order. */
-  render(session: string, song: { title: string; style: string; dur: number; takes: string[] }): Promise<{ song: string }> {
+  render(session: string, song: { title: string; style: string; dur: number; takes: string[]; engine: EngineId }): Promise<{ song: string }> {
     const id = 'b' + rid(), n = song.takes.length;
     return new Promise(done => setTimeout(() => {
       if (!state.sessions[session]) return;
-      put({ ...state, songs: [{ id, title: song.title, style: song.style, dur: song.dur, hue: Math.round(Math.random() * 360), sections: n, withdrawn: false }, ...state.songs].slice(0, 64) });
+      put({ ...state, songs: [{ id, title: song.title, style: song.style, dur: song.dur, hue: Math.round(Math.random() * 360), sections: n, withdrawn: false, engine: song.engine }, ...state.songs].slice(0, 64) });
       done({ song: id });
     }, 0));
   },

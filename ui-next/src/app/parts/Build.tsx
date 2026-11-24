@@ -97,7 +97,7 @@ export function BuildBoard(v: PartView) {
   const render = () => {
     if (!m.render || busy) return;
     setPlay(null); setBusy(true);
-    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });
+    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });
   };
   return (
     <>

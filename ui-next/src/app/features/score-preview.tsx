@@ -18,10 +18,13 @@ import { useDesk } from '../store/desk.ts';
 import { defineAction } from '../register/actions.ts';
 import { fill } from '../register/slots.ts';
 import { scoreRuns } from '../services/score.ts';
+import { generate } from '../generate/actions.ts';
 import { Icon, Glyph, ui, useSay } from '../kit/index.ts';
 import { reduced } from '../parts/motion.ts';
 
 defineAction('scorePreview', () => { void open(); });
+/* Continue with this score: generation renders it with its seed, for that run only (E-08; package 6's generate) */
+scoreRuns.use(seed => generate({ seed }));
 
 /** Plays the score from a bar, and moves the playhead; stops when done or asked. */
 function usePlayer(v: View) {

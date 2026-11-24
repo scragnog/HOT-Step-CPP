@@ -1,0 +1,271 @@
+{
+ "about": "Package 6 (generation, the go bar, Latest, the player, the song menu, the toast stack): every scenario this package makes runnable, each with what it exercises. 36-generate.mjs holds on the concept page too (--page hotstep-tiers.html), except its scenarios marked pending (the concept's own findings, built here) and a-refusal-the-server-makes (the rebuild's simulated server). Entries waiting on package 4 type into or read the prompt card; `excluded` lists the scenarios that touch generation but whose subject or precondition is another package's.",
+ "scenarios": [
+  {
+   "id": "36-generate/generate-queues-one-card-per-take",
+   "why": "Generate from press to queue: one card per take, Cancel all with its count, the badge on Generate with its label kept, the count in the document's title, the sweep across Generate (--gf), the cards' stage and their colours coming into focus (--f), Ctrl+Enter queueing behind (C-26, B-11, M-12, G-M-06)."
+  },
+  {
+   "id": "36-generate/cancel-one-and-all-with-undo",
+   "why": "The queue: × on one song (the rest carry on), the first run finishing and the next starting, Cancel all, its Undo re-queueing the runs as they were started and saying the one rendering starts again, Redo, and Ctrl+Z (F-13; store/desk.ts recordStep)."
+  },
+  {
+   "id": "36-generate/a-run-ends-as-cards",
+   "why": "A run ending: the pending cards resolve into songs, take badges (C-11), the unheard marks (C-45), no toast while the card is in sight, Generate at rest, the count line (F-27)."
+  },
+  {
+   "id": "36-generate/a-finished-run-out-of-sight-is-said",
+   "why": "A run ending with its card out of sight is said in a toast."
+  },
+  {
+   "id": "36-generate/a-run-keeps-the-engine-it-started-on",
+   "why": "A run keeps the engine it started on, whatever is selected later."
+  },
+  {
+   "id": "36-generate/an-empty-box-is-refused-with-an-example",
+   "why": "The refusal of an empty box per engine (S-05) with Use the example (refusalOf)."
+  },
+  {
+   "id": "36-generate/the-line-says-the-desk",
+   "why": "The go bar's status line: tier, modules, changes as a link that pulses the changed controls (B-14), its title, hidden and parked counts (E-13; goLine, changedKeys)."
+  },
+  {
+   "id": "36-generate/the-line-says-when-a-run-will-not-fit",
+   "why": "The line's Won't fit with Use N takes (G-B-08), and ACE-Step's passes."
+  },
+  {
+   "id": "36-generate/a-run-certain-not-to-fit-is-not-started",
+   "why": "Pending (F-21) in the concept, right here: a run certain not to fit is not started; the way out pulses and the line is said."
+  },
+  {
+   "id": "36-generate/a-refusal-the-server-makes",
+   "why": "Rebuild only (the simulated server's card made smaller with mockCard): the server's refusal as a one-line notice (G-D-09), said in sight, Retry with the takes that fit and Dismiss with focus on Generate (F-13), no second identical notice (F-21)."
+  },
+  {
+   "id": "36-generate/a-run-that-stops-part-way",
+   "why": "Rebuild only (mockFail): a run the server stops part-way is a notice with Run it again, which queues it as it was started, and Dismiss."
+  },
+  {
+   "id": "36-generate/cancel-puts-focus-on-generate",
+   "why": "Pending (F-13) in the concept, right here: × on a queued song puts focus on Generate."
+  },
+  {
+   "id": "36-generate/separate-presses-each-queue",
+   "why": "Pending (F-22) in the concept, right here: separate presses each queue a run; a double-click queues one."
+  },
+  {
+   "id": "36-generate/leaving-while-rendering-asks-first",
+   "why": "Pending (F-37) in the concept, right here: beforeunload is refused while songs render."
+  },
+  {
+   "id": "36-generate/a-reload-says-what-it-lost",
+   "why": "Pending (F-27) in the concept, right here: after a reload the songs the server did not keep are said once."
+  },
+  {
+   "id": "36-generate/the-cards-in-every-state",
+   "why": "Latest's cards: a finished card's marks and names, whole rows (D-26), the queue folded behind +N waiting and opened (C-47; latestShown)."
+  },
+  {
+   "id": "36-generate/play-pause-seek-and-stop",
+   "why": "The player in the go bar: play, the position, pause, End, Home, arrows and Shift, Space from the player and from the page (C-27), the end resting paused at the start, stop."
+  },
+  {
+   "id": "36-generate/the-song-menu",
+   "why": "The song menu: focus on its first item, its name, its items, arrows, Home, End, Escape refocusing its button, the ⋯ toggling it, the other pages' message, a click outside."
+  },
+  {
+   "id": "36-generate/reuse-puts-the-words-back",
+   "why": "Reuse its description: the text it was made from back in the box as one step, the toast with Undo (E-20)."
+  },
+  {
+   "id": "36-generate/repaint-from-the-song-menu",
+   "why": "Repaint a region from another engine: one step switching to ACE-Step with Repaint first and the song as its source, the switch toast, Generate's label, Undo (E-14; repaintDesk)."
+  },
+  {
+   "id": "36-generate/the-vram-meter-follows-the-run",
+   "why": "The VRAM meter while a run renders: the needle swings toward what it needs, the engine marked live, another engine rendering said with what it holds (B-34; package 5 left it here: meterModel with the run, meterTarget)."
+  },
+  {
+   "id": "36-generate/the-engine-log-says-the-queue",
+   "why": "The engine log's queue line (package 11's tellQueue): idle, then how many render and wait, and the engine rendering when it is not the selected one (S-33, B-34)."
+  },
+  {
+   "id": "36-generate/the-dice-and-the-cover-follow-the-runs",
+   "why": "Package 2 left them here: the re-planning dice light up with the tries the run reports, and the cover swatch takes the newest song's colour (desk.songs, readoutModel)."
+  },
+  {
+   "id": "36-generate/the-toast-stack",
+   "why": "The toast stack (F-12): an older message moves up, keeps its Undo and stands above; the same plain message twice is said once."
+  },
+  {
+   "id": "36-generate/a-plain-message-never-pushes-out-an-undo",
+   "why": "Pending (F-18) in the concept, right here: three plain messages never push out an Undo, three show at most, Escape on a toast's button dismisses it."
+  },
+  {
+   "id": "36-generate/tab-reaches-a-toasts-undo",
+   "why": "Tab into a toast that carries Undo and back (C-13)."
+  },
+  {
+   "id": "00-smoke/smoke",
+   "why": "Boots with the six songs the simulated server holds (S.songs), and a reload keeps them."
+  },
+  {
+   "id": "01-desk/show-changes",
+   "why": "The line's N changes counts the changes, pulses the changed controls, and says when they are in a hidden module (changesUnmarked, Q-15)."
+  },
+  {
+   "id": "11-engines/parked-pedals-and-units",
+   "why": "The line counts what is parked with the board's count (B-12)."
+  },
+  {
+   "id": "15-other-engines/one-count-of-hidden-and-parked",
+   "why": "The line counts hidden and parked once each (E-13)."
+  },
+  {
+   "id": "23-sa3-hm-round5/added-pedals-are-not-changes",
+   "why": "Pedals just added are no changes, a real one is, and the link never claims a hidden module (S-04)."
+  },
+  {
+   "id": "15-other-engines/song-menu-repaint-from-another-engine",
+   "why": "Repaint from MiniMax-Music3: the item says it switches, one press switches with Repaint on the desk and the song as its source, the toast, Ctrl+Z (E-14)."
+  },
+  {
+   "id": "21-chrome-round5/latest-cards-read-whole",
+   "why": "Latest's cards show their whole description on two lines, the ⋯ shares the title's line only, the count line (F-14, F-27)."
+  },
+  {
+   "id": "21-chrome-round5/toasts-keep-their-undo",
+   "why": "Pending (F-18) in the concept, right here: plain messages never push out the Undo toast; Escape on its button dismisses it."
+  },
+  {
+   "id": "21-chrome-round5/song-menu-keeps-off-the-go-bar",
+   "why": "Pending (F-28) in the concept, right here: the song menu stays clear of the go bar and inside the centre column."
+  },
+  {
+   "id": "23-sa3-hm-round5/tab-leaves-the-song-menu",
+   "why": "Pending (S-16) in the concept, right here: Tab in the song menu closes it and focus goes on from its button."
+  },
+  {
+   "id": "06-prompt-generate/generate",
+   "why": "Generate from an empty box (Use the example fills #prompt), takes, Ctrl+Enter from #prompt, the queue, Cancel and its Undo, finished cards.",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "06-prompt-generate/generate-engines",
+   "why": "Each engine's run; its scenes write #prompt.value.",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "08-persistence-cables/reload-songs",
+   "why": "A song rendering is not kept over a reload, a finished one is; its scenes write #prompt.value.",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "15-other-engines/play-while-rendering",
+   "why": "MiniMax-Music3's Play while rendering (E-40); its scene writes #prompt.value.",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "21-chrome-round5/reload-mid-run-says-what-was-lost",
+   "why": "Pending (F-27): one toast says what a reload lost; its scene writes #prompt.value (36-generate/a-reload-says-what-it-lost holds the same).",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "21-chrome-round5/leaving-while-rendering-warns",
+   "why": "Pending (F-37): beforeunload while a run is live; its scene writes #prompt.value (36-generate/leaving-while-rendering-asks-first).",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "21-chrome-round5/separate-presses-each-queue",
+   "why": "Pending (F-22); its scene writes #prompt.value (36-generate/separate-presses-each-queue).",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "21-chrome-round5/generate-does-not-queue-a-certain-refusal",
+   "why": "Pending (F-21); its scene writes #prompt.value (36-generate/a-run-certain-not-to-fit-is-not-started).",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "22-engines-round5/reuse-gives-back-the-source-text",
+   "why": "Reuse gives back a Structured Caption whole (E-20); it reads #prompt.value (36-generate/reuse-puts-the-words-back).",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  },
+  {
+   "id": "18-tips-touch/a-held-press-still-presses",
+   "why": "Generate held under a finger queues a song (S-01); its scene writes #prompt.value.",
+   "waiting": {
+    "package": 4,
+    "because": "It writes or reads #prompt, the prompt card package 4 draws, which is not on this branch."
+   }
+  }
+ ],
+ "excluded": [
+  {
+   "id": "06-prompt-generate/songs-player",
+   "why": "Its player and menu checks pass; it also reads #prompt (package 4) and opens the Library from Latest, whose navigation to the stub pages no package of this branch has built. 36-generate/play-pause-seek-and-stop and the-song-menu hold its checks of this package."
+  },
+  {
+   "id": "21-chrome-round5/focus-after-cancel-retry-dismiss",
+   "why": "Pending (F-13); it gets its notice by pressing Generate on a run certain not to fit, which F-21 (built here) does not start. Its focus checks are in 36-generate/cancel-puts-focus-on-generate and a-refusal-the-server-makes, with a refusal the server makes."
+  },
+  {
+   "id": "22-engines-round5/takes-tile-follows-retry",
+   "why": "Pending (E-03), the Takes tile (package 3a); it too gets its notice from a Generate that F-21 does not start."
+  },
+  {
+   "id": "21-chrome-round5/ctrl-enter-generates-from-rows-and-cards",
+   "why": "Pending (F-07): built here (Ctrl+Enter is heard before any row's or card's Enter); it needs #prompt (package 4) and the Workflows rows (package 7)."
+  },
+  {
+   "id": "05-modules/continue-and-repaint",
+   "why": "Its song menu checks pass; the rest are Continue's and Repaint's instruments (package 3a), and Repaint's removal dropping its source."
+  },
+  {
+   "id": "05-modules/takes",
+   "why": "The Takes tile's reels (package 3a); its line checks (Use N takes, wontfit) are in 36-generate/the-line-says-when-a-run-will-not-fit."
+  },
+  {
+   "id": "21-chrome-round5/toast-reachable-under-the-picker",
+   "why": "Pending (F-18) about the picker's Tab cycle (package 8); it passes vacuously without a picker."
+  },
+  {
+   "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast",
+   "why": "Pending (S-17): the toast's side is built (it claims Tab only while focus is where it was and no layer opened since); the drafts popover is package 7's."
+  },
+  {
+   "id": "08-persistence-cables/reload-keeps-the-desk",
+   "why": "The whole desk over a reload; Generate's label is one of its checks, the rest are other packages'."
+  },
+  {
+   "id": "07-overlays-keys/toasts",
+   "why": "The slice's (acceptance/slice.json): it still passes with the stack."
+  }
+ ]
+}

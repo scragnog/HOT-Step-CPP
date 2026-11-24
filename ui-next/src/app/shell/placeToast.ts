@@ -5,7 +5,7 @@
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 /* the engine log docked at the window's foot (features/logs.tsx): the go bar stands on it, and so does the toast */
-const dockH = () => { const l = document.getElementById('logs'); return !l || l.hidden ? 0 : l.getBoundingClientRect().height; };
+export const dockH = () => { const l = document.getElementById('logs'); return !l || l.hidden ? 0 : l.getBoundingClientRect().height; };
 
 export function placeToast(): void {
   const t = document.getElementById('toast'); if (!t || t.hidden) return;

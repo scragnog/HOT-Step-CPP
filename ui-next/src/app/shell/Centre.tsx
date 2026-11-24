@@ -74,13 +74,9 @@ export function Centre() {
       </div>
       <HiddenNote />
       <div className="deskwrap" id="deskwrap"><Desk /></div>
-      {/* the go bar's frame: the generation package fills the meter, Drafts and Generate */}
-      <div className="gobar">
-        <div className="meter" id="meter" />
-        <Slot name="centre.drafts" />
-        <button className="go" id="go" title={say(ui('generate.title'))} aria-keyshortcuts="Control+Enter"><i className="go-fill" aria-hidden="true" /><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z" /></svg><span id="goLabel">{say(ui('generate'))}</span></button>
-      </div>
-      <section className="latest" aria-label={say(ui('latest.songs'))}><div className="res-head"><h2>{say(ui('latest'))}</h2><span className="lbl" id="songCount" /><button className="linkbtn" data-goto="Library">{say(ui('latest.library'))}</button></div><div className="songgrid" id="latest" /></section>
+      {/* the go bar (the player, the status line, Drafts, Cancel, Generate) and Latest: the generation package's */}
+      <div className="gobar"><Slot name="centre.gobar" /></div>
+      <Slot name="centre.latest" />
     </main>
   );
 }

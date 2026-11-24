@@ -72,13 +72,6 @@
    "why": "In Tempo's top row the big number's pieces stand inside package 1's .lcd-numw (display: contents, so they stand in the row as the concept's do) and TAP is package 3's (a seam lent to the row's buttons); the LCD picker of a set time signature draws its own steps (package 1's pick). Each piece's look is compared in 33-containers/tempo-lcd-rows and by eye."
   },
   {
-   "state": "^containers-units",
-   "key": "u-art$",
-   "field": "^(--h|background-image)$",
-   "n": 4,
-   "why": "The cover swatch is in the newest song's colour; the songs list is the generation package's (6), so until then it shows the concept's own colour for no song (300), where the concept's page has its demo songs (215)."
-  },
-  {
    "state": "",
    "key": "",
    "field": "^only$",

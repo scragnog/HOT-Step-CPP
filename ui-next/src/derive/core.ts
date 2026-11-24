@@ -75,6 +75,9 @@ export interface Desk {
    *  count and the words for another engine's adapters. Every other fact is worked out when it is read (factOf), so
    *  none can be stale. */
   told?: { vstPlugins?: number; adaptersAway?: string };
+  /** What the generation service tells (package 6): the newest song's colour, which the cover swatch shows, and how
+   *  many re-planning tries the run that renders has used, which the dice light. */
+  songs?: { hue?: number; attempts?: number };
   /** Modules, pedals and units on the desk. Built-in modules always are. */
   on: Set<string>;
   /** The models the server has selected, by `<engine>.<bucket>` (GET /api/backends/models): what a model choice

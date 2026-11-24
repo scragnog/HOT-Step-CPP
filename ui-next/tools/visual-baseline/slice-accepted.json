@@ -32,13 +32,6 @@
    "why": "A dropdown option's hook names its value (\"spotify\"); the concept's names its label (\"Spotify / YouTube · -14\"), as its values are labels."
   },
   {
-   "state": "^slice-dropdown-open-dark$",
-   "key": "^#dd$",
-   "field": "^(top|bottom|inset-block-start|inset-block-end)$",
-   "n": 4,
-   "why": "The page below the desk is shorter until the generation package fills Latest, so a press near the foot of the page scrolls it 60px less, and the dropdown, pinned beside its button, stands 60px lower in the window."
-  },
-  {
    "state": "^slice-(engine-toast|undo)$",
    "key": "^#toast$",
    "field": "^(top|bottom|inset-block-start|inset-block-end)$",

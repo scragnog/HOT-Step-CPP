@@ -80,7 +80,9 @@ export default [
     await t.ok('Render saves the song and says the build stays (B-06)', () => /^Saved “Built song” to the Library\. The build stays here/.test(__b.toast()) && document.querySelector('#toast .toast-act')?.textContent === 'Undo');
     await t.ok('the build is still there, rendered, and can be rendered again or started anew', t2 => /^Rendered as “Built song” · 1 of 2 kept/.test(__b.text(`${B} .b-count`)) && __b.text(`${B} [data-brender]`) === 'Render again' && !!document.querySelector(`${B} [data-bnew]`) && document.querySelector(`${B} [data-take="${t2}"]`).classList.contains('keep'), t2);
     await t.eq('Render is a step', () => __b.undo(), 'Render "Built song"');
+    await t.ok('the song is first in the Library, built from its sections', () => S.songs[0]?.bk === 'yue' && S.songs[0].title === 'Built song' && /^Built from 1 section: Verse$/.test(S.songs[0].style));
     await t.press('Control+z');
+    await t.ok('and Undo takes it out of the Library', () => !S.songs.some(s => s.title === 'Built song'));
     await t.ok('Undo takes the render back and leaves the keep', t2 => !/Rendered/.test(__b.text(`${B} .b-count`)) && !document.querySelector(`${B} [data-bnew]`) && document.querySelector(`${B} [data-take="${t2}"]`).classList.contains('keep'), t2);
     await t.click(`${B} [data-brender]`);
     await t.click(`${B} [data-bnew]`);
