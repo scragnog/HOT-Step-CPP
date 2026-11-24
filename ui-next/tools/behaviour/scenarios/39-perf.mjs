@@ -49,6 +49,7 @@ export default [
     await t.press('Control+z');
     const u = await counted(t);
     await within(t, 'notifications of the desk store for one Undo', u.notify, 1);
+    await within(t, 'times the page\'s shell was drawn again for one Undo', u.shell, 0);
     await within(t, 'models worked out again for one Undo of a knob key', u.model, 40);
     await reset(t);
     await t.press('Control+Shift+z');
@@ -64,6 +65,7 @@ export default [
     await within(t, 'tiles measured for a removal', n['measure.tiles'], 1);
     await within(t, 'layouts forced to measure for a removal', n['measure.layouts'], 1);
     await within(t, 'notifications of the desk store for a removal', n.notify, 2);
+    await within(t, 'times the page\'s shell was drawn again for a removal (its focus request is a leaf of its own)', n.shell, 0);
     await reset(t);
     await t.press('Control+z');
     const u = await counted(t);
@@ -77,7 +79,7 @@ export default [
     await t.press('ArrowLeft');
     const n = await counted(t);
     await within(t, 'tiles measured for a move by key', n['measure.tiles'], 0);
-    await within(t, 'layouts solved for a move by key (one a place; the pack after it reuses its place\'s)', n.solve, 16);
+    await within(t, 'layouts solved for a move by key (one a place; the pack after it reuses its place\'s)', n.solve, 14);
   } },
   { id: 'a-tile-dragged-across-the-desk-measures-nothing', run: async t => {
     await full()(t);

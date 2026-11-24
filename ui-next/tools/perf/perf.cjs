@@ -1,7 +1,7 @@
 // Measures the rebuild's interactions, one action at a time, each in a fresh page on a saved desk (empty, typical,
 // full), with real input (Playwright through CDP: trusted pointer and key events).
 //
-//   node perf.cjs [--throttle 4] [--runs 3] [--desks empty,typical,full] [--only name,name] [--page file|test] [--out results/x.json]
+//   node perf.cjs [--throttle 4] [--runs 3] [--desks empty,typical,full] [--only name,name] [--page file|test] [--out results/x.json] [--no-warmup]
 //   PERF_BUILD=<folder with dist-file/ and dist-test/> to measure another build (default: ui-next itself).
 //
 // Per action it records: the largest Event Timing duration of the action's interactions (INP as Chrome computes it,
@@ -71,6 +71,11 @@ async function measure(browser, desk, a) {
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   const browser = await launch();
   const out = { page: PAGE, build: process.env.PERF_BUILD || 'ui-next', at: new Date().toISOString(), priority: process.env.PERF_PRIORITY || 'normal', throttle: THROTTLE, compositing: process.env.PERF_SOFT ? 'software' : 'gpu', runs: [] };
+  /* a browser started afresh does some things once only (the GPU compiles what it draws the first time, the fonts arrive
+     over the network): every action is done once on the full desk, unmeasured, before the measured runs (--no-warmup:
+     not) */
+  if (!process.argv.includes('--no-warmup')) for (const a of A) { if (ONLY && !ONLY.includes(a.name)) continue; await measure(browser, 'full', a); }
+  console.log('warmed up');
   for (let run = 0; run < RUNS; run++) {
     for (const desk of DESKS) for (const a of A) {
       if (ONLY && !ONLY.includes(a.name)) continue;

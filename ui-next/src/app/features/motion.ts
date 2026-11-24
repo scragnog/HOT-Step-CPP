@@ -31,20 +31,28 @@ let pending: Snap | null = null;
 /* the tile a drop lands, and the preview's box it lands from */
 let landing: { id: string; from: DOMRect } | null = null;
 
-/** The node that left, put back for a moment exactly where it stood, in a layer of its own over `host`, then faded:
- *  it is the node React let go of, inert, hidden from screen readers and without ids (no id is on the page twice). */
-function exitGhost(old: HTMLElement, r: DOMRect, host: HTMLElement, cls: string): HTMLElement {
-  const hr = host.getBoundingClientRect(), layer = document.createElement('div');
-  layer.className = cls; layer.setAttribute('aria-hidden', 'true'); layer.inert = true;
-  [old, ...old.querySelectorAll<HTMLElement>('[id]')].forEach(x => x.removeAttribute('id'));
-  old.style.removeProperty('view-transition-name');
-  old.style.cssText += `;position:absolute;margin:0;left:${r.left - hr.left}px;top:${r.top - hr.top}px;width:${r.width}px;height:${r.height}px;transform:none`;
-  layer.appendChild(old); host.appendChild(layer);
+/** The nodes that left, each put back for a moment exactly where it stood, in a layer of its own over `host`, then
+ *  faded: the nodes React let go of, inert, hidden from screen readers and without ids (no id is on the page twice).
+ *  Every node is put in its layer before any is measured, so the page is laid out once, however many leave. */
+function exitGhosts(gone: { el: HTMLElement; r: DOMRect }[], host: HTMLElement, cls: string): HTMLElement[] {
+  if (!gone.length) return [];
+  const hr = host.getBoundingClientRect();
+  const layers = gone.map(({ el: old, r }) => {
+    const layer = document.createElement('div');
+    layer.className = cls; layer.setAttribute('aria-hidden', 'true'); layer.inert = true;
+    [old, ...old.querySelectorAll<HTMLElement>('[id]')].forEach(x => x.removeAttribute('id'));
+    old.style.removeProperty('view-transition-name');
+    old.style.cssText += `;position:absolute;margin:0;left:${r.left - hr.left}px;top:${r.top - hr.top}px;width:${r.width}px;height:${r.height}px;transform:none`;
+    layer.appendChild(old); host.appendChild(layer);
+    return layer;
+  });
   /* the layer has the desk's or the board's own padding where the window is narrower: the node is put exactly where it
      stood whatever that is (the concept's ghost stands off by it, 92px at 1600) */
-  const at = old.getBoundingClientRect(), dx = r.left - at.left, dy = r.top - at.top;
-  if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { old.style.left = `${r.left - hr.left + dx}px`; old.style.top = `${r.top - hr.top + dy}px`; }
-  return layer;
+  gone.map(({ el: old, r }) => [old, r, old.getBoundingClientRect()] as const).forEach(([old, r, at]) => {
+    const dx = r.left - at.left, dy = r.top - at.top;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { old.style.left = `${r.left - hr.left + dx}px`; old.style.top = `${r.top - hr.top + dy}px`; }
+  });
+  return layers;
 }
 
 function play(): void {
@@ -74,11 +82,13 @@ function play(): void {
     const dx = b.r.left - r.left, dy = b.r.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out });
   });
-  const wrap = document.getElementById('deskwrap');
+  const wrap = document.getElementById('deskwrap'), left: At[] = [];
   was.tiles.forEach((b, m) => {
     if (seen.has(m) || b.el.isConnected || !wrap) return;
-    const layer = exitGhost(b.el, b.r, wrap, 'bento exit-layer');
-    b.el.animate(calm ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.97)' }], { duration: calm ? 120 : mtime('--t-fast'), easing: inn, fill: 'forwards' }).finished.then(() => layer.remove(), () => layer.remove());
+    left.push(b);
+  });
+  if (wrap) exitGhosts(left, wrap, 'bento exit-layer').forEach((layer, i) => {
+    left[i]!.el.animate(calm ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.97)' }], { duration: calm ? 120 : mtime('--t-fast'), easing: inn, fill: 'forwards' }).finished.then(() => layer.remove(), () => layer.remove());
   });
   playPedals(was, calm, out, inn, spring);
   /* what was added is brought into view by the shortest scroll (the concept's flash) */
@@ -104,12 +114,14 @@ function playPedals(was: Snap, calm: boolean, out: string, inn: string, spring: 
     const dx = b.r.left - r.left, dy = b.r.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) { moved = true; p.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out }); }
   });
-  const host = pd.closest<HTMLElement>('.board');
+  const host = pd.closest<HTMLElement>('.board'), left: At[] = [];
   was.peds.forEach((b, id) => {
     if (seen.has(id) || !host || b.el.isConnected || !pd.querySelector('.pedal[data-pid]')) return;
     moved = true;
-    const layer = exitGhost(b.el, b.r, host, 'pedals pedal-exit');
-    b.el.animate(calm ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-8px) scale(.97)' }], { duration: calm ? 120 : mtime('--t-fast'), easing: inn, fill: 'forwards' }).finished.then(() => layer.remove(), () => layer.remove());
+    left.push(b);
+  });
+  if (host) exitGhosts(left, host, 'pedals pedal-exit').forEach((layer, i) => {
+    left[i]!.el.animate(calm ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-8px) scale(.97)' }], { duration: calm ? 120 : mtime('--t-fast'), easing: inn, fill: 'forwards' }).finished.then(() => layer.remove(), () => layer.remove());
   });
   if (moved) { if (!calm) drawOut(); followCables(board, Math.max(mtime('--t-land'), mtime('--t-move')) + 80); }
 }

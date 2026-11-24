@@ -6,8 +6,8 @@
 // gathered from i18n/words/*.ts (one file per work package; an id defined twice fails at load).
 
 import i18next from 'i18next';
-import { initReactI18next, useTranslation } from 'react-i18next';
-import { useCallback } from 'react';
+import { initReactI18next } from 'react-i18next';
+import { useCallback, useSyncExternalStore } from 'react';
 import { DEFINITIONS } from '../../definitions/index.ts';
 import { coreStrings, stringsOf } from '../../derive/strings.ts';
 import { msg, say, type Msg, type Slot } from '../../derive/messages.ts';
@@ -48,10 +48,13 @@ const tableOf = (lang: string): { [id: string]: string } => {
 export interface SayCase { upper?: boolean; lower?: boolean }
 const cased = (t: string, lang: string, o?: SayCase) => (o?.upper ? t.toLocaleUpperCase(lang) : o?.lower ? t.toLocaleLowerCase(lang) : t);
 
+/* the page's language, which a component that says words follows: a subscription of its own to the instance's change of
+   language, so each of the page's many components costs no more than that (the tables are all loaded at start) */
+const onLanguage = (f: () => void) => { i18n.on('languageChanged', f); return () => i18n.off('languageChanged', f); };
+const language = () => i18n.language || 'en';
 /** Says a message (or any slot) in the page's language. */
 export function useSay(): (s: Slot | undefined, o?: SayCase) => string {
-  const { i18n: inst } = useTranslation(undefined, { i18n });
-  const lang = inst.language || 'en';
+  const lang = useSyncExternalStore(onLanguage, language);
   return useCallback((s: Slot | undefined, o?: SayCase) => (s === undefined ? '' : cased(say(s, tableOf(lang), lang), lang, o)), [lang]);
 }
 /** The same outside React (a toast queued by the store, the document title). */

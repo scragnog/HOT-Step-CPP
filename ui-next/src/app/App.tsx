@@ -16,6 +16,7 @@ import { usePanelStore, drawerMode } from './store/panels.ts';
 import { dispatchKey } from './register/keys.ts';
 import { Slot } from './register/Slot.tsx';
 import { service } from './register/services.ts';
+import { tally } from './tally.ts';
 
 /** Focus that a step left nowhere goes where the step said: the first of its places that is on the page (A-18). A leaf
  *  of its own, so a focus request draws nothing else again. */
@@ -33,6 +34,7 @@ function FocusRequests() {
 
 export function App() {
   const say = useSay(), panels = usePanels(), drawer = usePanelStore(s => s.drawer);
+  tally('shell');
   /* #app is React's root: its own classes say which panels stand open (31-side-panels.js paintPanels) */
   useLayoutEffect(() => {
     const app = document.getElementById('app')!;

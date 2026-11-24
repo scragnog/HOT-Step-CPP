@@ -1,0 +1,13 @@
+{
+ "about": "The performance pass (tools/perf/README.md): each of its fixes switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); each must make a guard of acceptance/perf.json fail (tools/behaviour/switches.mjs --package '^perf$'). A switch here brings a cause back without changing what the page shows, so only the guards can catch it.",
+ "switches": [
+  { "feature": "perf: a model is asked again only when what it read changed", "file": "src/app/render/useModel.ts", "find": "      if (!touched(l.reads, l.s, s)) { l.s = s; return l.v; }", "replace": "      if (!touched(l.reads, l.s, s) && false) { l.s = s; return l.v; }" },
+  { "feature": "perf: a tile's measurement is kept", "file": "src/app/desk/layout.ts", "find": "  let need = cols ? needOf(`${cols}|${width}|${fontGen}`) : tiles;", "replace": "  let need = cols ? tiles : tiles;" },
+  { "feature": "perf: a preview is measured as the tile it copies", "file": "src/app/desk/layout.ts", "find": "    && (k.el === t || (t.classList.contains('ghost') && k.el.classList.contains('moving') && k.el.dataset.mo === t.dataset.gm));", "replace": "    && k.el === t;" },
+  { "feature": "perf: the layout's own moves are not a change of content", "file": "src/app/desk/layout.ts", "find": "if (t && !placed.has(t)) stale.add(t);", "replace": "if (t) stale.add(t);" },
+  { "feature": "perf: a layout is solved once for the same tiles", "file": "src/app/desk/layout.ts", "find": "l = solved.get(k); if (l) return remember(k, l);", "replace": "l = solved.get(k); if (l && false) return remember(k, l);" },
+  { "feature": "perf: an Undo is one update of the store", "file": "src/app/store/desk.ts", "find": "      const r = e.run ? { moved: true, note: e.run.undo() ?? null, next: null } : cross(e.after, e.before), now = get();", "replace": "      set({ gone: { ...get().gone } });\n      const r = e.run ? { moved: true, note: e.run.undo() ?? null, next: null } : cross(e.after, e.before), now = get();" },
+  { "feature": "perf: a gesture is not state", "file": "src/app/store/desk.ts", "find": "    beginGesture(tag) { if (!gesture || !gesture.startsWith(tag + '#')) gesture = `${tag}#${++gestures}`; },", "replace": "    beginGesture(tag) { if (!gesture || !gesture.startsWith(tag + '#')) gesture = `${tag}#${++gestures}`; set({ gone: { ...get().gone } }); }," },
+  { "feature": "perf: the focus request is a leaf of its own", "file": "src/app/App.tsx", "find": "  const say = useSay(), panels = usePanels(), drawer = usePanelStore(s => s.drawer);", "replace": "  const say = useSay(), panels = usePanels(), drawer = usePanelStore(s => s.drawer); useDesk(s => s.focus);" }
+ ]
+}
