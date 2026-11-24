@@ -5,7 +5,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { engineName } from '../../definitions/engines.ts';
-import { findRevision, listModel, nameKey, revisionDetail, type Msg, type RevRow, type WfRow } from '../../derive.ts';
+import { findRevision, listModel, nameKey, normName, revisionDetail, type Msg, type RevRow, type WfRow } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { deleteRev, deleteWf, loadRev, openWorkflow, renameRev, renameWf, updateRevision, updateWorkflow, useWf } from '../store/workflows.ts';
@@ -27,7 +27,7 @@ const keepOn = (r: RowRef) => useDesk.getState().setFocus(sel(r));
 
 const rowRef = (el: Element): RowRef | null => {
   const d = (el as HTMLElement).dataset;
-  if (el.matches('.pre.wfrow')) return { kind: 'wf', name: d.preset!, user: d.user === '1' };
+  if (el.matches('.pre.wfrow')) return { kind: 'wf', name: d.preset!, user: useWf.getState().saved.workflows.some(w => w.name === d.preset) };
   if (el.matches('.pre.rev')) { const e = Object.entries(CONCEPT_ID).find(([, c]) => c === d.rb)?.[0]; return e ? { kind: 'rev', id: { workflow: d.rev!, engine: e as keyof typeof CONCEPT_ID, name: d.rn! }, user: d.ru === '1' } : null; }
   return null;
 };
@@ -39,15 +39,15 @@ function Rename({ row, name, commit }: { row: RowRef; name: string; commit: (v: 
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
   const end = (ok: boolean, blurTo?: Element | null) => {
     if (done.current) return;
-    const v = input.current?.value ?? '';
-    if (ok && v.trim() && v !== name) {
+    const v = normName(input.current?.value ?? '');
+    if (ok && v && v !== name) {
       const e = commit(v);
       if (e) { setErr(e); useDesk.getState().say(e); input.current?.focus(); return; }
     }
     done.current = true;
     useWfView.setState({ renaming: null });
     /* focus stays on the row (under its new name), unless the blur took it elsewhere */
-    if (!blurTo) requestAnimationFrame(() => document.querySelector<HTMLElement>(sel(row.kind === 'wf' ? { ...row, name: useWf.getState().saved.workflows.some(w => w.name === v.trim()) && ok ? v.trim() : name } : { ...row, id: { ...row.id, name: ok && findRevision(useWf.getState().saved, { ...row.id, name: v.trim() }, true) ? v.trim() : name } }))?.focus({ preventScroll: true }));
+    if (!blurTo) requestAnimationFrame(() => document.querySelector<HTMLElement>(sel(row.kind === 'wf' ? { ...row, name: useWf.getState().saved.workflows.some(w => w.name === v) && ok ? v : name } : { ...row, id: { ...row.id, name: ok && findRevision(useWf.getState().saved, { ...row.id, name: v }, true) ? v : name } }))?.focus({ preventScroll: true }));
   };
   return (
     <>
@@ -107,7 +107,7 @@ interface RowProps { tab: (r: RowRef) => number; tier: string }
 
 function More({ row, name, tab }: { row: RowRef; name: string; tab: number }) {
   const say = useSay(), open = useWfView(s => s.pop?.kind === 'menu' && sel(s.pop.row) === sel(row));
-  return <button type="button" className="jump ico-btn" data-rowmore="" aria-haspopup="menu" aria-expanded={open} aria-label={say(ui('wf.more.label', { name }))} title={say(ui('wf.more'))} tabIndex={tab}
+  return <button type="button" className="jump ico-btn" data-rowmore="" aria-haspopup="menu" {...(open ? { 'aria-expanded': true } : {})} aria-label={say(ui('wf.more.label', { name }))} title={say(ui('wf.more'))} tabIndex={tab}
     onClick={e => { e.stopPropagation(); if (open) { closePop(); return; } useWfView.setState({ pop: { kind: 'menu', row, anchor: e.currentTarget } }); }}>{ico('more')}</button>;
 }
 
@@ -200,7 +200,7 @@ function WorkflowRow({ w, tab, tier }: { w: WfRow } & RowProps) {
     <button type="button" className="jump ico-btn in-menu" {...{ [data]: w.name }} data-mlabel={say(ui(mlabel))} aria-label={say(label)} tabIndex={t} onClick={e => { e.stopPropagation(); run(); }}>{ico(icon)}</button>);
   return (
     <div className={`wf${shown ? ' open' : ''}`}>
-      <div className={`pre wfrow${w.on ? ' on' : ''}${w.modified ? ' mod' : ''}`} data-preset={w.name} data-user={w.user ? '1' : '0'} role="button" tabIndex={t} aria-label={say(w.label)} {...(w.on ? { 'aria-current': true } : {})} title={say(w.tip)}
+      <div className={`pre wfrow${w.on ? ' on' : ''}${w.modified ? ' mod' : ''}`} data-preset={w.name} role="button" tabIndex={t} aria-label={say(w.label)} {...(w.on ? { 'aria-current': true } : {})} title={say(w.tip)}
         onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) open(); }} onKeyDown={e => rowKeys(e, open)} onFocus={e => { if (e.target === e.currentTarget) useWfView.setState({ rove: sel(ref) }); }}>
         <button type="button" className="pchev" data-wfopen={w.name} aria-expanded={shown} disabled={!n} title={say({ id: 'wf.row.count', slots: { n } })} aria-label={say({ id: 'wf.row.chev', slots: { name: w.name } })} tabIndex={t}
           onClick={e => { e.stopPropagation(); chev(); }}>{ico('chevR', 12)}</button>
@@ -259,7 +259,7 @@ export function WorkflowList() {
       {model.yours.length ? model.yours.map(w => <WorkflowRow key={'u:' + w.name} w={w} tab={tab} tier={tier} />) : <p className="empty-note">{model.empty ? say(model.empty) : null}</p>}
       <div className="pre-group">{say(ui('wf.factory'))}</div>
       {model.factory.map(w => <WorkflowRow key={'f:' + w.name} w={w} tab={tab} tier={tier} />)}
-      {menu ? <Pop label={say(ui('wf.more'))}><RowMenu key={sel(menu.row) + (menu.armed ?? '')} row={menu.row} acts={menuActs(menu.row)} armed0={menu.armed} /></Pop> : null}
+      {menu ? <Pop label={menu.anchor.getAttribute('aria-label') ?? say(ui('wf.more'))}><RowMenu key={sel(menu.row) + (menu.armed ?? '')} row={menu.row} acts={menuActs(menu.row)} armed0={menu.armed} /></Pop> : null}
     </>
   );
 }

@@ -522,7 +522,7 @@ export const openStep = (name: string, revert: boolean, put: Msg): StepWords => 
 export const loadStep = (name: string, revert: boolean, put: Msg): StepWords => ({ label: msg(revert ? 'wf.step.revert' : 'wf.step.load', { name }), put });
 export const recordStep = (kind: 'replace' | 'update' | 'rename' | 'delete' | 'import' | 'save', name: string, what: Slot): StepWords =>
   ({ label: msg(`wf.step.${kind}`, { name }), put: recordPut(what) });
-export const draftStep = (kind: 'draftSave' | 'draftDelete' | 'draftLoad', name = '', put?: Msg): StepWords =>
+export const draftStep = (kind: 'draftSave' | 'draftDelete' | 'draftLoad', name: Slot = '', put?: Msg): StepWords =>
   ({ label: msg(`wf.step.${kind}`, { name }), put: put ?? recordPut(msg(kind === 'draftSave' ? 'wf.what.drafts' : 'wf.what.draft')) });
 export const whatWorkflow = (name: string): Msg => msg('wf.what.workflow', { name });
 export const whatRevision = (wf: string, name: string): Msg => msg('wf.what.revision', { wf, name });

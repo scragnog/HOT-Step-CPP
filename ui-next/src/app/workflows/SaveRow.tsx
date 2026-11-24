@@ -71,11 +71,11 @@ export function SaveRow() {
       <span className="save-field">
         <input ref={field} id="saveName" placeholder={say(ui(m.rev ? 'wf.name.rev' : 'wf.name.wf'))} maxLength={MAX} aria-label={say(ui('wf.name'))} aria-describedby="saveHint saveCount" onInput={typed}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSave(true); } }} />
-        <span className="save-count mono" id="saveCount" hidden={count < MAX - 5} aria-live="polite">{say(ui('wf.count', { n: count, max: MAX }))}</span>
+        <span className="save-count mono" id="saveCount" hidden={count < MAX - 5} aria-live="polite">{count < MAX - 5 ? '' : say(ui('wf.count', { n: count, max: MAX }))}</span>
       </span>
       <button type="button" className={`small-btn primary${v.confirm ? ' warn' : ''}`} id="saveOk" onClick={save}>{say(ui(v.confirm ? 'wf.replace' : 'wf.save'))}</button>
       <label className="save-inc" id="saveInc" hidden={!m.rev}><input ref={inc} type="checkbox" id="incContent" defaultChecked /> {say(ui('wf.include'))}</label>
-      <p className={`save-hint${warn ? ' warn' : ''}`} id="saveHint" aria-live="polite">{say(hint)}</p>
+      <p className={`save-hint${warn ? ' warn' : ''}`} id="saveHint" hidden={!v.saveOpen} aria-live="polite">{v.saveOpen ? say(hint) : ''}</p>
     </div>
   );
 }

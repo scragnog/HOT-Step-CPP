@@ -385,6 +385,6 @@ export function deleteDraft(id: string): void {
 export function loadDraft(id: string): void {
   const d = useWf.getState().drafts.find(x => x.id === id); if (!d) return;
   const from = now(), moved = onEngine(from, d.engine), to: Plan = { ...moved, desk: applyDraft(ix, moved.desk, d) }, t = draftTitle(d);
-  desk().deskStep(draftStep('draftLoad', typeof t === 'string' ? t.slice(0, 24) : '', putOf(from, to)), () => apply(to));
+  desk().deskStep(draftStep('draftLoad', typeof t === 'string' ? t.slice(0, 24) : t, putOf(from, to)), () => apply(to));
   toast(draftLoaded(d, from.desk.engine !== d.engine), undoAction(lastEntry()));
 }

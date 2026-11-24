@@ -11,6 +11,7 @@ import { deleteDraft, loadDraft, saveDraft } from '../store/workflows.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
 import { ENGINE_COLOUR, logoOf } from '../shell/engines.ts';
+import { useEdgeFade } from '../shell/edgeFade.ts';
 import { Pop } from './pop.tsx';
 import { closePop } from './popPlace.ts';
 import { useWfView } from './state.ts';
@@ -29,6 +30,8 @@ export function DraftsButton() {
 
 function DraftsList() {
   const say = useSay(), [name, setName] = useState(''), field = useRef<HTMLInputElement>(null), list = useRef<HTMLDivElement>(null);
+  /* the list's edges fade where there is more (edgeFade) */
+  useEdgeFade(list);
   const m = useWfModel((d, w) => {
     const now = Date.now(), e = d.desk.engine;
     return {

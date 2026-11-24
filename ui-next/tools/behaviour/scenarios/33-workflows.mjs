@@ -175,4 +175,10 @@ export default [
   { id: 'an-unknown-open-workflow-reads-as-start-fresh', storage: { 'hotstep.create.workflow': JSON.stringify({ open: { workflow: 'Not a workflow', revision: 'x', revFor: 'ace' }, expanded: ['Songwriter', 7] }) }, run: async t => {
     await t.eq('an open workflow that is not here reads as Start fresh, and the shown list keeps only names (08 restore-cleans)', () => [S.workflow, S.revision, [...S.wfOpen]], ['Start fresh', null, ['Songwriter']]);
   } },
+  /* C-09: a save reads storage first and merges, so what another tab wrote is kept even before its news arrives here */
+  { id: 'a-save-keeps-what-storage-holds', run: async t => {
+    await t.do('another tab writes a workflow, its storage event not here yet', () => { localStorage.setItem('hs3-wf', JSON.stringify({ workflows: [{ name: 'From elsewhere', tier: 'quick', mods: ['tempo'], pedals: [] }], revs: {} })); });
+    await t.click('#saveBtn'); await t.click('[data-saveas="wf"]'); await t.type('From here'); await t.press('Enter');
+    await t.eq('the save keeps both, and both show here', () => [JSON.parse(localStorage.getItem('hs3-wf')).workflows.map(w => w.name).sort(), S.workflows.map(w => w.name).sort()], [['From elsewhere', 'From here'], ['From elsewhere', 'From here']]);
+  } },
 ];
