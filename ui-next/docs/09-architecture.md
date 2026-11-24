@@ -364,7 +364,7 @@ draws them, compared with `controls-accepted.json`: `vb.mjs compare concept-cont
 tools/visual-baseline/controls-accepted.json`) and `tools/test-controls.ts` (in `npm run check`). The gallery draws a
 part with variants once in each (`testing/gallery.ts`).
 
-**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (23 scenarios that run, 8 of
+**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (24 scenarios that run, 9 of
 `scenarios/33-fields.mjs`, which hold on the concept page too, and 15 of the concept's suite, two of them pending there:
 F-13 and S-07; 6 more wait on packages 2, 3 and 8), `switches/4-fields.json` (27 features), `slice-states/
 40-fields.mjs` (38 states of the prompt card's column and the lyric tile, compared with `fields-accepted.json`:
