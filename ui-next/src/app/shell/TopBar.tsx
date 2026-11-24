@@ -38,7 +38,7 @@ export function TopBar() {
       <div className="top-right">
         <div className="engine" id="engine" style={{ '--ec': ENGINE_COLOUR[engine] } as CSSProperties}>
           <button className="eng-btn" id="engBtn" type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="engPanel" aria-label={say(ui('engine.label', { engine: name }))} onClick={() => setOpen(o => !o)}>
-            <span className="eng-glyph" id="engGlyph" aria-hidden="true" dangerouslySetInnerHTML={{ __html: logoOf(engine, 22) }} />
+            <span className="eng-glyph" id="engGlyph" aria-hidden="true" dangerouslySetInnerHTML={{ __html: logoOf(engine, 22, 'glyph') }} />
             <span className="eng-txt"><small>{say(ui('engine'))}</small><b id="engName">{name}</b></span>
             <span className="eng-caret" aria-hidden="true"><svg className="ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10l5 5 5-5" /></svg></span>
           </button>
@@ -129,7 +129,7 @@ function EnginePanel({ close }: { close: (refocus: boolean) => void }) {
       <div className="ep-cards" role="radiogroup" aria-label={say(ui('engine'))}>
         {m.cards.map(c => (
           <button key={c.id} type="button" className="ep-card" role="radio" data-backend={CONCEPT_ID[c.id]} aria-checked={c.id === engine} tabIndex={c.id === tab ? 0 : -1} style={{ '--c': ENGINE_COLOUR[c.id] } as CSSProperties} onClick={() => choose(c.id)}>
-            <span className="ep-scope" dangerouslySetInnerHTML={{ __html: logoOf(c.id, 40) + (c.testing ? `<i class="ep-badge">${escHtml(say(c.testing))}</i>` : '') }} />
+            <span className="ep-scope" dangerouslySetInnerHTML={{ __html: logoOf(c.id, 40, 'card') + (c.testing ? `<i class="ep-badge">${escHtml(say(c.testing))}</i>` : '') }} />
             <b>{c.name}</b><small>{say(c.tag[0])}<br />{say(c.tag[1])}</small>
             <span className="ep-specs"><i title={say(c.rateTip)}>{say(c.rate)}</i><i title={say(c.takesTip)}>{say(c.takes)}</i></span>
           </button>

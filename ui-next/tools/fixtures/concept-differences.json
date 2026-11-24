@@ -155,15 +155,9 @@
   },
   {
    "derivation": "tier contents",
-   "match": "quick adapters loaded: only the page \\[\"ad.adv\"\\]",
-   "why": "At Quick the page's note \"N adapters, stacked\" carries the Stack control's key, so the page counts Stack as shown there. The definitions show that note as a read-out: Stack is set at Studio, and a changed Stack is in Quick's Also set line.",
+   "match": "lab adapters loaded: only the page \\[\\], only the definitions \\[\"ad.planner\"\\]",
+   "why": "The cartridges edit the planner adapter at Lab; the page's planner add button carries no control key. Their section masks write the lyrics through a step of their own, not as a parameter the cartridges bind (package 3b). Also set is the same.",
    "n": 1
-  },
-  {
-   "derivation": "tier contents",
-   "match": "lab adapters loaded: only the page \\[\\], only the definitions \\[(\"ad.planner\",)?\"lyrics.text\"\\]",
-   "why": "The cartridges edit the lyrics through their section masks, and the planner adapter's cartridge at Lab; the page's mask chips and the planner's add button carry no control key. Neither is Adapters' own parameter's line, so Also set is the same.",
-   "n": 4
   },
   {
    "derivation": "tier contents",
@@ -191,21 +185,9 @@
   },
   {
    "derivation": "tier contents at other values",
-   "match": "^ace lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"ad\\.planner\",\"lyrics\\.text\"\\]$",
-   "why": "As in tier contents: the cartridges edit the lyrics through their section masks, and the planner adapter at Lab; the page's chips carry no control key.",
+   "match": "^ace lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"ad\\.planner\"\\]$",
+   "why": "As in tier contents: the cartridges edit the planner adapter at Lab; the page's add button carries no control key.",
    "n": 18
-  },
-  {
-   "derivation": "tier contents at other values",
-   "match": "^minimax-m3 lab adapters \\([12] adapters\\) .*: only the page \\[\\], only the definitions \\[\"lyrics\\.text\"\\]$",
-   "why": "As above: the cartridges' section masks are written into the lyrics.",
-   "n": 6
-  },
-  {
-   "derivation": "tier contents at other values",
-   "match": "^ace quick adapters \\(2 adapters\\) .*: only the page \\[\"ad\\.adv\"\\], only the definitions \\[\\]$",
-   "why": "As in tier contents: at Quick the page's note \"N adapters, stacked\" carries the Stack control's key.",
-   "n": 9
   },
   {
    "derivation": "tier contents at other values",

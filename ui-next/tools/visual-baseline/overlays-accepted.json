@@ -30,6 +30,13 @@
       "why": "The popover and the tip stand where they should by their anchor, which stands elsewhere on the page: the concept's prompt card (package 4) stands above the desk and makes its page taller and scrolled, so a grip, a pedal's knob and a card are lower there (by 142px, 142px and 54px of scroll)."
     },
     {
+      "state": "^ov8-pop-moves$",
+      "key": "^#bento>article:0>header:0>button:0$",
+      "field": "^sem:(data-tip-held|title)$",
+      "n": 2,
+      "why": "The grip pressed to open its moves keeps its title: a press gives the hovered control's title back until the tip shows again (features/tooltips.ts, package 8's rule after its merge, bc0fd076: the concept's controls are redrawn by a press, title and all, so its knobs and tokens do the same there). The concept's grip is not redrawn by its press, so its tip keeps the title held; no tip shows on either page in this state."
+    },
+    {
       "state": "^ov8-picker-light$",
       "key": "^shot$",
       "field": "^pixels$",

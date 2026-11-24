@@ -31,8 +31,9 @@ export function ChoiceRow(v: PartView) {
     choose(j); (e.currentTarget.parentElement?.children[j] as HTMLElement | undefined)?.focus();
   };
   const ctl = v.params[0]?.key, mood = v.opts.look === 'mood', changed = !!v.params[0]?.changed;
-  return (
-    <div className={`${mood ? 'mood' : 'qchoice'}${checked === null ? ' custom' : ''}${changed ? ' changed' : ''}`} data-q={mood ? undefined : ctl} data-ctl={ctl} role="radiogroup" aria-label={say(row.label)}>
+  /* standing back (the planner off), it fades, stays operable, and says why under it (Q-17; package 3b) */
+  const row0 = (
+    <div className={`${mood ? 'mood' : 'qchoice'}${checked === null ? ' custom' : ''}${changed ? ' changed' : ''}`} data-q={mood ? undefined : ctl} data-ctl={ctl} {...(v.dim ? { 'data-dim': '' } : {})} role="radiogroup" aria-label={say(row.label)}>
       <span className="kl">{say(row.label)}{checked === null ? <span className="q-real">{` · ${say(row.says)}`}</span> : null}</span>
       <div ref={track}>
         {row.choices.map((w, i) => (
@@ -45,6 +46,7 @@ export function ChoiceRow(v: PartView) {
       <i ref={mark} className="q-mark" aria-hidden="true" hidden={!between} />
     </div>
   );
+  return v.dim ? <>{row0}<p className="qhint lm-note">{say(v.dim)}</p></> : row0;
 }
 
-definePart('choiceRow', ChoiceRow);
+definePart('choiceRow', ChoiceRow, { dims: true });

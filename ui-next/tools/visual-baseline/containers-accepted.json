@@ -26,8 +26,8 @@
    "state": "",
    "key": "faders",
    "field": "^sem:(name|aria-label|title)$",
-   "n": 49,
-   "why": "Package 1's fader names itself by its label (\"Attn\", the concept's \"Attn strength\"), and its tape carries no tip of the full name; the bank (this package) draws the faders as they are."
+   "n": 1,
+   "why": "The Plan fader carries its parameter's tip on its slot, where the concept says it in its bank's note only (package 3b gave the faders their full names, \"Attn strength\", and their tapes the full name as their tip)."
   },
   {
    "state": "",
@@ -70,13 +70,6 @@
    "field": "^only$",
    "n": 148,
    "why": "In Tempo's top row the big number's pieces stand inside package 1's .lcd-numw (display: contents, so they stand in the row as the concept's do) and TAP is package 3's (a seam lent to the row's buttons); the LCD picker of a set time signature draws its own steps (package 1's pick). Each piece's look is compared in 33-containers/tempo-lcd-rows and by eye."
-  },
-  {
-   "state": "",
-   "key": "",
-   "field": "^sem:title$",
-   "n": 4,
-   "why": "The slice's LED switch carries no tip (its parameter's tip, which the concept's rackCtl prints as a title) and the Plan fader's tip stands on its slot here, in its bank's note in the concept; the containers draw them as they are."
   },
   {
    "state": "^containers-units",

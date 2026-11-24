@@ -74,6 +74,13 @@ function abcOf(ix: Index, node: Node, desk: Desk): AbcModel {
     note: n ? { text: ok ? msg('abc.lines', { n }) : msg('abc.not'), warn: !ok } : null,
   };
 }
+/* abcFoot: what the foot offers (InstrumentModel's field, added where it is drawn) */
+declare module './instruments.ts' {
+  interface InstrumentModel {
+    abc?: AbcModel;
+  }
+}
+
 defineInstrument('abcFoot', (ix, node, desk) => ({ abc: abcOf(ix, node, desk) }));
 
 /* ---------------------------------------------------------------- what the preview shows */

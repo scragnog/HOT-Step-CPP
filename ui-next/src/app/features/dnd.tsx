@@ -94,7 +94,7 @@ function ghostFor(id: string): HTMLElement | null {
     if (post) { post.classList.add('glow'); return null; }
     const g = drawn(BOARD); if (!g) return null;
     const body = g.querySelector('.tile-body'), engine = useDesk.getState().desk.engine, name = sayNow(defName(d, useDesk.getState().desk));
-    if (body) body.innerHTML = `<div class="board"><div class="pedals">${d.kind === 'pedal' ? thumbBare(d, engine, name) : thumbOf(d, engine, name)}</div></div>`;
+    if (body) body.innerHTML = `<div class="board"><div class="pedals">${d.kind === 'pedal' ? thumbBare(d, engine, name, 'drag') : thumbOf(d, engine, name, 'drag')}</div></div>`;
     return ghostCopy(g, BOARD.id, false);
   }
   const g = drawn(d); return g ? ghostCopy(g, d.id, false) : null;

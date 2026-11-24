@@ -181,7 +181,7 @@ export function LedButton(v: PartView) {
   if (!p) return null;
   const on = p.value === true;
   return (
-    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} onClick={() => p.set(!on)}>
+    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on)}>
       <i />{say(v.label)}
     </button>
   );
@@ -341,6 +341,19 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   it took (`Change.named`), so a gesture of several (a region dragged) is named by it. `derive/desk.ts nodeShown`: a
   bespoke part that houses children stands, on an engine without what it edits, while one of them does (the key wheel
   houses Tempo's LCD).
+- Package 3b: `derive/cartridges.ts` (`InstrumentModel.carts`: the Adapters' cartridges, each with its housing, label
+  art, name in pieces, faders, share, phase window and section masks; the empty slot, the planner adapter, the column
+  beside one cartridge, the adapters loaded but not used, what another engine keeps, Quick's line, the adapter lists;
+  the hands `load`, `remove`, `planner`, `phase`, `mask` through the slots state's steps; `directivesOf`,
+  `setDirective`, `dropDirectiveSlot`, `phaseMove`, `adapterLists`, `adaptersAway`; and the XY pad's off rail:
+  `InstrumentModel.rail`, `xyRail`, `xyRailValue`, `xyRailKey`, the hands `y` and `yKey`), registered through
+  `derive/instruments.ts defineInstrument(part, draw, acts)`, so a core file of its own adds instruments without editing
+  instruments.ts' tables. The definitions: `ParamFace.forced` (a choice the engine runs at another value while a
+  condition holds: shown pressed, the others disabled, what returns after said; `strings.ts forcedOf`,
+  `ParamModel.forced`, an option's `off`, `KidModel.forced`), `Size.narrowWhen` (one column at Quick and Studio while it
+  holds), `Desk.lists` entries' `kind`; a fader's `name` and `tape` (`ControlModel.fader`: "Self-Attn strength", its
+  short tape carrying the full name, V-01); a bespoke part that holds children it places itself is given their `kids`;
+  a state's named step may say its own `{from}` and `{to}` (a phase window's span).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 - `derive/workflows.ts` (package 7): the user's saved work. One rule for names (`normName`, `nameKey`, `sameName`: NFC,
@@ -375,8 +388,8 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   the record state's step of that name); `derive/recording.ts` (`spanAt`, `spanModel`, `spanMove`, `spanHit`: the
   recording's part, its keys and drags); `derive/score.ts` (the ABC foot's model, `scoreAsk`, `abcInfo`, `abcFile`,
   `readsAsAbc`, `scoreLayout`, `scoreModel`: the preview's words, every mark of its staff and where the playhead stands).
-  `derive/instruments.ts defineInstrument(part, draw, acts)` (a bespoke part's drawing and hands from another file) and
-  `Tell`'s `'say'` (said in the live region only). `Desk.sessions` (what a server session tells the page: never a step,
+  The three register through package 3b's `defineInstrument` (one mechanism; each declares its field of `InstrumentModel`
+  where it is drawn) and `Tell`'s `'say'` (said in the live region only). `Desk.sessions` (what a server session tells the page: never a step,
   never saved). `controls.ts rulerStep`. `models.ts`: a strip carries its Also set line (the concept's every tile does);
   `PartModel.actions[].auto`, `StateModel.detail` (a file's length). `tiers.ts alsoSet`: the tier a setting is in is
   where the face edits it, strip or not (E-25; `core.ts editsAt(..., strips)`). `desk.ts nodeShown`: a control with a
@@ -482,6 +495,21 @@ pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a 
 (`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
 back.
 
+**Package 3b (the Adapters' cartridges; the planner's XY pad: its top-p off rail and its fade with the planner off)** adds
+`acceptance/3b-cartridges.json` (18 scenarios: 10 of `scenarios/36-cartridges.mjs`, which hold on the concept page too,
+and 8 of the concept's suite), `switches/3b-cartridges.json` (46 features), `slice-states/31-cartridges.mjs` (17
+states, compared with `cartridges-accepted.json`) and `tools/test-cartridges.ts` (in `npm run check`). Its parts are
+`parts/Cartridges.tsx` (cartridges, placing its node's children: Quick's strength row, the stack bar, the fader banks,
+the foot) and `parts/CartArt.tsx` (the label art); `features/adapters.tsx` runs the named actions `loadAdapter` and
+`loadPlannerAdapter` (the adapter list, in the page's popover: package 8's `features/pop.ts openPop`) and
+tells the page the installed adapters (`services/adapters.ts`) and what another engine keeps (`adaptersAway`, from the
+engines' book; `store/desk.ts told` takes it). The Adapters' face is restructured: the cartridges node holds what stands
+around the cartridges. The Repetition guard, Mastering and the side units were drawn whole by packages 1 and 2 and match
+the concept. Parts of others given what these modules show: the fader bank's heading (its small words and the rebase
+row on its line), a labelled pairing's `rebase` look, a symbol label and the `forced` mark, a segmented choice's disabled
+options and forced note, the fader's tape tip and name, the LED switch's tip, the XY pad's rail and standing back,
+Quick's How adventurous standing back with its note.
+
 **Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 21 of the
 concept's suite, three of them pending there: F-17, F-36, S-17; 14 of `scenarios/33-workflows.mjs`, nine of which hold
 on the concept page too; and 5 waiting on packages 4 and 8, each with what it needs), `switches/7-workflows.json`
@@ -508,6 +536,15 @@ concept-notes rebuild-notes --scope notes --accept tools/visual-baseline/notes-a
 (`features/logs.tsx`, `logs-dock.ts`), both always drawn, as the concept paints them; what the log says is the core's
 (`derive/logs.ts`) from the logs service (`services/logs.ts`) and the queue the generation package tells
 (`store/notes-logs.ts tellQueue`).
+**No id is on the page twice** (found by package 11's full visual run after packages 7 and 8 merged): a drawing that
+stands in several places at once carries ids of its own in each. An engine's mark takes the place it stands in
+(`shell/engines.ts logoOf(engine, size, place)`: the engine button, the engine panel's card, a revision's or a draft's
+row), which numbers its gradient's id; a thumbnail takes its place (`thumbs/index.ts thumbOf(..., place)` and
+`thumbBare`: `card`, the picker's `pk`, a drag's `drag`), and every id inside it and every reference to it carry the
+definition and the place (`ownIds`). Before, HeartMuLa's gradient (`hmRainbow`) stood in the engine panel and in every
+HeartMuLa revision's row, and a module drawing's fixed `thg13` beside a pedal's counted one: a gradient inside a hidden
+element leaves every other drawing that names it unpainted. Every state of every package's visual set was checked for
+a repeated id: none. A new drawing with ids of its own goes through `ownIds` or a place in the same way.
 
 **Package 3c (the instruments of YuE2 and MiniMax-Music3: Build by section, Continue from recording, the Lead sheet and
 its score preview, and the Flow renderer's row)** adds `acceptance/3c-instruments.json` (25 entries: 12 of
@@ -669,6 +706,20 @@ Package 11's (the Concept notes and the engine log):
   their overlays through a delegated click, the meter's `aria-expanded` set by the log as it opens and closes, so the top
   bar (package 5's) is not edited; the same markup and behaviour as the concept's.
 
+43. **The empty Adapters tile is its definition's strip**, drawn by the tile: its buttons run the named actions and carry
+    none of the concept's hooks (`data-cartadd`, `data-plannerpick` on the strip; deviation 10). The cartridges' own
+    buttons keep them.
+44. **A phase window's and a section mask's steps** are named as the concept names them (L-01, L-09), and their Undo and
+    Redo toasts say that name; the concept's said "… back to 0–100%". Several masks painted in one drag join their
+    files in the core's English ("Section masks of a and b").
+45. **Apply as while runtime is forced** is the definition's `forced` (ParamFace): the segmented choice draws it,
+    wherever a choice has one; what is sent does not change (the server forces runtime itself).
+46. **The LED switch carries its parameter's tip** wherever it has one (E-17: the plans' Endings); the concept wrote
+    those three by hand.
+47. **The planner adapter's list holds the server's planner LM adapters** (`adapters.lm`, told by
+    features/adapters.tsx from services/adapters.ts), as `ad.planner`'s options; their value is the file, their words
+    the concept's ("folk-voice-planner (LoRA)").
+
 Package 3c's:
 
 - P3c-1. **A build is the user's record and the server's session.** The record (state `build`) holds what Undo covers:
@@ -689,8 +740,8 @@ Package 3c's:
   first 20 seconds).
 - P3c-7. **With Chain of Thought off the lead sheet's paper stands back and says why** (its text is not sent then), with
   the concept's placeholder; the concept leaves it at full strength.
-- P3c-8. **The score preview is a dialog of the package's own** in `#scoreModal` (Tab goes round it, Escape and the scrim
-  close it, focus goes back); package 8's layers may take it over. Continue with this score hands its seed to
+- P3c-8. **The score preview is a modal layer** in `#scoreModal` (package 8's layers: Tab goes round it, Escape and the
+  scrim close it, focus goes back to what opened it; package 11's exit). Continue with this score hands its seed to
   generation through `scoreRuns` (package 6); until that is registered it only closes the preview.
 - P3c-9. **The planner's composer CFG token is not painted as clashing** by the lead sheet (the concept's cross-module
   paint, B-09); the lyric-timing line warns, in the warning's ink, with Set CFG to auto.
@@ -754,7 +805,7 @@ it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to
 | 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
 | 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
-| 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log) |
+| 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log); at the coordinator's request, unique ids in drawings: `shell/engines.ts` and `thumbs/index.ts` (a place per drawing), their callers `shell/TopBar.tsx`, `workflows/List.tsx`, `workflows/Drafts.tsx`, `features/picker.tsx`, `features/dnd.tsx` (one argument each) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
 needs a new option on a part appends it (the type check refuses a clash, and the rows are independent); the generated

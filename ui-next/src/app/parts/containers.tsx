@@ -61,6 +61,8 @@ export function Labelled(v: PartView) {
     case 'deck': return <DeckRow v={v} label={label} />;
   }
   if (v.opts.look === 'strip') return <label className="schctl" title={tip}><span className="kl">{label}</span>{v.children}</label>;
+  /* a fader bank's rebase row on its heading's line (the Adapters, package 3b) */
+  if (v.opts.look === 'rebase') return <div className="rebase" title={tip ?? ''}><span className="kl">{label}</span>{v.children}</div>;
   /* a caption above a text field, with what follows the field at its foot (Latent & correction's timesteps) */
   if (what === 'textField') { const [field, ...rest] = itemsOf(v.children); return <label className="ts"><span className="kl" title={tip}>{label}</span>{field}<span className="ts-foot">{rest}</span></label>; }
   /* a caption above what it holds: a strip of switches (the plans' Endings), a row of dice (Re-planning) */
@@ -73,8 +75,11 @@ export function Labelled(v: PartView) {
     const said = notes.flatMap((n, i) => (kids[i]?.shown ? [n] : [])), line = said.flatMap((n, i) => (i ? [' ', n] : [n]));
     return <div className="ctl-row" title={tip}><span className="kl">{label}</span>{choice}<span className={`lbl${warn ? ' warn' : ''}`}><NoteInline.Provider value={true}>{line}</NoteInline.Provider></span></div>;
   }
-  return <span className="foot-ctl" title={tip}><span className="kl">{label}</span>{v.children}</span>;
+  /* a label that is one symbol (β) is printed as it is written; a choice run at another value meanwhile marks its
+     pairing forced (the Adapters' Apply as, A-30; package 3b) */
+  return <span className={`foot-ctl${kid?.forced ? ' forced' : ''}`} title={tip}><span className={`kl${SYM.test(label) ? ' sym' : ''}`}>{label}</span>{v.children}</span>;
 }
+const SYM = /^[Ͱ-Ͽ]$/;
 
 /** A row of a deck (25-module-plans.js): its label in the first column and what it holds in the second; a picker's or
  *  a field's row belongs to the recorder above it and is indented; a picker that stands back is marked and says why on

@@ -267,7 +267,7 @@ export const PARTS = {
   labelled: {
     kind: 'container', css: ['15-controls.css'],
     doc: 'A caps label beside one small control (the foot-ctl and lcdsel pairing). Where it stands and what it holds give it the pairing the concept draws there: above a text field, a strip of switches or dice; in a rack group the pair of a token; in a deck a row of its two columns.',
-    opts: { look: { type: ['strip'], doc: 'strip: an inset strip, its caption first and what it holds after it on one line (Retake seed in the Sampler).' } },
+    opts: { look: { type: ['strip', 'rebase'], doc: 'strip: an inset strip, its caption first and what it holds after it on one line (Retake seed in the Sampler); rebase: a fader bank\'s rebase row, on its heading\'s line (the Adapters).' } },
   },
   deck: {
     kind: 'container', css: ['25-module-plans.css'],
@@ -279,7 +279,7 @@ export const PARTS = {
   },
   bank: {
     kind: 'container', css: ['15-fader.css', '25-module-adapters.css'],
-    doc: 'A fader bank with a 2-1-0 scale and a heading, each fader labelled on tape.',
+    doc: 'A fader bank with a 2-1-0 scale and a heading, each fader labelled on tape. Its node\'s text is the small words after its heading; a child that is no fader (a rebase row) stands on the heading\'s line.',
     opts: {
       title: { type: 'text', doc: 'Its heading.' },
       note: { type: 'text', doc: 'Its heading\'s tip.' },
@@ -421,10 +421,16 @@ export const PARTS = {
     responsible: 'Recognising ABC (a K: line and bars) and counting lines, and choosing which of its node\'s actions apply. It edits nothing itself.',
   },
   cartridges: {
-    kind: 'bespoke', edits: ['number', 'choice', 'text'], state: ['slots'], steps: ['load', 'remove'], drive: 'keys', css: ['25-module-adapters.css'],
-    opts: { flat: { type: 'boolean', doc: 'Quick\'s flat cartridge: the first adapter lying flat, its art beside its name.' } },
-    doc: 'Adapter cartridges: each loaded adapter as a cassette with label art, its strength fader, its kind\'s housing, and in a stack its effective share, active phase and per-section mask.',
-    responsible: 'Showing its slots state and adding and removing cartridges (the state\'s `load` and `remove` steps: loading a second adapter while Stack is Single sets Stack, removing one moves the later strengths up and renumbers the lyric directives), each slot\'s active phase (kept in its slot), the label art, and drawing its params with the fader part. Section masks are written into the lyrics text it edits.',
+    kind: 'bespoke', edits: ['number', 'choice'], state: ['slots'], reads: ['choice', 'choice', 'number', 'choice', 'text'], steps: ['load', 'remove', 'phase', 'mask', 'masks'], drive: 'keys', css: ['25-module-adapters.css'],
+    opts: {
+      kinds: { type: 'texts', doc: 'Each slot\'s kind on the engine, in order (DiT; AR · composer, NAR · renderer): its cartridge\'s label, and how many slots there are.' },
+      side: { type: 'text', doc: 'What the column beside one cartridge says of the next slot, or that the engine takes one.' },
+      planner: { type: 'text', doc: 'The planner adapter\'s kind (Planner LM), where the node binds a planner adapter.' },
+      plannerNote: { type: 'text', doc: 'What the planner cartridge says where a fader would be.' },
+      plannerList: { type: 'text', doc: 'What the planner adapters\' list says under it.' },
+    },
+    doc: 'Adapter cartridges: each loaded adapter as a cassette with label art, its strength fader, its kind\'s housing, and in a stack its effective share, active phase and per-section mask; Quick lays the first flat. It places its children where the concept draws them: a Quick choice row first, then the stack bar\'s four, the two fader banks, and the foot\'s controls.',
+    responsible: 'Showing its slots state and adding and removing cartridges (the state\'s `load` and `remove` steps: loading a second adapter while Stack is Single sets Stack, removing one moves the later strengths up and renumbers the lyric directives), each slot\'s active phase (kept in its slot: the `phase` step), section masks written into the lyrics (`mask`, `masks`), the label art, the planner adapter, and drawing its params with the fader part. Its params: each slot\'s strength in order, then the first slot\'s own faders, then the planner adapter; its reads, by place: the stack switch, the stack mode, the combined strength, the planner adapter and the lyrics.',
   },
   buildBoard: {
     kind: 'bespoke', state: ['record'], reads: ['text', 'choice'], steps: ['plan', 'replan', 'relyric', 'keep', 'unkeep', 'discard', 'render', 'reset'], css: ['25-module-build.css'],

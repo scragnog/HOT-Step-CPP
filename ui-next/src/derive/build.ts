@@ -284,6 +284,13 @@ export function buildModel(ix: Index, node: Node, desk: Desk): BuildModel {
 /** The two settings a keep locks, by their names (the said words). */
 const lockNames = (ix: Index, desk: Desk, b: Built): [Slot, Slot] => [b.k.cond, b.k.bar].map(k => (k && ix.params.has(k) ? paramWords(ix, k, desk).label : '')) as [Slot, Slot];
 
+/* buildBoard: what the board draws (InstrumentModel's field, added where it is drawn) */
+declare module './instruments.ts' {
+  interface InstrumentModel {
+    build?: BuildModel;
+  }
+}
+
 defineInstrument('buildBoard', (ix, node, desk) => ({ build: buildModel(ix, node, desk) }), {
   /* the score landed (`arg`: the session and its seed, from the build service): the plan is the sections as they stand
      now; a build that was there is replaced whole, said with what it dropped (E-04) */

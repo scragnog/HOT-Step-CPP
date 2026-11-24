@@ -93,6 +93,13 @@ export function spanMove(a: number, z: number, dur: number, how: { key?: string;
   return [na, nz];
 }
 
+/* recordingSpan: the recording's part (InstrumentModel's field, added where it is drawn) */
+declare module './instruments.ts' {
+  interface InstrumentModel {
+    span?: SpanModel;
+  }
+}
+
 defineInstrument('recordingSpan', (ix, node, desk) => { const s = spanModel(ix, node, desk); return s ? { span: s } : {}; }, {
   /* a key, a drag or a double-click on the waveform (`arg`: spanMove's `how`) */
   move: x => {

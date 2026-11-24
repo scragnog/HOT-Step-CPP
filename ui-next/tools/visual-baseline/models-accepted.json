@@ -26,8 +26,15 @@
    "state": "",
    "key": "^#engPanel>div:1>button:4>span:0>svg:0>defs:0>linearGradient:0",
    "field": "^only$",
-   "n": 126,
-   "why": "HeartMuLa's mark's gradient (id hmRainbow) in its card, the same markup on both pages: while HeartMuLa is not the engine in use, its id is unique on the rebuild's page, so the recorder keys it by its id, outside the scope's paths; on the concept's page a revision's engine mark in the Workflows panel (package 7) carries the same id, so it is keyed by its path."
+   "n": 156,
+   "why": "HeartMuLa's mark's gradient in its card: every place a mark stands gives its gradient an id of its own on the rebuild's page (shell/engines.ts logoOf, hmRainbow-<n>), so the recorder keys it by that id, outside the scope's paths; the concept's page has one id, hmRainbow, in the card and in a revision's mark in the Workflows panel at once (a duplicate id, a defect: a gradient behind a hidden element can leave the other mark unpainted), so it keys the card's by its path."
+  },
+  {
+   "state": "",
+   "key": "^#engPanel>div:1>button:4>span:0>svg:0>path:2$",
+   "field": "^stroke$",
+   "n": 28,
+   "why": "The same: the card's mark paints with its own gradient (url(#hmRainbow-<n>)) where the concept's names the shared hmRainbow; the colours are the same."
   },
   {
    "state": "^models-dd-",

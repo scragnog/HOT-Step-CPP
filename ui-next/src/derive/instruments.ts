@@ -20,9 +20,6 @@ import { nodeWord } from './strings.ts';
 import { EN, type Msg, type Slot, msg } from './messages.ts';
 import { spellKey } from './readouts.ts';
 import { nodeShown } from './desk.ts';
-import type { BuildModel } from './build.ts';
-import type { SpanModel } from './recording.ts';
-import type { AbcModel } from './score.ts';
 
 /* the core's words for these instruments, added to its table (messages.ts EN) where this file is loaded */
 Object.assign(EN, {
@@ -92,10 +89,6 @@ export interface InstrumentModel {
   region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot; ctl: boolean; one: boolean };
   /** timbreBlend: the blend as its percent. */
   blend?: { pct: Slot };
-  /** buildBoard (package 3c, derive/build.ts), recordingSpan (derive/recording.ts), abcFoot (derive/score.ts). */
-  build?: BuildModel;
-  span?: SpanModel;
-  abc?: AbcModel;
 }
 
 /** What a bespoke part draws on the desk, or undefined for a part this file does not draw. */
@@ -426,16 +419,11 @@ export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: s
   if (!f) throw new Error(`${node.part} has no act "${name}"`);
   return f({ ix, node, v, desk, arg, tell }) !== false;
 }
-/** `undo`: the toast offers to undo the step just taken; 'say': it is said in the live region only, as the concept's say(). */
+/** `undo`: the toast offers to undo the step just taken; 'say': it is said in the live region only, as the concept's say()
+ *  (package 3c). */
 export type Tell = (m: Msg, undo?: boolean | 'say') => void;
 type Acts = { [name: string]: (x: ActIn) => boolean | void };
-/** Another package's bespoke part (package 3c's build board, recording span and ABC foot): what it draws and what a
- *  hand on it does, beside the parts of this file. */
-export function defineInstrument(part: string, draw: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel, acts: Acts = {}): void {
-  if (DRAW[part] || ACTS[part]) throw new Error(`the instrument ${part} is defined twice`);
-  DRAW[part] = draw; ACTS[part] = acts;
-}
-interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
+export interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
 
 /** Sets the seed and its lock in one step (the seed state's `set`): a number kept, or null for random. */
 function setSeed(x: ActIn, seed: number | string | null): void {
@@ -524,3 +512,15 @@ const ACTS: { [part: string]: Acts } = {
     },
   },
 };
+
+/* ---------------------------------------------------------------- instruments a core file of its own adds
+   A package's core file draws its own parts and works out their hands, and adds them here when it is loaded
+   (derive.ts loads it): derive/cartridges.ts, the Adapters' cartridges and the XY pad's off rail (package 3b);
+   derive/build.ts, recording.ts and score.ts, Build by section, Continue from recording and the ABC foot (package 3c).
+   Each adds its model's field to InstrumentModel by declaring it (declare module './instruments.ts'). */
+
+/** Adds a part's drawing (instrumentModel) and the hands it takes (partAct). */
+export function defineInstrument(part: string, draw?: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel, acts?: { [name: string]: (x: ActIn) => boolean | void }): void {
+  if (draw) { if (DRAW[part]) throw new Error(`the instrument "${part}" is drawn twice`); DRAW[part] = draw; }
+  if (acts) ACTS[part] = { ...ACTS[part], ...acts };
+}

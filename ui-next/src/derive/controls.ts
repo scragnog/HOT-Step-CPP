@@ -55,7 +55,7 @@ export interface ControlModel {
   ruler?: RulerModel;
   /** A fader: where the cap stands on its travel (0 to 1), where the unity line (1.00) falls, where the range stops on
    *  the travel (1: at the top), and how far along the parameter's range the top of the travel is (for a hand). */
-  fader?: { at: number; unity: number; top: number; span: number; stops: boolean };
+  fader?: { at: number; unity: number; top: number; span: number; stops: boolean; name: Slot; tape: Slot | null };
   /** A look-back strip: how many of its bars are lit, out of how many, and its caption and tip. */
   lookback?: { lit: number; bars: number; far: Slot; mid: Slot | null; now: Slot; tip: Slot };
   /** A power chip: whether its group is on, the value pressing it sets, its words and its tip. */
@@ -188,7 +188,10 @@ export function controlModel(ix: Index, node: Node, desk: Desk, words: { [k: str
       const f = numberFace(ix, key!, desk); if (!f.range) return undefined;
       const [lo, hi] = f.range, travel = typeof opts.travel === 'number' && opts.travel > hi ? opts.travel : hi, v = Number(valueOf(ix, key!, desk));
       const along = (x: number) => Math.min(1, Math.max(0, (x - lo) / (travel - lo)));
-      return { fader: { at: along(v), unity: along(1), top: (hi - lo) / (travel - lo), span: (travel - lo) / (hi - lo), stops: travel > hi } };
+      /* its accessible name is its parameter's full name and strength; its tape, said short, carries that name as its
+         tip (V-01, 25-module-adapters.js) */
+      const full = paramWords(ix, key!, desk).label;
+      return { fader: { at: along(v), unity: along(1), top: (hi - lo) / (travel - lo), span: (travel - lo) / (hi - lo), stops: travel > hi, name: msg('fader.name', { label: full }), tape: full } };
     }
     case 'lookback': {
       if (!here) return undefined;

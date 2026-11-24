@@ -23,7 +23,7 @@ export function Fader(v: PartView) {
   const up = () => { setSliding(false); v.gesture.end('drag'); };
   return (
     <div className={`fdr${p.changed ? ' changed' : ''}${f.stops ? ' stops' : ''}`} data-ctl={p.key}>
-      <div className={`fdr-slot${sliding ? ' sliding' : ''}`} data-fader={p.key} role="slider" tabIndex={0} aria-label={say(v.aria ?? v.label)} title={v.title ? say(v.title) : undefined}
+      <div className={`fdr-slot${sliding ? ' sliding' : ''}`} data-fader={p.key} role="slider" tabIndex={0} aria-label={say(f.name)} title={v.title ? say(v.title) : undefined}
         aria-valuemin={p.range[0]} aria-valuemax={p.range[1]} aria-valuenow={p.value as number} aria-valuetext={say(p.text)}
         style={{ '--p': String(f.at), '--u': String(f.unity), '--top': String(f.top) } as CSSProperties}
         onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
@@ -31,7 +31,8 @@ export function Fader(v: PartView) {
         <i className="fdr-ticks" /><i className="fdr-unity" /><b className="fdr-cap" />
       </div>
       <output data-out={p.key}>{say(p.text)}</output>
-      <span className="fdr-l">{say(v.label)}</span>
+      {/* its tape, said short, its full name as its tip; a cartridge's own fader has none (package 3b) */}
+      {v.label !== undefined ? <span className="fdr-l" title={f.tape !== null ? say(f.tape) : undefined}>{say(v.label)}</span> : null}
     </div>
   );
 }
