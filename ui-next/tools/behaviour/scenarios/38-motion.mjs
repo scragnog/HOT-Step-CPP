@@ -210,6 +210,32 @@ export default [
     await t.do('add Seed', () => addItem('seed'), null, 400);
     await t.ok('a tile added below the fold is brought into view', () => { const r = document.querySelector('.tile[data-m="seed"]').getBoundingClientRect(); return (r.top >= 0 && r.bottom <= innerHeight + 1) || `${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerHeight}`; });
   } },
+  /* Quick's fold opening and folding again: the tiles it shows arrive as an add does, those it folds leave where they
+     stood, and what moves slides (the concept's qall click, transition(render)); the concept's two stand-ins make the
+     desk long enough to fold, as its suite does */
+  { id: 'the-fold-opens-and-folds-again-by-moving', w: 1600, h: 900, run: async t => {
+    await t.do('stand-ins on a Quick desk', () => {
+      ['tx1', 'tx2'].forEach((id, i) => { defineModule(id, { at: 300 + i, name: 'Stand-in ' + (i + 1), cat: 'Engine', w: 1, keys: [] }); defineFace(id, () => '<p>stand-in</p>'); });
+      S.tier = 'quick'; S.backend = 'ace'; S.mods = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes', 'tx1', 'tx2', 'post']; S.pedals = ['lrc']; S.qAll = false; render(); scrollTo(0, 0);
+    }, null, 400);
+    const was = await boxes(t, '#bento > .tile[data-m]', 'data-m');
+    await t.js(() => document.querySelector('#bento > [data-qall]').click()); await tick(t);
+    await seek(t, 0);
+    const s0 = await box(t, '.tile[data-m="seed"]'), now0 = await boxes(t, '#bento > .tile[data-m]', 'data-m');
+    await seek(t, 2000);
+    const s1 = await box(t, '.tile[data-m="seed"]'), now1 = await boxes(t, '#bento > .tile[data-m]', 'data-m');
+    await check(t, 'opened: a tile it shows starts unseen and a little smaller, as an arrival does', s0 && s1 && s0.o < 0.05 && Math.abs(s0.w - s1.w * 0.96) <= 2, [s0, s1]);
+    const moved = Object.keys(was).filter(m => now1[m] && !xy(was[m], now1[m]));
+    await check(t, 'what it moves starts where it stood', moved.every(m => xy(now0[m], was[m])), { moved, was, now0, now1 });
+    await t.settle();
+    const open = await boxes(t, '#bento > .tile[data-m]', 'data-m');
+    await t.js(() => document.querySelector('#bento > [data-qall]').click()); await tick(t);
+    await seek(t, 0);
+    const g0 = await box(t, '.exit-layer > .tile[data-m="seed"]');
+    await check(t, 'folded again: a tile it hides is shown where it stood as it fades', at(g0, open.seed) && g0.o > 0.95, [open.seed, g0]);
+    await t.settle();
+    await t.ok('and nothing of it is left', () => !document.querySelector('.exit-layer') && !document.querySelector('#bento > .tile[data-m="seed"]'));
+  } },
   /* the decorative loops rest when nothing has happened for a while, and pick up on any input */
   { id: 'the-loops-rest-when-nothing-happens', run: async t => {
     await desk('studio', ['takes', 'tempo'])(t);

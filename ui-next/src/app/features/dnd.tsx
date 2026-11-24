@@ -16,6 +16,7 @@ import type { ModuleDef } from '../../definitions/types.ts';
 import { deskModel } from '../../derive.ts';
 import { BOARD, LEAD, defOf, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
+import { deskFold } from '../store/fold.ts';
 import { usePicker } from '../store/overlays.ts';
 import { Tile } from '../render/Tile.tsx';
 import { deskSlots, lastMeasure, packNow } from '../desk/layout.ts';
@@ -34,7 +35,7 @@ export const currentDragRects = (): Place[] | null => dragRects;
 
 const bento = () => document.getElementById('bento');
 const centre = () => document.getElementById('centre');
-const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods).make}|${innerWidth}`; };
+const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods, deskFold.get()).make}|${innerWidth}`; };
 const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 const dragKey = () => (dragId?.startsWith('move:') ? dragId.slice(5) : dragId);
 /** The tiles on the desk in order (not the lyric sheet, not the one travelling). */

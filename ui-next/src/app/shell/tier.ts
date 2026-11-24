@@ -21,6 +21,7 @@ import type { Tier } from '../../definitions/types.ts';
 import { deskModel } from '../../derive.ts';
 import { LEAD, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
+import { deskFold } from '../store/fold.ts';
 import { mtime, reduced } from '../kit/motion.ts';
 import { flushPack } from '../desk/layout.ts';
 
@@ -98,17 +99,17 @@ const ringFor = () => (reduced() ? 1200 : mtime('--t-slow') * 4);
 export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; reveal?: boolean; instant?: boolean } = {}): void {
   const s = useDesk.getState();
   if (s.desk.tier === t) { if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true }); return; }
-  const was = new Set(deskModel(ix, s.desk, s.mods).tiles), keep = deskAnchor();
+  const was = new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles), keep = deskAnchor();
   /* drawn and laid out now, so the anchor is put back before the page is painted */
   const go = () => { flushSync(() => useDesk.getState().setTier(t)); flushPack(); keep(); };
   const after = () => {
     if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
-    if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }
+    if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods, deskFold.get()).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }
     if (o.ring?.length) ringCtls(o.ring);
   };
   if (VT_OK && !o.instant && !reduced() && !document.hidden) {
     const me = ++seq, root = document.documentElement;
-    const now = new Set([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(m)), next = new Set(deskModel(ix, { ...s.desk, tier: t }, s.mods).tiles);
+    const now = new Set([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(m)), next = new Set(deskModel(ix, { ...s.desk, tier: t }, s.mods, deskFold.get()).tiles);
     only = new Set([...now, ...next].filter(x => now.has(x) !== next.has(x))); naming = 'old';
     nameForMorph(true); root.classList.add('tier-morph');
     const vt = doc.startViewTransition!(() => { go(); naming = 'new'; nameForMorph(true); after(); });

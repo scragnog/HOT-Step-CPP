@@ -14,6 +14,7 @@
 // test layer sets is drawn as it is (still()). Drawing only: places and times, no value.
 
 import { useDesk } from '../store/desk.ts';
+import { deskFold } from '../store/fold.ts';
 import { BOARD } from '../model/index.ts';
 import { onPacked, settlePack } from '../desk/layout.ts';
 import { drawOut, followCables } from '../board/cables.ts';
@@ -38,7 +39,12 @@ function exitGhost(old: HTMLElement, r: DOMRect, host: HTMLElement, cls: string)
   [old, ...old.querySelectorAll<HTMLElement>('[id]')].forEach(x => x.removeAttribute('id'));
   old.style.removeProperty('view-transition-name');
   old.style.cssText += `;position:absolute;margin:0;left:${r.left - hr.left}px;top:${r.top - hr.top}px;width:${r.width}px;height:${r.height}px;transform:none`;
-  layer.appendChild(old); host.appendChild(layer); return layer;
+  layer.appendChild(old); host.appendChild(layer);
+  /* the layer has the desk's or the board's own padding where the window is narrower: the node is put exactly where it
+     stood whatever that is (the concept's ghost stands off by it, 92px at 1600) */
+  const at = old.getBoundingClientRect(), dx = r.left - at.left, dy = r.top - at.top;
+  if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { old.style.left = `${r.left - hr.left + dx}px`; old.style.top = `${r.top - hr.top + dy}px`; }
+  return layer;
 }
 
 function play(): void {
@@ -130,6 +136,9 @@ useDesk.subscribe((s, p) => {
   requestAnimationFrame(play);
 });
 onPacked(play);
+/* Quick's fold opening or folding again changes which tiles show without changing the desk: the same transition (the
+   concept's qall click, transition(render)); its kept state tells this before the desk is drawn again */
+deskFold.subscribe(() => { if (!pending && moving()) { pending = snap(false); requestAnimationFrame(play); } });
 
 /** Runs fn, which changes the desk's make-up some other way than through the store (a fold opened), as the desk's own
  *  transition: what it adds, removes or moves animates as above. */

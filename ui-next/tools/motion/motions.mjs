@@ -6,6 +6,8 @@ const ACE = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed
 const desk = (tier, mods, pedals = []) => new Function(`S.tier = ${JSON.stringify(tier)}; S.mods = ${JSON.stringify(mods)}; S.pedals = ${JSON.stringify(pedals)}; S.pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = true; render(); scrollTo(0, 0);`);
 const TILES = '#bento > .tile[data-m]|data-m', EXIT = '.exit-layer > .tile|data-m', PEDALS = '[data-pedals] > .pedal[data-pid]|data-pid', PEXIT = '.pedal-exit > .pedal|data-pid';
 const vt = mods => [...mods.flatMap(m => [`vt:vt-${m}`, `vt:vt-h-${m}`]), 'vt:vt-prompt', 'vt:vt-lyrics', 'vt:vt-h-lyrics', 'vt:vt-ask', 'vt:vt-hnote', 'vt:vt-gobar', 'vt:vt-bar', 'vt:vt-deskend'];
+/* a Quick desk long enough to fold (the concept's two stand-ins, as its suite and 38-fold.mjs make them) */
+const fold = open => new Function(`['tx1', 'tx2'].forEach((id, i) => { defineModule(id, { at: 300 + i, name: 'Stand-in ' + (i + 1), cat: 'Engine', w: 1, keys: [] }); defineFace(id, () => '<span>stand-in</span>'); }); S.tier = 'quick'; S.backend = 'ace'; S.mods = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes', 'tx1', 'tx2', 'post']; S.pedals = ['lrc']; S.qAll = ${open}; render(); scrollTo(0, 0);`);
 const click = sel => p => p.click(sel);
 const key = (sel, k) => async p => { await p.focus(sel); await p.keyboard.press(k); };
 const few = ['tempo', 'avoid', 'takes', 'seed'], LINES = 'a\nb\nc\nd\ne\nf';
@@ -29,4 +31,6 @@ export const MOTIONS = [
   { id: 'suggestion-opens', what: 'a suggestion opens under the box; what is under it does not jump', w: 1920, h: 1080, scene: desk('quick', few), before: p => p.focus('#prompt'), act: p => p.keyboard.insertText('lofi beat at 92 bpm'), keys: ['.pc-foot', '#bento > .tile[data-m="tempo"]', '#suggest'], opacity: true },
   { id: 'song-info-opens', what: 'Song info opens under the card\'s tools', w: 1920, h: 1080, scene: desk('quick', few), act: click('#songInfoBtn'), keys: ['#songInfo', '#bento > .tile[data-m="tempo"]'], opacity: true },
   { id: 'generate-starts', what: 'Generate pressed: Cancel slides out from under it, the cards slide along for the new ones', w: 1920, h: 1080, scene: desk('quick', few), before: async p => { await p.focus('#prompt'); await p.keyboard.insertText('warm folk song'); await p.evaluate(() => { document.activeElement.blur(); scrollTo(0, 0); }); }, act: click('#go'), keys: ['#cancelGo', '#go', '#meter'], opacity: true },
+  { id: 'fold-opens', what: 'the fold of Quick opened: the tiles it shows arrive, what they push slides', w: 1600, h: 1400, scene: fold(false), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()), keys: [TILES], opacity: true },
+  { id: 'fold-folds', what: 'the fold of Quick folded again: the tiles it hides fade where they stood', w: 1600, h: 1400, scene: fold(true), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()), keys: [TILES, EXIT], opacity: true },
 ];

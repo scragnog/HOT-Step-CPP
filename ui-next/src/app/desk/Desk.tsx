@@ -17,6 +17,9 @@ import { Slot } from '../register/Slot.tsx';
 import { setTierFromView } from '../shell/tier.ts';
 import { packSoon, renderPack } from './layout.ts';
 import { ring } from './ring.ts';
+import { FoldButton } from './Fold.tsx';
+import { deskFold } from '../store/fold.ts';
+import { useKept } from '../kit/session.ts';
 
 export function HiddenNote() {
   const say = useSay(), note = useModel(s => deskModel(ix, s.desk, s.mods).hidden, 'hidden');
@@ -31,7 +34,8 @@ export function HiddenNote() {
 const addStarter = (id: string) => { if (useDesk.getState().add(id).did === 'added') useDesk.getState().setFocus(`.tile[data-m="${id}"] .grip`); };
 
 export function Desk() {
-  const say = useSay(), m = useModel(s => deskModel(ix, s.desk, s.mods), 'desk');
+  /* Quick's fold standing open is the session's (store/fold.ts); which modules it folds is the core's */
+  const say = useSay(), open = useKept(deskFold), m = useModel(s => deskModel(ix, s.desk, s.mods, open), `desk:${open}`);
   /* the window's width is part of the desk's make-up: a resize lays the desk out afresh */
   const [width, setWidth] = useState(innerWidth);
   useEffect(() => { const f = () => setWidth(innerWidth); addEventListener('resize', f); return () => removeEventListener('resize', f); }, []);
@@ -44,7 +48,7 @@ export function Desk() {
   /* a tile whose content changes size, or the window, re-places the desk */
   useEffect(() => {
     const g = document.getElementById('bento'); if (!g) return;
-    const now = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods).make}|${innerWidth}`; };
+    const now = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods, deskFold.get()).make}|${innerWidth}`; };
     const ro = new ResizeObserver(() => packSoon(now, true));
     const watch = () => g.querySelectorAll('.tile-body').forEach(b => ro.observe(b));
     watch(); const mo = new MutationObserver(watch); mo.observe(g, { childList: true });
@@ -68,6 +72,7 @@ export function Desk() {
         <div className="desk-empty"><span className="de-art" aria-hidden="true"><i /><i /><i /><i /></span><div><h3>{say(ui('empty.title'))}</h3></div>
           <div className="de-acts"><button className="sbtn" data-openpicker="">{say(ui('empty.picker'))} <kbd>F9</kbd></button>{starters}</div></div>
       ) : null}
+      {m.fold ? <FoldButton fold={m.fold} /> : null}
       {m.parked ? (
         <div className="parked"><span className="lbl">{say(m.parked.says)}</span>
           {m.parked.modules.map(d => <span key={d.id} className="pchip" data-pm={d.id}>{say(d.name)}{tag(d.tag)}<button className="x" data-remove={d.id} aria-label={say(ui('tile.remove', { name: d.name }))} onClick={() => useDesk.getState().remove(d.id)}><Icon name="x" size={12} /></button></span>)}

@@ -5,10 +5,12 @@ import { DEFINITIONS } from '../../definitions/index.ts';
 import type { Definition, ModuleDef } from '../../definitions/types.ts';
 import { boardOrder as coreBoardOrder, indexOf } from '../../derive.ts';
 import { gallery } from '../testing/gallery.ts';
+import { standIns } from '../testing/standins.ts';
 
 /* the test build indexes the parts gallery too (testing/gallery.ts): definitions that put every part on every surface,
-   offered nowhere; every other build has the definitions alone */
-const ALL: readonly Definition[] = import.meta.env.MODE === 'test' ? [...DEFINITIONS, ...gallery()] : DEFINITIONS;
+   offered nowhere; and two stand-in modules for Quick's fold (testing/standins.ts); every other build has the
+   definitions alone */
+const ALL: readonly Definition[] = import.meta.env.MODE === 'test' ? [...DEFINITIONS, ...gallery(), ...standIns()] : DEFINITIONS;
 export const ix = indexOf(ALL);
 
 const BY_ID = new Map<string, Definition>(ALL.map(d => [d.id, d]));

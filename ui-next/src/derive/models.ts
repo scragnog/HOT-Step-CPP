@@ -32,6 +32,7 @@ import { modelRows, type ModelRow } from './vram.ts';
 import { heldNote } from './engine.ts';
 import { rng } from './generate.ts';
 import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
+import { foldModel, type FoldModel } from './fold.ts';
 
 /* ---------------------------------------------------------------- a part's model */
 
@@ -468,8 +469,10 @@ export function pedalModel(ix: Index, d: PedalDef | UnitDef, desk: Desk): PedalM
 
 export interface DeskModel {
   tier: Tier; engine: EngineId;
-  /** The tiles drawn, in the user's order: on the desk, at this tier, used by this engine. */
+  /** The tiles drawn, in the user's order: on the desk, at this tier, used by this engine, and not folded away. */
   tiles: string[];
+  /** Quick's fold (fold.ts): the modules it holds and its button's words; null when nothing folds. */
+  fold: FoldModel | null;
   /** The lyric sheet's place: a tile of its own on this engine, or a row the desk keeps for it. */
   lyricsHere: boolean;
   empty: { quick: boolean; says: Slot | null; starters: { id: string; name: Slot }[] } | null;
@@ -495,14 +498,15 @@ export function startersOn(ix: Index, desk: Desk): ModuleDef[] {
   const at = (d: ModuleDef) => ((d.per || []).find(l => l.engines.includes(desk.engine) && l.starter)?.starter ?? d.starter)!;
   return ix.defs.filter((d): d is ModuleDef => d.kind === 'module' && !!d.starter && usedHere(d, desk.engine) && !desk.on.has(d.id)).sort((a, b) => at(a).at - at(b).at).slice(0, 3);
 }
-export function deskModel(ix: Index, desk: Desk, mods: readonly string[]): DeskModel {
+/** `open`: whether Quick's fold stands open (the page's session keeps it). */
+export function deskModel(ix: Index, desk: Desk, mods: readonly string[], open = false): DeskModel {
   const defs = mods.map(id => ix.defs.find(d => d.id === id)).filter((d): d is ModuleDef => d?.kind === 'module');
-  const tiles = defs.filter(d => tileAtTier(d, desk) && usedHere(d, desk.engine)).map(d => d.id);
+  const { tiles, fold } = foldModel(ix, desk, defs.filter(d => tileAtTier(d, desk) && usedHere(d, desk.engine)).map(d => d.id), open);
   const p = parkedOn(ix, desk), lyrics = ix.defs.find(d => d.kind === 'module' && d.builtIn && d.face.some(n => n.part === 'lyricSheet'));
   const st = tiles.length ? [] : startersOn(ix, desk);
   const first = st[0] ? ((st[0].per || []).find(l => l.engines.includes(desk.engine) && l.starter)?.starter ?? st[0].starter) : undefined;
   return {
-    tier: desk.tier, engine: desk.engine, tiles, lyricsHere: !!lyrics && usedHere(lyrics, desk.engine),
+    tier: desk.tier, engine: desk.engine, tiles, fold, lyricsHere: !!lyrics && usedHere(lyrics, desk.engine),
     empty: tiles.length ? null : {
       quick: desk.tier === 'quick',
       says: desk.tier === 'quick' ? msg('qempty', { first: first?.noun ? { id: `create.${st[0]!.id}.starter${starterLine(st[0]!, desk)}`, en: first.noun } : '' }) : null,
@@ -514,7 +518,7 @@ export function deskModel(ix: Index, desk: Desk, mods: readonly string[]): DeskM
       board: p.board.map(d => ({ id: d.id, name: defName(d, desk), what: msg(d.kind === 'unit' ? 'parked.unit' : 'parked.pedal'), tag: enginesTag(d, 'parked') })),
     } : null,
     hidden: hiddenLabModules(ix, desk),
-    make: [desk.tier, desk.engine, mods.join()].join('|'),
+    make: [desk.tier, desk.engine, mods.join(), open].join('|'),
   };
 }
 

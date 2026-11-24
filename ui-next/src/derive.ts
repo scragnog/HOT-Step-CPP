@@ -33,3 +33,4 @@ export * from './derive/generate.ts';
 export * from './derive/build.ts';
 export * from './derive/recording.ts';
 export * from './derive/score.ts';
+export * from './derive/fold.ts';

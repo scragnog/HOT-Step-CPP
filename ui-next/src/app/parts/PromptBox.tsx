@@ -11,6 +11,7 @@ import { Pick } from './Pick.tsx';
 import { subView } from './subView.ts';
 import { useGrow } from './textGrow.ts';
 import { reduced } from '../kit/motion.ts';
+import { keptFlag, useKept } from '../kit/session.ts';
 
 /* the parameters it lays out beside its box are found by their role (definitions/roles.ts), never by key */
 const INFO: Role[] = ['songArtist', 'songTitle', 'songSubject'];
@@ -19,6 +20,8 @@ const CAP = () => Math.max(150, Math.round(innerHeight * 0.3));
 /* the placeholder turns through the examples every 3.5 s while the box is empty and has no focus (S-35: not under
    reduced motion) */
 const TURN_MS = 3500;
+/* Song info standing open is kept with the session (the concept's S.songInfoOpen): a reload shows it as it was */
+const songInfo = keptFlag('prompt.songInfo');
 
 export function PromptBox(v: PartView) {
   const say = useSay(), ta = useRef<HTMLTextAreaElement>(null), info = useRef<HTMLDivElement>(null), m = v.prompt, box = v.params[0];
@@ -26,10 +29,10 @@ export function PromptBox(v: PartView) {
   const act = (name: string, arg?: string) => { v.act(name, arg); };
   const words = (name: string) => v.actions.find(a => a.name === name);
   const [ph, setPh] = useState(0), [ping, setPing] = useState(0);
-  const any = !!m?.info.any, seen = useRef(any), [open, setOpen] = useState(false);
+  const any = !!m?.info.any, seen = useRef(any), open = useKept(songInfo);
   const g = useGrow(ta, CAP, m?.shown ?? '');
   /* Song info opens by itself only when info arrives from outside (a draft, a revision), never again after it was closed */
-  useEffect(() => { if (any && !seen.current) setOpen(true); seen.current = any; }, [any]);
+  useEffect(() => { if (any && !seen.current) songInfo.set(true); seen.current = any; }, [any]);
   useEffect(() => {
     const t = setInterval(() => { if (!reduced() && !ta.current?.value && document.activeElement !== ta.current) setPh(i => i + 1); }, TURN_MS);
     return () => clearInterval(t);
@@ -50,7 +53,7 @@ export function PromptBox(v: PartView) {
         onFocus={() => v.gesture.begin(p.key)} onBlur={() => v.gesture.end(p.key)} onChange={e => { v.gesture.begin(p.key); p.set(e.currentTarget.value); }} />
     </label>
   ) : null;
-  const toggleInfo = () => { const to = !open; setOpen(to); if (to) requestAnimationFrame(() => info.current?.querySelector('input')?.focus({ preventScroll: true })); };
+  const toggleInfo = () => { const to = !open; songInfo.set(to); if (to) requestAnimationFrame(() => info.current?.querySelector('input')?.focus({ preventScroll: true })); };
   const src = of('captionSource'), ds = of('captionDataset'), wild = of('wildcards'), trig = of('trigger');
   /* the caption source and its dataset are chips (G-D-8); choosing a dataset is the feature's, so a track it lacks goes
      back to Custom in the same step (E-22) */

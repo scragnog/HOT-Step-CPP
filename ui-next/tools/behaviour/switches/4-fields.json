@@ -25,7 +25,7 @@
     { "feature": "locked says why", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('promptLocked', () => store().say(lockedMsg(ix, desk())));", "replace": "defineAction('promptLocked', () => { void lockedMsg; });" },
     { "feature": "dataset drops", "file": "src/derive/fields.ts", "find": "const drops = !!src &&", "replace": "const drops = false &&" },
     { "feature": "dataset tags", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('datasetTag', tag => { if (tag) apply(", "replace": "defineAction('datasetTag', tag => { if (!tag) apply(" },
-    { "feature": "song info", "file": "src/app/parts/PromptBox.tsx", "find": "const toggleInfo = () => { const to = !open; setOpen(to);", "replace": "const toggleInfo = () => { const to = !open; void setOpen;" },
+    { "feature": "song info", "file": "src/app/parts/PromptBox.tsx", "find": "const toggleInfo = () => { const to = !open; songInfo.set(to);", "replace": "const toggleInfo = () => { const to = !open; void songInfo;" },
     { "feature": "placeholder", "file": "src/app/parts/PromptBox.tsx", "find": "setPh(i => i + 1)", "replace": "setPh(i => i)" },
     { "feature": "box word", "file": "src/derive/fields.ts", "find": "    aria: paramWords(ix, key, desk).label,", "replace": "    aria: msg('box.description')," },
     { "feature": "reuse lock", "file": "src/derive/fields.ts", "find": "(trackNow(ix, desk) ? lockedMsg(ix, desk, 'reuse') : null)", "replace": "(trackNow(ix, desk) && false ? lockedMsg(ix, desk, 'reuse') : null)" }

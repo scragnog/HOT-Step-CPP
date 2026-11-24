@@ -1,0 +1,16 @@
+{
+ "about": "Quick's fold (A-28, Q-05), built after the consolidation round: each part of it switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); each must make a scenario of the acceptance fail (tools/behaviour/switches.mjs --package '^fold$').",
+ "switches": [
+  { "feature": "fold: Quick folds", "file": "src/derive/fold.ts", "find": "if (desk.tier !== 'quick' || live.length < FOLD.from) return [];", "replace": "if (live.length >= 0) return [];" },
+  { "feature": "fold: three or more", "file": "src/derive/fold.ts", "find": "return folded.length >= FOLD.least ? folded : [];", "replace": "return folded;" },
+  { "feature": "fold: a set value is never folded", "file": "src/derive/fold.ts", "find": " || d.params.some(p => changed(ix, p.key, desk));", "replace": " || d.params.some(p => changed(ix, p.key, desk) && false);" },
+  { "feature": "fold: the board is never folded", "file": "src/derive/fold.ts", "find": "=> !!d.board || !!d.source ||", "replace": "=> !!d.source ||" },
+  { "feature": "fold: the button names them", "file": "src/derive/fold.ts", "find": "msg('desk.fold.more', { n: ids.length, names: list(names) })", "replace": "msg('desk.fold.more', { n: ids.length, names: list(names.slice(0, 1)) })" },
+  { "feature": "fold: open shows them", "file": "src/derive/fold.ts", "find": "tiles: open ? [...live] : live.filter(id => !ids.includes(id)),", "replace": "tiles: live.filter(id => !ids.includes(id))," },
+  { "feature": "fold: the button works", "file": "src/app/desk/Fold.tsx", "find": "onClick={() => deskFold.set(!fold.open)}", "replace": "onClick={() => deskFold.get()}" },
+  { "feature": "fold: a ring opens it", "file": "src/app/features/fold.ts", "find": "s.flash?.ring === 'flash' ? s.flash.id : null;", "replace": "s.flash?.ring === 'flash' ? null : null;" },
+  { "feature": "fold: an arrival opens it", "file": "src/app/features/fold.ts", "find": "(came.length === 1 ? came[0]! : null)", "replace": "(came.length === -1 ? came[0]! : null)" },
+  { "feature": "fold: kept with the session", "file": "src/app/kit/session.ts", "find": "      writePref(KEY, { ...saved(), [name]: v });\n", "replace": "" },
+  { "feature": "fold: Song info kept with the session", "file": "src/app/parts/PromptBox.tsx", "find": "const songInfo = keptFlag('prompt.songInfo');", "replace": "const songInfo = keptFlag('prompt.songInfo'); songInfo.set(false);" }
+ ]
+}

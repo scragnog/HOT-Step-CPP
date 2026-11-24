@@ -1,9 +1,35 @@
 {
   "about": "Differences in motion between the concept and the rebuild accepted on purpose, each with its reason: match is a regex on \"<motion> <key>\", most the largest difference it accepts (px, or opacity for a key ending :op or :old or :new; \"missing\" for a key one page lacks), n how many keys it may cover.",
   "accepted": [
-    {"match": "^tier-lab-to-quick vt:vt-(tempo|seed)$", "most": 34, "n": 2, "why": "Not motion: at Lab, 1600 wide, with the Guidance plugin on the desk, the concept stretches Tempo and Seed 34px taller than the rebuild's layout does (the old tiles the transition starts from); a packing difference of the desk's, recorded in the notes for its owner."},
-    {"match": "^prompt-grows (.pc-foot|#bento > .tile.data-m=.tempo..)$", "most": 110, "n": 2, "why": "The concept's box does not ease when it is typed into (its input handler measures the box twice, the second measure cancelling the first's ease), so what is under it jumps; the rebuild eases every change of more than a line and a half, as F-09 asks and as the concept does when Undo or a tool sets the text (prompt-shrinks-on-undo matches it step for step)."},
-    {"match": "^suggestion-opens #suggest$", "most": 40, "n": 1, "why": "Compositor only (the owner's rule for motion): the suggestion is at its full height from the first step, faded in and revealed by its card's clip, where the concept animates its height; what follows it (the card's foot, the desk) stands where the concept's does at every step."},
-    {"match": "^song-info-opens #songInfo$", "most": 110, "n": 1, "why": "The same for Song info: at its full height from the first step, revealed by the card's clip, where the concept animates its height; what follows it stands where the concept's does at every step."}
+    {
+      "match": "^tier-lab-to-quick vt:vt-(tempo|seed)$",
+      "most": 34,
+      "n": 2,
+      "why": "Not motion: at Lab, 1600 wide, with the Guidance plugin on the desk, the concept stretches Tempo and Seed 34px taller than the rebuild's layout does (the old tiles the transition starts from); a packing difference of the desk's, recorded in the notes for its owner."
+    },
+    {
+      "match": "^prompt-grows (.pc-foot|#bento > .tile.data-m=.tempo..)$",
+      "most": 110,
+      "n": 2,
+      "why": "The concept's box does not ease when it is typed into (its input handler measures the box twice, the second measure cancelling the first's ease), so what is under it jumps; the rebuild eases every change of more than a line and a half, as F-09 asks and as the concept does when Undo or a tool sets the text (prompt-shrinks-on-undo matches it step for step)."
+    },
+    {
+      "match": "^suggestion-opens #suggest$",
+      "most": 40,
+      "n": 1,
+      "why": "Compositor only (the owner's rule for motion): the suggestion is at its full height from the first step, faded in and revealed by its card's clip, where the concept animates its height; what follows it (the card's foot, the desk) stands where the concept's does at every step."
+    },
+    {
+      "match": "^song-info-opens #songInfo$",
+      "most": 110,
+      "n": 1,
+      "why": "The same for Song info: at its full height from the first step, revealed by the card's clip, where the concept animates its height; what follows it stands where the concept's does at every step."
+    },
+    {
+      "match": "^fold-folds \\.exit-layer > \\.tile\\[",
+      "most": 92,
+      "n": 4,
+      "why": "P9-7: a tile that leaves fades exactly where it stood; the concept's stands off by its exit layer's padding (92px at 1600 wide), as the rebuild's did before this was found."
+    }
   ]
 }

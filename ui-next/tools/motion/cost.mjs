@@ -30,6 +30,8 @@ const COSTS = [
   { id: 'move a tile by key', scene: full('lab'), before: p => p.focus('[data-move="takes"]'), act: p => p.keyboard.press('ArrowLeft') },
   { id: 'a pedal joins', scene: full('lab', ACE, PEDS.filter(x => x !== 'lift')), act: p => p.evaluate(() => addItem('pd:lift')) },
   { id: 'a pedal leaves', scene: full('lab'), act: p => p.click('[data-pedalx="lift"]') },
+  { id: 'the fold opens', scene: full('quick'), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
+  { id: 'the fold folds', scene: full('quick'), before: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
   { id: 'prompt grows', scene: full('quick'), before: p => p.focus('#prompt'), act: p => p.keyboard.insertText(LINES) },
   { id: 'song info opens', scene: full('quick'), act: p => p.click('#songInfoBtn') },
 ];

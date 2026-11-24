@@ -138,6 +138,18 @@
    "file": "src/app/generate/Player.tsx",
    "find": "      slideLine('--t-base', '--e-out');",
    "replace": ""
+  },
+  {
+   "feature": "motion the fold moves",
+   "file": "src/app/features/motion.ts",
+   "find": "deskFold.subscribe(() => { if (!pending && moving())",
+   "replace": "deskFold.subscribe(() => { if (false)"
+  },
+  {
+   "feature": "motion exits stand exactly where they stood",
+   "file": "src/app/features/motion.ts",
+   "find": "if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) { old.style.left",
+   "replace": "if (false) { old.style.left"
   }
  ]
 }

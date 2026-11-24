@@ -1,0 +1,13 @@
+{
+ "about": "Differences between the concept's page and the rebuild's in Quick's fold's states (slice-states/37-fold.mjs) that are accepted on purpose, each with its reason and exact count (vb.mjs compare --accept).",
+ "accepted": [
+  {
+   "state": "^fold-open-light$",
+   "key": "^shot$",
+   "field": "^pixels$",
+   "n": 1,
+   "pixels": 1000,
+   "why": "The open fold shows Takes, whose ninth reel the concept draws and the rebuild does not: ACE-Step takes eight at most (deviations 27 and 34). Every tile, the board and the button stand where the concept's do. Measured 836 pixels, all in that reel's place."
+  }
+ ]
+}

@@ -64,6 +64,10 @@
     {
       "id": "38-motion/the-player-slides-in-beside-the-line",
       "why": "The player joining the go bar moves the line beside it over from where it stood (compositor only)."
+    },
+    {
+      "id": "38-motion/the-fold-opens-and-folds-again-by-moving",
+      "why": "Quick's fold (merged from ui-next 43be87c2) moves as every change of which tiles show: opened, a tile it shows arrives by its entrance and what it moves starts where it stood; folded again, a tile it hides fades where it stood, and nothing is left. (The concept's fading tile stands 92px off where it stood at 1600, its exit layer's padding: that check does not hold there, P9-7.)"
     }
   ]
 }
