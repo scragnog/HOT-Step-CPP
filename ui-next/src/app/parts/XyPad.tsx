@@ -52,8 +52,13 @@ export function XyPad(v: PartView) {
   };
   const reset = () => { working(true); v.batch(() => { px.reset(); py.reset(); }); working(false); };
 
-  return (
-    <div ref={el} className={`xy ${v.opts.look ? `xy-${v.opts.look as string}` : ''} `} data-xy={`${px.key}|${py.key}`} tabIndex={0} role="slider" aria-roledescription={say(ui('xy.role'))}
+  /* the corner words are printed just outside the pad, above and below its corners, so the puck reaches every corner
+     without covering one (A-07) */
+  const corner = (i: number) => (v.words[`corners.${i}`] ? say(v.words[`corners.${i}`]) : '');
+  const cap = (a: string, b: string, w: string) => (a || b ? <div className={`xy-cap ${w}`} aria-hidden="true"><span>{a}</span><span>{b}</span></div> : null);
+  const corners = [0, 1, 2, 3].map(corner), look = v.opts.look ? `xy-${v.opts.look as string}` : '';
+  const pad = (
+    <div ref={el} className={`xy ${look} `} data-xy={`${px.key}|${py.key}`} tabIndex={0} role="slider" aria-roledescription={say(ui('xy.role'))}
       aria-label={say(ui('xy.label', { x: xl, y: yl }))} title={say(ui('xy.title', { x: xl, y: yl }))}
       aria-valuetext={say(ui('xy.text', { x: px.label, xv: px.text, y: py.label, yv: py.text }))} aria-valuemin={px.range[0]} aria-valuemax={px.range[1]} aria-valuenow={px.value as number}
       onPointerDown={down} onPointerMove={e => { if (motion.current.dragging) setAt(e); }} onPointerUp={up} onPointerCancel={up}
@@ -65,6 +70,7 @@ export function XyPad(v: PartView) {
       <span className={`xy-ax y${py.changed ? ' changed' : ''}`} data-ctl={py.key}>{`${say(yl)} `}<output data-xyy="">{say(py.text)}</output></span>
     </div>
   );
+  return corners.some(Boolean) ? <div className={`xy-frame ${look ? look + '-frame' : ''}`}>{cap(corners[0]!, corners[1]!, 'cap-t')}{pad}{cap(corners[2]!, corners[3]!, 'cap-b')}</div> : pad;
 }
 
 definePart('xyPad', XyPad);

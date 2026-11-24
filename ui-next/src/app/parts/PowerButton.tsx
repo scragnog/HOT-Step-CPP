@@ -16,6 +16,14 @@ export function PowerButton(v: PartView) {
       </button>
     );
   }
+  /* on the Sampler's scope: Lua plugins, a lit word after its dot (25-module-sampler.js .scope-btn) */
+  if (v.opts.look === 'scope') {
+    return (
+      <button type="button" className={`scope-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on)}>
+        {`● ${say(v.label)}`}
+      </button>
+    );
+  }
   return (
     <button type="button" className={`master${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} aria-label={say(v.words.name ?? v.label)} onClick={() => p.set(!on)}>
       <i />{say(v.label)} <b />

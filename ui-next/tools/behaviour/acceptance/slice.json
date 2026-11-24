@@ -2,7 +2,7 @@
   "about": "The slice's acceptance: every scenario whose subject is something the slice builds (the shell, the desk, the pure-data modules, the Pedalboard with its pure-data pedals and side unit, undo and redo, the autosave, the theme, the tiers, adding, removing and moving). Each must pass on every run (tools/behaviour/run.mjs --slice). A work package adds a file of its own beside this one (acceptance/<package>.json); none edits another's. `excluded` lists scenarios that look like the slice's but are left out, each with the reason, so that a reader can check the choice. tools/behaviour/switches.mjs proves the list has teeth: each slice feature switched off makes at least one of these fail.",
   "scenarios": [
     { "id": "01-desk/engines-panel", "why": "The engine button and its panel's five cards: arrows, Enter, Escape, a click outside." },
-    { "id": "01-desk/add-by-keyboard", "why": "Adding from the Modules panel with the keyboard.", "waiting": { "package": 3, "because": "Its grip move beside Tempo and the Sampler is a visible step only at the concept's tile heights, which Tempo reaches when package 3 draws its LCD rows and key wheel (placeholders until then)." } },
+    { "id": "01-desk/add-by-keyboard", "why": "Adding from the Modules panel with the keyboard." },
     { "id": "02-dnd-panels/panels-collapse", "why": "The side panels collapse to their rails and expand, and the choice is kept over a reload." },
     { "id": "02-dnd-panels/panels-overlay-1280", "why": "Below 1400px the Modules panel opens over the desk and closes on a press outside or Escape; Lab below 1600px puts the Workflows panel on its rail." },
     { "id": "02-dnd-panels/drawers-1000", "why": "Below 1180px the panels are drawers: focus goes in, the scrim and Escape close them, adding from one closes it (SL-07)." },
@@ -10,7 +10,7 @@
     { "id": "08-persistence-cables/cables", "why": "The board's cables: one per link, on the jacks, redrawn as pedals come and go." },
     { "id": "10-desk-modules/offline-fonts-keep-the-layout", "why": "The desk lays out the same without the web fonts." },
     { "id": "10-desk-modules/focus-after-pedal-removal-and-undo", "why": "Taking a pedal off moves focus to the next pedal; Undo brings it back with focus on it (SL-05)." },
-    { "id": "10-desk-modules/undo-covers-structure", "why": "Undo with nothing to undo says so; a run of moves on one grip is one step; undo puts back a move and an add.", "waiting": { "package": 3, "because": "Its second move of Tempo is a visible step only at the concept's tile heights, which Tempo reaches when package 3 draws its LCD rows and key wheel (placeholders until then)." } },
+    { "id": "10-desk-modules/undo-covers-structure", "why": "Undo with nothing to undo says so; a run of moves on one grip is one step; undo puts back a move and an add." },
     { "id": "12-desk-layout/arrow-keys-move-one-visible-step", "why": "A tile's grip: an arrow moves it one visible step, a refused move is said and changes nothing." },
     { "id": "12-desk-layout/layout-is-a-function-of-the-order", "why": "The same tiles in the same order give the same desk." },
     { "id": "13-quick-studio/tier-switch-stays-under-the-pointer", "why": "The tier switch does not move under the pointer as the tier changes." },

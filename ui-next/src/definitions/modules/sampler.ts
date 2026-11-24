@@ -751,9 +751,17 @@ export const sampler = {
       engines: ['sa3'],
       tiers: ['quick'],
     },
+    /* the scope reads the steps, shift and schedule, the schedule shapes' values, the custom timesteps and the CFG
+       cutoff it draws, the solver and Stable Audio 3's own sampler (whether sampling is native), and the CFG interval;
+       at Lab it edits the interval with its two handles. Its read-out offers the way to what replaces or ends what it
+       draws: Latent & correction's timesteps, Performance trades' cutoff */
     {
       part: 'samplerScope',
-      reads: ['samp.steps', 'samp.shift', 'samp.sched', 'samp.cs', 'samp.ce'],
+      reads: ['samp.steps', 'samp.shift', 'samp.sched', 'sch.alpha', 'sch.beta', 'sch.exp', 'sch.a', 'sch.b', 'sch.x', 'sch.split', 'lat.ts', 'perf.cfgcut', 'samp.solver', 'sa3.sampler', 'samp.cs', 'samp.ce'],
+      actions: [
+        { do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show in Lab' },
+        { do: 'tier', tier: 'lab', ring: ['perf.cfgcut'], label: 'Show in Lab' },
+      ],
       children: [
         {
           part: 'powerButton',
@@ -765,10 +773,15 @@ export const sampler = {
       ],
       per: [
         {
+          engines: ['ace'],
           tiers: ['lab'],
           params: ['samp.cs', 'samp.ce'],
-          reads: ['samp.steps', 'samp.shift', 'samp.sched'],
+          reads: ['samp.steps', 'samp.shift', 'samp.sched', 'sch.alpha', 'sch.beta', 'sch.exp', 'sch.a', 'sch.b', 'sch.x', 'sch.split', 'lat.ts', 'perf.cfgcut', 'samp.solver', 'sa3.sampler'],
           opts: { interval: true },
+          actions: [
+            { do: 'tier', tier: 'lab', ring: ['lat.ts'], label: 'Show' },
+            { do: 'tier', tier: 'lab', ring: ['perf.cfgcut'], label: 'Show' },
+          ],
         },
       ],
       tiers: ['studio', 'lab'],

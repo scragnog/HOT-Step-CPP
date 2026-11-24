@@ -323,6 +323,19 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   stored so); `formatValue` takes the engine. The definitions: `OptionsFrom.loaded`, the Models parameters' `short`
   (their roles: Sound, Planner, Decoder), the Models face split so Quick shows the sound model only, an engine's
   `khz`, `tagline` and `testing`. The engine switch's toast names a model whole (F-34).
+- Package 3a: `derive/instruments.ts instrumentModel` (`PartModel.instrument`: what a bespoke instrument draws: the key
+  wheel's segments spelled as a musician does, the prompt chips and which are in, the split-flap's cells and the LM seed's
+  link, the saved seeds' rows and the save form's defaults, the reels and the VRAM a count costs, the scope's schedule,
+  band, cutoff, read-out and handles, the latent curves, the repaint region in the song's times, the blend's percent) and
+  `partAct` (`PartView.act(name, arg)`: what a hand on a bespoke part does, made through the part's own setters, so it is
+  cleaned, bound and named as every other change, or refused and said, with Undo in the toast where a step's words call
+  for it): `wheelWalk`, `capToggle`, `seedTyped`, `cleanSeeds`, `takesCost`, `sigmasOf`, `distOf`, `regionMove`.
+  `ParamModel.canAuto` and `run`, a number on auto standing at what auto stands for (`at`), a list of option words
+  (`corners.0`...) in `PartModel.words`, `ReadModel.changed`. `derive/steps.ts`: the seed's named step is named as every
+  change of the seed is (random or the number kept), a span is said in the song's times; a change carries the named step
+  it took (`Change.named`), so a gesture of several (a region dragged) is named by it. `derive/desk.ts nodeShown`: a
+  bespoke part that houses children stands, on an engine without what it edits, while one of them does (the key wheel
+  houses Tempo's LCD).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 
@@ -398,6 +411,22 @@ tools/visual-baseline/models-accepted.json`). The models service (`services/mode
 figures behind `ModelsService` (`catalogue(engine)`, `vram()`); the simulated Engine's `models.list` reads the same
 catalogue.
 
+**Package 3a (the instruments of Tempo, Seed, Takes, the Sampler, Repaint, Timbre reference, Latent & correction and
+Performance trades)** adds `acceptance/3a-instruments.json` (22 scenarios: 13 of `scenarios/34-instruments.mjs`, which hold
+on the concept page too, and 9 of the concept's suite; 9 more waiting on packages 4, 6 and 8), `switches/3a-instruments.json`
+(38 features), `slice-states/30-instruments.mjs` (24 states of the instruments on their own, compared with
+`instruments-accepted.json`) and `tools/test-instruments.ts` (in `npm run check`). Its parts are `parts/Tempo.tsx`
+(keyWheel, tapTempo, capChips), `Seed.tsx` (splitFlap, savedSeeds), `Takes.tsx`, `Scope.tsx` (samplerScope, latentCurve),
+`Repaint.tsx`, `Timbre.tsx` (recentRefs, timbreBlend), with `parts/motion.ts` (the page's motion tokens read for their
+animations); `services/references.ts` (the recent reference tracks, server-owned) and `features/references.ts` (a file a
+drop zone takes is remembered); `testing/compat/instruments.ts` (`S.seed`, `S.stars`, `S.refs`, `S.source`, `S.region`).
+The slice's `01-desk/add-by-keyboard` and `10-desk-modules/undo-covers-structure` no longer wait. What the instruments'
+modules show of others' parts is drawn as the concept draws it there: a knob's auto pill and its symbol labels, an XY
+pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a pad with a column beside it
+(`.padrow`, `.padside`) or a row of plugin pickers (`.picks`), the Sampler's well holding its pickers beside its numbers
+(`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
+back.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
@@ -470,6 +499,24 @@ catalogue.
     queue (package 6), which can feed the needle's target; and its click opens no engine log yet (the log is drawn by
     the overlays' package), so its `aria-expanded` stays false.
 30. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys); the concept's does nothing there.
+31. **LM seed follows stands on the Seed tile while the planner is on the desk**: it is the planner's switch, and with the
+    planner off the desk it would change nothing that is sent (the value in force). The concept shows it at Lab always.
+32. **The saved seeds are the desk's state, and every change of them is a step** (save, update, star, unstar, delete),
+    as every change of the desk is; the concept's save and star are no steps. The test page starts with the concept's two
+    demo seeds (`testing/compat/instruments.ts`); the product starts with none.
+33. **The recent references are the server's reference tracks** (`services/references.ts`, as the existing frontend's
+    `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
+    `recentRefs` state stays declared and holds nothing.
+34. **The Takes tile's VRAM line counts the engines' default models** until the engine panel's package gives the loaded
+    models' figures; ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
+    rule would put eight in two rows of four, a shorter tile, and the desk would pack differently from the concept's).
+35. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
+36. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a
+    region"), so the region needs no song list; the region is kept in seconds, as the real application keeps it.
+37. **At Studio Repaint's mode and crossfade stand in a row (`.knobs`) beside the wave**, where the concept draws a
+    `.rp-ctl`; at Lab they stand on the wave's caption line, as the concept's.
+38. **A seed's refusal, the saved seeds' update and delete, and the plain loads say what they did in a toast through
+    the core** (`partAct`'s words), the update and delete with Undo; the concept's Update toast offered Undo too.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

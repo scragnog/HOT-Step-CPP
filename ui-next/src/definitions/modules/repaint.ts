@@ -72,26 +72,28 @@ export const repaint = {
     },
   ],
   face: [
+    /* the song and its waveform with the region; at Lab the mode and the crossfade stand on its caption line (L-36), at
+       Studio beside it, with the lyrics at Lab and the note under them */
     {
       part: 'repaintRegion',
       state: ['source', 'region'],
       children: [
         { part: 'segmented', param: 'rp.mode', tiers: ['lab'] },
         { part: 'knob', param: 'rp.xfade', label: 'Crossfade', opts: { small: true }, tiers: ['lab'] },
+        {
+          part: 'row',
+          children: [{ part: 'segmented', param: 'rp.mode' }, { part: 'knob', param: 'rp.xfade', label: 'Crossfade' }],
+          tiers: ['studio'],
+        },
+        {
+          part: 'textArea',
+          param: 'rp.lyrics',
+          tip: 'Lyrics for the repaint. They replace the whole track\'s lyrics.',
+          opts: { look: 'paper' },
+          tiers: ['lab'],
+        },
+        { part: 'note', text: 'An empty prompt reuses the song\'s style' },
       ],
     },
-    {
-      part: 'row',
-      children: [{ part: 'segmented', param: 'rp.mode' }, { part: 'knob', param: 'rp.xfade', label: 'Crossfade' }],
-      tiers: ['studio'],
-    },
-    {
-      part: 'textArea',
-      param: 'rp.lyrics',
-      tip: 'Lyrics for the repaint. They replace the whole track\'s lyrics.',
-      opts: { look: 'paper' },
-      tiers: ['lab'],
-    },
-    { part: 'note', text: 'An empty prompt reuses the song\'s style' },
   ],
 } satisfies ModuleDef;

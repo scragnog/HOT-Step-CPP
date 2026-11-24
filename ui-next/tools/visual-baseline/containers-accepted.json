@@ -54,7 +54,7 @@
    "state": "",
    "key": "",
    "field": "^line-height$",
-   "n": 74,
+   "n": 72,
    "why": "The LCD picker's arrows (.cyc) in standards mode (styles/rebuild/10-standards.css, the slice's): line-height 0 keeps them where the concept's quirks-mode page draws them."
   },
   {
@@ -63,13 +63,6 @@
    "field": "color$",
    "n": 51,
    "why": "A note in the terminal's bar is in the bar's own ink (#a39cae, the flags' and chips'), so it reads at 3:1 on the terminal; the concept's quiet ink (#8a819a) reads at 2.88:1, below what the parts gallery asks of every part."
-  },
-  {
-   "state": "^containers-lcd-",
-   "key": "[.]lcd$",
-   "field": "^display$",
-   "n": 4,
-   "why": "Tempo's LCD stands in the concept's .tempo wrapper beside the key wheel, which lays it out as a column (25-module-tempo.css); the wrapper and the wheel are package 3's. Its rows are the same."
   },
   {
    "state": "^containers-lcd-",
@@ -84,13 +77,6 @@
    "field": "^sem:title$",
    "n": 4,
    "why": "The slice's LED switch carries no tip (its parameter's tip, which the concept's rackCtl prints as a title) and the Plan fader's tip stands on its slot here, in its bank's note in the concept; the containers draw them as they are."
-  },
-  {
-   "state": "^containers-sched-strip$",
-   "key": "[.]schctl>div:[12]>span:1$",
-   "field": "^(font-family|font-size|letter-spacing|line-height|text-transform)$",
-   "n": 8,
-   "why": "The concept prints a knob label that is a symbol (α, β) as a word in the body type (21-knob.js .kl.sym); the slice's knob prints every label as the page's caps label."
   },
   {
    "state": "^containers-units",

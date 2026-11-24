@@ -4,7 +4,7 @@
 // what changed. Every name is a message (messages.ts), so it reads in any locale.
 
 import type { Definition, Json, ParamDef, Step, Text, Value } from '../definitions/types.ts';
-import { type Desk, type Index, has, isAuto, nameOn, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, has, isAuto, mmss, nameOn, resolve, valueOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { fillMsg, formatMsg, paramWords, stateWords, stepKey } from './strings.ts';
 
@@ -87,7 +87,8 @@ export function stepWords(ix: Index, before: Desk, after: Desk, hint?: { named?:
   const { keys, state } = changesOf(ix, before, after);
   if (!keys.length && !state.length) return null;
   const put = msg('step.put', { what: pathNames(ix, keys, state, before) });
-  if (hint?.named) {
+  /* the seed's own step is named as every change of the seed is (below): random or the number kept */
+  if (hint?.named && ix.states.get(hint.named.key)?.s.kind !== 'seed') {
     const n = hint.named, own = ix.params.get(n.key)?.p ?? ix.states.get(n.key)?.s;
     const file = fileStep(ix, n, before, after);
     if (file) return file;
@@ -178,6 +179,9 @@ function stateText(ix: Index, key: string, desk: Desk): Slot {
   const v = desk.state[key] as Json | undefined, w = stateWords(ix, key);
   if (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length)) return w.empty ?? 'none';
   if (typeof v === 'string' || typeof v === 'number') return String(v);
+  /* a span in seconds, in the song's times (the repaint region, Q-24) */
+  const sp = v as { start?: unknown; end?: unknown };
+  if (typeof sp === 'object' && !Array.isArray(sp) && typeof sp.start === 'number' && typeof sp.end === 'number') return `${mmss(Math.min(sp.start, sp.end))}–${mmss(Math.max(sp.start, sp.end))}`;
   return w.noun;
 }
 

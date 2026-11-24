@@ -371,7 +371,7 @@ export const PARTS = {
   },
   keyWheel: {
     kind: 'bespoke', edits: ['choice'], drive: 'choose', css: ['25-module-tempo.css'],
-    doc: 'The circle of fifths: majors outside, minors inside, Auto in the middle, a radio group driven by the arrows.',
+    doc: 'The circle of fifths: majors outside, minors inside, Auto in the middle, a radio group driven by the arrows. It stands beside the LCD it holds as its child (.tempo); with nothing to edit (Quick, an engine without a key) the LCD stands alone.',
     responsible: 'Drawing the two rings from its param\'s options, spelling keys as a musician does (B♭, F♯), the arrow-key walk around and between rings, and the selection nudge.',
   },
   tapTempo: {
@@ -390,12 +390,12 @@ export const PARTS = {
     responsible: 'Drawing as many reels as its param\'s maximum, the hover preview, the reel spin, and the VRAM cost line from the loaded models. The LCD reads the value as its format writes it, then the node\'s label.',
   },
   splitFlap: {
-    kind: 'bespoke', edits: ['boolean'], state: ['seed'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['seed'], reads: ['boolean'], steps: ['set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The seed as ten split-flap cells that flip to a new number; pressing it types one. Roll once and Random each time.',
     responsible: 'The flap animation, the ten-cell layout, typing or pasting a seed (checked 0 to 2^64-1, kept as its decimal text past 2^53), Roll once and Random each time. Each sets the seed and its lock (its param) in one step, the seed state\'s `set` step.',
   },
   savedSeeds: {
-    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'set'], drive: 'click', css: ['25-module-seed.css'],
+    kind: 'bespoke', edits: ['boolean'], state: ['list', 'seed'], steps: ['save', 'update', 'delete', 'star', 'unstar', 'set'], drive: 'click', css: ['25-module-seed.css'],
     doc: 'The saved seeds list: search, star, name, describe, tag, load, delete, random from saved.',
     responsible: 'The list (its `list` state) and its search; loading a saved seed sets the seed and its lock in the seed state\'s `set` step; every list action is the list state\'s step of that name.',
   },
