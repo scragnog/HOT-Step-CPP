@@ -1,16 +1,14 @@
 // Package 8's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the concept's
 // overlay and drag states (states.mjs ov-picker, picker-filter, picker-cat, the popover, the keyboard tip, drag-card,
 // drag-move, drag-picker-peek, drag-pedal) on a desk of the modules, pedals and side unit the rebuild draws whole (the
-// slice's), with the concept's lyric sheet withdrawn as the slice's states withdraw it. The scope `overlays` compares
+// slice's), with the lyric sheet in place (package 4). The scope `overlays` compares
 // the picker, the popover, the tip and the desk under a drag.
 //
 //   node tools/visual-baseline/vb.mjs capture concept-overlays --states slice --scope overlays --only "^ov8-" --page <concept>/hotstep-tiers.html
 //   node tools/visual-baseline/vb.mjs capture rebuild-overlays --states slice --scope overlays --only "^ov8-" --plan-from concept-overlays
-//   node tools/visual-baseline/vb.mjs compare concept-overlays rebuild-overlays --accept tools/visual-baseline/overlays-accepted.json
+//   node tools/visual-baseline/vb.mjs compare concept-overlays rebuild-overlays --scope overlays --accept tools/visual-baseline/overlays-accepted.json
 
-const withdraw = h => h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
 const scene = (tier, mods, pedals = [], bk = 'ace') => async h => {
-  await withdraw(h);
   await h.js(([bk, tier, mods, pedals]) => { if (bk !== S.backend) { if (typeof enterEngine === 'function') enterEngine(bk); else S.backend = bk; } S.tier = tier; S.mods = mods; S.pedals = pedals; render(); }, [bk, tier, mods, pedals]);
   await h.settle(900);
 };

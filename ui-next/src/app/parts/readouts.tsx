@@ -26,6 +26,8 @@ export function Note(v: PartView) {
   /* the caption note under an instrument (Tempo's), with its actions after it; Quick's hint */
   if (v.opts.look === 'cap') return <div className="cap-note" title={tip}>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" /></div>;
   if (v.opts.look === 'hint') return <span className="qhint" title={tip}>{text}</span>;
+  /* plain words in the page's own ink (the Adapters' "Merged into the model at load"; package 3b) */
+  if (v.opts.look === 'plain') return <span title={tip}>{text}</span>;
   return <span className="lbl" title={tip}>{text}</span>;
 }
 

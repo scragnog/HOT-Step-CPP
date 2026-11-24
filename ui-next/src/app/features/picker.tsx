@@ -46,7 +46,7 @@ function Tags({ it }: { it: PickerItem }) {
 function Snapshot({ it, d, rove, q }: { it: PickerItem; d: Definition; rove: boolean; q: string }) {
   const say = useSay(), engine = useDesk(s => s.desk.engine), id = itemId(d);
   const size = d.kind === 'pedal' ? bareSize(d) : { w: 176, h: 112 };
-  const art = d.kind === 'pedal' ? thumbBare(d, engine, it.thumbName) : thumbOf(d, engine, it.thumbName);
+  const art = d.kind === 'pedal' ? thumbBare(d, engine, it.thumbName) : thumbOf(d, engine, it.thumbName, 'pk');
   const cls = ['fl-it', it.pedal ? 'bare' : '', size.w > 120 ? 'u2' : '', it.locked ? 'locked' : '', it.on ? 'in' : '', it.lab ? 'lab' : '', it.notHere ? 'no' : '',
     it.gone ? 'gone' : '', it.dim ? 'dim' : '', it.nomatch ? 'nomatch' : '', it.rank === 3 ? 'weak' : ''].filter(Boolean).join(' ');
   return (

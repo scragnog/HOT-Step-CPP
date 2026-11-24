@@ -2,20 +2,6 @@
  "about": "Package 1's accepted differences between the concept's page and the rebuild's in its states (slice-states/10-controls.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
  "accepted": [
   {
-   "state": "^controls-dd-solvers$",
-   "key": "^#dd>div:1$",
-   "field": "^mask-image$",
-   "n": 1,
-   "why": "The prompt card (package 4) is not drawn yet, so the Sampler stands 142px higher than on the concept's page and its solver list opens below its button, where the window cuts it by 15px: the list's edge fade (package 1's) says so. On the concept's page it opens above, whole. (The list's width now matches: the Sampler's scope is drawn, package 3a.)"
-  },
-  {
-   "state": "^controls-dd-solvers$",
-   "key": "^shot$",
-   "field": "^pixels$",
-   "n": 1,
-   "why": "The periodic table's shot: its rows stand a pixel lower, a sub-pixel offset of the header (no computed style, attribute or word differs inside the list; both shots are in tools/visual-baseline/out/*-controls/shots)."
-  },
-  {
    "state": "",
    "key": "",
    "field": "^sem:data-(opt|v|setq|setn|base)$",
@@ -39,9 +25,9 @@
   {
    "state": "^controls-planner-quick-set-dark$",
    "key": "\\.mood$",
-   "field": "^(opacity|transition-(duration|property|timing-function))$",
-   "n": 4,
-   "why": "With the planner off the concept stands its tile's planner-only parts back (25-module-planner.js lm-off, a class on the Planner's tile): the Planner tile's own state, which its package builds; the row itself is the same."
+   "field": "^sem:data-dim$",
+   "n": 1,
+   "why": "With the planner off How adventurous stands back by its own mark (data-dim, styles/rebuild/25-planner.css: package 3b) where the concept fades it from the Planner tile's lm-off class: the same opacity and words."
   },
   {
    "state": "^controls-build-tokens",

@@ -32,13 +32,6 @@
    "why": "A dropdown option's hook names its value (\"spotify\"); the concept's names its label (\"Spotify / YouTube · -14\"), as its values are labels."
   },
   {
-   "state": "^slice-dropdown-open-dark$",
-   "key": "^#dd$",
-   "field": "^(top|bottom|inset-block-start|inset-block-end)$",
-   "n": 4,
-   "why": "The page below the desk is shorter until the generation package fills Latest, so a press near the foot of the page scrolls it 60px less, and the dropdown, pinned beside its button, stands 60px lower in the window."
-  },
-  {
    "state": "^slice-desk-ace-quick-light$",
    "key": "^shot$",
    "field": "^pixels$",
@@ -70,7 +63,7 @@
    "key": "^#bento>article:0>div:1>div:2>span:1",
    "field": "^sem:(role|name|aria-label|aria-hidden|title)$",
    "n": 168,
-   "why": "Package 4: the lyric sheet's vocal gender (MiniMax-Music3, Studio and Lab) is the generic labelled pairing holding the segmented part, whose segments are the named group (deviation 6) where the concept names the pairing and hides its caps label; the pairing carries no tip (deviation 44; tools/visual-baseline/fields-accepted.json says the same of the package's own states)."
+   "why": "Package 4: the lyric sheet's vocal gender (MiniMax-Music3, Studio and Lab) is the generic labelled pairing holding the segmented part, whose segments are the named group (deviation 6) where the concept names the pairing and hides its caps label; the pairing carries no tip (deviation 49; tools/visual-baseline/fields-accepted.json says the same of the package's own states)."
   },
   {
    "state": "^slice-",

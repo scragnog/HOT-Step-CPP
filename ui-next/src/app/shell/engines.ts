@@ -23,7 +23,16 @@ const LOGO: { [e in EngineId]: string } = {
     <path class="lg-base" stroke="currentColor" stroke-width="3.6" d="M37.2 15.2V18.6A5.15 5.15 0 0 1 26.9 18.6V11.6L18.8 18.2L11.2 11.3V34.8C11.2 36.3 12.2 37 13.7 37H24.4L31.9 29.7L39.3 37.5"/>
     <path class="lg-run" pathLength="100" stroke="url(#hmRainbow)" stroke-width="3.6" d="M37.2 15.2V18.6A5.15 5.15 0 0 1 26.9 18.6V11.6L18.8 18.2L11.2 11.3V34.8C11.2 36.3 12.2 37 13.7 37H24.4L31.9 29.7L39.3 37.5"/></svg>`,
 };
-/** An engine's mark at a size, as markup. */
-export const logoOf = (e: EngineId, size: number): string => LOGO[e].replace('<svg ', `<svg width="${size}" height="${size}" `);
+/* each place a mark stands in has a number of its own, so the ids inside the mark (HeartMuLa's gradient) are its own */
+const PLACES = new Map<string, number>();
+const placeNo = (place: string): number => { let n = PLACES.get(place); if (n === undefined) { n = PLACES.size + 1; PLACES.set(place, n); } return n; };
+/** An engine's mark at a size, as markup. `place` names where it stands (the engine button, the engine panel's card, a
+ *  revision's or a draft's row): the mark stands in several places at once, and its gradient's id is made the place's
+ *  own, so two marks never share an id (one would paint with the other's gradient, or with none while the other is
+ *  hidden). The same place gives the same markup on every redraw. */
+export const logoOf = (e: EngineId, size: number, place: string): string => {
+  const n = placeNo(place);
+  return LOGO[e].replace('<svg ', `<svg width="${size}" height="${size}" `).replace(/\bid="([^"]+)"/g, `id="$1-${n}"`).replace(/url\(#([^)]+)\)/g, `url(#$1-${n})`);
+};
 /** The concept's short engine ids, which its markup and its saved shapes use (data-backend="mm3"). */
 export const CONCEPT_ID: { [e in EngineId]: string } = { ace: 'ace', 'minimax-m3': 'mm3', yue2: 'yue', sa3: 'sa3', heartmula: 'hm' };

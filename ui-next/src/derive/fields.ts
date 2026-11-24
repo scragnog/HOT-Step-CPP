@@ -4,7 +4,7 @@
 // pure functions of the definitions and the desk; a tool's step is one of the prompt's named steps (prompt.ts `steps`),
 // so the core names it as it names every step. Nothing here reads the page.
 
-import type { Definition, Json, Node, Value } from '../definitions/types.ts';
+import type { Definition, EngineId, Json, Node, Value } from '../definitions/types.ts';
 import { engineName } from '../definitions/engines.ts';
 import { type Desk, type Index, applies, changed, has, isAuto, mmss, onDesk, valueOf } from './core.ts';
 import { EN, type Msg, type Slot, msg, say } from './messages.ts';
@@ -25,6 +25,8 @@ const boxKey = (desk: Desk) => BOX[desk.engine]?.w ?? 'description';
 /** The box's word with its article ("a caption", "some tags"), and whether it is a plural; the word itself is
  *  workflows.ts boxWord, the one statement of it. */
 export const boxA = (desk: Desk): Msg => msg(`box.${boxKey(desk)}.a`);
+/** The example a refusal offers to put in the box: the first of the box's examples (33-prompt.js PH, PHT), as text. */
+export const exampleText = (e: EngineId): string => say(msg(`prompt.ph.${BOX[e]?.tags ? 'tags' : 'words'}.0`));
 const boxPl = (desk: Desk): boolean => boxKey(desk) === 'tags';
 
 /** The engines whose tempo field reaches the song (E-38): there a BPM written in the box is offered to the field. */
@@ -407,6 +409,10 @@ export function latentClear(ix: Index, desk: Desk): ToolStep | null {
   const after = { ...desk, state: { ...desk.state, latent: null } }, words = stepWords(ix, desk, after, { named: { key: 'latent', step: 'clear' } });
   return words ? { change: { vals: {}, auto: {}, state: { latent: null }, words }, undo: true, said: msg('latent.cleared') } : null;
 }
+
+/** Reuse (a song's menu) puts its text in the box; a caption a dataset supplies is not written over, and says so in
+ *  the source's own words (E-31, 35-songs.js). Null when Reuse may write. */
+export const reuseRefused = (ix: Index, desk: Desk): Msg | null => (trackNow(ix, desk) ? lockedMsg(ix, desk, 'reuse') : null);
 
 /** Presets & genres (33-prompt.js PRESETS, GENRES): style presets that replace the box, and genres that go in or out of
  *  its items (C-20). The words are content the engine reads, in its words. */

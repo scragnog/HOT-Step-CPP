@@ -10,9 +10,8 @@
 //   node tools/visual-baseline/vb.mjs capture rebuild-containers --states slice --only "^containers-" --plan-from concept-containers
 //   node tools/visual-baseline/vb.mjs compare concept-containers rebuild-containers --accept tools/visual-baseline/containers-accepted.json
 
-/* the concept's lyric sheet (package 4) is withdrawn, as the slice's states withdraw it; nothing else is changed */
+/* the concept's page as it is, its lyric sheet in place (package 4 draws it) */
 const scene = (bk, tier, mods, vals = {}, pedals = [], more = {}) => async h => {
-  await h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
   await h.js(([bk, tier, mods, vals, pedals, more]) => { if (bk !== S.backend) enterEngine(bk); S.tier = tier; S.mods = mods; S.pedals = pedals; Object.assign(S.vals, vals); Object.assign(S, more); render(); }, [bk, tier, mods, vals, pedals, more]);
   await h.settle(900);
 };

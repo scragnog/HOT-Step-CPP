@@ -62,6 +62,14 @@ export default [
     await t.press('Control+z');
     await t.eq('and Ctrl+Z after that goes on to the page, never putting the words back (F-06)', () => [document.querySelector('#quickLyrics [data-bind="lyrics.text"]').value, get('lyrics.text')], ['', '']);
   } },
+  /* a caption a dataset supplies is not written over by a song's Reuse either; Edit a copy first (E-31) */
+  { id: 'reuse-leaves-a-supplied-caption', run: async t => {
+    await desk('studio', [], { 'cap.src': 'Track 04 · Paper boats' }, 'mm3')(t);
+    const shown = await t.js(() => document.querySelector('#prompt').value);
+    await t.click('#latest .song [data-songmenu]');
+    await t.click('#menu [data-sa="reuse"]');
+    await t.ok('Reuse leaves the supplied caption and says why, in the source\'s own words', s => document.querySelector('#prompt').value === s && document.querySelector('#prompt').readOnly && /comes from the dataset \(Caption source: Track 04 · Paper boats\)\. Edit a copy to reuse this one/.test(document.querySelector('#toast .toast-msg')?.textContent || '') || (document.querySelector('#toast .toast-msg')?.textContent || ''), shown);
+  } },
   /* 17-undo-net/ctrl-z-under-an-overlay-edits-nothing, with the picker as the layer (no package draws the Concept notes) */
   { id: 'ctrl-z-under-the-picker-edits-nothing', run: async t => {
     await t.click('#prompt'); await t.type('alpha beta gamma');

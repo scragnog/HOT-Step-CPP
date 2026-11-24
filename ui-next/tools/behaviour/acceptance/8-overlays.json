@@ -5,8 +5,8 @@
     { "id": "02-dnd-panels/drag-card-onto-desk", "why": "A Modules card dropped on the desk lands at the place nearest the pointer; a cancelled drag adds nothing and leaves nothing behind (dnd.tsx)." },
     { "id": "02-dnd-panels/drag-from-picker-and-pedal", "why": "A picker drawing dropped on the desk is added and the picker closes; a pedal brings the Pedalboard, a second joins in chain order, a side unit too." },
     { "id": "02-dnd-panels/drag-move-tile", "why": "A tile dragged by its header moves; a cancelled move puts it back." },
-    { "id": "07-overlays-keys/picker", "why": "The picker: its button and F9, the filter and its count, Enter, Escape, the category bar, the arrows, Home, End, Tab, Space, a Lab module's offer, one already on the desk, pointing, ×, the backdrop, F9 toggling.", "waiting": { "package": 6, "because": "Its Ctrl+Enter check reads the generation queue (S.songs), which the generation package keeps; every other check is in 33-overlays/picker-opens-filters-walks-and-adds." } },
-    { "id": "07-overlays-keys/focus-tooltips-keys", "why": "The keyboard focus ring on Tab, a keyboard tip, Escape hides it, a pointer press turns the ring off, a pointer-focused knob shows none until an arrow.", "waiting": { "package": 6, "because": "It starts in the prompt (drawn now, package 4) and ends with Ctrl+Enter, whose check reads the generation queue (S.songs, package 6); its ring and tip checks are in 33-overlays/focus-ring-and-keyboard-tips." } },
+    { "id": "07-overlays-keys/picker", "why": "The picker: its button and F9, the filter and its count, Enter, Escape, the category bar, the arrows, Home, End, Tab, Space, a Lab module's offer, one already on the desk, pointing, ×, the backdrop, F9 toggling." },
+    { "id": "07-overlays-keys/focus-tooltips-keys", "why": "The keyboard focus ring on Tab, a keyboard tip, Escape hides it, a pointer press turns the ring off, a pointer-focused knob shows none until an arrow." },
     { "id": "07-overlays-keys/touch-tips", "why": "Pressing and holding a control under a finger shows its tip, which goes by itself." },
     { "id": "09-undo-storage/hover-tooltip", "why": "A resting pointer gets the page's tip and the browser's is held back; it goes when the pointer leaves and the title comes back." },
     { "id": "11-engines/grip-menu-moves-a-tile", "why": "A press on a grip offers the four moves in the popover (B-23); Move to the top; Undo puts it back (grip-menu.tsx)." },
@@ -18,7 +18,7 @@
     { "id": "16-engines-sizes-input/touch-scroll-or-control", "why": "Under a finger a swipe that starts on a control scrolls and leaves it alone; resting first turns a knob; a sideways drag moves a ruler; each touch edit one step (S-29)." },
     { "id": "16-engines-sizes-input/f6-moves-between-modules", "why": "F6 enters the desk at its first module, each press the next in reading order, Shift+F6 back (S-33)." },
     { "id": "18-tips-touch/tips-keep-every-digit", "why": "The sentence splitter keeps every digit; the VRAM meter's tip says 31.8 GB; every title on a full Lab desk splits with nothing lost (F-01, Q-01, E-04)." },
-    { "id": "18-tips-touch/a-held-press-still-presses", "why": "A control held under a finger shows its tip and is still pressed when the finger lifts: Generate, a tier (S-01).", "waiting": { "package": 6, "because": "It holds Generate (package 6) after typing in the prompt (package 4); the tier half is checked in 33-overlays/a-held-finger-shows-the-tip-and-still-presses." } },
+    { "id": "18-tips-touch/a-held-press-still-presses", "why": "A control held under a finger shows its tip and is still pressed when the finger lifts: Generate, a tier (S-01)." },
     { "id": "18-tips-touch/tip-waits-out-the-quiet-after-a-press", "why": "A tip due inside the quiet 1.5 s after a press waits for it and opens once it is over, the pointer still resting on the Sampler's AUTO pill (L-06)." },
     { "id": "19-desk-round5/a-drop-does-not-scroll", "why": "A drop scrolls nothing, and the tile stands where its preview stood (Q-15)." },
     { "id": "20-lab-round5/drop-preview-is-the-tile", "why": "The preview is the tile's own face, the size it lands at; after the drag one tile carries its name (L-26)." },
@@ -48,7 +48,7 @@
   ],
   "excluded": [
     { "id": "01-desk/quick-more-parked-empty", "why": "Only its last check (Open the picker from the empty desk) is this package's, and it passes; the rest needs Quick's fold of modules and the concept's defineModule, which the rebuild has no counterpart for. The picker's button is in 33-overlays/picker-opens-filters-walks-and-adds." },
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "It types in the prompt (package 4) and opens the Concept notes (no package draws them yet); Ctrl+Z under the picker is in 33-overlays/picker-opens-filters-walks-and-adds." },
+    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes and the picker passes; its last part presses Ctrl+Z on another page, whose navigation no package builds (acceptance/11-notes-logs.json). The same rule under the picker is in 33-overlays/picker-opens-filters-walks-and-adds." },
     { "id": "09-undo-storage/undo-not-under-overlays", "why": "It loads a workflow (package 7) and opens the presets popover (package 4) and the notes." },
     { "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast", "why": "Pending (S-17): the toast's claim on Tab (the toast's package, 6) inside the drafts popover (package 6 or 7)." },
     { "id": "07-overlays-keys/notes-logs-escape", "why": "The Concept notes and the engine log are not this package's; Escape closing only the top layer is in 33-overlays/lab-offer-popover-keys and the picker's scenarios." }

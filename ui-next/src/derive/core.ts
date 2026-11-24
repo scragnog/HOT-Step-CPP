@@ -75,6 +75,9 @@ export interface Desk {
    *  count and the words for another engine's adapters. Every other fact is worked out when it is read (factOf), so
    *  none can be stale. */
   told?: { vstPlugins?: number; adaptersAway?: string };
+  /** What the generation service tells (package 6): the newest song's colour, which the cover swatch shows, and how
+   *  many re-planning tries the run that renders has used, which the dice light. */
+  songs?: { hue?: number; attempts?: number };
   /** Modules, pedals and units on the desk. Built-in modules always are. */
   on: Set<string>;
   /** The models the server has selected, by `<engine>.<bucket>` (GET /api/backends/models): what a model choice
@@ -83,7 +86,7 @@ export interface Desk {
   /** The lists the server gives for server-listed choices (parts.ts OPTION_SOURCES), with their words, so a value
    *  from one is written by its name ("DPM++ 3M" for dpm3m). A model bucket's list is the engine's own, under
    *  `models.<engine>.<bucket>` (listKey), and each file carries its size in GB; a caption dataset carries its tracks and tags (`data`). */
-  lists?: { [source: string]: { value: string | number; label: string; gb?: number; data?: Json }[] };
+  lists?: { [source: string]: { value: string | number; label: string; gb?: number; kind?: string; data?: Json }[] };
   /** What the VRAM figures are worked out from beside the model files' sizes (derive/vram.ts): the card, and what
    *  each engine loads besides its model files and costs per take. Told by the models service. */
   vram?: VramFigures;

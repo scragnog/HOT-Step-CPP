@@ -1,0 +1,47 @@
+{
+ "about": "Package 6's accepted differences between the concept's page and the rebuild's in its states (slice-states/60-generate.mjs, scope generate: the go bar, Latest, the song menu, the toasts), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; so does a count that changes.",
+ "accepted": [
+  {
+   "state": "^gen-(running|queue|queue-dark|queue-reduced|fold|done|done-dark)$",
+   "key": "",
+   "field": "^(--pbg|--f|--gf|background-image|inline-size|inset-inline-end|perspective-origin|transform-origin|right|width|filter|opacity|clip-path)$",
+   "n": 385,
+   "why": "Chance and timing, not drawing: a new song's colour is random (the two pages draw Math.random in a different order, so the same seed gives other hues: its art, --pbg), and how far a run has got at the moment it is read (--f, --gf, the bar's width, the art's blur and opacity, Generate's sweep) differs by a few frames, because the simulated server counts its own frames. The same rules draw both."
+  },
+  {
+   "state": "^gen-(done|done-dark|fold|queue|queue-dark|queue-reduced)$",
+   "key": "^#latest>article:\\d+>div:0>span:3$",
+   "field": "^sem:text$",
+   "n": 17,
+   "why": "A new song's length where the model ends it is chance (150 s and up to 90 more, as the concept draws it)."
+  },
+  {
+   "state": "",
+   "key": "^#go$",
+   "field": "^sem:data-tip-held$",
+   "n": 4,
+   "why": "The concept's tooltip system marks Generate while its tip is held (data-tip-held), in the states where the rebuild's (package 8) has not held it."
+  },
+  {
+   "state": "^gen-notice$",
+   "key": "",
+   "field": "",
+   "n": 41,
+   "why": "Deviation P6-1: the concept's notice comes from pressing Generate on four takes that will not fit, which the rebuild does not start (F-21); the rebuild's comes from its simulated server refusing two takes on a smaller card, so its words, its numbers, its Retry and the line above it differ (the line says Won't fit only on the concept, where the run would not fit the page's card); the notice's markup and look are the same."
+  },
+  {
+   "state": "^gen-menu",
+   "key": "^#menu$",
+   "field": "",
+   "n": 38,
+   "why": "Deviation P6-4 (F-28): the song menu opens above its button, never over the go bar, scrolling inside when there is no room; the concept opens it below and moves the page."
+  },
+  {
+   "state": "^gen-menu",
+   "key": "^#menu>button:\\d+$",
+   "field": "^sem:type$",
+   "n": 14,
+   "why": "Deviation 6: every button says its type."
+  }
+ ]
+}

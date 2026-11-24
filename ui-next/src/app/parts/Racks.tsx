@@ -66,11 +66,13 @@ export function Pair(v: PartView) {
 }
 
 export function Bank(v: PartView) {
-  const say = useSay();
+  const say = useSay(), items = itemsOf(v.children), kids = v.kids ?? [];
+  /* its small words after the heading, and a child that is no fader (the rebase row) on the heading's line (package 3b) */
+  const head = items.filter((_, i) => kids[i] && kids[i]!.part !== 'fader'), faders = items.filter((_, i) => !kids[i] || kids[i]!.part === 'fader');
   return (
     <div className="rig-master">
-      <div className="rig-mh"><span title={v.words.note ? say(v.words.note) : undefined}>{v.words.title ? say(v.words.title) : null}</span></div>
-      <div className="faders"><div className="fdr-scale" aria-hidden="true"><span>2</span><span>1</span><span>0</span></div>{v.children}</div>
+      <div className="rig-mh"><span title={v.words.note ? say(v.words.note) : undefined}>{v.words.title ? say(v.words.title) : null}</span>{v.words.text ? <small>{say(v.words.text)}</small> : null}{head}</div>
+      <div className="faders"><div className="fdr-scale" aria-hidden="true"><span>2</span><span>1</span><span>0</span></div>{faders}</div>
     </div>
   );
 }

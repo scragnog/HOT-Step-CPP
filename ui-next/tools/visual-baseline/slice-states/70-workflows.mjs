@@ -10,11 +10,8 @@
 //   node tools/visual-baseline/vb.mjs capture rebuild-workflows --states slice --only "^wf-" --plan-from concept-workflows
 //   node tools/visual-baseline/vb.mjs compare concept-workflows rebuild-workflows --accept tools/visual-baseline/workflows-accepted.json
 
-/* the concept's lyric sheet (package 4) is withdrawn, as the slice's states withdraw it; nothing else is changed */
-const withdraw = h => h.js(() => { if (typeof lyricsBlock === 'function') window.lyricsBlock = () => ''; });
 /* a desk and the lists: user workflows and revisions in the concept's shape (testing/compat/workflows.ts reads them) */
 const scene = (o = {}) => async h => {
-  await withdraw(h);
   await h.js(o => {
     S.tier = o.tier ?? 'studio'; S.mods = o.mods ?? []; S.pedals = []; render();
     S.workflows = o.workflows ?? []; S.revs = Object.assign(Object.create(null), o.revs ?? {}); saveUser();

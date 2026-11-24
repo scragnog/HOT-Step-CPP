@@ -11,11 +11,11 @@
 import { CATEGORIES, type Definition, type EngineId, type ModuleDef, type Node, type PedalDef, type Tier, type UnitDef, type Value } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, changed, has, isAuto, nodeAt, resolve, shownValue, stripOf, valueOf, wordsOf } from './core.ts';
+import { type Desk, type Index, applies, changed, has, holds, isAuto, nodeAt, resolve, shownValue, stripOf, valueOf, wordsOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { defName } from './steps.ts';
 import {
-  actionWords, bareText, fillMsg, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stateWords, stripWords, textMsg,
+  actionWords, bareText, fillMsg, forcedOf, formatMsg, keptMsg, lcdMsg, nodeOptWord, nodeWord, optionsOf, paramWords, pickMsg, stateWords, stripWords, textMsg,
   wordKey,
 } from './strings.ts';
 import { alsoLinkWords, alsoSet } from './tiers.ts';
@@ -71,7 +71,9 @@ export interface ParamModel {
   lcd: Slot;
   pick: Slot;
   /** A choice: its options, with their words and whether each is the value in force. */
-  options?: { value: string | number; label: Slot; short?: Slot; tip?: Slot; lcd: Slot; pick: Slot; detail?: Slot; on: boolean }[];
+  options?: { value: string | number; label: Slot; short?: Slot; tip?: Slot; lcd: Slot; pick: Slot; detail?: Slot; on: boolean; off?: Slot }[];
+  /** A choice the engine runs at another value meanwhile (ParamFace.forced): what is said beside it. */
+  forced?: { note: Msg };
   placeholder?: Slot;
   /** The most characters a text takes. */
   maxLength?: number;
@@ -167,7 +169,10 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   }
   /* a model choice's "" is shown as the file it stands for */
   const shown = shownValue(ix, key, desk, v);
-  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: o.value === shown }));
+  /* while forced, the value the engine runs is pressed and the others are disabled with why (A-30) */
+  const forced = p.type === 'choice' ? forcedOf(ix, key, desk) : null;
+  if (p.type === 'choice') out.options = optionsOf(ix, key, desk).map(o => ({ value: o.value, label: o.label, ...(o.short ? { short: o.short } : {}), ...(o.tip ? { tip: o.tip } : {}), lcd: o.lcd ?? o.label, pick: o.pick ?? o.lcd ?? o.label, ...(o.detail ? { detail: o.detail } : {}), on: forced ? o.value === forced.value : o.value === shown, ...(forced && o.value !== forced.value ? { off: forced.tip } : {}) }));
+  if (forced) out.forced = { note: forced.note };
   if (f.placeholder) out.placeholder = fillMsg(ix, wordKey(ix, key, desk, 'placeholder'), f.placeholder, desk);
   if (f.maxLength) out.maxLength = f.maxLength;
   if (f.auto && f.auto.tip) out.autoTip = fillMsg(ix, `create.${ix.params.get(key)!.d.id}.p.${key.replace(/\./g, '-')}.autoTip${(p.per || []).some(l => 'engines' in l && l.engines.includes(desk.engine) && (l as { auto?: { tip?: string } }).auto?.tip) ? '@' + ((p.per || []).find(l => 'engines' in l && l.engines.includes(desk.engine)) as { engines: string[] }).engines.join('+') : ''}`, f.auto.tip, desk, f);
@@ -217,7 +222,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
     if (ctl) m.control = ctl;
   }
   if (node.dim && key) m.dimWords = m.dim ?? fillMsg(ix, `${key}.dim`, node.dim.says, desk);
-  if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);
+  /* a container's children, and a bespoke part's that holds children it places itself (the cartridges' stack bar) */
+  if ((spec?.kind === 'container' || (spec?.kind === 'bespoke' && node0.children?.length)) && key) m.kids = kidsOf(ix, node0, desk, key);
   const ro = readoutModel(ix, node, desk);
   if (ro) m.readout = ro;
   const ins = instrumentModel(ix, node, desk, key);
@@ -320,6 +326,7 @@ export function tileModel(ix: Index, d: ModuleDef, desk: Desk): TileModel {
   const unsup = !usedHere(d, desk.engine), strip = unsup ? null : stripOf(ix, d, desk);
   const size = { ...d.size, ...((d.per || []).find(l => l.engines.includes(desk.engine))?.size ?? {}) };
   let w = desk.tier === 'quick' ? (size.quickW === 4 ? 'w4' : size.quickW === 2 ? 'w2' : '') : size.w === 2 ? 'w2' : size.w === 4 ? 'w4' : '';
+  if (size.narrowWhen && desk.tier !== 'lab' && holds(ix, size.narrowWhen, desk)) w = '';
   if (size.foldAt3 && desk.tier !== 'quick') w += ' fold3';
   if (strip) w = size.stripKeepsWidth ? `${w} is-strip` : 'is-strip';
   const attrs: Record<string, string> = {};

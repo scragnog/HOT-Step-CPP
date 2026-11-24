@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { createPortal } from 'react-dom';
 import { ENGINES } from '../../definitions/engines.ts';
 import type { EngineId } from '../../definitions/types.ts';
-import { enginePanelModel, meterEase, meterLeds, meterModel } from '../../derive.ts';
+import { enginePanelModel, meterEase, meterLeds, meterModel, meterTarget } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { useModel } from '../render/useModel.ts';
@@ -16,6 +16,7 @@ import { Slot } from '../register/Slot.tsx';
 import { ui, useSay } from '../i18n/index.ts';
 import { ENGINE_COLOUR, logoOf, CONCEPT_ID } from './engines.ts';
 import { Theme } from './Theme.tsx';
+import { useGen } from '../store/generate.ts';
 
 /* the main navigation: each page's hook in the concept's markup (data-nav) and its words' id */
 const NAV = [['create', 'create'], ['Library', 'library'], ['Studios', 'studios'], ['Training', 'training'], ['Settings', 'settings']] as const;
@@ -23,7 +24,7 @@ const EM_N = 32;
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function TopBar() {
-  const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false);
+  const say = useSay(), engine = useDesk(s => s.desk.engine), [open, setOpen] = useState(false), live = useGen(s => s.runs.length > 0);
   const name = ENGINES.find(e => e.id === engine)!.name;
   /* the panel is named whether it is open or not, as the concept's markup names it */
   useEffect(() => { document.getElementById('engPanel')?.setAttribute('aria-label', say(ui('engine.panel'))); }, [say]);
@@ -36,9 +37,9 @@ export function TopBar() {
         {NAV.map(([n, id]) => <button key={n} data-nav={n} aria-current={n === 'create' ? 'page' : undefined}>{say(ui(`nav.${id}`))}</button>)}
       </nav>
       <div className="top-right">
-        <div className="engine" id="engine" style={{ '--ec': ENGINE_COLOUR[engine] } as CSSProperties}>
+        <div className={`engine${live ? ' lg-live' : ''}`} id="engine" style={{ '--ec': ENGINE_COLOUR[engine] } as CSSProperties}>
           <button className="eng-btn" id="engBtn" type="button" aria-haspopup="dialog" aria-expanded={open} aria-controls="engPanel" aria-label={say(ui('engine.label', { engine: name }))} onClick={() => setOpen(o => !o)}>
-            <span className="eng-glyph" id="engGlyph" aria-hidden="true" dangerouslySetInnerHTML={{ __html: logoOf(engine, 22) }} />
+            <span className="eng-glyph" id="engGlyph" aria-hidden="true" dangerouslySetInnerHTML={{ __html: logoOf(engine, 22, 'glyph') }} />
             <span className="eng-txt"><small>{say(ui('engine'))}</small><b id="engName">{name}</b></span>
             <span className="eng-caret" aria-hidden="true"><svg className="ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10l5 5 5-5" /></svg></span>
           </button>
@@ -56,13 +57,16 @@ export function TopBar() {
  *  needs, with its peak line; a fast attack and a slow release (34-engine-panel.js stepMeter). Its click opens the engine
  *  log, whose package draws it. */
 function Meter() {
-  const say = useSay(), m = useModel(s => meterModel(ix, s.desk), 'vram-meter'), [cur, setCur] = useState(0);
+  /* the run that renders (the head of the queue) holds the card: while it runs the needle swings toward what it needs,
+     and when it is another engine's, the meter shows what that engine holds (B-34, package 6) */
+  const head = useGen(s => s.runs[0]), run = head?.spec.desk ?? null, busy = run !== null;
+  const say = useSay(), m = useModel(s => meterModel(ix, s.desk, run), `vram-meter:${head?.id ?? ''}`), [cur, setCur] = useState(0);
   useEffect(() => {
     let raf = 0, at = cur;
-    const step = () => { raf = 0; at = meterEase(at, m.use, reduced()); setCur(at); if (Math.abs(m.use - at) > 0.05) raf = requestAnimationFrame(step); };
-    if (Math.abs(m.use - at) > 0.05 || at !== cur) raf = requestAnimationFrame(step);
+    const step = () => { raf = 0; const target = meterTarget(m.use, m.est, busy, Math.random); at = meterEase(at, target, reduced()); setCur(at); if (busy || Math.abs(target - at) > 0.05) raf = requestAnimationFrame(step); };
+    if (busy || Math.abs(m.use - at) > 0.05 || at !== cur) raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [m.use]); // eslint-disable-line react-hooks/exhaustive-deps -- it starts from where the needle is
+  }, [m.use, m.est, busy]); // eslint-disable-line react-hooks/exhaustive-deps -- it starts from where the needle is
   const leds = meterLeds(cur, m.est, m.card, EM_N);
   return (
     <button className={`eng-meter${m.over ? ' over' : ''}${m.tight ? ' tight' : ''}`} id="engMeter" type="button" aria-expanded="false" aria-describedby="emRead" aria-label={say(m.aria)} title={say(m.title)}>
@@ -129,7 +133,7 @@ function EnginePanel({ close }: { close: (refocus: boolean) => void }) {
       <div className="ep-cards" role="radiogroup" aria-label={say(ui('engine'))}>
         {m.cards.map(c => (
           <button key={c.id} type="button" className="ep-card" role="radio" data-backend={CONCEPT_ID[c.id]} aria-checked={c.id === engine} tabIndex={c.id === tab ? 0 : -1} style={{ '--c': ENGINE_COLOUR[c.id] } as CSSProperties} onClick={() => choose(c.id)}>
-            <span className="ep-scope" dangerouslySetInnerHTML={{ __html: logoOf(c.id, 40) + (c.testing ? `<i class="ep-badge">${escHtml(say(c.testing))}</i>` : '') }} />
+            <span className="ep-scope" dangerouslySetInnerHTML={{ __html: logoOf(c.id, 40, 'card') + (c.testing ? `<i class="ep-badge">${escHtml(say(c.testing))}</i>` : '') }} />
             <b>{c.name}</b><small>{say(c.tag[0])}<br />{say(c.tag[1])}</small>
             <span className="ep-specs"><i title={say(c.rateTip)}>{say(c.rate)}</i><i title={say(c.takesTip)}>{say(c.takes)}</i></span>
           </button>

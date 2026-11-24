@@ -424,7 +424,9 @@ export function revisionHolds(r: Revision): 'lyrics' | 'box' | null {
   return t('lyrics.text') ? 'lyrics' : t('prompt.text') ? 'box' : null;
 }
 /** What the main box is called on an engine, inside a sentence ("the description", "the tags"). */
-export const boxWord = (_ix: Index, desk: Desk, e: EngineId = desk.engine): Msg => msg('wf.box', { e });
+export const boxWord = (_ix: Index, desk: Desk, e: EngineId = desk.engine): Msg => boxWordOf(e);
+/** The same, for an engine named by itself (a song's, in its menu). The one statement of the box's word. */
+export const boxWordOf = (e: EngineId): Msg => msg('wf.box', { e });
 
 /** A revision's details (the info button): its settings that are not at their defaults, by what owns them, in the
  *  definitions' order; a modified revision also lists what changed since, with its value now (C-36); its adapters and

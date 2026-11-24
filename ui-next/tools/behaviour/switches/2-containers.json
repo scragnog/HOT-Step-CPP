@@ -124,8 +124,8 @@
   {
    "feature": "dice off",
    "file": "src/derive/readouts.ts",
-   "find": "off: !!off && read(ix, desk, off) === false, used: 0",
-   "replace": "off: false, used: 0"
+   "find": "off: !!off && read(ix, desk, off) === false, used:",
+   "replace": "off: false, used:"
   },
   {
    "feature": "flow windows",
@@ -232,7 +232,7 @@
   {
    "feature": "container kids",
    "file": "src/derive/models.ts",
-   "find": "  if (spec?.kind === 'container' && key) m.kids = kidsOf(ix, node0, desk, key);",
+   "find": "  if ((spec?.kind === 'container' || (spec?.kind === 'bespoke' && node0.children?.length)) && key) m.kids = kidsOf(ix, node0, desk, key);",
    "replace": ""
   }
  ]

@@ -4,6 +4,7 @@
     { "id": "33-fields/field-undo-and-page-undo", "why": "Each text field's own Ctrl+Z (F-22): the field's own texts first, then on into what the page put there (Expand), Redo the same way, a value set without telling is a step of its own, Ctrl+Z in another field never touches the box." },
     { "id": "33-fields/field-undo-never-moves-forward", "why": "F-06: Ctrl+Z in the box takes back its last typing and moves the page's step that wrote it, so Ctrl+Z outside goes on back to the setting, never the words again." },
     { "id": "33-fields/lyrics-keep-their-history-on-another-tier", "why": "Typing in the sheet is one step named for the lyrics; the sheet drawn again at Quick keeps its own history; once back at empty, Ctrl+Z goes on to the page and never puts the words back." },
+    { "id": "33-fields/reuse-leaves-a-supplied-caption", "why": "A song's Reuse does not write over a caption a dataset supplies, and says why in the source's own words (E-31; package 6's Reuse, finished here)." },
     { "id": "33-fields/ctrl-z-under-the-picker-edits-nothing", "why": "F-04: Ctrl+Z under a layer (the picker) leaves the box as it is and says why, a field in the layer with nothing of its own included; back in the box its own Ctrl+Z works." },
     { "id": "33-fields/what-the-page-wrote-is-a-step-of-the-field", "why": "A page write into a field no one was in (Write it for me into the lyrics) is a step of that field's own: its Ctrl+Z goes back through it to the empty sheet (F-22)." },
     { "id": "33-fields/lyrics-tags-strip-instrumental-wildcards", "why": "lyricSheet: the Lab tabs insert at a line boundary, the strip and a segment's caret, Instrumental read-only and the tabs refused, Expand with Undo and with none, Expand on Generate, the vocal gender, an engine with no lyrics (05-modules/lyrics)." },
@@ -33,7 +34,7 @@
     { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06) in the concept: the ruler's note follows a BPM typed in the box (passes) and a BPM chip." }
   ],
   "excluded": [
-    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "It opens the Concept notes, which no package draws; the same rule under the picker (a layer) is 33-fields/ctrl-z-under-the-picker-edits-nothing." },
+    { "id": "17-undo-net/ctrl-z-under-an-overlay-edits-nothing", "why": "Ctrl+Z under the Concept notes and the picker passes; its last part presses Ctrl+Z on another page, whose navigation no package builds (acceptance/11-notes-logs.json). The same rule under the picker is 33-fields/ctrl-z-under-the-picker-edits-nothing." },
     { "id": "05-modules/lyrics", "why": "Its vocal gender is found by data-v=\"Duet\", the option's label (deviation 10: the rebuild's data-v is the value). Every check of it is in 33-fields/lyrics-tags-strip-instrumental-wildcards." },
     { "id": "06-prompt-generate/minimax-caption", "why": "Its Automatic is found by data-opt=\"Automatic\" (deviation 10). Every check of it is in 33-fields/minimax-caption-and-the-caption-source." },
     { "id": "18-tips-touch/language-stamp-stays-put", "why": "Its French is found by data-opt=\"French\" (deviation 10). Its check is in 33-fields/language-stamp-stays-put." },

@@ -18,6 +18,12 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 const rect = (cls: string, x: number, y: number, w: number, h: number, r = 8) => `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/>`;
 const bar = (cls: string, x: number, y: number, w: number, h = 3) => `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}"/>`;
 const led = (cx: number, cy: number) => `<circle class="led-on" cx="${cx}" cy="${cy}" r="2.4"/>`;
+/** Every id inside a drawing made its own (`<id>-<tag>`, and every reference to it): a drawing stands in several places
+ *  at once (the Modules panel, the picker, a drag's preview) and carries ids of its own (a pedal's gradient, the fixed
+ *  ids some module drawings hold), so without this two drawings on the page could share an id, and one paint with the
+ *  other's gradient, or with none while the other is hidden. */
+export const ownIds = (markup: string, tag: string): string =>
+  markup.replace(/\bid="([^"]+)"/g, `id="$1-${tag}"`).replace(/url\(#([^)]+)\)/g, `url(#$1-${tag})`).replace(/href="#([^"]+)"/g, `href="#$1-${tag}"`);
 /* inner class names are prefixed t-, so no page rule can reach into a drawing */
 const svg = (inner: string, cls = '', vb = `0 0 ${TH_W} ${TH_H}`, style = '') =>
   `<svg class="th ${cls}" viewBox="${vb}" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false"${style ? ` style="${style}"` : ''}>${inner.replace(/class="([^"]+)"/g, (_m, c: string) => `class="${c.trim().split(/\s+/).map(x => 't-' + x).join(' ')}"`)}</svg>`;
@@ -34,13 +40,14 @@ function pedal(d: Extract<Definition, { kind: 'pedal' }>, e: EngineId, name: str
 }
 
 /** The drawing the Modules panel shows for a definition: a module on its canvas, a pedal mounted on a piece of board,
- *  a side unit as its rack strip. `name` is its name as the page says it (for the engraved name bar's length). */
-export function thumbOf(d: Definition, e: EngineId, name: string): string {
-  /* one drawing per definition, engine and name: a redraw gives the same markup, so a card's drawing is never replaced
-     under a press (a press that starts on a node a redraw removes is no click) */
-  const k = `${d.id}|${e}|${name}`;
+ *  a side unit as its rack strip. `name` is its name as the page says it (for the engraved name bar's length); `place`
+ *  where it stands (`card`, the picker's `pk`, a drag's `drag`), which its ids carry (ownIds). */
+export function thumbOf(d: Definition, e: EngineId, name: string, place = 'card'): string {
+  /* one drawing per definition, engine, name and place: a redraw gives the same markup, so a card's drawing is never
+     replaced under a press (a press that starts on a node a redraw removes is no click) */
+  const k = `${d.id}|${e}|${name}|${place}`;
   let t = CACHE.get(k);
-  if (t === undefined) { t = draw(d, e, name); CACHE.set(k, t); }
+  if (t === undefined) { t = ownIds(draw(d, e, name), `${d.id}-${place}`); CACHE.set(k, t); }
   return t;
 }
 const CACHE = new Map<string, string>();
@@ -61,9 +68,9 @@ function draw(d: Definition, e: EngineId, name: string): string {
  *  unit width, so pedals stand on a shelf; and the size of that canvas. Its gradient's id is its own (thb), clear of
  *  the ids the modules' drawings carry (thg). Package 8. */
 export const bareSize = (d: Definition): { w: number; h: number } => ({ w: pedalW(d), h: TH_PH });
-export function thumbBare(d: Extract<Definition, { kind: 'pedal' }>, e: EngineId, name: string): string {
-  const k = `bare|${d.id}|${e}|${name}`;
+export function thumbBare(d: Extract<Definition, { kind: 'pedal' }>, e: EngineId, name: string, place = 'pk'): string {
+  const k = `bare|${d.id}|${e}|${name}|${place}`;
   let t = CACHE.get(k);
-  if (t === undefined) { t = svg(pedal(d, e, name).replace(/thg(\d+)/g, 'thb$1'), `ped-th${d.on ? '' : ' neutral'}`, `0 0 ${pedalW(d)} ${TH_PH}`, `--h:${d.hue}`); CACHE.set(k, t); }
+  if (t === undefined) { t = ownIds(svg(pedal(d, e, name).replace(/thg(\d+)/g, 'thb$1'), `ped-th${d.on ? '' : ' neutral'}`, `0 0 ${pedalW(d)} ${TH_PH}`, `--h:${d.hue}`), `${d.id}-${place}`); CACHE.set(k, t); }
   return t;
 }

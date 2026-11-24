@@ -1,0 +1,389 @@
+{
+  "about": "Package 6's features, each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+  "switches": [
+    {
+      "feature": "go press",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "const press = (e: MouseEvent) => { if (e.detail > 1) return; generate(); };",
+      "replace": "const press = (e: MouseEvent) => { void e; void generate; };"
+    },
+    {
+      "feature": "double click",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "if (e.detail > 1) return; generate();",
+      "replace": "generate();"
+    },
+    {
+      "feature": "takes cards",
+      "file": "src/derive/generate.ts",
+      "find": "const songs: SongSpec[] = Array.from({ length: n }, (_, i) => {",
+      "replace": "const songs: SongSpec[] = Array.from({ length: 1 }, (_, i) => {"
+    },
+    {
+      "feature": "cancel one",
+      "file": "src/app/generate/actions.ts",
+      "find": "cancelStep(new Set([id]), c); focus('#go');",
+      "replace": "void c; focus('#go');"
+    },
+    {
+      "feature": "cancel all",
+      "file": "src/app/generate/actions.ts",
+      "find": "cancelStep(new Set(q.map(c => c.id)), null); focus('#go');",
+      "replace": "void q; focus('#go');"
+    },
+    {
+      "feature": "cancel undo",
+      "file": "src/app/store/generate.ts",
+      "find": "back = jobs.map(startRun); return said;",
+      "replace": "back = []; return said;"
+    },
+    {
+      "feature": "cancel focus",
+      "file": "src/app/generate/actions.ts",
+      "find": "  cancelStep(new Set([id]), c); focus('#go');",
+      "replace": "  cancelStep(new Set([id]), c);"
+    },
+    {
+      "feature": "queue head",
+      "file": "src/app/services/generate.ts",
+      "find": "const head = live()[0];",
+      "replace": "const head = live()[live().length - 1];"
+    },
+    {
+      "feature": "stages",
+      "file": "src/app/services/generate.ts",
+      "find": "stage: stageOf(takeProgress(f, i), sp.engine, sp.steps, sp.lit)",
+      "replace": "stage: stageOf(0.9, sp.engine, sp.steps, [])"
+    },
+    {
+      "feature": "go sweep",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "style={gf !== null ? { '--gf': gf.toFixed(4) } as CSSProperties : undefined}",
+      "replace": "style={undefined}"
+    },
+    {
+      "feature": "go badge",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "<b className=\"go-q\" id=\"goQ\" hidden={!m.queued}>",
+      "replace": "<b className=\"go-q\" id=\"goQ\" hidden={true}>"
+    },
+    {
+      "feature": "cancel button",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "hidden={!m.queued} aria-label={say(m.cancelLabel)}",
+      "replace": "hidden={true} aria-label={say(m.cancelLabel)}"
+    },
+    {
+      "feature": "doc title",
+      "file": "src/app/generate/Live.tsx",
+      "find": "document.title = sayNow(docTitle(BASE, q));",
+      "replace": "void sayNow; void docTitle; void BASE;"
+    },
+    {
+      "feature": "card focus",
+      "file": "src/app/generate/Latest.tsx",
+      "find": "style={{ '--f': p.f.toFixed(4), ...pp } as CSSProperties}",
+      "replace": "style={pp}"
+    },
+    {
+      "feature": "unheard",
+      "file": "src/app/store/generate.ts",
+      "find": "return { ...song, fresh: true, unheard: true };",
+      "replace": "return { ...song, fresh: true };"
+    },
+    {
+      "feature": "run engine",
+      "file": "src/app/store/generate.ts",
+      "find": "return { ...song, fresh: true, unheard: true };",
+      "replace": "return { ...song, engine: useDesk.getState().desk.engine, fresh: true, unheard: true };"
+    },
+    {
+      "feature": "out of sight",
+      "file": "src/app/generate/Latest.tsx",
+      "find": "if (e.ids.length && (!el || !inView(el))) d.showToast",
+      "replace": "if (e.ids.length && !el && !inView) d.showToast"
+    },
+    {
+      "feature": "empty refusal",
+      "file": "src/derive/generate.ts",
+      "find": "  if (!src && !typed) {",
+      "replace": "  if (false as boolean) {"
+    },
+    {
+      "feature": "status line",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "<b>{say(m.tier)}</b>",
+      "replace": "<b />"
+    },
+    {
+      "feature": "line title",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "if (el.current) el.current.title = el.current.textContent ?? '';",
+      "replace": "void el;"
+    },
+    {
+      "feature": "changes link",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "onClick={showChanges}",
+      "replace": "onClick={undefined}"
+    },
+    {
+      "feature": "changes count",
+      "file": "src/derive/generate.ts",
+      "find": "!(d.kind !== 'module' && d.on === p.key) && !(d.kind === 'module' && d.builtIn",
+      "replace": "!(d.kind === 'module' && d.builtIn"
+    },
+    {
+      "feature": "line parked",
+      "file": "src/derive/generate.ts",
+      "find": "  if (np) rest.push({ says: msg('gen.line.parked', { n: np }) });",
+      "replace": ""
+    },
+    {
+      "feature": "line wontfit",
+      "file": "src/derive/generate.ts",
+      "find": "wontFit: v.refuses ? {",
+      "replace": "wontFit: false ? {"
+    },
+    {
+      "feature": "line passes",
+      "file": "src/derive/generate.ts",
+      "find": "passes: !v.refuses && v.passes > 1 ? {",
+      "replace": "passes: false ? {"
+    },
+    {
+      "feature": "takes fit",
+      "file": "src/app/generate/GoBar.tsx",
+      "find": "onClick={() => takesFit(m.wontFit!.fits)}",
+      "replace": "onClick={undefined}"
+    },
+    {
+      "feature": "certain refusal",
+      "file": "src/app/generate/actions.ts",
+      "find": "if (r?.kind === 'wontFit') {",
+      "replace": "if (r?.kind === ('never' as string)) {"
+    },
+    {
+      "feature": "server refusal",
+      "file": "src/app/services/generate.ts",
+      "find": "if (v.refuses) { head.status = 'refused';",
+      "replace": "if (false as boolean) { head.status = 'refused';"
+    },
+    {
+      "feature": "one notice",
+      "file": "src/app/store/generate.ts",
+      "find": "const same = (c: Card) => !!c.error && c.title === title && JSON.stringify(c.error.why) === JSON.stringify(rf.why);",
+      "replace": "const same = (c: Card) => !c;"
+    },
+    {
+      "feature": "retry",
+      "file": "src/app/generate/Latest.tsx",
+      "find": "onClick={() => retry(c.id)}",
+      "replace": "onClick={() => dismiss(c.id)}"
+    },
+    {
+      "feature": "dismiss focus",
+      "file": "src/app/generate/actions.ts",
+      "find": "focus(next ? `#latest .song.errored[data-id=\"${next.id}\"] button` : '#go');",
+      "replace": "void next;"
+    },
+    {
+      "feature": "beforeunload",
+      "file": "src/app/generate/Live.tsx",
+      "find": "const ask = (e: BeforeUnloadEvent) => { e.preventDefault(); };",
+      "replace": "const ask = (e: BeforeUnloadEvent) => { void e; };"
+    },
+    {
+      "feature": "reload lost",
+      "file": "src/app/store/generate.ts",
+      "find": "if (lost) useDesk.getState().showToast({ text: lostSays(lost) });",
+      "replace": "void lostSays;"
+    },
+    {
+      "feature": "queue fold",
+      "file": "src/derive/generate.ts",
+      "find": "if (pend.length > cols) {",
+      "replace": "if (pend.length > 999) {"
+    },
+    {
+      "feature": "ctrl enter",
+      "file": "src/app/features/generate.tsx",
+      "find": "if (!e.repeat) generate();",
+      "replace": "void generate;"
+    },
+    {
+      "feature": "player opens",
+      "file": "src/app/generate/Player.tsx",
+      "find": "pl.hidden = false; if (reduced()) return;",
+      "replace": "if (reduced()) return;"
+    },
+    {
+      "feature": "player moves",
+      "file": "src/app/store/generate.ts",
+      "find": "const pos = Math.min(c.dur, s.pos + 1);",
+      "replace": "const pos = s.pos;"
+    },
+    {
+      "feature": "player end",
+      "file": "src/app/store/generate.ts",
+      "find": "set(pos >= c.dur ? { pos: 0, paused: true } : { pos });",
+      "replace": "set({ pos: Math.min(pos, c.dur - 1) });"
+    },
+    {
+      "feature": "player seek",
+      "file": "src/app/generate/Player.tsx",
+      "find": "const v = playerSeek(e.key, e.shiftKey, pos, c.dur);",
+      "replace": "const v = null as number | null; void playerSeek;"
+    },
+    {
+      "feature": "player space",
+      "file": "src/app/features/generate.tsx",
+      "find": "run: e => { e.preventDefault(); pausePlayer(); },",
+      "replace": "run: e => { void e; void pausePlayer; },"
+    },
+    {
+      "feature": "menu opens",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "    m.hidden = !c;",
+      "replace": "    m.hidden = true;"
+    },
+    {
+      "feature": "menu keys",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "e.preventDefault(); items[(j + items.length) % items.length]?.focus();",
+      "replace": "e.preventDefault(); void items;"
+    },
+    {
+      "feature": "menu escape",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "layerOpen(m, { trigger: b, close: () => close(true) });",
+      "replace": "void layerOpen;"
+    },
+    {
+      "feature": "menu tab",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "if (e.key === 'Tab') { close(true); return; }",
+      "replace": ""
+    },
+    {
+      "feature": "menu outside",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "if (!t.closest?.('#menu') && !t.closest?.('[data-songmenu]')) close(false);",
+      "replace": "void t;"
+    },
+    {
+      "feature": "menu off go bar",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "const ceil = seen && g!.bottom <= r.top ? Math.max(top0, g!.bottom + 8) : top0",
+      "replace": "const ceil = top0"
+    },
+    {
+      "feature": "menu repaint",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "if (id === 'repaint') repaint(c);",
+      "replace": "if (id === 'repaint') void repaint;"
+    },
+    {
+      "feature": "menu reuse",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "else if (id === 'reuse') reuse(c);",
+      "replace": "else if (id === 'reuse') void reuse;"
+    },
+    {
+      "feature": "menu pages",
+      "file": "src/app/generate/SongMenu.tsx",
+      "find": "else sendTo(id, c);",
+      "replace": "else void sendTo;"
+    },
+    {
+      "feature": "toast stack",
+      "file": "src/app/shell/Toast.tsx",
+      "find": "if (was && cur) demote(cur, host.contains(document.activeElement));",
+      "replace": "if (was && cur) void demote;"
+    },
+    {
+      "feature": "toast keeps undo",
+      "file": "src/app/shell/Toast.tsx",
+      "find": "const i = next.findIndex(x => !x.t.action), gone = next[i >= 0 ? i : 0]!;",
+      "replace": "const gone = next[0]!;"
+    },
+    {
+      "feature": "toast escape",
+      "file": "src/app/shell/Toast.tsx",
+      "find": "const esc = (e: KeyboardEvent) => { if (e.key === 'Escape' && host.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); hideCur(); } };",
+      "replace": "const esc = (e: KeyboardEvent) => { void e; };"
+    },
+    {
+      "feature": "toast tab",
+      "file": "src/app/shell/Toast.tsx",
+      "find": "tab.tabbed = true; tab.from = act; e.preventDefault(); e.stopImmediatePropagation(); a.focus(); return;",
+      "replace": "return;"
+    },
+    {
+      "feature": "toast said once",
+      "file": "src/app/shell/Toast.tsx",
+      "find": "if (was && !t.action && !was.action && cur && sayNow(t.text) === sayNow(was.text)) {",
+      "replace": "if (false as boolean) {"
+    },
+    {
+      "feature": "meter swing",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "const target = meterTarget(m.use, m.est, busy, Math.random);",
+      "replace": "const target = meterTarget(m.use, m.est, false, Math.random);"
+    },
+    {
+      "feature": "meter other engine",
+      "file": "src/derive/vram.ts",
+      "find": "const other = run && run.engine !== desk.engine ? run : null,",
+      "replace": "const other = (run && false) as Desk | null | false,"
+    },
+    {
+      "feature": "engine live",
+      "file": "src/app/shell/TopBar.tsx",
+      "find": "`engine${live ? ' lg-live' : ''}`",
+      "replace": "`engine${''}`"
+    },
+    {
+      "feature": "dice used",
+      "file": "src/derive/readouts.ts",
+      "find": "used: Math.min(desk.songs?.attempts ?? 0, 50),",
+      "replace": "used: 0,"
+    },
+    {
+      "feature": "cover hue",
+      "file": "src/derive/readouts.ts",
+      "find": "coverHue(desk.songs?.hue === undefined ? null : { hue: desk.songs.hue })",
+      "replace": "coverHue()"
+    },
+    {
+      "feature": "repaint label",
+      "file": "src/derive/generate.ts",
+      "find": "const label = repaintSource(ix, desk) && modOn(ix, 'repaint', desk) ? msg('gen.go.repaint') : msg('gen.go'),",
+      "replace": "const label = msg('gen.go'),"
+    },
+    {
+      "feature": "failed run",
+      "file": "src/app/store/generate.ts",
+      "find": "} else if (j.status === 'failed' && j.failed) {",
+      "replace": "} else if (false as boolean) {"
+    },
+    {
+      "feature": "run it again",
+      "file": "src/app/generate/actions.ts",
+      "find": "if (c.error.again) flushSyncRun(() => startRun(c.error!.spec));",
+      "replace": "if (c.error.again) void startRun;"
+    },
+    {
+      "feature": "log queue",
+      "file": "src/app/store/generate.ts",
+      "find": "if (j !== queueSaid) { queueSaid = j; tellQueue(q); }",
+      "replace": "void tellQueue; void j;"
+    },
+    {
+      "feature": "songs list",
+      "file": "src/app/store/generate.ts",
+      "find": "...songs.map(({ createdAt, ...x }) => { void createdAt; return x; })",
+      "replace": "...songs.slice(0, 0)"
+    }
+  ]
+}
