@@ -93,13 +93,6 @@
    "why": "The concept prints a knob label that is a symbol (α, β) as a word in the body type (21-knob.js .kl.sym); the slice's knob prints every label as the page's caps label."
   },
   {
-   "state": "^containers-units",
-   "key": "u-art$",
-   "field": "^(--h|background-image)$",
-   "n": 4,
-   "why": "The cover swatch is in the newest song's colour; the songs list is the generation package's (6), so until then it shows the concept's own colour for no song (300), where the concept's page has its demo songs (215)."
-  },
-  {
    "state": "",
    "key": "",
    "field": "^only$",
