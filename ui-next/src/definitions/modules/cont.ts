@@ -31,6 +31,8 @@ export const cont = {
       key: 'contSel',
       kind: 'span',
       noun: 'Part to continue from',
+      /* a recording's part is its first 20 seconds until it is moved */
+      empty: '0:00–0:20',
       owner: 'song',
       stored: 'none',
       wire: { to: 'content:yue2Continuation', via: 'continuation' },
@@ -47,13 +49,15 @@ export const cont = {
         hint: 'YuE2 continues a new song from up to 30 seconds of it',
       },
     },
-    { part: 'recordingSpan', when: { state: 'contFile', set: true }, state: ['contSel'], reads: ['contFile'] },
+    /* it stands while there is no recording too, drawing nothing, so that one chosen brings focus to it (E-23) */
+    { part: 'recordingSpan', state: ['contSel'], reads: ['contFile'] },
     {
       part: 'note',
       tip: 'The selected part is composed again, so it will differ from the original. It works on simple material and is unreliable on real vocal recordings.',
       text: 'Experimental',
+      opts: { look: 'badge' },
+      per: [{ when: { onDesk: 'build' }, opts: { look: 'badge', after: 'Can’t be combined with Build by section.' } }],
     },
-    { part: 'note', text: 'Can\'t be combined with Build by section.', when: { onDesk: 'build' } },
   ],
   thumb: { file: 'cont' },
 } satisfies ModuleDef;

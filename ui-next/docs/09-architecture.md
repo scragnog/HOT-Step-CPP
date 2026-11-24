@@ -406,6 +406,21 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   (`PartModel.actions[].name`; a part runs one by `v.act(name, arg)`); a text parameter's `maxLength`. `derive/core.ts`: a server list's entry may carry
   `data` (a caption dataset's tracks and tags).
 
+- Package 3c: `derive/build.ts` (Build by section: `buildSections` (a section known by its name and its ordinal, B-05),
+  `sectionColour`, `cleanBuild`, `cleanSessions`, `buildAt`, `buildModel` (`InstrumentModel.build`: the sections, the
+  drift banner, the section being built and what Generate asks for, its takes, the keeps in order, the locked settings,
+  the foot, what Render asks for) and the board's hands `planned`, `keep`, `discard`, `relyric`, `rendered`, `reset`, each
+  the record state's step of that name); `derive/recording.ts` (`spanAt`, `spanModel`, `spanMove`, `spanHit`: the
+  recording's part, its keys and drags); `derive/score.ts` (the ABC foot's model, `scoreAsk`, `abcInfo`, `abcFile`,
+  `readsAsAbc`, `scoreLayout`, `scoreModel`: the preview's words, every mark of its staff and where the playhead stands).
+  The three register through package 3b's `defineInstrument` (one mechanism; each declares its field of `InstrumentModel`
+  where it is drawn) and `Tell`'s `'say'` (said in the live region only). `Desk.sessions` (what a server session tells the page: never a step,
+  never saved). `controls.ts rulerStep`. `models.ts`: a strip carries its Also set line (the concept's every tile does);
+  `PartModel.actions[].auto`, `StateModel.detail` (a file's length). `tiers.ts alsoSet`: the tier a setting is in is
+  where the face edits it, strip or not (E-25; `core.ts editsAt(..., strips)`). `desk.ts nodeShown`: a control with a
+  `dim` stays and stands back, as the rule's comment always said. `core.ts WORD_FIELDS` and `WordsOverride`: a word line
+  may change a placeholder. `containers.ts KidModel.look`. Tested by `tools/test-instruments-3c.ts` (in `npm run check`).
+
 ## The test layer, and running the tools against the rebuild
 
 `src/app/testing/compat.ts` gives the two tools what they reach into the concept page for, on top of the store, in the
@@ -470,13 +485,13 @@ and `tools/test-overlays.ts` (in `npm run check`). The `overlays` slot is drawn 
 overlay of another package registers with `features/layers.ts` and puts what it holds in the popover with
 `features/pop.ts` (above, "Adding without colliding").
 
-**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (30 scenarios, 10 of
+**Package 4 (prompt card and lyric sheet)** adds `acceptance/4-fields.json` (31 scenarios, 11 of
 `scenarios/33-fields.mjs`, which hold on the concept page too, and 20 of the concept's suite, four of them pending there:
-F-13, S-07, E-06 and S-06; the Presets & genres list is drawn in package 8's popover), `switches/4-fields.json` (27 features), `slice-states/
+F-13, S-07, E-06 and S-06; the Presets & genres list is drawn in package 8's popover), `switches/4-fields.json` (28 features), `slice-states/
 40-fields.mjs` (38 states of the prompt card's column and the lyric tile, compared with `fields-accepted.json`:
-`vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json`). The
-slice's states, its parts' and package 1's now have the lyric sheet in place on both pages (it was withdrawn from the
-concept page until it was built); `01-desk/add-by-keyboard` passes with it and is a normal entry again.
+`vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json`). Every
+package's states now have the lyric sheet in place on both pages (it was withdrawn from the concept page until it was
+built); `01-desk/add-by-keyboard` passes with it and is a normal entry again.
 
 An acceptance entry may wait on a later package (`"waiting": { "package", "because" }`, tools/behaviour/README.md):
 `run.mjs --slice` reports it apart and fails if it passes, `switches.mjs` leaves it out. The slice's
@@ -578,6 +593,22 @@ definition and the place (`ownIds`). Before, HeartMuLa's gradient (`hmRainbow`) 
 HeartMuLa revision's row, and a module drawing's fixed `thg13` beside a pedal's counted one: a gradient inside a hidden
 element leaves every other drawing that names it unpainted. Every state of every package's visual set was checked for
 a repeated id: none. A new drawing with ids of its own goes through `ownIds` or a place in the same way.
+
+**Package 3c (the instruments of YuE2 and MiniMax-Music3: Build by section, Continue from recording, the Lead sheet and
+its score preview, and the Flow renderer's row)** adds `acceptance/3c-instruments.json` (25 entries: 12 of
+`scenarios/36-instruments-3c.mjs`, ten of which hold on the concept page too, the other two being its pending E-46 and
+E-47 stated in full; 11 of the concept's suite, five of them pending there: E-09, E-23, E-24, E-46, E-47; and 2 waiting on
+packages 4 and 6), `switches/3c-instruments.json` (47 features), `slice-states/32-instruments-3c.mjs` (24 states,
+compared with `instruments-3c-accepted.json`) and `tools/test-instruments-3c.ts` (in `npm run check`). Its parts are
+`parts/Build.tsx` (buildBoard), `Recording.tsx` (recordingSpan), `Score.tsx` (abcFoot); the build session is a service
+(`services/build.ts`, server-owned: the takes as they land and the section looked at, told to the desk by
+`store/build.ts` as `desk.sessions.build`), as is a recording's length (`services/recording.ts`) and the planner's score
+for the preview (`services/score.ts`, with `scoreRuns`, which generation registers to render a score with its seed).
+What the user decides about a build is the module's record state `build` (its session, seed, plan, keeps, discards and
+the songs it rendered), changed only by the board's hands through the core, each a step; a section looked at and a take
+arriving are none. The score preview is `features/score-preview.tsx` with its state in `score/state.ts`, drawn into
+`#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
+`kit/glyphs.tsx` holds three more icons (play, stop, the padlock) in a file of its own.
 
 ## Deviations from the concept's markup
 
@@ -786,6 +817,34 @@ Package 4's:
     itself when info arrives from outside, as the concept's does.
 54. **Compose caption writes the key as the page writes it** ("F# major"); the concept spells it with ♯ and flats
     (Tempo's spellKey, package 3).
+
+Package 3c's:
+
+- P3c-1. **A build is the user's record and the server's session.** The record (state `build`) holds what Undo covers:
+  the session, the score's seed, the sections planned, the keeps, the takes discarded and the songs rendered; the session
+  holds the takes and the section looked at. The concept keeps both in `S.build`. The first plan is a step ("Plan the
+  score"); the concept's makes none.
+- P3c-2. **Discard and Re-plan leave the server's takes alone**: a discarded take is marked so in the record, and Re-plan
+  opens a new session; Undo of either brings the takes back from the session that still holds them.
+- P3c-3. **Undoing a render withdraws its song from the Library** through the build session (the record's songs follow
+  Undo and Redo; `store/build.ts` keeps them among Latest's cards, package 6's, while their render stands).
+- P3c-4. **Follow score and Plan strength are locked while any section is kept**, worked out from the keeps, so
+  discarding the last kept take frees them (pending E-24).
+- P3c-5. **Play kept** beside Render (E-46) and **Continue's play button** (E-47), added as the review asked; the
+  simulated server plays no sound, the playhead runs; the player's audio is package 6's.
+- P3c-6. **A recording's length is what the page is told of it** (`services/recording.ts`; the simulated one is two to four
+  minutes by its name, the concept's a random length each load), said on the sleeve ("3:51 long"). The part chosen is kept
+  while the recording holds it, so replacing the recording with a long enough one keeps it (the concept goes back to the
+  first 20 seconds).
+- P3c-7. **With Chain of Thought off the lead sheet's paper stands back and says why** (its text is not sent then), with
+  the concept's placeholder; the concept leaves it at full strength.
+- P3c-8. **The score preview is a modal layer** in `#scoreModal` (package 8's layers: Tab goes round it, Escape and the
+  scrim close it, focus goes back to what opened it; package 11's exit). Continue with this score renders it with its
+  seed through `scoreRuns` (registered with package 6's `generate({ seed })`, which then does not preview it again).
+- P3c-9. **The planner's composer CFG token is not painted as clashing** by the lead sheet (the concept's cross-module
+  paint, B-09); the lyric-timing line warns, in the warning's ink, with Set CFG to auto.
+- P3c-10. **A tile that is a strip says what is set at another tier** (its Also set line), as every tile of the concept's
+  does; the slice left it out on strips.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations

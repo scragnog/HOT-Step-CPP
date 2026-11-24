@@ -25,7 +25,7 @@ import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
 import { kidsOf, type KidModel } from './containers.ts';
 import { readoutModel, type ReadoutModel } from './readouts.ts';
 import { instrumentModel, type InstrumentModel } from './instruments.ts';
-import { stateOf } from './core.ts';
+import { mmss, stateOf } from './core.ts';
 import type { Json } from '../definitions/types.ts';
 import { modelRows, type ModelRow } from './vram.ts';
 import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
@@ -110,8 +110,9 @@ export interface PartModel {
   words: Record<string, Slot>;
   params: ParamModel[];
   reads: ReadModel[];
-  /** Its actions' words; a named action (parts.ts ACTIONS) says its name, so a part can run the one it means. */
-  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string; name?: string }[];
+  /** Its actions' words; a named action (parts.ts ACTIONS) says its name, so a part can run the one it means; `auto`, the
+   *  parameter an action puts back on auto (the concept's data-auto hook, package 3c). */
+  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string; name?: string; auto?: string }[];
   /** A Quick choice row: its label, the choice checked (null: the values match none) and what the row says. */
   row?: { label: Slot; checked: number | null; says: Slot; choices: Slot[]; sets: Slot[] };
   /** A meter: its scale. */
@@ -143,8 +144,15 @@ export interface PartModel {
   instrument?: InstrumentModel;
 }
 
+/** A file's length, as the recording service told it (desk.sessions.recording): "3:51 long". */
+function fileDetail(kind: string, v: Json | undefined, desk: Desk): { detail?: Slot } {
+  const told = desk.sessions?.recording as { [file: string]: number } | undefined, t = kind === 'file' && typeof v === 'string' ? told?.[v] : undefined;
+  return typeof t === 'number' ? { detail: msg('file.long', { t: mmss(t) }) } : {};
+}
+
 /** A state a node names, as a part draws it. */
-export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot }
+/** `detail`: a file's length, when the page was told it (a recording given to Continue from recording: package 3c). */
+export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot; detail?: Slot }
 
 
 /** A parameter on the desk as a part draws it. */
@@ -205,7 +213,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   const m: PartModel = {
     part: node.part, tier: desk.tier, engine: desk.engine, surface, opts, words, params,
     reads: (node.reads ?? []).map(k => readModel(ix, k, desk)),
-    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: a.ring.join(' ') } : {}) } : {}), ...(a.do === 'bespoke' ? { name: a.name } : {}) })) : [],
+    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: a.ring.join(' ') } : {}) } : {}), ...(a.do === 'bespoke' ? { name: a.name } : {}), ...(a.do === 'auto' ? { auto: a.param } : {}) })) : [],
     dim: key ? dimOf(ix, node, desk, key) : null,
     small: !!cell?.small || opts.small === true,
     ...(label !== undefined ? { label } : {}), ...(cell?.aria ?? label) !== undefined ? { aria: (cell?.aria ?? label)! } : {}, ...(title !== undefined ? { title } : {}),
@@ -228,7 +236,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (ro) m.readout = ro;
   const ins = instrumentModel(ix, node, desk, key);
   if (ins) m.instrument = ins;
-  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun }; });
+  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun, ...fileDetail(hit.s.kind, stateOf(ix, k, desk), desk) }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
@@ -335,7 +343,9 @@ export function tileModel(ix: Index, d: ModuleDef, desk: Desk): TileModel {
   if (size.stretch && !unsup && !strip) attrs['data-stretch'] = String(size.stretch);
   if (strip && !unsup) attrs['data-span'] = '';
   const parent = d.labUnder ? ix.defs.find(x => x.id === d.labUnder) : undefined;
-  const a = strip || unsup ? null : alsoSet(ix, d, desk);
+  /* a strip says what is set at another tier too, as the concept's every tile does (E-25: Build by section's strip at
+     Quick names Studio) */
+  const a = unsup ? null : alsoSet(ix, d, desk);
   const s = strip ? stripWords(ix, `create.${d.id}.strip`, strip, desk) : null;
   return {
     id: d.id, cls: `tile ${w} ${d.labUnder ? 'labmod' : ''} ${unsup ? 'unsup' : ''}`, attrs,

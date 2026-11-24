@@ -30,3 +30,6 @@ export * from './derive/fields.ts';
 export * from './derive/logs.ts';
 export * from './derive/cartridges.ts';
 export * from './derive/generate.ts';
+export * from './derive/build.ts';
+export * from './derive/recording.ts';
+export * from './derive/score.ts';

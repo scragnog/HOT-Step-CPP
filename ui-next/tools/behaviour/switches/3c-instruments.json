@@ -1,0 +1,287 @@
+{
+ "about": "Package 3c's features (Build by section, Continue from recording, the Lead sheet and its preview, the Flow renderer's row, a strip's Also set line), each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+ "switches": [
+  {
+   "feature": "3c plan lands",
+   "file": "src/app/parts/Build.tsx",
+   "find": "    void buildSession.plan(m.plan.sections).then(r => { v.act('planned', r); });",
+   "replace": "    void buildSession.plan(m.plan.sections).then(r => { void r; });"
+  },
+  {
+   "feature": "3c plan focus",
+   "file": "src/app/parts/Build.tsx",
+   "find": "      if (!a || a === document.body || a.closest?.('.tile') === box.closest('.tile')) box.querySelector<HTMLElement>('[data-btake]')?.focus({ preventScroll: true });",
+   "replace": "      if (!a || a === document.body || a.closest?.('.tile') === box.closest('.tile')) void 0;"
+  },
+  {
+   "feature": "3c takes asked",
+   "file": "src/app/parts/Build.tsx",
+   "find": "          <button type=\"button\" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake=\"\" onClick={() => { keep('[data-btake]'); buildSession.takes(session, cur.make.ask.section, cur.make.ask.words, cur.make.ask.n, cur.make.ask.ownChords); }}>{say(cur.make.label)}</button>",
+   "replace": "          <button type=\"button\" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake=\"\" onClick={() => { keep('[data-btake]');  }}>{say(cur.make.label)}</button>"
+  },
+  {
+   "feature": "3c section looked",
+   "file": "src/app/parts/Build.tsx",
+   "find": "  useEffect(() => { if (sess && curId && looked !== curId) buildSession.look(sess, curId); }, [sess, curId, looked]);",
+   "replace": "  useEffect(() => { if (sess && curId && looked !== curId) void looked; }, [sess, curId, looked]);"
+  },
+  {
+   "feature": "3c take play",
+   "file": "src/app/parts/Build.tsx",
+   "find": "  const toggle = (take: string, dur: number) => { setPos(0); setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };",
+   "replace": "  const toggle = (take: string, dur: number) => { setPos(0); void ((p: Playing | null) => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };"
+  },
+  {
+   "feature": "3c play kept",
+   "file": "src/app/parts/Build.tsx",
+   "find": "  const playKept = () => { setPos(0); setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };",
+   "replace": "  const playKept = () => { setPos(0); void ((p: Playing | null) => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };"
+  },
+  {
+   "feature": "3c render asked",
+   "file": "src/app/parts/Build.tsx",
+   "find": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });",
+   "replace": "    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); void r; });"
+  },
+  {
+   "feature": "3c library songs",
+   "file": "src/app/store/build.ts",
+   "find": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));",
+   "replace": "  const add = songs.filter(x => false), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));"
+  },
+  {
+   "feature": "3c library withdraws",
+   "file": "src/app/store/build.ts",
+   "find": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => x.withdrawn).map(x => x.id));",
+   "replace": "  const add = songs.filter(x => !x.withdrawn && !have.has(x.id)), gone = new Set(songs.filter(x => !x).map(x => x.id));"
+  },
+  {
+   "feature": "3c keep",
+   "file": "src/derive/build.ts",
+   "find": "  keep: x => {",
+   "replace": "  keep: x => { if (x) return false;"
+  },
+  {
+   "feature": "3c discard",
+   "file": "src/derive/build.ts",
+   "find": "  discard: x => {",
+   "replace": "  discard: x => { if (x) return false;"
+  },
+  {
+   "feature": "3c keep building",
+   "file": "src/derive/build.ts",
+   "find": "  relyric: x => {",
+   "replace": "  relyric: x => { if (x) return false;"
+  },
+  {
+   "feature": "3c render",
+   "file": "src/derive/build.ts",
+   "find": "  rendered: x => {",
+   "replace": "  rendered: x => { if (x) return false;"
+  },
+  {
+   "feature": "3c new build",
+   "file": "src/derive/build.ts",
+   "find": "  reset: x => {",
+   "replace": "  reset: x => { if (x) return false;"
+  },
+  {
+   "feature": "3c stale keep",
+   "file": "src/derive/build.ts",
+   "find": "const staleKeep = (b: Built, s: BuildSection) => { const t = keptTake(b, s.id); return !!t && t.words !== s.words; };",
+   "replace": "const staleKeep = (b: Built, s: BuildSection) => { const t = keptTake(b, s.id); return !!t && !s; };"
+  },
+  {
+   "feature": "3c drift",
+   "file": "src/derive/build.ts",
+   "find": "    drift: b.planned && (d.changed || nStale) ? { text: msg('build.drift', { lost: d.lost, stale: nStale, added: d.added }), goon: d.changed } : null,",
+   "replace": "    drift: false ? { text: msg('build.drift', { lost: d.lost, stale: nStale, added: d.added }), goon: d.changed } : null,"
+  },
+  {
+   "feature": "3c replan cost",
+   "file": "src/derive/build.ts",
+   "find": "    replanTip: msg('build.replan.tip', { seed, takes: cost.takes }),",
+   "replace": "    replanTip: msg('build.replan.tip', { seed, takes: 0 }),"
+  },
+  {
+   "feature": "3c make label",
+   "file": "src/derive/build.ts",
+   "find": "      make: { label: takes.length ? msg('build.more') : msg('build.make', { n }), primary: !takes.length, ask: { section: cur.id, words: cur.words, n, ownChords } },",
+   "replace": "      make: { label: takes.length ? msg('build.more') : msg('build.make', { n: 2 }), primary: !takes.length, ask: { section: cur.id, words: cur.words, n, ownChords } },"
+  },
+  {
+   "feature": "3c locks",
+   "file": "src/derive/build.ts",
+   "find": "  const lockKeys = b.planned && Object.keys(b.kept).length ? (node.children ?? []).map((c, at) => ({ at, k: [c.param, ...(c.children ?? []).map(g => g.param)].find(k => !!k && (k === b.k.cond || k === b.k.bar) && has(ix, k, desk.engine)) })).filter((x): x is { at: number; k: string } => !!x.k && nodeShown(ix, node.children![x.at]!, desk)) : [];",
+   "replace": "  const lockKeys = false ? (node.children ?? []).map((c, at) => ({ at, k: [c.param, ...(c.children ?? []).map(g => g.param)].find(k => !!k && (k === b.k.cond || k === b.k.bar) && has(ix, k, desk.engine)) })).filter((x): x is { at: number; k: string } => !!x.k && nodeShown(ix, node.children![x.at]!, desk)) : [];"
+  },
+  {
+   "feature": "3c settings tier",
+   "file": "src/derive/build.ts",
+   "find": "    ctl: (node.children ?? []).some(c => nodeShown(ix, c, desk)),",
+   "replace": "    ctl: true,"
+  },
+  {
+   "feature": "3c span keys",
+   "file": "src/derive/recording.ts",
+   "find": "    const k = how.key, dir = k === 'ArrowRight' || k === 'ArrowUp' ? 1 : k === 'ArrowLeft' || k === 'ArrowDown' ? -1 : 0;",
+   "replace": "    const k = 'x', dir = k === 'ArrowRight' || k === 'ArrowUp' ? 1 : k === 'ArrowLeft' || k === 'ArrowDown' ? -1 : 0;"
+  },
+  {
+   "feature": "3c span drag",
+   "file": "src/derive/recording.ts",
+   "find": "  if (how.mode === 'move') { const len = z0 - a0, na = clamp(a0 + t - sec(how.t0), 0, dur - len); return [na, na + len]; }",
+   "replace": "  if (how.mode === 'move') { return [a, z]; const len = z0 - a0, na = clamp(a0 + t - sec(how.t0), 0, dur - len); return [na, na + len]; }"
+  },
+  {
+   "feature": "3c span reset",
+   "file": "src/derive/recording.ts",
+   "find": "  if (how.reset) return [0, Math.min(SPAN_FIRST, dur)];",
+   "replace": "  if (how.reset) return null;"
+  },
+  {
+   "feature": "3c span ruler",
+   "file": "src/derive/recording.ts",
+   "find": "  for (let t = 0; t < dur - st * 0.4; t += st) at.push(t);",
+   "replace": "  for (let t = 0; t < dur - st * 0.4; t += st * 2) at.push(t);"
+  },
+  {
+   "feature": "3c span focus",
+   "file": "src/app/parts/Recording.tsx",
+   "find": "  useEffect(() => { if (file && file !== was.current) wave.current?.focus({ preventScroll: true }); was.current = file; }, [file]);",
+   "replace": "  useEffect(() => { if (file && file !== was.current)  was.current = file; }, [file]);"
+  },
+  {
+   "feature": "3c span play",
+   "file": "src/app/parts/Recording.tsx",
+   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>",
+   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>"
+  },
+  {
+   "feature": "3c span words",
+   "file": "src/derive/recording.ts",
+   "find": "    text: msg('span.text', { a: mmss(a), b: mmss(z) }), cap: msg('span.cap', { a: mmss(a), b: mmss(z), n: z - a, max: SPAN_MAX }),",
+   "replace": "    text: msg('span.text', { a: mmss(a), b: mmss(z) }), cap: msg('span.cap', { a: mmss(0), b: mmss(z), n: z - a, max: SPAN_MAX }),"
+  },
+  {
+   "feature": "3c load told",
+   "file": "src/app/features/instruments-3c.ts",
+   "find": "  s.showToast({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });",
+   "replace": "  void ({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });"
+  },
+  {
+   "feature": "3c file length",
+   "file": "src/derive/models.ts",
+   "find": "  return typeof t === 'number' ? { detail: msg('file.long', { t: mmss(t) }) } : {};",
+   "replace": "  return false ? { detail: msg('file.long', { t: mmss(t) }) } : {};"
+  },
+  {
+   "feature": "3c badge",
+   "file": "src/app/parts/readouts.tsx",
+   "find": "  if (v.opts.look === 'badge') return <span className=\"lbl\"><b className=\"exp\" tabIndex={0} title={tip}>{text}</b>{v.words.after ? ` ${say(v.words.after)}` : null}</span>;",
+   "replace": "  if (v.opts.look === 'badge-off') return <span className=\"lbl\"><b className=\"exp\" tabIndex={0} title={tip}>{text}</b>{v.words.after ? ` ${say(v.words.after)}` : null}</span>;"
+  },
+  {
+   "feature": "3c abc offers",
+   "file": "src/derive/score.ts",
+   "find": "  if (!n && none) return { show: [...at('example'), ...at('set')], preview: msg('abc.plan'), note: { text: msg('abc.none'), warn: false } };",
+   "replace": "  if (!n && none && !acts) return { show: [...at('example'), ...at('set')], preview: msg('abc.plan'), note: { text: msg('abc.none'), warn: false } };"
+  },
+  {
+   "feature": "3c abc lines",
+   "file": "src/derive/score.ts",
+   "find": "    note: n ? { text: ok ? msg('abc.lines', { n }) : msg('abc.not'), warn: !ok } : null,",
+   "replace": "    note: n ? { text: ok ? msg('abc.not') : msg('abc.not'), warn: !ok } : null,"
+  },
+  {
+   "feature": "3c abc back focus",
+   "file": "src/app/parts/Score.tsx",
+   "find": "        if (s.kind === 'back') return <button key={s.at} type=\"button\" className=\"small-btn\" data-bcot=\"\" onClick={() => { back.current = true; v.run(s.at); }}>{say(a.label)}</button>;",
+   "replace": "        if (s.kind === 'back') return <button key={s.at} type=\"button\" className=\"small-btn\" data-bcot=\"\" onClick={() => { v.run(s.at); }}>{say(a.label)}</button>;"
+  },
+  {
+   "feature": "3c preview action",
+   "file": "src/app/features/score-preview.tsx",
+   "find": "defineAction('scorePreview', () => { void open(); });",
+   "replace": "defineAction('scorePreview', () => { void 0; });"
+  },
+  {
+   "feature": "3c preview layer",
+   "file": "src/app/score/state.ts",
+   "find": "  const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); if (h && !was) layerOpen(h, { trigger, modal: true, close }); };",
+   "replace": "  const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); void was; };"
+  },
+  {
+   "feature": "3c preview focus back",
+   "file": "src/app/score/state.ts",
+   "find": "  const trigger = document.activeElement as HTMLElement | null;",
+   "replace": "  const trigger = null;"
+  },
+  {
+   "feature": "3c preview playhead",
+   "file": "src/app/features/score-preview.tsx",
+   "find": "      setAt({ x, y: p.y, si: p.si, row: p.row });",
+   "replace": "      setAt({ x: 0, y: 0, si: p.si, row: p.row });"
+  },
+  {
+   "feature": "3c preview trail",
+   "file": "src/app/features/score-preview.tsx",
+   "find": "            <button key={i} type=\"button\" className={at?.si === i ? 'cur' : undefined} data-scoresec={i} style={{ '--c': o.colour } as CSSProperties} title={say(o.tip)} onClick={() => { const b = score.meas.findIndex(mm => mm.si === i); if (b >= 0) p.play(b); }}>{o.name}</button>])}",
+   "replace": "            <button key={i} type=\"button\" className={at?.si === i ? 'cur' : undefined} data-scoresec={i} style={{ '--c': o.colour } as CSSProperties} title={say(o.tip)} onClick={() => { const b = score.meas.findIndex(mm => mm.si === i); if (b >= 0) p.play(0); }}>{o.name}</button>])}"
+  },
+  {
+   "feature": "3c pasted preview",
+   "file": "src/app/score/state.ts",
+   "find": "  if (ask.abc && seed === undefined) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }",
+   "replace": "  if (ask.abc && seed === -1) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }"
+  },
+  {
+   "feature": "3c runaway drawn",
+   "file": "src/derive/score.ts",
+   "find": "    const solid = run && last ? end - 26 : end;",
+   "replace": "    const solid = false ? end - 26 : end;"
+  },
+  {
+   "feature": "3c ctl-row",
+   "file": "src/app/parts/containers.tsx",
+   "find": "  if (what === 'segmented' && (v.kids ?? []).slice(1).length && (v.kids ?? []).slice(1).every(k => k.part === 'note')) {",
+   "replace": "  if (what === 'segmented-off' && (v.kids ?? []).slice(1).length && (v.kids ?? []).slice(1).every(k => k.part === 'note')) {"
+  },
+  {
+   "feature": "3c auto link hook",
+   "file": "src/app/parts/readouts.tsx",
+   "find": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>",
+   "replace": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>"
+  },
+  {
+   "feature": "3c flow row",
+   "file": "src/app/parts/containers.tsx",
+   "find": "  if (kids.length === 2 && kids[0]!.part === 'row' && kids[1]!.part === 'rack') return <div className=\"flow-row\">{v.children}</div>;",
+   "replace": "  if (kids.length === 2 && kids[0]!.part === 'row' && kids[1]!.part === 'rack-off') return <div className=\"flow-row\">{v.children}</div>;"
+  },
+  {
+   "feature": "3c strip also",
+   "file": "src/derive/models.ts",
+   "find": "  const a = unsup ? null : alsoSet(ix, d, desk);",
+   "replace": "  const a = unsup || strip ? null : alsoSet(ix, d, desk);"
+  },
+  {
+   "feature": "3c also tier",
+   "file": "src/derive/tiers.ts",
+   "find": "  const studio = editsHere('studio', false);",
+   "replace": "  const studio = editsHere('studio');"
+  },
+  {
+   "feature": "3c sheet stays",
+   "file": "src/derive/desk.ts",
+   "find": "  if (spec?.kind === 'control' && !at.dim && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;",
+   "replace": "  if (spec?.kind === 'control' && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;"
+  },
+  {
+   "feature": "3c sessions told",
+   "file": "src/app/store/build.ts",
+   "find": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, build, recording } } });",
+   "replace": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, recording } } });"
+  }
+ ]
+}

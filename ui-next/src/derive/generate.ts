@@ -16,6 +16,7 @@ import { defName, stepName } from './steps.ts';
 import { tileAtTier, usedHere, parkedOn } from './desk.ts';
 import { vramNeed } from './vram.ts';
 import type { SourceSong } from './instruments.ts';
+import { cleanBuild } from './build.ts';
 import { switchEngine, type EngineBook } from './engine.ts';
 import { boxA, exampleText, expandWild } from './fields.ts';
 import { boxWordOf } from './workflows.ts';
@@ -55,15 +56,17 @@ export type Refusal =
   | { kind: 'clash'; says: Msg }
   | { kind: 'wontFit'; says: Msg; fits: number };
 
-export function refusalOf(ix: Index, desk: Desk): Refusal | null {
+/** `scoreChosen`: the run renders a score the preview showed (its seed), so it is not previewed again (package 3c). */
+export function refusalOf(ix: Index, desk: Desk, o: { scoreChosen?: boolean } = {}): Refusal | null {
   const e = desk.engine, src = repaintSource(ix, desk), typed = str(val(ix, K.prompt, desk)).trim();
   if (!src && !typed) {
     const lyr = has(ix, K.lyrics, e) && str(val(ix, K.lyrics, desk)).trim(), needStyle = e !== 'ace';
     if (needStyle || (!lyr && val(ix, K.instr, desk) !== true)) return { kind: 'empty', says: needStyle ? msg('gen.needs', { engine: engineName(e), box: boxA(desk) }) : msg('gen.needs.ace'), example: exampleText(e) };
   }
-  if (on(ix, K.preview, desk) && !str(val(ix, K.abc, desk)).trim() && !src) return { kind: 'score' };
-  const build = stateOf(ix, S.build, desk) as { planned?: unknown } | undefined;
-  if (stateOf(ix, S.cont, desk) && modOn(ix, 'build', desk) && build?.planned) return { kind: 'clash', says: msg('gen.clash') };
+  if (!o.scoreChosen && on(ix, K.preview, desk) && !str(val(ix, K.abc, desk)).trim() && !src) return { kind: 'score' };
+  /* a build is planned while its record names a session (derive/build.ts, package 3c) */
+  const build = stateOf(ix, S.build, desk);
+  if (stateOf(ix, S.cont, desk) && modOn(ix, 'build', desk) && build && cleanBuild(build).session) return { kind: 'clash', says: msg('gen.clash') };
   const n = takesOf(ix, desk), v = vramNeed(ix, desk, n);
   if (v.refuses) return { kind: 'wontFit', says: msg('gen.blocked', { need: v.need.toFixed(1), card: cardText(v.card), fits: lineFits(ix, desk) }), fits: lineFits(ix, desk) };
   return null;

@@ -419,7 +419,10 @@ export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: s
   if (!f) throw new Error(`${node.part} has no act "${name}"`);
   return f({ ix, node, v, desk, arg, tell }) !== false;
 }
-export type Tell = (m: Msg, undo?: boolean) => void;
+/** `undo`: the toast offers to undo the step just taken; 'say': it is said in the live region only, as the concept's say()
+ *  (package 3c). */
+export type Tell = (m: Msg, undo?: boolean | 'say') => void;
+type Acts = { [name: string]: (x: ActIn) => boolean | void };
 export interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
 
 /** Sets the seed and its lock in one step (the seed state's `set`): a number kept, or null for random. */
@@ -434,7 +437,7 @@ function seedList(x: ActIn): { key: string; list: SavedSeed[] } | null {
   return key && x.v.state[key] ? { key, list: cleanSeeds(x.v.state[key]!.value) } : null;
 }
 
-const ACTS: { [part: string]: { [name: string]: (x: ActIn) => boolean | void } } = {
+const ACTS: { [part: string]: Acts } = {
   keyWheel: {
     /* a key on the wheel, from the value in force */
     walk: x => {
@@ -512,7 +515,9 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => boolean | void } }
 
 /* ---------------------------------------------------------------- instruments a core file of its own adds
    A package's core file draws its own parts and works out their hands, and adds them here when it is loaded
-   (derive.ts loads it): derive/cartridges.ts, the Adapters' cartridges and the XY pad's off rail. */
+   (derive.ts loads it): derive/cartridges.ts, the Adapters' cartridges and the XY pad's off rail (package 3b);
+   derive/build.ts, recording.ts and score.ts, Build by section, Continue from recording and the ABC foot (package 3c).
+   Each adds its model's field to InstrumentModel by declaring it (declare module './instruments.ts'). */
 
 /** Adds a part's drawing (instrumentModel) and the hands it takes (partAct). */
 export function defineInstrument(part: string, draw?: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel, acts?: { [name: string]: (x: ActIn) => boolean | void }): void {

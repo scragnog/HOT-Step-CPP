@@ -1,0 +1,22 @@
+/* Package 3c: what the concept never drew on Build by section, Continue from recording and the lead-sheet preview.
+   Everything else is the concept's own (25-module-build.css, 25-module-cont.css, 25-module-score.css,
+   30-score-modal.css), which the parts' markup takes unchanged. */
+
+/* Play kept (E-46) and the recording's play button (E-47): the glyph beside its words, as the preview's Play */
+.b-foot [data-bplaykept], .cw-play { display: inline-flex; align-items: center; gap: 5px; }
+/* the section whose keep is playing: at full strength, its whole chip lit (no edge mark) */
+.b-src button.playing { opacity: 1; background: var(--c); box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 45%, transparent); }
+/* the recording's play button stands at the end of its caption line */
+.tile[data-m="cont"] .cap { align-items: center; }
+.tile[data-m="cont"] .cw-play { height: 20px; margin: -2px 0; padding: 0 8px; font: 11px var(--body); }
+/* the playhead across the chosen part, on the same track as the selection */
+.cw-head { position: absolute; top: 2px; bottom: 2px; left: calc(10px + (100% - 20px) * var(--p) / 100); width: 2px; margin-left: -1px; border-radius: 1px; background: #fff; pointer-events: none; }
+/* standards mode: the preview's seed line under its title is a line of its own font, as the concept's quirks-mode page
+   draws it (a span after a heading would take the body's taller line) */
+.sc-head > div > .sc-meta { display: block; }
+/* standards mode: the lead sheet's paper is as tall as its textarea (an inline textarea would leave a descender's gap
+   under it that the concept's quirks-mode page does not have) */
+.staffpad > textarea { display: block; }
+/* standards mode: the Experimental badge's line is as tall as the badge (and its words after it), as in the concept's
+   quirks-mode page */
+.lbl:has(> .exp) { display: flex; flex-wrap: wrap; align-items: baseline; }

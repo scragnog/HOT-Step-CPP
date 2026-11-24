@@ -28,7 +28,7 @@ export function ping(els: Element[]): void {
 /** A press of Generate (or Ctrl+Enter): a refusal is said, with its way out; otherwise the run starts and its first
  *  card comes into sight if it is not (the page moves only as far as it needs to, G-M-06). */
 export function generate(o: { seed?: number } = {}): boolean {
-  const s = useDesk.getState(), r = refusalOf(ix, s.desk);
+  const s = useDesk.getState(), r = refusalOf(ix, s.desk, { scoreChosen: o.seed !== undefined });
   if (r?.kind === 'empty') {
     s.showToast({ text: r.says, action: { label: ui('gen.example'), run: () => { setValue('prompt.text', r.example); focus('#prompt'); } } });
     focus('#prompt'); return false;

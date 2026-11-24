@@ -28,13 +28,6 @@
    "field": "^sem:data-dim$",
    "n": 1,
    "why": "With the planner off How adventurous stands back by its own mark (data-dim, styles/rebuild/25-planner.css: package 3b) where the concept fades it from the Planner tile's lm-off class: the same opacity and words."
-  },
-  {
-   "state": "^controls-build-tokens",
-   "key": "\\.tok",
-   "field": "^(font-size|line-height)$",
-   "n": 8,
-   "why": "A token takes the type of the row it stands in; the concept's Build foot is Build's own row (14px), here the shared tile foot (13px), the Build module's package's to match."
   }
  ]
 }

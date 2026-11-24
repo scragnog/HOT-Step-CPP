@@ -289,7 +289,7 @@ export const PARTS = {
   note: {
     kind: 'readout', css: ['01-base.css', '15-controls.css'],
     doc: 'A quiet line of words: a hint, why something is off, what another module changes. Its actions follow as links.',
-    opts: { look: { type: ['plain', 'warn', 'cap', 'hint'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
+    opts: { after: { type: 'text', doc: 'badge: the words after the badge, on its line.' }, look: { type: ['plain', 'warn', 'cap', 'hint', 'badge'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
   },
   link: {
     kind: 'readout', css: ['14-buttons.css'],
@@ -416,6 +416,7 @@ export const PARTS = {
   },
   abcFoot: {
     kind: 'bespoke', reads: ['text', 'choice'], css: ['25-module-score.css'],
+    opts: { chords: { type: 'text', doc: 'The plan mode (its second read) at which the planner writes chord symbols over the melody.' } },
     doc: 'The lead sheet\'s foot: whether the text it reads is ABC, how many lines, and its actions as they apply (Insert example, Preview this score or Plan and preview a score, the way back when the planner writes nothing).',
     responsible: 'Recognising ABC (a K: line and bars) and counting lines, and choosing which of its node\'s actions apply. It edits nothing itself.',
   },
@@ -433,6 +434,7 @@ export const PARTS = {
   },
   buildBoard: {
     kind: 'bespoke', state: ['record'], reads: ['text', 'choice'], steps: ['plan', 'replan', 'relyric', 'keep', 'unkeep', 'discard', 'render', 'reset'], css: ['25-module-build.css'],
+    opts: { ownChords: { type: 'text', doc: 'The section mode (its fourth read) at which each take gets chords and a melody of its own; at any other, every take follows the score.' } },
     doc: 'Build by section: the planned sections as columns, takes under each, keep one, render the song.',
     responsible: 'Showing its record state (planned score, takes per section, keeps, the render) and its drift against the lyrics it reads, and talking to the build session API. Every change is the record state\'s step of that name.',
   },

@@ -95,12 +95,6 @@
   },
   {
    "derivation": "also set",
-   "match": "yue2 quick build .*→ studio",
-   "why": "Page fault: the link is chosen by finding the key's name in the Studio face's text, where Build by section names the takes and section mode without drawing them; Studio does not show them, so the definitions send the link to Lab.",
-   "n": 3
-  },
-  {
-   "derivation": "also set",
    "match": "quick post .*→ lab \\| core .*→ studio",
    "why": "The page looks for a pedal's settings in the Pedalboard's own Studio face, which holds no pedals, so it always sends the link to Lab. At Studio every pedal shows its main knob and switch, so when those are all that is hidden the definitions send it to Studio.",
    "n": 5

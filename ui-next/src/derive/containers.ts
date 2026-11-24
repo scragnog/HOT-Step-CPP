@@ -28,6 +28,8 @@ export interface KidModel {
   keys: string[];
   /** A choice it edits is run at another value meanwhile (ParamFace.forced): its pairing is marked forced. */
   forced?: true;
+  /** Its look, where its node gives one (a warning note: package 3c's lyric-timing line). */
+  look?: string;
 }
 
 /** A container's children on the desk, in the order the renderer draws them. `node` is the container's node as the
@@ -44,6 +46,7 @@ export function kidsOf(ix: Index, node: Node, desk: Desk, key: string): KidModel
       extra: !!c.tiers && (!node.tiers || node.tiers.some(t => !c.tiers!.includes(t))),
       keys: at ? [...editsOf(at), ...(at.children ?? []).flatMap(g => editsOf(g))].filter(x => has(ix, x, desk.engine)) : [],
       ...(at && [...editsOf(at), ...(at.children ?? []).flatMap(g => editsOf(g))].some(x => forcedOf(ix, x, desk)) ? { forced: true as const } : {}),
+      ...(typeof (c.opts as { look?: unknown } | undefined)?.look === 'string' ? { look: (c.opts as { look: string }).look } : {}),
     };
   });
 }
