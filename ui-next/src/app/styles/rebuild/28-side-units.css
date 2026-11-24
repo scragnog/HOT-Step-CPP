@@ -3,9 +3,9 @@
    rule against one-sided edges). */
 .u-lip button:focus-visible { outline-offset: -2px; }
 /* A side unit's text field (Cover art's subject at Lab, laid out by rule) takes the room its row has, up to its
-   placeholder's width (236px: 30 characters of the LCD font), where the LCD picker's 150px cut it short (RD-17); it shrinks rather than wrapping under the
-   unit's drawing, so the unit keeps the concept's height. */
-.board .xunit .u-ctls:has(> .lcdsel > .lcd-input) { flex-wrap: nowrap; width: 100%; justify-content: center; }
-.board .xunit .u-ctls .lcdsel:has(> .lcd-input) { flex: 0 1 236px; max-width: 236px; }
-.board .xunit .u-ctls:has(> .lcdsel > .lcd-input) > :not(.lcdsel) { flex: none; }
+   placeholder's width (236px: 30 characters of the LCD font), where the LCD picker's 150px cut it short (RD-17).
+   Beside the unit's drawing alone it shrinks rather than wrapping under it, so the unit keeps the concept's height. */
+.board .xunit .u-ctls:has(> .lcdsel > .lcd-input):not(:has(> :nth-child(3))) { flex-wrap: nowrap; width: 100%; justify-content: center; }
+.board .xunit .u-ctls:has(> .lcdsel > .lcd-input):not(:has(> :nth-child(3))) > .lcdsel { flex: 0 1 236px; max-width: 236px; }
+.board .xunit .u-ctls:has(> .lcdsel > .lcd-input):not(:has(> :nth-child(3))) > :not(.lcdsel) { flex: none; }
 .xunit .lcdsel .lcd-input { width: 100%; }
