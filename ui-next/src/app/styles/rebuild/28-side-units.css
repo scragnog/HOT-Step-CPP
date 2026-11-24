@@ -2,8 +2,10 @@
    drawn inside the button, so it shows whole rather than as a red line along its bottom edge (RD-15; the owner's
    rule against one-sided edges). */
 .u-lip button:focus-visible { outline-offset: -2px; }
-/* A side unit's text field (Cover art's subject at Lab, laid out by rule) is wide enough for its placeholder, which the
-   LCD picker's 150px cut short (RD-17); its selector may be that wide, and it never passes the unit (max-width in
-   15-lcd.css). */
-.xunit .lcdsel:has(> .lcd-input) { max-width: 260px; }
-.xunit .lcdsel .lcd-input { width: calc(30ch + 20px); }
+/* A side unit's text field (Cover art's subject at Lab, laid out by rule) takes the room its row has, up to its
+   placeholder's width (236px: 30 characters of the LCD font), where the LCD picker's 150px cut it short (RD-17); it shrinks rather than wrapping under the
+   unit's drawing, so the unit keeps the concept's height. */
+.board .xunit .u-ctls:has(> .lcdsel > .lcd-input) { flex-wrap: nowrap; width: 100%; justify-content: center; }
+.board .xunit .u-ctls .lcdsel:has(> .lcd-input) { flex: 0 1 236px; max-width: 236px; }
+.board .xunit .u-ctls:has(> .lcdsel > .lcd-input) > :not(.lcdsel) { flex: none; }
+.xunit .lcdsel .lcd-input { width: 100%; }

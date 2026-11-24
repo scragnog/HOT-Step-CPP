@@ -142,7 +142,7 @@
   {
    "feature": "fix-desk: a unit's text field holds its words",
    "file": "src/app/styles/rebuild/28-side-units.css",
-   "find": ".xunit .lcdsel .lcd-input { width: calc(30ch + 20px); }",
+   "find": ".board .xunit .u-ctls .lcdsel:has(> .lcd-input) { flex: 0 1 236px; max-width: 236px; }",
    "replace": ""
   }
  ]

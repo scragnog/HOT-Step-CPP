@@ -354,8 +354,10 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   holds), `Desk.lists` entries' `kind`; a fader's `name` and `tape` (`ControlModel.fader`: "Self-Attn strength", its
   short tape carrying the full name, V-01); a bespoke part that holds children it places itself is given their `kids`;
   a state's named step may say its own `{from}` and `{to}` (a phase window's span).
-- `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
-  words, so adding a module no one has put on the desk renames nothing (SL-13).
+- `derive/steps.ts stepName`: a module's parameter is named with its owner when another parameter **on the desk** prints
+  the same words, so adding a module no one has put on the desk renames nothing (SL-13). A pedal's or side unit's is
+  counted as the concept counts it, among every definition on every engine, so a generic knob on the board ("Mix") always
+  says whose it is (the fix round's RD-11); an owner whose name already ends with the label is said once (RD-18).
 - `derive/workflows.ts` (package 7): the user's saved work. One rule for names (`normName`, `nameKey`, `sameName`: NFC,
   trimmed, a run of white space as one, any capitals; F-02, F-10) and the clashes it decides (`wfNameClash`,
   `revNameClash`, `saveCheck`); the lists as pure operations by name (`putWorkflow`, `dropWorkflow`, `putRevision`,
@@ -610,6 +612,20 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
 `#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
 `kit/glyphs.tsx` holds three more icons (play, stop, the padlock) in a file of its own.
 
+- The desk's fix round (review r1's RD- findings and RA-23, `notes` of the round): `derive/desk.ts nodeShown` keeps a
+  control with a `dim` only while the dim's condition holds (RD-02) and draws a bespoke housing that binds and reads
+  nothing only while a child is drawn (RD-04); `leavesWith` (a source module's state leaves the desk with it: removed or
+  left behind on an engine switch, RA-23); `tileModel` gives a source module the `source` class (RD-09) and a strip the
+  held note of its own values (`TileModel.strip.held`, RD-03). `derive/engine.ts heldNote` reads the book's holds from
+  the desk (`Desk.told.hold`, told by `features/held.ts`), and `ParamModel.held` carries it to the reels and the length
+  ruler (RD-03). `StateModel.wave` and the dropZone's `wave` option (RD-05); the note's `plugin` look and `head`, and its
+  `after` on the `cap` look (RD-06, RD-10); the textField's `placeholder` (RD-18). `derive/parts.ts`: a setting that
+  leaves the value in force is no step (RD-14). `strings.ts stepFromTo`: a state step that says its value before and
+  after is undone "back to" it (RD-13). `derive/score.ts scoreAsk` reads the lead sheet on the engine whether or not it
+  is on the desk (the planner's own "score preview"). The validator refuses a strip that keeps its width but not at
+  Quick (RD-04). Tested by `tools/behaviour/scenarios/37-fix-desk.mjs`, `acceptance/fix-desk.json`,
+  `switches/fix-desk.json`.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and
@@ -757,9 +773,10 @@ Package 11's (the Concept notes and the engine log):
 43. **The empty Adapters tile is its definition's strip**, drawn by the tile: its buttons run the named actions and carry
     none of the concept's hooks (`data-cartadd`, `data-plannerpick` on the strip; deviation 10). The cartridges' own
     buttons keep them.
-44. **A phase window's and a section mask's steps** are named as the concept names them (L-01, L-09), and their Undo and
-    Redo toasts say that name; the concept's said "… back to 0–100%". Several masks painted in one drag join their
-    files in the core's English ("Section masks of a and b").
+44. **A phase window's and a section mask's steps** are named as the concept names them (L-01, L-09). Several masks
+    painted in one drag join their files in the core's English ("Section masks of a and b"). (Their Undo and Redo toasts
+    now say "… back to 0–100%" as the concept's do: every state step that says its value before and after is undone
+    "back to" it, the fix round's RD-13.)
 45. **Apply as while runtime is forced** is the definition's `forced` (ParamFace): the segmented choice draws it,
     wherever a choice has one; what is sent does not change (the server forces runtime itself).
 46. **The LED switch carries its parameter's tip** wherever it has one (E-17: the plans' Endings); the concept wrote
@@ -845,6 +862,18 @@ Package 3c's:
   paint, B-09); the lyric-timing line warns, in the warning's ink, with Set CFG to auto.
 - P3c-10. **A tile that is a strip says what is set at another tier** (its Also set line), as every tile of the concept's
   does; the slice left it out on strips.
+
+The desk's fix round's (numbered FD- so that the round's three shares do not collide):
+
+- FD-1. **A setting that leaves the value in force is no step** (RD-14): a key pressed at the end of a range, End at the
+  end. The concept records "Mix 100% → 100%".
+- FD-2. **A side unit's lip buttons draw their keyboard ring inside the button** (RD-15, the owner's rule 1); the
+  concept's ring is clipped to a red line along the bottom.
+- FD-3. **"Pre-VST gain 0.0 dB → 0.5 dB"**: an owner whose name ends with the label is said once (RD-18); the concept
+  says "Pre-VST gain gain".
+- FD-4. **HeartMuLa's planner terminal at Lab ends after its sample line**: the concept draws its Lab flags block
+  (`.tparams`, a dashed rule and 9px) there empty, as HeartMuLa has no Lab tokens or flags; an empty box is not drawn
+  here (a node with nothing in it is not drawn), so HeartMuLa's Lab desks with the Planner stand 17px shorter under it.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
