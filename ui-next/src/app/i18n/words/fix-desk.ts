@@ -4,4 +4,6 @@
 export const WORDS: { [id: string]: string } = {
   /* a held count under the reels (RD-03, the concept's 25-module-takes.js) */
   'ui.takes.held.title': 'Comes back there unless you change it here',
+  /* the recent references' popover (the concept's 25-module-timbre.js) */
+  'ui.refs.all': 'Recent references',
 };

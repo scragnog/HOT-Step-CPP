@@ -80,6 +80,34 @@
   {
    "id": "37-fix-desk/side-unit-lip-focus-is-a-whole-ring",
    "why": "RD-15: a side unit's power button shows its keyboard focus as a whole ring inside it (styles/rebuild/28-side-units.css). The concept fails it (its fault)."
+  },
+  {
+   "id": "14-lab-desk/off-settings-show-at-once",
+   "why": "The Mastering pedal lending its reference with Timbre off the desk says so and offers it (L-15): the note's Add it carries the item it adds (models.ts actions' `item`, readouts.tsx), as the starters do. (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "02-dnd-panels/file-drops",
+   "why": "Clearing a drop zone's file is said with Undo (a state's `tells: ['clear']`, render/bind.ts apply); the recent references past the latest two open in the popover from \"N more…\" (the named action moreRefs, features/refs-more.tsx); the rest is 33-containers'. (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "17-undo-net/timbre-load-is-its-own-step",
+   "why": "The reference blend is a percent everywhere (Format `percent`), so its step says \"100% → 95%\"; a replaced reference is said by its title (\"Timbre reference my-track.wav → second.flac\", StateDef `title`). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "11-engines/hit-areas-go-to-the-nearer-control",
+   "why": "A click that lands on a control only through its enlarged pad goes to the control nearest the pointer (features/hit-areas.ts, the concept's 19-hit-areas.js; A-12). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "14-lab-desk/timesteps-keep-what-was-typed",
+   "why": "Custom timesteps: a typo kept and marked, and one value refused as no schedule (the check's message names both rules, L-13). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "19-desk-round5/factory-desks-leave-no-empty-desk-1920",
+   "why": "The factory workflows' desks at 1920 leave no empty desk: Seed hunter at Quick on Stable Audio 3 and HeartMuLa (RD-04) and Deep sampler on MiniMax-Music3 at Lab (RD-02). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
+  },
+  {
+   "id": "20-lab-round5/pedals-with-nothing-to-run",
+   "why": "\"set in Lab\" goes to Lab and to the reference slot: a link that rings a file rings its drop zone and puts focus in it (view.ts ringKeys, shell/tier.ts; Q-10, Q-28). (Excluded by the core round's re-reading, RA-06, for the desk share.)"
   }
  ]
 }

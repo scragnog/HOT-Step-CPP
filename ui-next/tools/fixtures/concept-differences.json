@@ -14,10 +14,11 @@
    "n": 5
   },
   {
-   "derivation": "undo step names",
+   "derivation": "also set",
    "match": "\"timbre\\.str\"",
-   "why": "The page's steps say the reference blend as a percent its knob does not show (1.00 on the knob, 100% in the step). The definitions write it one way everywhere.",
-   "n": 2
+   "why": "The reference blend is a percent everywhere, as the concept's blend, its tip and its undo steps write it (Format `percent`, the desk round); the concept's Also set line alone writes 0.95.",
+   "core": "Reference blend [0-9]+%",
+   "n": 3
   },
   {
    "derivation": "undo step names",

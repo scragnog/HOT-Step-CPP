@@ -24,7 +24,7 @@ export const latent = {
       example: '0.97, 0.76, 0.5, 0.28, 0.085, 0',
       check: {
         rule: 'timesteps',
-        message: 'Timesteps are numbers from 0 to 1, separated by commas, highest first.',
+        message: 'Give at least two timesteps: numbers from 0 to 1, separated by commas, highest first.',
         keepInvalid: 'the last valid list',
       },
       wire: 'param:customTimesteps',

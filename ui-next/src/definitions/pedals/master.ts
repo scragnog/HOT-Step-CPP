@@ -31,6 +31,8 @@ export const master = {
       role: 'reference',
       kind: 'file',
       noun: 'the mastering reference',
+      title: 'Mastering reference',
+      tells: ['clear'],
       steps: { load: 'Load {file} as the mastering reference' },
       owner: 'song',
       stored: 'none',

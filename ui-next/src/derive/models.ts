@@ -20,7 +20,7 @@ import {
   wordKey,
 } from './strings.ts';
 import { alsoLinkWords, alsoSet } from './tiers.ts';
-import { boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
+import { ringKeys, boardNodes, choiceOf, dimOf, hiddenLabModules, idleOf, rowOf, type Cell } from './view.ts';
 import { boardCount, nodeShown, parkedOn, tileAtTier, tileName, usedHere } from './desk.ts';
 import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
 import { kidsOf, type KidModel } from './containers.ts';
@@ -121,7 +121,7 @@ export interface PartModel {
   reads: ReadModel[];
   /** Its actions' words; a named action (parts.ts ACTIONS) says its name, so a part can run the one it means; `auto`, the
    *  parameter an action puts back on auto (the concept's data-auto hook, package 3c). */
-  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string; name?: string; auto?: string }[];
+  actions: { label: Slot; tip?: Slot; tier?: Tier; ring?: string; name?: string; auto?: string; item?: string }[];
   /** A Quick choice row: its label, the choice checked (null: the values match none) and what the row says. */
   row?: { label: Slot; checked: number | null; says: Slot; choices: Slot[]; sets: Slot[] };
   /** A meter: its scale. */
@@ -234,7 +234,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   const m: PartModel = {
     part: node.part, tier: desk.tier, engine: desk.engine, surface, opts, words, params,
     reads: (node.reads ?? []).map(k => readModel(ix, k, desk)),
-    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: a.ring.join(' ') } : {}) } : {}), ...(a.do === 'bespoke' ? { name: a.name } : {}), ...(a.do === 'auto' ? { auto: a.param } : {}) })) : [],
+    actions: key ? actionWords(ix, node, desk, key).map(({ action: a, label: l, tip: t }) => ({ label: l, ...(t ? { tip: t } : {}), ...(a.do === 'tier' ? { tier: a.tier, ...(a.ring ? { ring: ringKeys(ix, a.ring).join(' ') } : {}) } : {}), ...(a.do === 'bespoke' ? { name: a.name } : {}), ...(a.do === 'auto' ? { auto: a.param } : {}), ...(a.do === 'add' ? { item: a.item } : {}) })) : [],
     dim: key ? dimOf(ix, node, desk, key) : null,
     small: !!cell?.small || opts.small === true,
     ...(label !== undefined ? { label } : {}), ...(cell?.aria ?? label) !== undefined ? { aria: (cell?.aria ?? label)! } : {}, ...(title !== undefined ? { title } : {}),

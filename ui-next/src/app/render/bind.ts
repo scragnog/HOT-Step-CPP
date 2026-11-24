@@ -59,7 +59,12 @@ function actionsOf(def: Definition, node: Node, key: string) {
     check: (k: string, t: string) => checkText(ix, k, desk(), t),
     choose: (i: number) => { try { commit(applyChoice(ix, def, node, desk(), key, i)); } catch { /* the row is not shown any more */ } },
     run: (i: number) => { const a = actionWords(ix, node, desk(), key)[i]?.action; if (a) dispatch(def, a, node, from); },
-    apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => bound()?.state[k]?.apply(step, next as never, undefined, slots),
+    /* a step its state says (`tells`: a file cleared, 13-files.js) is said with what it did and Undo */
+    apply: (k: string, step: string, next: unknown, slots?: { [slot: string]: string | number }) => {
+      took = null; bound()?.state[k]?.apply(step, next as never, undefined, slots);
+      const e = took as Entry | null;
+      if (e && ix.states.get(k)?.s.tells?.includes(step)) useDesk.getState().showToast({ text: e.words.redone ?? e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });
+    },
     /* a file whose state says its load (`tells`) is said with the step's words and Undo (E-23: a recording to continue
        from); any other loads without a toast */
     load: (k: string, name: string, type: string) => {

@@ -34,7 +34,8 @@ export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean }
     keep();
     if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
     if (!o.ring?.length) return;
-    const els = o.ring.map(k => document.querySelector<HTMLElement>(k.startsWith('[') ? `#bento ${k}` : `#bento [data-ctl="${k}"], #bento [data-bind="${k}"]`)).filter((x): x is HTMLElement => !!x);
+    /* a file's field rings its drop zone, and focus goes into it (the fix round's Q-10) */
+    const els = o.ring.map(k => document.querySelector<HTMLElement>(k.startsWith('[') ? `#bento ${k}` : `#bento [data-ctl="${k}"], #bento [data-bind="${k}"]`)).filter((x): x is HTMLElement => !!x).map(el => el.closest<HTMLElement>('label.drop') ?? el);
     els.forEach(el => { el.classList.remove('ring-here'); void el.offsetWidth; el.classList.add('ring-here'); window.setTimeout(() => el.classList.remove('ring-here'), reduced() ? 1200 : 2400); });
     els[0]?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' });
     /* the link that named them is gone with the tier: focus goes to the first control it named (Q-28) */

@@ -21,7 +21,7 @@ export function RecentRefs(v: PartView) {
     <div className="refs">
       <span className="kl">{say(ui('refs.recent'))}</span>
       {shown.map(r => <button key={r} type="button" className={`pref${file.value === r ? ' on' : ''}`} data-pref={r} title={say(ui('refs.use', { file: r }))} onClick={() => use(r)}>{r}</button>)}
-      {refs.length > shown.length ? <button type="button" className="pref refs-more" data-refsmore="" aria-haspopup="dialog">{say(ui('refs.more', { n: refs.length - shown.length }))}</button> : null}
+      {refs.length > shown.length ? <button type="button" className="pref refs-more" data-refsmore="" aria-haspopup="dialog" onClick={() => v.run(0)}>{say(ui('refs.more', { n: refs.length - shown.length }))}</button> : null}
     </div>
   );
 }

@@ -51,7 +51,7 @@ export function stringsOf(d: Definition): Str[] {
   for (const p of d.params) param(`${base}.p.${dashed(p.key)}`, p);
   for (const s of d.state || []) {
     const k = `${base}.s.${dashed(s.key)}`;
-    add(`${k}.noun`, s.noun); add(`${k}.empty`, s.empty);
+    add(`${k}.noun`, s.noun); add(`${k}.empty`, s.empty); add(`${k}.title`, s.title);
     for (const [n, st] of Object.entries(s.steps || {})) { const t = typeof st === 'string' ? st : st.says; add(`${k}.step.${n}`, t); add(`${k}.step.${n}.name`, stepFromTo(t)); }
   }
   const face = 'face' in d ? d.face || [] : [];
@@ -173,9 +173,9 @@ export const optionWord = (ix: Index, key: string, desk: Desk, value: string | n
   return from === 'options' ? { id: `${base}.o.${keyPart(value)}.label${lineAt(ix, key, desk, 'options')}`, en: text } : { id: `${base}.w.${keyPart(value)}${lineAt(ix, key, desk, 'format')}`, en: text };
 };
 /** A state's noun and empty words. */
-export function stateWords(ix: Index, key: string): { noun: Msg; empty?: Msg } {
+export function stateWords(ix: Index, key: string): { noun: Msg; empty?: Msg; title?: Msg } {
   const { s, d } = ix.states.get(key)!, k = `create.${d.id}.s.${dashed(s.key)}`;
-  return { noun: { id: `${k}.noun`, en: s.noun }, ...(s.empty ? { empty: { id: `${k}.empty`, en: s.empty } } : {}) };
+  return { noun: { id: `${k}.noun`, en: s.noun }, ...(s.empty ? { empty: { id: `${k}.empty`, en: s.empty } } : {}), ...(s.title ? { title: { id: `${k}.title`, en: s.title } } : {}) };
 }
 /** A state's named step that says its value before and after ("{noun} {from} → {to}"): what it is called without
  *  them, so Undo and Redo say "… back to {from}" and "… {to}" as every value's step does (RD-13). Undefined otherwise. */

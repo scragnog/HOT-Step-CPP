@@ -250,8 +250,8 @@
   {
    "feature": "3c auto link hook",
    "file": "src/app/parts/readouts.tsx",
-   "find": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>",
-   "replace": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>"
+   "find": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} data-additem={a.item} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>",
+   "replace": "        ? <button key={i} type=\"button\" className=\"linkbtn\" data-tier={a.tier} data-ring={a.ring} data-additem={a.item} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>"
   },
   {
    "feature": "3c flow row",

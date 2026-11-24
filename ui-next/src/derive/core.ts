@@ -311,6 +311,7 @@ export function formatValue(f: ParamFace, v: Value, lists?: Desk['lists'], e?: E
   }
   const step = f.range?.[2] ?? 1;
   const dec = fm.decimals ?? (step < 0.1 ? 2 : step < 1 ? 1 : 0);
+  if (fm.percent) return `${Math.round(v * 100)}%`;
   if (fm.template) return fm.template.replace('{v}', minus(v.toFixed(dec))).replace('{s}', fm.perSecond ? seconds(v / fm.perSecond) : '');
   if (f.unit === 's') return v >= 60 ? mmss(v) : `${v.toFixed(step < 1 && v < 10 ? 1 : 0)} s`;
   return minus(v.toFixed(dec)) + (f.unit ? (f.unit === '%' ? '%' : ' ' + f.unit) : '');

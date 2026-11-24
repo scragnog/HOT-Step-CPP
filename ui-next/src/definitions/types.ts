@@ -43,6 +43,8 @@ export interface Format {
   perSecond?: number;
   /** Exact values said as words instead: 0 is "whole history", Top-P 0 is "off", false is "bypassed". */
   words?: { value: Value; text: Text }[];
+  /** A share from 0 to 1 written as a percent: the reference blend's 0.95 is "95%". */
+  percent?: true;
 }
 
 /** One option of a choice. `value` is what is stored and sent; the rest is how it reads. */
@@ -253,6 +255,9 @@ export interface StateDef {
   kind: 'file' | 'seed' | 'span' | 'slots' | 'record' | 'list';
   /** How undo and toasts name it: "the timbre reference". */
   noun: Text;
+  /** How a step that replaces it begins ("Timbre reference my-track.wav → second.flac"), where its noun would not
+   *  (13-files.js fileStep). Default: its noun. */
+  title?: Text;
   /** How an empty value reads in a step ("random" for the seed). */
   empty?: Text;
   /** Its undo steps, by the name its part uses: the part asks for a step by name and the words come from here.

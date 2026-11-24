@@ -13,7 +13,7 @@ export function ActionLinks({ v, look }: { v: PartView; look: 'link' | 'button' 
   return (
     <>
       {v.actions.map((a, i) => look === 'link'
-        ? <button key={i} type="button" className="linkbtn" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
+        ? <button key={i} type="button" className="linkbtn" data-auto={a.auto} data-tier={a.tier} data-ring={a.ring} data-additem={a.item} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>
         : <button key={i} type="button" className={look === 'term' ? 'tbtn' : 'pbtn'} title={a.tip ? say(a.tip) : undefined} onClick={() => v.run(i)}>{say(a.label)}</button>)}
     </>
   );

@@ -118,7 +118,7 @@ section(() => {
   bound().state.masterRef!.apply('load', 'ref.wav', undefined, { file: 'ref.wav' });
   ok('loading names the step for the file, in the definition\'s words', s(steps[0]!.words.label) === 'Load ref.wav as the mastering reference', s(steps[0]!.words.label));
   bound().state.masterRef!.apply('load', 'other.wav', undefined, { file: 'other.wav' });
-  ok('replacing names both files', s(steps[1]!.words.label) === 'the mastering reference: ref.wav → other.wav', s(steps[1]!.words.label));
+  ok('replacing names both files', s(steps[1]!.words.label) === 'Mastering reference ref.wav → other.wav', s(steps[1]!.words.label));
   bound().state.masterRef!.apply('clear', '');
   ok('clearing is a step a file has without saying', s(steps[2]!.words.label) === 'Clear the mastering reference' && s(steps[2]!.words.undone) === 'Put other.wav back', s(steps[2]!.words.label));
   const lent = nodes('timbre', 'dropZone')[0]!, m = partModel(ix, def('timbre'), lent, desk('ace', 'lab', ['timbre', 'post', 'master'], { 'pp.master.timbre': true }, {}, { masterRef: 'm.wav' }), keyOf('timbre', lent), 'tile')!;

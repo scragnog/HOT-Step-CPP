@@ -169,6 +169,10 @@ function fileStep(ix: Index, n: NamedStep, before: Desk, after: Desk): StepWords
   if (!hit || hit.s.kind !== 'file' || !FILE_STEPS.includes(n.step)) return null;
   const x = String(before.state[n.key] ?? ''), y = String(after.state[n.key] ?? ''), noun = stateWords(ix, n.key).noun;
   if (!y) return { label: msg('step.file.clear', { noun }), undone: msg('step.file.back', { file: x }), redone: msg('step.file.cleared', { file: x }), put: msg('step.file.putBack', { file: x }) };
+  /* a replacement is said as a value's change is, by the file's title where it has one (the concept's "Timbre
+     reference my-track.wav → second.flac"), and undone "back to" the file before */
+  const title = stateWords(ix, n.key).title;
+  if (x && title) return { label: msg('step.set', { name: title, from: x, to: y }), undone: msg('step.set.undone', { name: title, from: x }), redone: msg('step.set.redone', { name: title, to: y }), put: msg('step.file.putBack', { file: x }) };
   if (x) return { label: msg('step.file.replace', { noun, from: x, to: y }), put: msg('step.file.putBack', { file: x }) };
   const def = hit.s.steps?.load;
   if (def) return null;

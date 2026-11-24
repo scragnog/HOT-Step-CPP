@@ -658,6 +658,7 @@ export const ACTIONS = {
   promptLocked: 'Says why a caption a dataset supplies cannot be typed over.',
   insertSectionTag: 'Inserts the section tag it is given into the lyrics at a line boundary.',
   stylePresets: 'Opens Presets & genres: style presets that replace the box, and genres added to it or taken out.',
+  moreRefs: 'Opens every recent reference track in the popover; one loads it as the reference.',
 } as const;
 export type ActionName = keyof typeof ACTIONS;
 

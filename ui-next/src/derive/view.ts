@@ -102,6 +102,9 @@ export function dimOf(ix: Index, node: Node, desk: Desk, key: string): Msg | nul
 
 /** What an action does: a change to the desk (named as every step is), or something only the shell can do (go to a
  *  tier and ring controls, add a module, run a named action). */
+/** What a link to another tier rings there: a parameter by its key; a file by its drop zone, which carries its owner
+ *  (`[data-file="master"]`: the Mastering pedal's slot, Q-10, Q-28). */
+export const ringKeys = (ix: Index, keys: string[]): string[] => keys.map(k => (ix.states.get(k)?.s.kind === 'file' ? `[data-file="${ix.states.get(k)!.d.id}"]` : k));
 export type Did = { change: Change } | { go: Tier; ring: string[] } | { add: string } | { call: string };
 export function runAction(ix: Index, d: Definition, a: Action, desk: Desk, node?: Node): Did {
   const one = (vals: Change['vals'], auto: Change['auto']): Did => {
@@ -121,7 +124,7 @@ export function runAction(ix: Index, d: Definition, a: Action, desk: Desk, node?
       const key = d.params.find(p => p.type === 'text')?.key ?? roleKey(ix, 'lyrics') ?? '', text = String(valueOf(ix, key, desk) ?? '');
       return one({ [key]: `${text}${text && !text.endsWith('\n') ? '\n' : ''}${a.tag}\n` }, {});
     }
-    case 'tier': return { go: a.tier, ring: a.ring ?? [] };
+    case 'tier': return { go: a.tier, ring: ringKeys(ix, a.ring ?? []) };
     case 'add': return { add: a.item };
     case 'bespoke': return { call: a.name };
   }

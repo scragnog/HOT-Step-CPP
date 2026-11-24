@@ -20,6 +20,7 @@ export const timbre = {
       type: 'number',
       label: 'Reference blend',
       range: [0, 1, 0.05],
+      format: { percent: true },
       default: 1,
       wire: 'param:timbreReferenceStrength',
     },
@@ -30,6 +31,8 @@ export const timbre = {
       role: 'reference',
       kind: 'file',
       noun: 'the timbre reference',
+      title: 'Timbre reference',
+      tells: ['clear'],
       steps: { load: 'Load {file} as the timbre reference' },
       owner: 'song',
       stored: 'none',
@@ -45,7 +48,8 @@ export const timbre = {
     },
   ],
   face: [
-    { part: 'recentRefs', state: ['recentRefs', 'timbreFile'], tiers: ['studio', 'lab'] },
+    /* "N more…" opens the rest of them (the part draws its words: how many more) */
+    { part: 'recentRefs', state: ['recentRefs', 'timbreFile'], tiers: ['studio', 'lab'], actions: [{ do: 'bespoke', name: 'moreRefs', label: 'More recent references' }] },
     {
       part: 'dropZone',
       state: ['timbreFile'],

@@ -144,6 +144,54 @@
    "file": "src/app/styles/rebuild/28-side-units.css",
    "find": ".board .xunit .u-ctls:has(> .lcdsel > .lcd-input):not(:has(> :nth-child(3))) > .lcdsel { flex: 0 1 236px; max-width: 236px; }",
    "replace": ""
+  },
+  {
+   "feature": "fix-desk: a cleared file is said with Undo",
+   "file": "src/app/render/bind.ts",
+   "find": "if (e && ix.states.get(k)?.s.tells?.includes(step)) useDesk",
+   "replace": "if (false && e && ix.states.get(k)?.s.tells?.includes(step)) useDesk"
+  },
+  {
+   "feature": "fix-desk: N more opens the rest",
+   "file": "src/app/parts/Timbre.tsx",
+   "find": " aria-haspopup=\"dialog\" onClick={() => v.run(0)}>",
+   "replace": " aria-haspopup=\"dialog\">"
+  },
+  {
+   "feature": "fix-desk: the blend is a percent",
+   "file": "src/derive/core.ts",
+   "find": "  if (fm.percent) return `${Math.round(v * 100)}%`;\n",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a replaced file is said by its title",
+   "file": "src/derive/steps.ts",
+   "find": "  const title = stateWords(ix, n.key).title;",
+   "replace": "  const title = undefined as Msg | undefined;"
+  },
+  {
+   "feature": "fix-desk: Add it carries its item",
+   "file": "src/app/parts/readouts.tsx",
+   "find": " data-additem={a.item}",
+   "replace": ""
+  },
+  {
+   "feature": "fix-desk: a link rings a file at its drop zone",
+   "file": "src/derive/view.ts",
+   "find": "keys.map(k => (ix.states.get(k)?.s.kind === 'file' ?",
+   "replace": "keys.map(k => (false ?"
+  },
+  {
+   "feature": "fix-desk: a click in a pad goes to the nearer control",
+   "file": "src/app/features/hit-areas.ts",
+   "find": "  const to = nearestPadded(e); if (!to) return;",
+   "replace": "  const to = nearestPadded(e); if (!to || true) return;"
+  },
+  {
+   "feature": "fix-desk: one timestep is no schedule",
+   "file": "src/definitions/modules/latent.ts",
+   "find": "message: 'Give at least two timesteps: numbers from 0 to 1, separated by commas, highest first.'",
+   "replace": "message: 'Timesteps are numbers from 0 to 1, separated by commas, highest first.'"
   }
  ]
 }
