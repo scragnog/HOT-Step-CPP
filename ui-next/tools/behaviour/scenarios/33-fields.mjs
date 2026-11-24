@@ -62,6 +62,17 @@ export default [
     await t.press('Control+z');
     await t.eq('and Ctrl+Z after that goes on to the page, never putting the words back (F-06)', () => [document.querySelector('#quickLyrics [data-bind="lyrics.text"]').value, get('lyrics.text')], ['', '']);
   } },
+  { id: 'what-the-page-wrote-is-a-step-of-the-field', run: async t => {
+    await desk('studio', [])(t);
+    await t.click('#aiBtn');
+    await t.ok('Write it for me fills the lyrics it was not in', () => /Kettle on/.test(document.querySelector('.tile[data-m="lyrics"] [data-bind="lyrics.text"]').value));
+    await t.click('.tile[data-m="lyrics"] [data-bind="lyrics.text"]'); await t.press('Control+End'); await t.type('!');
+    await t.press('Control+z');
+    await t.ok('the field\'s Ctrl+Z takes back the typing, to what the page wrote', () => /Stay a little longer, stay$/.test(document.querySelector('[data-bind="lyrics.text"]').value));
+    await t.press('Control+z');
+    await t.eq('and before it, the empty sheet: what the page wrote was a step of the field\'s own (F-22)', () => [document.querySelector('[data-bind="lyrics.text"]').value, get('lyrics.text')], ['', '']);
+    await t.ok('the field\'s own step, not the page\'s Undo: the description Write it for me wrote stays', () => /room sound/.test(document.querySelector('#prompt').value) || document.querySelector('#prompt').value);
+  } },
   /* 05-modules/lyrics, with the vocal gender found by its value as well as its words */
   { id: 'lyrics-tags-strip-instrumental-wildcards', run: async t => {
     await desk('lab', [])(t);

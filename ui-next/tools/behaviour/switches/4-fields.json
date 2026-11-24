@@ -8,7 +8,7 @@
     { "feature": "prompt card", "file": "src/app/features/prompt.tsx", "find": "fill('centre.prompt', PromptCard);", "replace": "void PromptCard;" },
     { "feature": "lyric tile", "file": "src/app/features/prompt.tsx", "find": "fill('desk.lead', LyricsLead);", "replace": "void LyricsLead;" },
     { "feature": "quick lyrics", "file": "src/app/features/prompt.tsx", "find": "fill('centre.quickLyrics', QuickLyrics);", "replace": "void QuickLyrics;" },
-    { "feature": "section tabs", "file": "src/app/parts/LyricSheet.tsx", "find": "onClick={() => act('insertSectionTag', t.tag)}", "replace": "onClick={() => {}}" },
+    { "feature": "section tabs", "file": "src/app/parts/LyricSheet.tsx", "find": "onClick={() => act('insertSectionTag', t.tag)}", "replace": "onClick={() => act('insertSectionTagOff', t.tag)}" },
     { "feature": "instr read-only", "file": "src/app/parts/LyricSheet.tsx", "find": "readOnly={off}", "replace": "readOnly={false}" },
     { "feature": "stamp stands back", "file": "src/app/parts/Pick.tsx", "find": "disabled: !!v.dim", "replace": "disabled: false" },
     { "feature": "stamp at quick", "file": "src/derive/fields.ts", "find": "(desk.tier !== 'quick' || changed(ix, lang, desk)),", "replace": "(desk.tier !== 'quick'),"},
