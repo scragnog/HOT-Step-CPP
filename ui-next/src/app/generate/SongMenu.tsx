@@ -14,17 +14,25 @@ import { repaint, reuse, sendTo } from './actions.ts';
 const trigger = (id: string) => document.querySelector<HTMLElement>(`#latest .song[data-id="${id}"] [data-songmenu]`);
 const close = (refocus: boolean) => { const id = useGen.getState().menuFor; setMenu(null); if (refocus && id) trigger(id)?.focus({ preventScroll: true }); };
 
-/** Where the menu stands (F-28): above its button when there is room, else below; right edges together, inside the
- *  centre column; the page moves first when neither side has room and it can. */
+/** Where the menu stands (F-28): above its button when there is room, else below; never over the go bar (it is a
+ *  ceiling above the cards and a floor where it sticks below them); right edges together, inside the centre column.
+ *  When neither side has room the page moves first, if it can; else it takes the roomier side and scrolls inside. */
+function room(b: HTMLElement): { up: number; down: number; r: DOMRect } {
+  const r = b.getBoundingClientRect(), gap = 6, top0 = (document.querySelector('.top')?.getBoundingClientRect().bottom ?? 0) + 8;
+  const g = document.querySelector('.gobar')?.getBoundingClientRect(), seen = !!g && g.height > 0 && g.bottom > 0 && g.top < innerHeight;
+  const ceil = seen && g!.bottom <= r.top ? Math.max(top0, g!.bottom + 8) : top0, floor = seen && g!.top >= r.bottom ? g!.top - 8 : innerHeight - 12;
+  return { up: r.top - gap - ceil, down: floor - r.bottom - gap, r };
+}
 function place(m: HTMLElement, b: HTMLElement): void {
-  m.style.left = '0px'; m.style.top = '0px'; m.classList.remove('up');
-  const r0 = b.getBoundingClientRect(), h = m.offsetHeight, w = m.offsetWidth, gap = 6;
-  const top0 = (document.querySelector('.top')?.getBoundingClientRect().bottom ?? 0) + 8, g = document.querySelector('.gobar')?.getBoundingClientRect(), floor = g && g.bottom >= innerHeight - 2 ? g.top - 8 : innerHeight - 12;
-  let up = r0.top - gap - h >= top0;
-  if (!up && floor - r0.bottom - gap < h) { const can = document.documentElement.scrollHeight - innerHeight - scrollY; if (can > 0) scrollBy({ top: Math.min(can, h - (floor - r0.bottom - gap)), behavior: 'instant' }); }
-  const r = b.getBoundingClientRect(); up = r.top - gap - h >= top0;
+  m.style.left = '0px'; m.style.top = '0px'; m.style.maxHeight = ''; m.style.overflowY = ''; m.classList.remove('up');
+  const h = m.offsetHeight, w = m.offsetWidth, gap = 6;
+  let k = room(b);
+  if (k.up < h && k.down < h) { const can = document.documentElement.scrollHeight - innerHeight - scrollY; if (can > 0) { scrollBy({ top: Math.min(can, h - k.down), behavior: 'instant' }); k = room(b); } }
+  const up = k.up >= h || (k.down < h && k.up > k.down), fit = up ? k.up : k.down;
+  if (fit < h) { m.style.maxHeight = `${Math.max(120, fit)}px`; m.style.overflowY = 'auto'; }
+  const mh = Math.min(h, fit < h ? Math.max(120, fit) : h), r = k.r;
   const c = document.getElementById('centre')?.getBoundingClientRect(), lo = c ? c.left : 12, hi = c ? c.right : document.documentElement.clientWidth - 12;
-  const left = Math.max(lo, Math.min(hi - w, r.right - w)), top = up ? r.top - gap - h : r.bottom + gap;
+  const left = Math.max(lo, Math.min(hi - w, r.right - w)), top = up ? r.top - gap - mh : r.bottom + gap;
   m.style.left = `${left + scrollX}px`; m.style.top = `${top + scrollY}px`; m.classList.toggle('up', up);
 }
 

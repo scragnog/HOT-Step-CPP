@@ -149,14 +149,13 @@ useGen.subscribe((s, p) => {
 
 /** Loads the server's songs and starts listening to its queue; says what a reload lost. */
 export async function bootGenerate(): Promise<void> {
+  let was: { job: string; n: number }[] = [];
+  try { const a = JSON.parse(localStorage.getItem(LIVE_KEY) ?? '[]'); if (Array.isArray(a)) was = a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number'); } catch { was = []; }
   gen().watch(heardJobs);
   const [songs, live] = await Promise.all([gen().songs(), gen().live()]);
   const max = songs.reduce((a, x) => (/^\d+$/.test(x.id) ? Math.max(a, +x.id) : a), 99);
   set(s => ({ cards: [...s.cards.filter(c => c.pending || c.error), ...songs.map(({ createdAt, ...x }) => { void createdAt; return x; })], nextId: Math.max(s.nextId, max + 1) }));
-  let was: { job: string; n: number }[] = [];
-  try { const a = JSON.parse(localStorage.getItem(LIVE_KEY) ?? '[]'); if (Array.isArray(a)) was = a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number'); } catch { was = []; }
   const lost = was.filter(x => !live.includes(x.job)).reduce((a, x) => a + x.n, 0);
-  try { localStorage.removeItem(LIVE_KEY); } catch { /* not kept */ }
   if (lost) useDesk.getState().showToast({ text: lostSays(lost) });
 }
 

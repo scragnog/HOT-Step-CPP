@@ -75,12 +75,12 @@ export function Latest() {
   const pos = useRef<Map<string, DOMRect> | null>(null), seen = useRef<Set<string> | null>(null);
   useEffect(() => { const g = grid.current; if (!g) return; const ro = new ResizeObserver(() => setCols(colsOf(g))); ro.observe(g); setCols(colsOf(g)); return () => ro.disconnect(); }, []);
   /* a finished run is said only when its card is out of sight (the card is the message); a refusal likewise */
-  useEffect(() => onRun(e => {
+  useEffect(() => onRun(e => requestAnimationFrame(() => {
     const d = useDesk.getState();
     if (e.kind === 'done') { const el = document.querySelector(`#latest .song[data-id="${e.ids[0]}"]`); if (e.ids.length && (!el || !inView(el))) d.showToast({ text: newSongs(e.ids.length, e.run.spec.engine) }); }
     else if (e.kind === 'refused') { const el = document.querySelector(`#latest .song.errored[data-id="${e.id}"]`), m = refusedSays(e.run.ids.length, e.run.spec.engine); if (!el || !inView(el)) d.showToast({ text: m }); else d.say(m); }
     else { const c = useGen.getState().cards.find(x => x.id === e.id); if (c) d.say({ id: 'gen.stream.ready', slots: { name: songCard(c).name } }); }
-  }), []);
+  })), []);
   const list = cards.slice(0, Math.max(24, cards.filter(c => c.pending || c.error).length + 24));
   const runAt = (c: Card) => runs.findIndex(r => r.id === c.pending?.run);
   const shown = latestShown(list.map(c => (c.error ? 'error' : c.pending ? 'pending' : 'song')), list.map(c => (c.pending ? (runAt(c) < 0 ? 999 : runAt(c)) * 100 + (c.take ?? 0) : 0)), cols, open);
