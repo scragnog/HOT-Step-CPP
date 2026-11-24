@@ -64,18 +64,24 @@ export const flow = {
   face: [
     { part: 'flowWindows', reads: ['mm.hop'] },
     {
+      /* the knobs and the switches share one row (D-11) */
       part: 'row',
       children: [
-        { part: 'knob', param: 'mm.hop', label: 'Hop' },
-        { part: 'knob', param: 'mm.dcache', label: 'Δ cache' },
-      ],
-    },
-    {
-      part: 'rack',
-      children: [
-        { part: 'ledButton', param: 'mm.lowstep' },
-        { part: 'ledButton', param: 'mm.fused' },
-        { part: 'ledButton', param: 'mm.stream' },
+        {
+          part: 'row',
+          children: [
+            { part: 'knob', param: 'mm.hop', label: 'Hop' },
+            { part: 'knob', param: 'mm.dcache', label: 'Δ cache' },
+          ],
+        },
+        {
+          part: 'rack',
+          children: [
+            { part: 'ledButton', param: 'mm.lowstep' },
+            { part: 'ledButton', param: 'mm.fused' },
+            { part: 'ledButton', param: 'mm.stream' },
+          ],
+        },
       ],
     },
     {

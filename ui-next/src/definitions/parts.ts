@@ -289,7 +289,7 @@ export const PARTS = {
   note: {
     kind: 'readout', css: ['01-base.css', '15-controls.css'],
     doc: 'A quiet line of words: a hint, why something is off, what another module changes. Its actions follow as links.',
-    opts: { look: { type: ['plain', 'warn', 'cap', 'hint'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
+    opts: { after: { type: 'text', doc: 'badge: the words after the badge, on its line.' }, look: { type: ['plain', 'warn', 'cap', 'hint', 'badge'], doc: 'warn; cap: the caption note under an instrument; hint: Quick\'s hint.' } },
   },
   link: {
     kind: 'readout', css: ['14-buttons.css'],

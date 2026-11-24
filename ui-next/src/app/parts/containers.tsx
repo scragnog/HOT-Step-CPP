@@ -23,6 +23,8 @@ export function Row(v: PartView) {
      and .padside (25-module-perf.css; package 3a) */
   if (kids.length === 2 && kids[0]!.part === 'xyPad' && kids[1]!.part === 'row') return <div className="padrow">{v.children}</div>;
   if (kids.length === 2 && kids[0]!.part === 'speedGauge' && kids[1]!.part === 'knob') return <div className="padside">{v.children}</div>;
+  /* a row of knobs beside a rack of switches shares one line (the Flow renderer's .flow-row, D-11; package 3c) */
+  if (kids.length === 2 && kids[0]!.part === 'row' && kids[1]!.part === 'rack') return <div className="flow-row">{v.children}</div>;
   /* a row of plugin pickers is the Sampler's .picks (package 3a) */
   if (kids.length && kids.every(k => k.part === 'pick')) return <div className="picks">{v.children}</div>;
   return <div className="knobs">{v.children}</div>;

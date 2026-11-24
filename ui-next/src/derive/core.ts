@@ -47,12 +47,12 @@ export function resolve(p: ParamDef, e: EngineId): ParamDef {
   return { ...p, ...fields } as ParamDef;
 }
 
-export const WORD_FIELDS = ['label', 'short', 'tip', 'auto'] as const;
+export const WORD_FIELDS = ['label', 'short', 'tip', 'auto', 'placeholder'] as const;
 
 /** The parameter's words on the desk: its engine's face, then every word line whose condition holds. */
 export function wordsOf(ix: Index, p: ParamDef, desk: Desk): ParamFace {
   let f: ParamFace = resolve(p, desk.engine);
-  /* a word line changes words only: its label, short, tip and auto words, nothing else (types.ts WordsOverride) */
+  /* a word line changes words only: its label, short, tip, auto words and placeholder, nothing else (types.ts WordsOverride) */
   for (const l of p.per || []) if (!isEngineLine(l) && holds(ix, l.when, desk)) for (const k of WORD_FIELDS) if (l[k] !== undefined) f = { ...f, [k]: l[k] } as ParamFace;
   return f;
 }
@@ -333,10 +333,10 @@ export const editsOf = (n: Partial<Pick<Node, 'param' | 'params' | 'choices'>>):
 
 /** The parameters a definition's face lets you change at the desk's tier: the edits of every node shown, whose
  *  parameter applies. This is what "Also set", the changed marker's tests and the coverage check read. */
-export function editsAt(ix: Index, d: Definition, desk: Desk): Set<string> {
+export function editsAt(ix: Index, d: Definition, desk: Desk, strips = true): Set<string> {
   const out = new Set<string>();
-  /* a tile that is a strip at this tier shows no controls */
-  if (stripOf(ix, d, desk)) return out;
+  /* a tile that is a strip at this tier shows no controls (`strips` false: what its face edits there once it is not) */
+  if (strips && stripOf(ix, d, desk)) return out;
   const walk = (n: Node) => {
     const at = nodeAt(ix, n, desk);
     if (!at) return;

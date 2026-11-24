@@ -55,8 +55,9 @@ export const cont = {
       part: 'note',
       tip: 'The selected part is composed again, so it will differ from the original. It works on simple material and is unreliable on real vocal recordings.',
       text: 'Experimental',
+      opts: { look: 'badge' },
+      per: [{ when: { onDesk: 'build' }, opts: { look: 'badge', after: 'Can’t be combined with Build by section.' } }],
     },
-    { part: 'note', text: 'Can\'t be combined with Build by section.', when: { onDesk: 'build' } },
   ],
   thumb: { file: 'cont' },
 } satisfies ModuleDef;

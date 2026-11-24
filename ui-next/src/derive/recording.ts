@@ -20,6 +20,7 @@ Object.assign(EN, {
   'span.tip': 'Drag to choose up to {max} seconds',
   'span.play': 'Play the chosen part',
   'span.stop': 'Stop',
+  'file.long': '{t} long',
 });
 
 /** The longest part YuE2 continues from, the part a new recording starts with, and the shortest a hand can make. */

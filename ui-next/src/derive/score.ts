@@ -154,7 +154,8 @@ export interface ScoreModel {
   file: string;
 }
 
-const r2 = (x: number) => Math.round(x * 100) / 100;
+/* coordinates as the concept writes them, unrounded, so the drawing is the same to the last place */
+const r2 = (x: number) => x;
 /** A section's ink on the score's paper (E-37): the trail above uses the same mix, so a section has one colour. */
 const secInk = (n: string) => `color-mix(in srgb, ${sectionColour(n)} 62%, #2a2433)`;
 

@@ -38,7 +38,7 @@ export function DropZone(v: PartView) {
     <label className={cls} {...over$}>
       <i className="vinyl" aria-hidden="true" />
       <span className="sl-txt">
-        {name ? <><b title={name}>{name}</b>{lent && v.words.from ? <small className="sl-from">{say(v.words.from)}</small> : null}</>
+        {name ? <><b title={name}>{name}</b>{lent && v.words.from ? <small className="sl-from">{say(v.words.from)}</small> : st.detail ? <small>{say(st.detail)}</small> : null}</>
           : <><b>{v.words.empty ? say(v.words.empty) : null}</b>{v.words.hint ? <small>{say(v.words.hint)}</small> : null}</>}
       </span>
       {input}{clear}

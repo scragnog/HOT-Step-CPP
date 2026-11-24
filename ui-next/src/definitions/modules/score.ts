@@ -22,6 +22,7 @@ export const score = {
       placeholder: '% empty: the planner writes one\n% e.g.  K:G   G A B d | c B A G |',
       example: 'X:1\nT:Stay a little longer\nM:4/4\nL:1/4\nK:G\n"G" G A B d | "C" c B A G | "D" A B c d | "G" B2 G2 |]',
       when: { param: 'lm.cotmode', not: 'off' },
+      per: [{ when: { param: 'lm.cotmode', is: 'off' }, placeholder: '% empty: the Planner is set to write nothing down\n% e.g.  K:G   G A B d | c B A G |' }],
       wire: {
         to: 'ext:yue2Abc',
         note: 'Declared by the YuE2 backend and read by backends/yue2/generate.ts as a lead sheet marker.',
@@ -38,7 +39,14 @@ export const score = {
     },
   ],
   face: [
-    { part: 'textArea', param: 'yue.abc', opts: { look: 'staff' } },
+    {
+      /* with Chain of Thought off the planner writes no score and the sheet is not sent: it stands back and says so,
+         and can still be written on */
+      part: 'textArea',
+      param: 'yue.abc',
+      opts: { look: 'staff' },
+      dim: { when: { param: 'lm.cotmode', is: 'off' }, says: 'Not used while the Planner is set to write nothing down' },
+    },
     {
       part: 'abcFoot',
       reads: ['yue.abc', 'lm.cotmode', 'lyrics.text', 'prompt.text', 'song.title'],

@@ -211,7 +211,7 @@ export interface BuildModel {
   /** Follow score and Plan strength while a keep locks them: their read-outs, in the order the board's children hold them. */
   /** Whether any of the board's settings (its children) is drawn at this tier. */
   ctl: boolean;
-  locked: { at: number; label: Slot; text: string; aria: Slot; tip: Slot }[] | null;
+  locked: { at: number; label: Slot; text: string; aria: Slot; tip: Slot; ktip?: Slot }[] | null;
   foot: { count: Slot; render: Slot; canRender: boolean; again: boolean; reset: boolean };
   /** What Render asks the service for: the song's title and style line, its length, and the kept takes in order. */
   render: { title: string; style: Slot; dur: number; takes: string[] } | null;
@@ -269,7 +269,7 @@ export function buildModel(ix: Index, node: Node, desk: Desk): BuildModel {
     }) : [],
     keptOrder: b.secs.filter(kept).map(s => ({ take: b.kept[s.id]!, section: s.id, dur: keptTake(b, s.id)!.dur })),
     ctl: (node.children ?? []).some(c => nodeShown(ix, c, desk)),
-    locked: lockKeys.length ? lockKeys.map(({ at, k }) => { const label = paramWords(ix, k, desk).label, text = fmt(ix, desk, k); return { at, label, text, aria: msg('build.locked.aria', { label, value: text }), tip: msg('build.locked.tip') }; }) : null,
+    locked: lockKeys.length ? lockKeys.map(({ at, k }) => { const w = paramWords(ix, k, desk), label = w.label, text = fmt(ix, desk, k); return { at, label, text, aria: msg('build.locked.aria', { label, value: text }), tip: msg('build.locked.tip'), ...(w.tip ? { ktip: w.tip } : {}) }; }) : null,
     foot: {
       count: msg('build.count', { rendered: b.rec?.rendered?.title ?? 'none', k: ks, n: b.secs.length, seed: desk.tier === 'lab' ? seed : 'none' }),
       render: b.rec?.rendered ? msg('build.render.again') : all || !ks ? msg('build.render') : msg('build.render.part', { k: ks, n: b.secs.length }),

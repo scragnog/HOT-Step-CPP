@@ -26,7 +26,7 @@ export function nodeShown(ix: Index, n: Node, desk: Desk): boolean {
   /* on a module's tile, a control none of whose parameters applies is not drawn, as the concept leaves out what does not
      apply (its ok()); a node that should stay and stand back says so with `dim`. A pedal or a side unit keeps every
      cell's room (a plate, or a field beside its switch: docs/01, "How a pedal and a side unit are laid out") */
-  if (spec?.kind === 'control' && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;
+  if (spec?.kind === 'control' && !at.dim && binds.length && binds.every(k => ix.params.get(k)?.d.kind === 'module') && !binds.some(k => applies(ix, k, desk))) return false;
   if (spec?.kind === 'container') return (at.children ?? []).some(c => nodeShown(ix, c, desk));
   return true;
 }

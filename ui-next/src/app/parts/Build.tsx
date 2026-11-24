@@ -66,7 +66,7 @@ export function BuildBoard(v: PartView) {
   const ctl = m.ctl ? (
     <div className="b-ctl">
       {kids.map((k, i) => { const l = lockedAt.get(i); return l ? (
-        <span key={i} className="foot-ctl locked"><span className="kl" title={say(l.tip)}>{say(l.label)}</span>
+        <span key={i} className="foot-ctl locked"><span className="kl" title={l.ktip ? say(l.ktip) : undefined}>{say(l.label)}</span>
           <span className="tok-ro" tabIndex={0} role="note" title={say(l.tip)} aria-label={say(l.aria)}>{l.text}<Glyph name="lock" /></span></span>
       ) : k; })}
       {m.locked ? <span className="lbl b-locknote">{say({ id: 'build.locknote' })}</span> : null}
@@ -130,7 +130,7 @@ export function BuildBoard(v: PartView) {
                 <span className="b-bars">{bars(t.w).map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}<i className="b-head" aria-hidden="true" /></span>
               </span>
               <b>{say(t.name)}</b>
-              {t.ready ? <button type="button" className="x b-x" data-bdrop={t.id} aria-label={say(t.discard)} title={say({ id: 'build.take.discard.tip' })} onClick={() => { keep('[data-bdrop], [data-btake]'); v.act('discard', t.id); }}><Icon name="x" /></button> : null}
+              {t.ready ? <button type="button" className="x b-x" data-bdrop={t.id} aria-label={say(t.discard)} title={say({ id: 'build.take.discard.tip' })} onClick={() => { keep('[data-bdrop], [data-btake]'); v.act('discard', t.id); }}><Icon name="x" size={12} /></button> : null}
               <small title={say(t.tip)}>{say(t.meta)}</small>
               {t.ready ? <button type="button" className={`small-btn${t.keep ? ' primary' : ''}`} data-bkeep={t.id} aria-pressed={t.keep} onClick={() => { keep(`[data-bkeep="${t.id}"]`); v.act('keep', t.id); }}>{say({ id: t.keep ? 'build.kept' : 'build.keep' })}</button> : <span className="b-slot" aria-hidden="true" />}
             </div>

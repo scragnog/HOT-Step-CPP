@@ -47,15 +47,16 @@ export interface AlsoSet { keys: string[]; text: Msg; link: Tier }
 export function alsoSet(ix: Index, d: Definition, desk: Desk): AlsoSet | null {
   if (desk.tier === 'lab' || d.kind !== 'module') return null;
   const keys = tileKeys(ix, d, desk);
-  const editsHere = (t: Tier) => {
-    const s = new Set(editsAt(ix, d, { ...desk, tier: t }));
+  const editsHere = (t: Tier, strips = true) => {
+    const s = new Set(editsAt(ix, d, { ...desk, tier: t }, strips));
     for (const x of ix.defs) if (x.kind !== 'module' && keys.some(k => ix.params.get(k)!.d === x)) boardEdits(ix, x, t, desk).forEach(k => s.add(k));
     return s;
   };
   const here = editsHere(desk.tier);
   const hidden = keys.filter(k => has(ix, k, desk.engine) && changed(ix, k, desk) && !here.has(k));
   if (!hidden.length) return null;
-  const studio = editsHere('studio');
+  /* the tier its settings are in, strip or not (E-25) */
+  const studio = editsHere('studio', false);
   const link: Tier = desk.tier === 'quick' && hidden.every(k => studio.has(k)) ? 'studio' : 'lab';
   return { keys: hidden, text: msg('also.set', { items: list(hidden.map(k => alsoWords(ix, k, desk)), 'dot') }), link };
 }

@@ -183,8 +183,8 @@ export interface ParamFace {
 export type EngineOverride = { engines: EngineId[] } & Partial<ParamFace>;
 /** Words that change with another setting (DCW's first knob is "Low" in Both mode, "Scaler" otherwise). A word line
  *  changes words only: what the value is, where it goes and when it applies are the parameter's (an engine line's). */
-export type WordsOverride = { when: Condition; engines?: never } & Partial<Pick<ParamFace, 'label' | 'short' | 'tip' | 'auto'>>
-  & { [K in Exclude<keyof ParamFace, 'label' | 'short' | 'tip' | 'auto' | 'when'>]?: never };
+export type WordsOverride = { when: Condition; engines?: never } & Partial<Pick<ParamFace, 'label' | 'short' | 'tip' | 'auto' | 'placeholder'>>
+  & { [K in Exclude<keyof ParamFace, 'label' | 'short' | 'tip' | 'auto' | 'placeholder' | 'when'>]?: never };
 
 /** A song value whose limit differs per engine (length, takes): an engine that cannot take it reads it at its limit
  *  and holds the value for an engine that can. Slots: {value} the held value, {shown} the limit in force, {engine}

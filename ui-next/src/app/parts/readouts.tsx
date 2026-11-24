@@ -27,6 +27,8 @@ export function Note(v: PartView) {
   /* in a terminal, its quiet ink; in an LCD's row, the LCD's dimmed words */
   if (v.surface === 'term') return <span className="k" title={tip}>{text}</span>;
   if (v.surface === 'lcdrow') return <span className="lcd-dim" title={tip}>{text}</span>;
+  /* a badge with its tip and the words after it on its line (Continue from recording's Experimental; package 3c) */
+  if (v.opts.look === 'badge') return <span className="lbl"><b className="exp" tabIndex={0} title={tip}>{text}</b>{v.words.after ? ` ${say(v.words.after)}` : null}</span>;
   /* the caption note under an instrument (Tempo's), with its actions after it; Quick's hint */
   if (v.opts.look === 'cap') return <div className="cap-note" title={tip}>{text}{v.actions.length ? ' ' : null}<ActionLinks v={v} look="link" /></div>;
   if (v.opts.look === 'hint') return <span className="qhint" title={tip}>{text}</span>;
