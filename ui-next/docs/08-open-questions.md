@@ -238,3 +238,13 @@ failing; a field the existing page does send, sent wrongly, still fails. Today t
 definitions send that the existing page does not is an exact entry naming its own question. A user sees the new control
 and gets what it says. Following the existing page strictly would mean a new parameter is not sent until this is
 answered, so each new knob would ship inert.
+
+## 20. The song menu where nothing has room for it
+
+On a short desk at 1920x1080 (and at 1536 and 1280 with the page at its end) a song card sits under the go bar with
+neither 340px above it (the go bar is in the way) nor below it (the window ends), and the page cannot move. The concept
+then puts the menu beside its card, over the go bar, and shows all seven items. Its own later rule (F-28, pending there)
+says the menu never covers the go bar, so the rebuild stands it beside its card between the go bar and the window's
+foot, 293px of 340, and its last item scrolls in (deviation P6-4, RC-04). Covering the go bar for the moment the menu
+is open would show everything at once; keeping the go bar clear keeps Generate and the queue in sight. Meanwhile: the
+go bar stays clear.

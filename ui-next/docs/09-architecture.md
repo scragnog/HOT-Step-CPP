@@ -35,7 +35,7 @@ Not built, and left as seams: the bespoke parts and the modules made of them, th
 engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
 workflows and revisions, drafts, the remaining overlays (score modal, song menu), and the
 choreographed tier transition (a View Transition in the concept; here the
-tier changes at once). "The plan for the rest" below divides them into packages.
+tier changes at once, the tile being read kept in place). "The plan for the rest" below divides them into packages.
 
 ## The folder
 
@@ -253,8 +253,8 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | A part's look, a package's stylesheet | `src/app/styles/rebuild/<NN>-<name>.css` | loaded after the concept's, in name order |
 | A keyboard shortcut | a file in `src/app/features/` | `onKey({ id, when, run, order })` (register/keys.ts) |
 | Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
-| An overlay that takes focus and gives it back (a dialog, a menu) | its own file | `layerOpen(el, { trigger, modal, close })` and `layerClosed(el)` (features/layers.ts): Escape closes the top one, Tab stays in a modal one, Undo waits under one, F6 and F9 wait |
-| Something in the popover (a list, a menu, an offer) | its own file | `openPop(button, () => <Body />)`, `closePop()`, `placeFloat` (features/pop.ts) |
+| An overlay that takes focus and gives it back (a dialog, a menu, a panel) | its own file | `layerOpen(el, { trigger, modal, undo, close })` and `layerClosed(el)` (features/layers.ts): Escape closes the top one, Tab stays in a modal one (a toast raised since it opened joins it), Undo waits under one (`undo`: it acts there, the engine panel's deviation 30), Ctrl+Enter, F6 and F9 wait |
+| Something in the popover (a list, a menu, an offer) | its own file | `openPop(button, () => <Body />, { label, place, fixed, focus })`, `closePop()`, `placeFloat` (features/pop.ts): the page's one popover (RA-04) |
 | An overlay's exit (a copy of it played out while it is hidden at once, the concept's ovOut) | its own file | `ovOut(el, kind)` just before hiding `el` (features/overlay-exit.ts, package 11) |
 | What the queue holds, for the engine log's queue line | the generation package's file | `tellQueue({ rendering, waiting, engine?, loaded? })` (store/notes-logs.ts, package 11); until it is told, the log says idle |
 | A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts); `run(arg, from)` is given what the part chose and the part, whose gesture its change joins: a bespoke part reaches it by `v.act(name, arg)` when its node lists the action |
@@ -713,8 +713,9 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
     the core** (`partAct`'s words), the update and delete with Undo; the concept's Update toast offered Undo too.
 Package 7's (numbered P7- so that the packages built beside it number theirs without a clash):
 
-- P7-1. **The row menu and the Drafts list are a popover of the package's own** (`workflows/pop.tsx`, drawn into the
-  skeleton's `#pop` with the concept's placement, Escape and outside press); package 8's popover takes them over.
+- P7-1. **(Closed in the fix round: RA-04.)** The row menu and the Drafts list were a popover of the package's own
+  (`workflows/pop.tsx`, `popPlace.ts`); they open in the page's one popover (`features/pop.ts openPop`, the drafts as its
+  fixed panel with focus in the name field), so they are layers like every other.
 - P7-2. **Saved records are kept under the page's own keys and in its own shapes** (deviation 5): `hotstep.create.
   workflows` (`{ v: 1, workflows, revisions }`, a revision naming its workflow), `hotstep.create.drafts`,
   `hotstep.create.workflow` (the open workflow and revision, the workflows whose revisions show). The concept's stored
@@ -740,7 +741,9 @@ Package 11's (the Concept notes and the engine log):
   choose a tier "from anywhere while no dialog is open" (pending F-08, built); Ctrl+Z changes nothing under a dialog
   "(the engine panel aside: there it is the page's Undo)" (deviation 30); the held takes read "Your 8 takes return on
   ACE-Step 1.5" (deviation 27: 8 at most); a knob's "double-click or Delete still resets it" (deviation 13). Every other
-  sentence holds of the rebuild as written.
+  sentence holds of the rebuild as written, but one until package 9 lands: changing tier, "each tile is one object that
+  grows or shrinks in place ...", is the transition the motion package builds; the tile you were reading does stay
+  where it was (RC-11, RC-12).
 - P11-2. **The log tags the engine's models line with the engine's short id** (`engines.ts short`: `[yue2]`), where the
   concept writes its own (`[yue]`); ACE-Step, MiniMax-Music3, Stable Audio 3 and HeartMuLa read the same.
 - P11-3. **An overlay's exit copy carries no ids** (`ovOut`), so no id is on the page twice while it plays (deviation
@@ -778,8 +781,10 @@ Package 6's (numbered P6 so that packages built at the same time do not collide)
   "(3) HOT-Step Tiers".
 - P6-3. **A double-click on Generate is one press, and separate presses each queue** (F-22): the click's own count,
   where the concept ignores any press within 350ms.
-- P6-4. **The song menu opens above its button and never over the go bar** (F-28): with no room on either side and no
-  page to scroll it takes the roomier side and scrolls inside. The concept opens it below and moves the page.
+- P6-4. **The song menu opens above its button and never over the go bar** (F-28): with no room on either side the page
+  moves first; with no page to move it stands beside its card, level with its button, between the go bar and the
+  window's foot (the concept's F-34), and scrolls inside only for what that room lacks (RC-04: at 1920x1080 it shows 293
+  of its 340px). The concept opens it below and moves the page, and beside its card over the go bar.
 - P6-5. **The queue is the server's**: after a reload the page says the songs the server no longer has (F-27, pending
   in the concept); the simulated server loses its queue on a reload, as the concept page does, so that is every song
   that was rendering. Leaving while songs render asks first (F-37).
@@ -794,8 +799,8 @@ Package 6's (numbered P6 so that packages built at the same time do not collide)
   in the concept), not through `onKey` (which the page dispatches after its controls').
 - P6-10. **The request is `pageIntent`** (the desk in the real application's names, request.ts realState), not
   `createIntent` with the application's resolver, which needs the real application (package 10).
-- P6-11. **"Open the Library" in Latest goes nowhere**: no package of this branch builds the navigation to the stub
-  pages.
+- P6-11. **(Closed in the fix round: RC-01.)** The top bar's pages, the brand and "Open the Library" show the
+  concept's stand-in for each other page (`shell/screens.ts`, `features/screens.tsx`).
 
 Package 4's:
 
@@ -845,6 +850,17 @@ Package 3c's:
   paint, B-09); the lyric-timing line warns, in the warning's ink, with Set CFG to auto.
 - P3c-10. **A tile that is a strip says what is set at another tier** (its Also set line), as every tile of the concept's
   does; the slice left it out on strips.
+
+The fix round around the desk's (numbered FC-, review-r2 and RA-04):
+
+- FC-1. **A tab reloads with its own desk** (RC-08): each tab keeps the desk it last showed in `sessionStorage` beside
+  the shared one, so a reload shows that desk when another tab has written since, and offers the newer one ("Another
+  tab has a newer desk. This one still shows its own."). The concept reads the shared desk on a reload, so its reload
+  shows whichever tab wrote last. A new tab opens with the desk changed last, as the concept's.
+- FC-2. **A desk step puts back the tier it changed** (Use that desk, Open in its tier): the tier is one of the
+  undo's paths (`store/desk.ts flatOf`), as the concept's `deskEntry` has it.
+- FC-3. **Ctrl+Enter in a field whose Enter is its own** (the save row's name, a rename, the draft's name: `data-enter`)
+  is that Enter (RC-09), as the concept's field stops it; everywhere else it is Generate (P6-9).
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
