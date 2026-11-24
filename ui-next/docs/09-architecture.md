@@ -282,8 +282,8 @@ rings as still outlines).
   6, 8 and 11); a playhead or the VRAM meter, which move on every frame, are set on the page from the animation loop
   (`parts/Build.tsx`, `parts/Recording.tsx`, `shell/TopBar.tsx`), never by drawing the component again.
 
-Checked against the concept step by step (`tools/motion/frames.mjs`: 18 motions, every running animation moved to 0,
-16, 32 ... ms on both pages and the moving boxes compared within 2px; 4 differences accepted, `tools/motion/accepted.json`)
+Checked against the concept step by step (`tools/motion/frames.mjs`: 20 motions, every running animation moved to 0,
+16, 32 ... ms on both pages and the moving boxes compared within 2px; 5 accepted entries, `tools/motion/accepted.json`)
 and in the acceptance (`scenarios/38-motion.mjs`, which reads the page at moments of each motion). What each costs the
 main thread on a full desk is `tools/motion/cost.mjs` (package 9's notes give the numbers before and after).
 
