@@ -37,8 +37,10 @@ export interface VramNeed {
   models: number;
   /** What the next Generate needs: that, and what its takes add. */
   need: number;
-  /** What each take adds. */
-  each: number;
+  /** What each take adds, and whether the first take adds it too (else only the takes after the first). */
+  each: number; first: boolean;
+  /** How many takes fit on the card at once (what "Use N takes" and "Try N takes" offer). */
+  fits: number;
   /** In how many passes it runs to fit the card (1: at once). */
   passes: number;
   /** The engine refuses it before loading anything. */
@@ -62,7 +64,8 @@ export function vramNeed(ix: Index, desk: Desk, takes?: number): VramNeed {
   const models = parts.reduce((a, x) => a + x.gb, 0), extra = t?.first ? n * each : Math.max(0, n - 1) * each, need = models + extra;
   const passes = fig?.over === 'passes' && need > card && each ? Math.ceil(extra / Math.max(each, card - models)) : 1;
   const refuses = fig?.over === 'refuse' && need > card;
-  return { card, models, need, each, passes, refuses, tight: !refuses && need > card, parts };
+  const fits = Math.max(1, Math.floor((card - models) / (each || 1)) + 1);
+  return { card, models, need, each, first: !!t?.first, fits, passes, refuses, tight: !refuses && need > card, parts };
 }
 
 /** A number of GB as the meter writes it ("13.3"); the card as the page names it ("31.8"). */

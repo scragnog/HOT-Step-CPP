@@ -701,8 +701,8 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
 33. **The recent references are the server's reference tracks** (`services/references.ts`, as the existing frontend's
     `useReferenceTracks`), remembered when a drop zone takes a file and never taken back by Undo; the definition's
     `recentRefs` state stays declared and holds nothing.
-34. **The Takes tile's VRAM line counts the engines' default models** until the engine panel's package gives the loaded
-    models' figures; ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
+34. **(The VRAM half closed in the consolidation round, RA-01: the Takes tile's line is `vramNeed`'s, the meter's and the
+    go bar's one figure, for the models chosen.)** ACE-Step has eight reels (docs/03, Takes), three a row, the footprint of the concept's nine (its
     rule would put eight in two rows of four, a shorter tile, and the desk would pack differently from the concept's).
 35. **A seed is typed up to 2^64-1**, the application's range (the concept's 4294967295), and the field takes 20 digits.
 36. **A repaint's song is a record of its own** (`{ song, title, style, dur, hue }`, written by the song menu's "Repaint a

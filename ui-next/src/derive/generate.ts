@@ -14,7 +14,7 @@ import { realState } from './request.ts';
 import type { CreateIntent } from './request.ts';
 import { defName, stepName } from './steps.ts';
 import { tileAtTier, usedHere, parkedOn } from './desk.ts';
-import { vramNeed } from './vram.ts';
+import { vramNeed, type VramNeed } from './vram.ts';
 import type { SourceSong } from './instruments.ts';
 import { cleanBuild } from './build.ts';
 import { switchEngine, type EngineBook } from './engine.ts';
@@ -181,8 +181,8 @@ export const attemptsAt = (f: number, att: number): number => (f < 0.2 ? Math.mi
 
 /** A refusal the server makes when a run reaches the card (MiniMax-Music3 checks before it loads anything): the
  *  notice's words, and how many takes would fit on that card. */
-export function refusedWords(e: EngineId, n: number, need: number, card: number, each: number, models: number): { why: Msg; more: Msg; retry: number } {
-  const fits = Math.max(1, Math.floor((card - models) / (each || 1)) + 1);
+export function refusedWords(e: EngineId, n: number, v: Pick<VramNeed, 'need' | 'card' | 'fits'>): { why: Msg; more: Msg; retry: number } {
+  const { need, card, fits } = v;
   return { why: msg('gen.refused.why', { need: need.toFixed(1), n, card: cardText(card) }), more: msg('gen.refused.more', { engine: engineName(e) }), retry: Math.min(fits, n - 1) };
 }
 
@@ -196,7 +196,7 @@ export const failedSays = (n: number, e: EngineId): Msg => msg('gen.failed', { n
 /** How many takes the line offers when the next run will not fit (35-gobar.js paintMeter). */
 function lineFits(ix: Index, desk: Desk): number {
   const tk = takesOf(ix, desk), v = vramNeed(ix, desk, tk);
-  return Math.min(tk - 1, Math.max(1, Math.floor((v.card - v.models) / (v.each || 1)) + 1));
+  return Math.min(tk - 1, v.fits);
 }
 
 /** The settings the line's "N changes" counts (S-04): every changed setting of the modules and pedals on the desk

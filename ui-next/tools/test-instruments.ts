@@ -8,10 +8,11 @@
 import { DEFINITIONS } from '../src/definitions/index.ts';
 import type { EngineId, Node, Tier, Value } from '../src/definitions/types.ts';
 import {
-  bindPart, capHas, capToggle, distOf, indexOf, nodeKeys, nodeShown, partAct, partModel, regionMove, seedTyped, sigmasOf, takesCost, wheelWalk,
+  bindPart, capHas, capToggle, distOf, indexOf, nodeKeys, nodeShown, partAct, partModel, regionMove, seedTyped, sigmasOf, vramNeed, wheelWalk, listKey, selectionKey,
   type Change, type Desk, type Msg,
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
+import { MODEL_FILES, FIGURES } from '../src/app/services/models.ts';
 
 const ix = indexOf(DEFINITIONS);
 const J = (x: unknown) => JSON.stringify(x);
@@ -105,11 +106,20 @@ function act(id: string, part: string, d0: Desk, name: string, arg?: unknown) {
 
 /* ---- takes */
 {
-  ok('one take on ACE-Step: 15.6 GB (35-gobar.js vramNeed)', takesCost(ix, desk('ace', 'studio', ['takes']), 1).need.toFixed(1) === '15.6');
-  ok('each take adds the LM track', takesCost(ix, desk('ace', 'studio', ['takes']), 3).need.toFixed(1) === '20.2');
-  const big = takesCost(ix, desk('ace', 'studio', ['takes', 'adapters'], {}, {}, { slots: [{ file: 'a', type: 'LoRA' }] }), 8);
+  /* the simulated server's catalogue and figures, as the page is told them (features/engine-panel.tsx) */
+  const told = (d: Desk): Desk => ({ ...d, vram: FIGURES, lists: Object.fromEntries(Object.entries(MODEL_FILES).flatMap(([e, b]) => Object.entries(b).map(([k, f]) => [listKey({ from: 'models', bucket: k }, e as EngineId), f]))),
+    selection: Object.fromEntries(Object.entries(MODEL_FILES).flatMap(([e, b]) => Object.entries(b).map(([k, f]) => [selectionKey(e as EngineId, k), f[0]!.value]))) });
+  ok('one take on ACE-Step: 15.6 GB (35-gobar.js vramNeed)', vramNeed(ix, told(desk('ace', 'studio', ['takes'])), 1).need.toFixed(1) === '15.6');
+  ok('each take adds the LM track', vramNeed(ix, told(desk('ace', 'studio', ['takes'])), 3).need.toFixed(1) === '20.2');
+  const big = vramNeed(ix, told(desk('ace', 'studio', ['takes', 'adapters'], {}, {}, { slots: [{ file: 'a', type: 'LoRA' }] })), 8);
   ok('past the card ACE-Step plans in passes (an adapter tips eight takes over)', big.need > 31.8 && big.passes === 2 && !big.refuses, big);
-  const t = model('takes', 'takesReels', desk('minimax-m3', 'studio', ['takes'], { 'takes.n': 2 }))!.instrument!.takes!;
+  /* RA-01: the tile says what the go bar and the meter say, for the models chosen (one formula) */
+  const mm = told(desk('minimax-m3', 'studio', ['takes'], { 'takes.n': 4, 'model.lm': '8B planner · F16' }));
+  const tk = model('takes', 'takesReels', mm)!.instrument!.takes!, need = vramNeed(ix, mm);
+  ok("the Takes tile's figure is vramNeed's, for the models chosen (RA-01)", s(tk.cost.text) === `${need.need.toFixed(1)} of 31.8 GB` && need.refuses && tk.cost.cls === 'over' && !!tk.cost.msg && s(tk.cost.msg) === `Won't fit. Try ${need.fits} takes.`, [s(tk.cost.text), need]);
+  const small = told(desk('ace', 'studio', ['takes'], { 'model.dit': 'XL Turbo · MXFP4', 'model.lm': '0.6B · Q8_0' }));
+  ok('a smaller model chosen costs less on the tile too', s(model('takes', 'takesReels', small)!.instrument!.takes!.cost.text) === `${vramNeed(ix, small).need.toFixed(1)} of 31.8 GB` && vramNeed(ix, small).need < 15);
+  const t = model('takes', 'takesReels', told(desk('minimax-m3', 'studio', ['takes'], { 'takes.n': 2 })))!.instrument!.takes!;
   ok('MiniMax-Music3: four reels in one row, extra takes cost', t.max === 4 && t.cols === 4 && /per extra take/.test(s(t.cost.each)), t);
   ok('its words for one take and for more', s(t.labels[0]) === 'Take per run' && s(t.labels[1]) === 'Takes per run', t.labels.map(s));
   const a = model('takes', 'takesReels', desk('ace', 'studio', ['takes']))!.instrument!.takes!;

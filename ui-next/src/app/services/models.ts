@@ -56,7 +56,7 @@ export const MODEL_FILES: { [e in EngineId]: { [bucket: string]: ModelFile[] } }
 /** The concept's figures: a 31.8 GB card; what each engine always loads; an adapter's 0.15 GB and how many each engine
  *  loads; ACE-Step's planner track per take while it plans (and plans in passes when they do not fit), MiniMax-Music3's
  *  3.4 GB per take after the first (refused before loading when they do not fit), YuE2's 1.8 GB. */
-const FIGURES: VramFigures = {
+export const FIGURES: VramFigures = {
   card: 31.8,
   engines: {
     ace: { fixed: [{ name: 'Text encoder', gb: 1.2 }, { name: 'Working memory', gb: 2.0 }], adapters: { gb: 0.15, most: 3 }, take: { gb: 2.3, when: 'lm.on', first: true }, over: 'passes' },

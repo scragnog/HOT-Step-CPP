@@ -117,7 +117,7 @@ export function mockGenerate(): GenerateService {
       const sp = head.spec, n = head.ids.length, f = Math.min(1, head.prog / RUN_MS);
       /* MiniMax-Music3 checks before it loads anything: a run its card cannot hold is refused at once */
       const own = mockCard.gb ?? card, v = vramNeed(ix, { ...sp.desk, ...(figures ? { vram: { ...figures, card: own } } : {}) }, n);
-      if (v.refuses) { head.status = 'refused'; head.refused = refusedWords(sp.engine, n, v.need, own, v.each, v.models); }
+      if (v.refuses) { head.status = 'refused'; head.refused = refusedWords(sp.engine, n, v); }
       else {
         if (head.fails && f >= 0.5) { head.status = 'failed'; head.failed = { why: failWords(sp.engine) }; }
         else if (sp.tries) { head.att ||= 1 + Math.floor(Math.random() * sp.tries); head.attempts = attemptsAt(f, head.att); }

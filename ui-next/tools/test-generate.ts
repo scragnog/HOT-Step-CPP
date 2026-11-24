@@ -65,7 +65,7 @@ const fixed = (v: number) => () => v;
   ok('takes start one after another', Math.abs(takeProgress(0.5, 0) - 0.6) < 1e-9 && Math.abs(takeProgress(0.5, 2) - 0.3) < 1e-9 && takeProgress(1, 1) === 1);
   ok('what can be played is a window behind the render (E-40)', readyOf(0.25) === 0 && readyOf(1) === 1);
   ok('the dice light up through planning', attemptsAt(0, 3) === 1 && attemptsAt(0.15, 3) === 3 && attemptsAt(0.5, 3) === 3);
-  const rf = refusedWords('minimax-m3', 2, 30.6, 30, 3.4, 27.2);
+  const rf = refusedWords('minimax-m3', 2, { need: 30.6, card: 30, fits: 1 });
   ok('a refusal the server makes: its words and the takes that fit', s(rf.why) === 'Needs about 30.6 GB for 2 takes at once; the card has 30 GB.' && s(rf.more) === 'MiniMax-Music3 checks before it loads anything.' && rf.retry === 1, [s(rf.why), rf.retry]);
 }
 
