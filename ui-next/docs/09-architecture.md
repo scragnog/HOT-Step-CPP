@@ -667,7 +667,10 @@ says how many pixels it accepts.
   leaves the value in force is no step (RD-14). `strings.ts stepFromTo`: a state step that says its value before and
   after is undone "back to" it (RD-13). `derive/score.ts scoreAsk` reads the lead sheet on the engine whether or not it
   is on the desk (the planner's own "score preview"). The validator refuses a strip that keeps its width but not at
-  Quick (RD-04). Tested by `tools/behaviour/scenarios/37-fix-desk.mjs`, `acceptance/fix-desk.json`,
+  Quick (RD-04). From the core round's re-reading: a state's `tells` may name `clear` (said with Undo, `render/bind.ts`),
+  a file state's `title` (how a replacement is said), Format `percent`, a node action's `item` on its link (an `add`),
+  `view.ts ringKeys` (a link to another tier rings a file at its drop zone), the named action `moreRefs`
+  (`features/refs-more.tsx`) and `features/hit-areas.ts` (a click in an enlarged pad goes to the nearer control, A-12). Tested by `tools/behaviour/scenarios/37-fix-desk.mjs`, `acceptance/fix-desk.json`,
   `switches/fix-desk.json`.
 
 ## Deviations from the concept's markup
@@ -935,6 +938,10 @@ The desk's fix round's (numbered FD- so that the round's three shares do not col
 - FD-4. **HeartMuLa's planner terminal at Lab ends after its sample line**: the concept draws its Lab flags block
   (`.tparams`, a dashed rule and 9px) there empty, as HeartMuLa has no Lab tokens or flags; an empty box is not drawn
   here (a node with nothing in it is not drawn), so HeartMuLa's Lab desks with the Planner stand 17px shorter under it.
+- FD-5. **A cleared file's toast names the file** ("Cleared take-2.flac", the step's own redo words) where the concept's
+  says "Cleared the file"; both offer Undo.
+- FD-6. **The reference blend is a percent everywhere** (Format `percent`), its Also set line too ("Reference blend 95%");
+  the concept's Also set line alone writes 0.95.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
