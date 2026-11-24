@@ -83,5 +83,9 @@ export function watchBoard(board: HTMLElement | null, lab: () => boolean): () =>
   ro.observe(board);
   let t = 0; const rs = () => { clearTimeout(t); t = window.setTimeout(() => { snapPedals(board, lab()); fixCables(board); }, 120); requestAnimationFrame(() => fixCables(board)); };
   addEventListener('resize', rs);
-  return () => { ro.disconnect(); removeEventListener('resize', rs); };
+  /* a pedal that gains or loses a line inside it (the Mastering pedal's "lent to Timbre" note) is snapped again, as the
+     concept's board is drawn again: its 32px step is taken from what it now holds (RD-16) */
+  let f = 0; const mo = new MutationObserver(ms => { if (ms.every(m => (m.target as Element).closest?.('.cables'))) return; if (!f) f = requestAnimationFrame(() => { f = 0; snapPedals(board, lab()); fixCables(board); }); });
+  mo.observe(board, { childList: true, subtree: true });
+  return () => { ro.disconnect(); mo.disconnect(); cancelAnimationFrame(f); removeEventListener('resize', rs); };
 }

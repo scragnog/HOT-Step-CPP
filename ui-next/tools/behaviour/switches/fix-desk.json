@@ -126,6 +126,24 @@
    "file": "src/app/styles/rebuild/28-side-units.css",
    "find": ".u-lip button:focus-visible { outline-offset: -2px; }",
    "replace": ""
+  },
+  {
+   "feature": "fix-desk: a resize keeps the widths",
+   "file": "src/app/desk/layout.ts",
+   "find": "const keep = content || now === packMake ? performance.now()",
+   "replace": "const keep = content && now === packMake ? performance.now()"
+  },
+  {
+   "feature": "fix-desk: a pedal snaps again when it grows",
+   "file": "src/app/board/cables.ts",
+   "find": "  mo.observe(board, { childList: true, subtree: true });",
+   "replace": "  void mo;"
+  },
+  {
+   "feature": "fix-desk: a unit's text field holds its words",
+   "file": "src/app/styles/rebuild/28-side-units.css",
+   "find": ".xunit .lcdsel .lcd-input { width: calc(30ch + 20px); }",
+   "replace": ""
   }
  ]
 }

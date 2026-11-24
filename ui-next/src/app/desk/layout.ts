@@ -94,7 +94,9 @@ let raf = 0;
 export function packSoon(make: () => string, content: boolean): void {
   const now = make();
   if (!content && now !== packMake) { packFresh = performance.now(); }
-  const keep = content && now === packMake ? performance.now() - packFresh > 700 : false;
+  /* a resize that leaves the width alone (the desk's make-up the same) keeps the widths too, as the concept's packDesk
+     does: the same desk at the same width gives the same layout (RD-08) */
+  const keep = content || now === packMake ? performance.now() - packFresh > 700 : false;
   packMake = now;
   if (!raf) raf = requestAnimationFrame(() => { raf = 0; packNow(now, keep); });
 }

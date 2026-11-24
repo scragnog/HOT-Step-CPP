@@ -34,6 +34,14 @@
    "why": "RD-06: the YuE2 solver and schedules with no controls of their own say so (sampler.ts notes, the note's `plugin` look)."
   },
   {
+   "id": "37-fix-desk/a-resize-at-the-same-width-keeps-the-desk",
+   "why": "RD-08: YuE2's Sampler made tall by HT V3's controls keeps its width and column through a resize at the same width (desk/layout.ts packSoon keeps the widths while the make-up holds, as the concept's packDesk)."
+  },
+  {
+   "id": "37-fix-desk/a-pedal-that-grows-a-line-snaps-again",
+   "why": "RD-16: the Mastering pedal lending its reference (a file chosen in its slot, its switch pressed) grows a line and is snapped to the 32px step again (board/cables.ts watchBoard)."
+  },
+  {
    "id": "37-fix-desk/repaint-rings-its-tile-and-leaves-with-its-song",
    "why": "RD-09 and RA-23: Repaint from the song menu carries the source ring; removed, it takes its song with it, Undo brings both back (derive/desk.ts leavesWith)."
   },
@@ -64,6 +72,10 @@
   {
    "id": "37-fix-desk/mm3-planner-seed-reads-as-a-token",
    "why": "RD-18: the planner terminal's empty --seed says \"follows\" (textField `placeholder`)."
+  },
+  {
+   "id": "37-fix-desk/cover-art-subject-field-holds-its-words",
+   "why": "RD-17: the Cover art unit's subject field at Lab holds its placeholder whole, inside the unit (styles/rebuild/28-side-units.css). The concept does not lay the subject out on the unit (docs/03), so this one is the rebuild's own."
   },
   {
    "id": "37-fix-desk/side-unit-lip-focus-is-a-whole-ring",

@@ -117,6 +117,29 @@ export default [
     await t.do('the schedule Plan-Loose', () => setVal('samp.sched', 'Plan-Loose (exp.)'));
     await t.eq('a schedule says it too', () => [...document.querySelectorAll('.tile[data-m="sampler"] .plugctl.none b')].map(b => b.textContent), ['Ancestral Euler', 'Plan-Loose']);
   } },
+  { id: 'a-resize-at-the-same-width-keeps-the-desk', ...W, run: async t => {
+    await helpers(t);
+    await t.press('Alt+3');
+    await engine(t, 'yue');
+    await add(t, 'sampler');
+    await t.do('the desk settles', () => {}, null, 1000);
+    await t.do('the schedule HT V3, whose controls make the Sampler tall', () => setVal('samp.sched', 'HT V3 (exp.)'), null, 1000);
+    const box = () => [...document.querySelectorAll('#bento > .tile[data-m]')].map(x => { const r = x.getBoundingClientRect(); return [x.dataset.m, Math.round(r.left), Math.round(r.width)]; });
+    const was = await t.js(box);
+    await t.ok('the Sampler stands narrowed beside the lyric sheet', () => document.querySelector('.tile[data-m="sampler"]').getBoundingClientRect().left > document.querySelector('.tile[data-m="lyrics"]').getBoundingClientRect().right);
+    await t.do('a resize event at the same size', () => dispatchEvent(new Event('resize')), null, 1000);
+    await t.eq('the same desk at the same width keeps its layout (RD-08)', box, was);
+  } },
+  { id: 'a-pedal-that-grows-a-line-snaps-again', ...W, run: async t => {
+    await helpers(t);
+    await t.press('Alt+3');
+    await add(t, 'timbre');
+    await add(t, 'pd:master');
+    await t.file('[data-pid="master"] input[type="file"]', 'my-master.flac', 'audio/flac');
+    await t.click('[data-pid="master"] [data-ctl="pp.master.timbre"]');
+    await t.ok('lending its reference, the Mastering pedal says so', () => !!document.querySelector('[data-pid="master"] .pnote'));
+    await t.eq('and is snapped again to the 32px step with its new line (RD-16)', () => document.querySelector('[data-pid="master"]').getBoundingClientRect().height % 32, 0);
+  } },
   { id: 'repaint-rings-its-tile-and-leaves-with-its-song', ...W, run: async t => {
     await helpers(t);
     await t.press('Alt+2');
@@ -189,6 +212,12 @@ export default [
     await t.press('Alt+3');
     await add(t, 'planner');
     await t.eq('its empty --seed says "follows" (RD-18)', () => document.querySelector('.tile[data-m="planner"] [data-ctl="mm.seed"]')?.placeholder, 'follows');
+  } },
+  { id: 'cover-art-subject-field-holds-its-words', ...W, run: async t => {
+    await helpers(t);
+    await t.press('Alt+3');
+    await add(t, 'ex:art');
+    await t.ok('the subject\'s field at Lab is as wide as its placeholder, inside the unit (RD-17)', () => { const i = document.querySelector('[data-xid="art"] .lcd-input'), c = i.closest('.u-ctls').getBoundingClientRect(), r = i.getBoundingClientRect(); return r.width >= 225 && r.right <= c.right && r.right <= i.parentElement.getBoundingClientRect().right + 1 || [r.width, r.right, c.right]; });
   } },
   { id: 'side-unit-lip-focus-is-a-whole-ring', ...W, why: 'RD-15: the concept draws a red line along the bottom (its fault; the owner\'s rule 1).', run: async t => {
     await helpers(t);
