@@ -33,7 +33,7 @@ The slice is a working vertical cut of the page:
 
 Not built, and left as seams: the prompt card and the lyric sheet, the bespoke parts and the modules made of them, the
 engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
-workflows and revisions, drafts, the remaining overlays (notes, score modal, song menu, engine log), and the
+workflows and revisions, drafts, the remaining overlays (score modal, song menu), and the
 choreographed tier transition (a View Transition in the concept; here the
 tier changes at once). "The plan for the rest" below divides them into packages.
 
@@ -255,6 +255,8 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | Something drawn in the shell (the prompt card, the lyric sheet, the go bar, Latest, the Workflows list, the engine panel's models, an overlay) | a file in `src/app/features/` | `fill(slot, Component)` (register/slots.ts): `desk.lead`, `centre.prompt`, `centre.quickLyrics`, `centre.gobar`, `centre.latest`, `panel.workflows`, `engine.panel`, `overlays` |
 | An overlay that takes focus and gives it back (a dialog, a menu) | its own file | `layerOpen(el, { trigger, modal, close })` and `layerClosed(el)` (features/layers.ts): Escape closes the top one, Tab stays in a modal one, Undo waits under one, F6 and F9 wait |
 | Something in the popover (a list, a menu, an offer) | its own file | `openPop(button, () => <Body />)`, `closePop()`, `placeFloat` (features/pop.ts) |
+| An overlay's exit (a copy of it played out while it is hidden at once, the concept's ovOut) | its own file | `ovOut(el, kind)` just before hiding `el` (features/overlay-exit.ts, package 11) |
+| What the queue holds, for the engine log's queue line | the generation package's file | `tellQueue({ rendering, waiting, engine?, loaded? })` (store/notes-logs.ts, package 11); until it is told, the log says idle |
 | A named action (parts.ts ACTIONS) | a file in `src/app/features/` | `defineAction(name, run)` (register/actions.ts) |
 | State of its own | `src/app/store/<package>.ts` | its own store; `defineUndoable(name, { read, write })` when Undo covers it |
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
@@ -361,6 +363,11 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   sentences that teach how to work a control and are said once a session (`tipLesson`, `isHowTo`), a finger's words
   (`touchTip`) and the rule that a tip repeating a printed line does not open (`sameAsLabel`); the last two languages'
   rules are the English table's, keyed by language. Tested in `tools/test-overlays.ts` (in `npm run check`).
+- `derive/logs.ts` (package 11): what the engine log says (`engineLogModel`: its head, the engine and the models it
+  renders with, named whole, F-34; its lines: what the server says of itself, `EngineStatus`, the models by role, the
+  plugins the server lists, the VRAM as the meter's, `vramNeed`, and the queue, `QueueSummary`, with what another engine
+  rendering holds, B-34). Its words are added to the core's table as the file loads. Tested in `tools/test-notes-logs.ts`
+  (in `npm run check`).
 
 ## The test layer, and running the tools against the rebuild
 
@@ -556,8 +563,8 @@ they are then and say what they left alone; C-02, C-07). The shell gained four s
     5). The concept's default is the first file of the list; with the simulated server, which selects the first, the
     page looks and behaves the same.
 29. **The VRAM meter does not yet swing while a run renders, nor show another engine rendering** (B-34): both need the
-    queue (package 6), which can feed the needle's target; and its click opens no engine log yet (the log is drawn by
-    the overlays' package), so its `aria-expanded` stays false.
+    queue (package 6), which can feed the needle's target. Its click opens the engine log, and its `aria-expanded` says
+    whether the log is open (package 11).
 30. **Ctrl+Z with focus in the engine panel undoes** (the page's undo keys); the concept's does nothing there.
 31. **LM seed follows stands on the Seed tile while the planner is on the desk**: it is the planner's switch, and with the
     planner off the desk it would change nothing that is sent (the value in force). The concept shows it at Lab always.
@@ -599,6 +606,26 @@ Package 7's (numbered P7- so that the packages built beside it number theirs wit
   board appears there as the open one goes.
 - P7-8. **The Workflows list's keys** (pending F-36): F2 renames a row of yours, Delete opens its menu with Delete armed,
   a letter moves to the next row whose name starts with it.
+
+Package 11's (the Concept notes and the engine log):
+
+- P11-1. **The notes say what the rebuild does where it differs on purpose.** Four sentences changed: Alt+1, 2 and 3
+  choose a tier "from anywhere while no dialog is open" (pending F-08, built); Ctrl+Z changes nothing under a dialog
+  "(the engine panel aside: there it is the page's Undo)" (deviation 30); the held takes read "Your 8 takes return on
+  ACE-Step 1.5" (deviation 27: 8 at most); a knob's "double-click or Delete still resets it" (deviation 13). Every other
+  sentence holds of the rebuild as written.
+- P11-2. **The log tags the engine's models line with the engine's short id** (`engines.ts short`: `[yue2]`), where the
+  concept writes its own (`[yue]`); ACE-Step, MiniMax-Music3, Stable Audio 3 and HeartMuLa read the same.
+- P11-3. **An overlay's exit copy carries no ids** (`ovOut`), so no id is on the page twice while it plays (deviation
+  39); the concept's keeps them.
+- P11-4. **A toast that shows while any modal layer is open joins its Tab cycle** (pending F-18, for the picker and the
+  notes; `layers.ts` does it for every modal layer, the picker's keys for the picker).
+- P11-5. **The tier keys wait under a modal layer or a side panel open as a drawer** (pending F-08): `modal-keys.ts`.
+- P11-6. **The log's queue line says idle** until the generation package tells the queue (`tellQueue`); the concept's
+  counts its songs rendering and waiting.
+- P11-7. **The notes' × and the log's Close say their type** (deviation 6). The notes button and the VRAM meter open
+  their overlays through a delegated click, the meter's `aria-expanded` set by the log as it opens and closes, so the top
+  bar (package 5's) is not edited; the same markup and behaviour as the concept's.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
@@ -657,6 +684,7 @@ it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to
 | 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
 | 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
+| 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
 needs a new option on a part appends it (the type check refuses a clash, and the rows are independent); the generated
