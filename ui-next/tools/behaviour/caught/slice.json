@@ -1,0 +1,16 @@
+{
+ "about": "The scenarios that caught each switch of switches/slice.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "undo": ["10-desk-modules/focus-after-pedal-removal-and-undo","10-desk-modules/undo-covers-structure","12-desk-layout/layout-is-a-function-of-the-order","30-slice/add-and-remove-with-undo","30-slice/engine-switch-from-its-panel","30-slice/undo-and-redo-by-key-and-button"],
+  "redo": ["30-slice/undo-and-redo-by-key-and-button"],
+  "autosave": ["12-desk-layout/layout-is-a-function-of-the-order","30-slice/the-desk-is-kept-and-comes-back"],
+  "restore": ["12-desk-layout/layout-is-a-function-of-the-order","30-slice/the-desk-is-kept-and-comes-back"],
+  "knob keys": ["30-slice/knob-keys-keep-the-value-contract","30-slice/the-desk-is-kept-and-comes-back","30-slice/undo-and-redo-by-key-and-button"],
+  "keyboard moves": ["01-desk/add-by-keyboard","10-desk-modules/undo-covers-structure","12-desk-layout/arrow-keys-move-one-visible-step","12-desk-layout/layout-is-a-function-of-the-order"],
+  "add": ["01-desk/add-by-keyboard","02-dnd-panels/drawers-1000","10-desk-modules/undo-covers-structure","21-chrome-round5/adding-from-the-panel-answers-one-way","30-slice/add-and-remove-with-undo"],
+  "remove": ["10-desk-modules/focus-after-pedal-removal-and-undo","30-slice/add-and-remove-with-undo"],
+  "tier switch": ["13-quick-studio/tier-switch-stays-under-the-pointer","19-desk-round5/every-tier-says-what-it-hides","21-chrome-round5/rapid-tier-and-theme-switching-is-quiet","30-slice/tier-keys-and-the-tier-switch"],
+  "engine switch": ["01-desk/engines-panel","22-engines-round5/engine-switch-toast-is-short","30-slice/engine-switch-from-its-panel"],
+  "theme": ["30-slice/theme-is-chosen-kept-and-keyed"]
+ }
+}
