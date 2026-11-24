@@ -31,7 +31,12 @@ npm run switches:apply             each switch's and planted defect's text is st
 node tools/visual-baseline/plants.mjs    each planted visual defect is caught
 node tools/motion/frames.mjs        each motion against the concept, every 16ms of its run, with its accepted differences
 node tools/motion/cost.mjs          what each motion costs the main thread on a full desk (a measure, not a check)
+npm run perf                        every action's speed, the load, idle and memory (a measure; tools/perf/README.md)
 ```
+
+The acceptance holds the performance guards too (`scenarios/39-perf.mjs`, `acceptance/perf.json`): what a knob's
+change asks again, what an Undo notifies, what a removal, a move and a drag measure, each held to a limit;
+`switches/perf.json` brings each cause back and a guard fails.
 
 [09](09-architecture.md), "The test layer", says what each covers.
 

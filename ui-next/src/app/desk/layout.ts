@@ -5,13 +5,13 @@
 // A re-pack that a tile's content set off slides the tiles it moves (the concept's packDesk, M-02); a change to the
 // desk's make-up is the desk's own transition's (features/motion.ts), told when the desk has been laid out (onPacked).
 //
-// What a tile needs (its natural width and its height at each width it may take) is measured once and kept, and
-// measured again only when it can have changed (docs/09, "Rendering"): a tile new on the desk, one whose classes or
-// layout attributes changed, one whose markup changed inside (a MutationObserver), one whose body changed size while
-// the layout had not moved it (a ResizeObserver), every tile when the desk's columns or width change or a web font
-// arrives. Measuring is the concept's (each width set in turn, the height read), on those tiles only, the others
-// standing where they are; a layout is solved once for the same tiles (a small cache), and only what changed is
-// written, so a re-pack that changes nothing touches nothing.
+// What a tile needs (its natural width and its height at each width it may take) is measured and kept, and the desk is
+// measured again only when a tile's can have changed (docs/09, "Rendering"): a tile new on the desk, one whose classes
+// or layout attributes changed, one whose markup changed inside (a MutationObserver), one whose body changed size while
+// the layout had not moved it (a ResizeObserver), the desk's columns or width, a web font that arrived. Measuring is the
+// concept's, whole (every tile cleared, each width set in turn, the heights read); a layout is solved once for the same
+// tiles (a small cache), and only what changed is written, so a re-pack that changes nothing touches nothing and a
+// removal, a move or a drag measures nothing.
 
 import { easing, mtime, reduced, booted } from '../kit/motion.ts';
 import { deskPlace, deskSettle, deskSolve, deskSolveAt, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
@@ -85,11 +85,15 @@ function watchContent(g: HTMLElement): void {
 document.fonts?.addEventListener?.('loadingdone', e => { if ((e as FontFaceSetLoadEvent).fontfaces.length) { stale = new WeakSet(); fontGen++; } });
 let fontGen = 0;
 
-/** Measures the tiles in `need` as the concept's deskMeasure does (each tile's natural width, then its height at each
- *  width it may take, every tile of a width set at once), the other tiles standing where they are. */
-function measureSome(need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>): void {
+/** Measures every tile as the concept's deskMeasure does (each tile's natural width, then its height at each width it
+ *  may take, every tile of a width set at once), and keeps what each needs. Every tile is measured when one must be:
+ *  what one needs can hang on where the others stand (a board's rows are balanced to the pixel, and the desk's columns
+ *  share out their fractions of a pixel by what is placed in them), so a tile is only ever measured as the concept
+ *  measures it, with every tile cleared at once. */
+function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>): void {
   tally('measure'); tally('measure.tiles', need.length);
   const rows = (h: number) => Math.max(1, Math.ceil((h + PACK_GAP) / PACK_ROW));
+  g.classList.add('measuring');
   need.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; t.classList.remove('stretched', 'widened', 'narrowed'); wrote.delete(t); });
   const nat = need.map(t => { const cs = getComputedStyle(t), e = cs.gridColumnEnd, sp = [cs.gridColumnStart, e].find(v => /^span/.test(v)); return e === '-1' ? cols : sp ? Math.min(cols, parseInt(sp.slice(5)) || 1) : 1; });
   const ws = need.map((t, i) => widths(t, nat[i]!));
@@ -103,6 +107,7 @@ function measureSome(need: HTMLElement[], cols: number, widths: (t: HTMLElement,
     need.forEach((t, i) => { if (ws[i]![j]) hs[i]![j] = rows(t.offsetHeight); });
     set.forEach(t => { t.style.gridColumn = ''; t.classList.remove('narrowed', 'widened'); });
   }
+  g.classList.remove('measuring');
   need.forEach((t, i) => { ks.set(packKey(t), { el: t, look: lookOf(t), geo, nat: nat[i]!, hs: new Map(ws[i]!.map((w, j) => [w, hs[i]![j]!])) }); stale.delete(t); });
 }
 
@@ -154,7 +159,7 @@ function measure(g: HTMLElement, width: number, place: (m: Measured) => void): v
     g.style.minHeight = g.offsetHeight + 'px';
     try {
       if (!cols) { tiles.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; wrote.delete(t); }); cols = getComputedStyle(g).gridTemplateColumns.split(' ').length; grids.set(g, { at, cols }); need = needOf(`${cols}|${width}|${fontGen}`); }
-      if (need.length) measureSome(need, cols, widths, `${cols}|${width}|${fontGen}`, ks);
+      if (need.length) measureAll(g, tiles, cols, widths, `${cols}|${width}|${fontGen}`, ks);
       place(items());
     } finally { g.style.minHeight = ''; }
   });

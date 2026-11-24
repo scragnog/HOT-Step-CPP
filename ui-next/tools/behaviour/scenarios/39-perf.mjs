@@ -6,8 +6,9 @@
 // counts nothing).
 //
 // The limits: a knob's change asks again the models that read its value (the knob, the tile's "Also set" line, the go
-// bar's words, the Modules panel's matches...), about 20 of the full desk's 250; a drag of a tile, a removal, an Undo
-// and a move by key measure no tile that did not change; one Undo is one notification of the store.
+// bar's words...), 3 of the full desk's 250 (the limit 40 leaves room for modules that read more); a drag of a tile, a
+// removal and a move by key measure nothing, a tile brought back is measured once; one Undo is one notification of the
+// store, and draws the shell not at all.
 
 const ACE = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'repetition', 'sampler', 'guidance', 'perf', 'latent', 'seed', 'takes', 'post'];
 const PEDS = ['tile', 'refiner', 'ss', 'ppvae', 'lift', 'nat', 'gain', 'vst', 'master', 'norm', 'lrc', 'wh', 'art', 'q'];
@@ -70,7 +71,7 @@ export default [
     await t.press('Control+z');
     const u = await counted(t);
     await t.eq('Undo brings it back', () => !!document.querySelector('.tile[data-m="avoid"]'), true);
-    await within(t, 'tiles measured when Undo brings a tile back (the tile itself)', u['measure.tiles'], 2);
+    await within(t, 'times the desk measured its tiles when Undo brings a tile back (once, for the tile that is new)', u.measure, 1);
   } },
   { id: 'a-move-by-key-measures-nothing-and-solves-each-place-once', run: async t => {
     await full()(t);

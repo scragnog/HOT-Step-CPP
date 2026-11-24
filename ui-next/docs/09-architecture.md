@@ -58,7 +58,9 @@ ui-next/
                            value contract's gestures)
       parts/               one file per part (or a few small ones together); each registers itself with definePart
       render/              Face.tsx (the generic renderer), Tile.tsx, bind.ts (a node's model and its actions),
-                           useModel.ts (a view's subscription, redrawn only when its model changes)
+                           useModel.ts (a view's subscription, redrawn only when its model changes), reads.ts (what a
+                           model read, and what a change of the store touches)
+      tally.ts             the page's counters of its costly steps, for the performance guards (test build only)
       register/            the registration points: keys.ts, slots.ts and Slot.tsx, actions.ts, undoable.ts, services.ts
       features/            what the page does that is not a part: each file registers keys, slot fills, named actions,
                            undoable state (undo-keys, tier-keys, drawers, motion-offscreen); motion.ts,
@@ -76,6 +78,8 @@ ui-next/
       testing/             compat.ts (the concept's globals for the two tools) and compat/*.ts (one per package);
                            gallery.ts (every part on every surface)
   tools/
+    perf/                  the performance measurements (npm run perf: every action, the load, idle, memory, the
+                           motions; README.md)
     motion/                frames.mjs (each motion against the concept, step by step), cost.mjs (what each costs the
                            main thread), motions.mjs, accepted.json (package 9)
     behaviour/             the concept's behaviour suite; acceptance/*.json (one per package), scenarios/30-slice.mjs
@@ -231,15 +235,66 @@ filter, in the page's language).
 
 ## Rendering
 
-Each view subscribes to its own model (`render/useModel.ts`): on every change of the store it asks the core for its
-model, compares it with the last as JSON, and redraws only when it differs. A knob that turns redraws that knob, the
-words that show its value and the Undo button; the tiles, the board and the desk do not redraw. The desk is laid out
-again only when its make-up changes (tier, engine, the modules in order, the window's width), a tile's shape changes
-(its width class, a strip, the engine's note, the "Also set" line) or a tile's body changes size (a ResizeObserver);
-the board's pedals are measured again when what stands on it changes or it resizes.
+**A model depends on what it read.** Each view subscribes to its own model (`render/useModel.ts`). The model is worked
+out by the core on a stand-in of the store that notes everything the model reads (`render/reads.ts`): a field of the
+store (`mods`, `board`), a field of the desk (`desk:tier`, `desk:on`), a key of one of the desk's object fields
+(`vals:tempo.bpm`, `state:stars`, `lists:refs.recent`, `told:hold`), or all of one (`vals:*`) when its keys were listed
+(a spread, `Object.keys`, `JSON.stringify`). A change of the store is worked out once, as the set of what differs
+between its two states in the same names; a view asks the core again only when that set touches what its model read,
+and then compares the new model with the last as JSON and redraws only when it differs. So one key on a knob of the
+full desk asks for 3 of its 250 models (before this, every model, on every change of the store, a toast or the
+history's bookkeeping included) and redraws that knob, the words that show its value and the Undo button. This is the
+one rule for every model, the workflow list's too (`workflows/useWfModel.ts`, the desk store beside the records): a
+model is a pure function of the store and of its key, so what it read is all it depends on; anything else it depends on
+is named in its key, as before. Nothing about a value moved: the core decides, the stand-in only watches it read.
 
-Measured with the review's method (`perf.js`: every ACE-Step module, all pedals and units at Lab, StableStep's Refine
-dragged through 60 pointer moves; CDP metrics, two runs each):
+**One update of the store a step.** A change with what it says, an Undo or a Redo, a removal, an engine switch: each
+sets the parts, the history, the toast, the live region's words and the focus request in one update (`store/desk.ts`:
+`record(..., also)`, `notice`). The gesture in progress is the store's own bookkeeping, not state, so beginning or
+ending one tells no one; being told again what the page was told changes nothing (`told`); an Undo puts back the paths
+it moves and keeps every other part as the same object (`unflat`), so the engines' book is not new to what watches it.
+What lives a moment (the toast, the words said, a focus request, an add's ring) stays in the desk store, where a model
+that did not read it is not asked again; what acts on a focus request or a ring is a leaf of its own (`App.tsx
+FocusRequests`, `desk/Desk.tsx Rings`), so the shell and the desk are not drawn again for it.
+
+**The desk measures only what can have changed.** The desk is laid out again only when its make-up changes (tier,
+engine, the modules in order, the window's width), a tile's shape changes (its width class, a strip, the engine's note,
+the "Also set" line) or a tile's body changes size (a ResizeObserver); the board's pedals are measured again when what
+stands on it changes or it resizes. What each tile needs (its natural width, its height at each width it may take) is
+kept (`desk/layout.ts`), and the desk is measured again only when one can have changed: a tile that is new, whose look
+changed (its classes and layout attributes), whose markup changed inside (a MutationObserver; not the tile's own
+attributes, not the board's cables, not a style set back or changed only in its tier-change names), or whose body
+changed size while the layout had not moved or restyled it; the desk's columns or width; a web font that arrived.
+Measuring is the concept's, whole (every tile cleared at once, each width set in turn, the heights read, inside one
+hold of the page's height and scroll): what one tile needs can hang on where the others stand (the Pedalboard's rows
+are balanced to the pixel, and the desk's columns share out their fractions of a pixel by what stands in them; measured
+with the others in place, HeartMuLa's board at Lab at 1000 wide came out 268px shorter than the concept's). A removal,
+a value's change, a move by key and a drag measure nothing (a drag's preview is measured as the tile it copies). The layout is solved once for the same tiles (a small cache), only what changed is written, and a re-pack
+that finds nothing changed touches nothing. The solver (`desk/pack.ts`) keeps each state's tiles by column, and
+`deskSolveAt` gives every place a tile could take with the steps the orders share taken once: the arrow keys and a drag
+ask for those, and the pack after a move reuses its place's (the same layouts as solving each: checked on 3,690
+layouts and 7,040 places against the solver the concept's 90 layouts check). A moved tile's places are worked out as
+its drag starts (`features/dnd.tsx`), so its first move over the desk only places the preview.
+
+**The page's web fonts are loaded as it opens** (`features/fonts.ts`), every face its stylesheet offers, not the first
+time a word needs one: a face that arrives later lays the whole document out again (the first dropdown of a visit cost
+85 ms so) and has the desk measured again. The motion tokens are read once (`kit/motion.ts`); the blocks that push what
+follows are looked for in what was added (`features/motion-blocks.ts`); the tiles and pedals that leave are put in their
+layers before any is measured (`features/motion.ts`).
+
+PERF-TABLE
+
+**The guards.** `tools/behaviour/scenarios/39-perf.mjs` (in the acceptance: `acceptance/perf.json`) does the actions
+whose cost this removed, as a user does them on a full desk, and holds what the page counted to a limit
+(`src/app/tally.ts`, counted in the test build only; `__tally()` in the test layer): the models asked again for a knob's
+key (40) and drag (4 a move), the store's notifications for a knob's key (1), an Undo and a Redo (1 each), a removal (2),
+the tiles measured for a removal (1), a move by key and a drag (0), the desk measured when Undo brings a tile back (1)
+and for a tier change (2), the layouts solved
+for a move by key (one a place), the times the shell is drawn for a removal or an Undo (0). `switches/perf.json` switches each fix off in turn and each makes a guard fail (8 of 8). The
+measurements themselves are `tools/perf` (`npm run perf`, tools/perf/README.md).
+
+The review's earlier measurement of a pedal knob's drag (`perf.js`: every ACE-Step module, all pedals and units at Lab,
+StableStep's Refine dragged through 60 pointer moves; CDP metrics, two runs each), for the record:
 
 | | Script | Style | Layout | Layouts | DOM mutations outside the pedal |
 | --- | --- | --- | --- | --- | --- |
@@ -1052,6 +1107,14 @@ Quick's fold's (numbered FO-):
 - FO-2. **The fold's open state is view state kept with the session** (`hotstep.create.session`, deviation 5), not part
   of the desk's record: a workflow, a revision, a draft or another tab's desk never opens or closes it.
 
+The performance pass's (numbered PF-; above, "Rendering"; none changes what the page shows or does):
+
+- PF-1. **Every web font is loaded as the page opens** (`features/fonts.ts`), each face of the stylesheet; the concept's
+  browser loads a face the first time a word needs it, and lays the page out again then.
+- PF-2. **A workflow's name cut short leads its row's tooltip once the list is painted** (F-05), and again when the
+  list's rows change; the concept sets it as it draws the list (which made the browser lay the page out in the middle of
+  drawing it).
+
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
 3, 4 (an LCD picker's words) and 9 (Avoid's ellipsis) are closed.
@@ -1143,6 +1206,7 @@ feature on; the verdict for each switch is the one the whole acceptance would gi
 | 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
 | Quick's fold (after the consolidation round) | `derive/fold.ts`, `desk/Fold.tsx`, `store/fold.ts`, `features/fold.ts`, `kit/session.ts` (the kept-state registration point), `testing/standins.ts`, `testing/compat/fold.ts`, `tools/test-fold.ts`, its acceptance, switches, states | `keptFlag('desk.fold')`, `keptFlag('prompt.songInfo')` | `derive/models.ts deskModel` (`open`, `fold`), `desk/Desk.tsx` (draws the button, passes `open`), `features/dnd.tsx` and `model/index.ts` (one line each), `parts/PromptBox.tsx` (Song info kept), `switches/4-fields.json` (its Song info switch's text) |
+| The performance pass (after package 9 and the fold) | `render/reads.ts`, `tally.ts`, `features/fonts.ts`, `testing/compat/perf.ts`, `tools/perf/`, `scenarios/39-perf.mjs`, `acceptance/perf.json`, `switches/perf.json` | none new | `render/useModel.ts`, `desk/layout.ts`, `desk/pack.ts`, `store/desk.ts`; and, each the smallest change: `App.tsx`, `desk/Desk.tsx` (the focus request and the ring as leaves), `workflows/useWfModel.ts`, `workflows/List.tsx`, `store/generate.ts`, `features/dnd.tsx`, `features/motion.ts`, `features/motion-blocks.ts`, `kit/motion.ts`, `i18n/index.ts`, `testing/compat/fields.ts` (the gesture through `gestureNow()`), `switches/7-workflows.json` (one find) |
 | 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log); at the coordinator's request, unique ids in drawings: `shell/engines.ts` and `thumbs/index.ts` (a place per drawing), their callers `shell/TopBar.tsx`, `workflows/List.tsx`, `workflows/Drafts.tsx`, `features/picker.tsx`, `features/dnd.tsx` (one argument each) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
