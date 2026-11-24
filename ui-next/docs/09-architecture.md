@@ -494,6 +494,15 @@ concept-notes rebuild-notes --scope notes --accept tools/visual-baseline/notes-a
 (`features/logs.tsx`, `logs-dock.ts`), both always drawn, as the concept paints them; what the log says is the core's
 (`derive/logs.ts`) from the logs service (`services/logs.ts`) and the queue the generation package tells
 (`store/notes-logs.ts tellQueue`).
+**No id is on the page twice** (found by package 11's full visual run after packages 7 and 8 merged): a drawing that
+stands in several places at once carries ids of its own in each. An engine's mark takes the place it stands in
+(`shell/engines.ts logoOf(engine, size, place)`: the engine button, the engine panel's card, a revision's or a draft's
+row), which numbers its gradient's id; a thumbnail takes its place (`thumbs/index.ts thumbOf(..., place)` and
+`thumbBare`: `card`, the picker's `pk`, a drag's `drag`), and every id inside it and every reference to it carry the
+definition and the place (`ownIds`). Before, HeartMuLa's gradient (`hmRainbow`) stood in the engine panel and in every
+HeartMuLa revision's row, and a module drawing's fixed `thg13` beside a pedal's counted one: a gradient inside a hidden
+element leaves every other drawing that names it unpainted. Every state of every package's visual set was checked for
+a repeated id: none. A new drawing with ids of its own goes through `ownIds` or a place in the same way.
 
 ## Deviations from the concept's markup
 
@@ -696,7 +705,7 @@ it, and `npm run check` and `npm run lint` pass. Order: 1 and 2 first, then 3 to
 | 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
 | 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
-| 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log) |
+| 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log); at the coordinator's request, unique ids in drawings: `shell/engines.ts` and `thumbs/index.ts` (a place per drawing), their callers `shell/TopBar.tsx`, `workflows/List.tsx`, `workflows/Drafts.tsx`, `features/picker.tsx`, `features/dnd.tsx` (one argument each) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
 needs a new option on a part appends it (the type check refuses a clash, and the rows are independent); the generated

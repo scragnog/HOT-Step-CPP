@@ -173,7 +173,7 @@ function RevisionRow({ r, tab }: { r: RevRow } & Pick<RowProps, 'tab'>) {
     <>
       <div className={`pre rev${r.on ? ' on' : ''}${r.modified ? ' mod' : ''}`} {...attrs} role="button" tabIndex={t} aria-label={say(r.label)} {...(r.on ? { 'aria-current': true } : {})} title={say(r.tip)}
         onClick={(e: MouseEvent) => { if (!(e.target as Element).closest('button, input')) load(); }} onKeyDown={e => rowKeys(e, load)} onFocus={() => useWfView.setState({ rove: sel(ref) })}>
-        <span className="rev-eng" style={{ '--ec': ENGINE_COLOUR[r.engine] } as CSSProperties} title={engineName(r.engine)} dangerouslySetInnerHTML={{ __html: logoOf(r.engine, 13) }} />
+        <span className="rev-eng" style={{ '--ec': ENGINE_COLOUR[r.engine] } as CSSProperties} title={engineName(r.engine)} dangerouslySetInnerHTML={{ __html: logoOf(r.engine, 13, `rev ${key}`) }} />
         {renaming ? <Rename row={ref} name={name} commit={v => renameRev(r.id, v)} /> : <b>{name}</b>}
         {r.mine ? <i className="pmine" title={say(ui('wf.yoursMark.title'))} aria-hidden="true">{say(ui('wf.yoursMark'))}</i> : null}
         <span className="pslot">
