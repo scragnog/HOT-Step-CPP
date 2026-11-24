@@ -46,11 +46,13 @@ function play(): void {
   settlePack();
   const calm = reduced(), out = easing('--e-out'), inn = easing('--e-in'), spring = easing('--e-spring'), land = landing; landing = null;
   const seen = new Set<string>(), fresh: HTMLElement[] = [];
-  document.querySelectorAll<HTMLElement>(TILES).forEach(t => {
+  /* every box is read before any animation starts, so the page is laid out once, not once a tile */
+  const now = [...document.querySelectorAll<HTMLElement>(TILES)].map(t => [t, t.getBoundingClientRect()] as const);
+  now.forEach(([t, r]) => {
     const m = t.dataset.m!, b = was.tiles.get(m); seen.add(m);
     if (land && m === land.id) {
       if (calm) { t.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 120 }); if (was.added) ringStill(t, 'flash'); return; }
-      const r = t.getBoundingClientRect(), dx = land.from.left - r.left, dy = land.from.top - r.top, far = Math.hypot(dx, dy) > 16;
+      const dx = land.from.left - r.left, dy = land.from.top - r.top, far = Math.hypot(dx, dy) > 16;
       t.animate([{ transform: `translate(${dx}px, ${dy}px) scale(1.02)`, boxShadow: '0 18px 44px #1b172229' }, { transform: 'none', boxShadow: '0 0 0 transparent' }], { duration: far ? mtime('--t-move') : mtime('--t-land'), easing: far ? out : spring });
       return;
     }
@@ -63,7 +65,7 @@ function play(): void {
       return;
     }
     if (calm) return;
-    const r = t.getBoundingClientRect(), dx = b.r.left - r.left, dy = b.r.top - r.top;
+    const dx = b.r.left - r.left, dy = b.r.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out });
   });
   const wrap = document.getElementById('deskwrap');
@@ -83,7 +85,7 @@ function playPedals(was: Snap, calm: boolean, out: string, inn: string, spring: 
   const pd = document.querySelector<HTMLElement>(`#bento [data-pedals]`);
   if (!pd || !(was.peds.size || pd.querySelector('.pedal[data-pid]'))) return;
   const seen = new Set<string>(); let moved = false;
-  pd.querySelectorAll<HTMLElement>(':scope > .pedal[data-pid]').forEach(p => {
+  [...pd.querySelectorAll<HTMLElement>(':scope > .pedal[data-pid]')].map(p => [p, p.getBoundingClientRect()] as const).forEach(([p, r]) => {
     const id = p.dataset.pid!, b = was.peds.get(id); seen.add(id);
     if (!b) {
       if (!was.peds.size) return;
@@ -93,7 +95,7 @@ function playPedals(was: Snap, calm: boolean, out: string, inn: string, spring: 
       return;
     }
     if (calm) return;
-    const r = p.getBoundingClientRect(), dx = b.r.left - r.left, dy = b.r.top - r.top;
+    const dx = b.r.left - r.left, dy = b.r.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) { moved = true; p.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out }); }
   });
   const host = pd.closest<HTMLElement>('.board');
@@ -143,7 +145,7 @@ export const still = (): void => { pending = null; landing = null; };
 document.addEventListener('drop', e => {
   const g = document.querySelector<HTMLElement>('#bento > .tile.ghost'), id = e.dataTransfer?.getData('text/plain') ?? '';
   if (!g?.isConnected || !moving()) return;
-  const pedal = id.includes(':');
-  pending = snap(!pedal && !id.startsWith('move:')); requestAnimationFrame(play);
-  if (!pedal) landing = { id: id.startsWith('move:') ? id.slice(5) : id, from: g.getBoundingClientRect() };
+  const move = id.startsWith('move:'), pedal = !move && id.includes(':');
+  pending = snap(!pedal && !move); pending.pedal = pedal; requestAnimationFrame(play);
+  if (!pedal) landing = { id: move ? id.slice(5) : id, from: g.getBoundingClientRect() };
 }, true);

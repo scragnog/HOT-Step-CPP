@@ -1,8 +1,69 @@
 {
   "about": "Package 9, motion: the tier change as one View Transition (shell/tier.ts), the desk's own transition (features/motion.ts: tiles and pedals arriving, leaving and moving, the landing after a drop, the cables drawing out), the blocks that push what follows (features/motion-blocks.ts) and the small motions on a change of state (features/motion-kicks.ts), with reduced motion as the concept designs it. The scenarios of scenarios/38-motion.mjs sample positions and animations over time; most hold on the concept page too.",
   "scenarios": [
-    {"id": "19-desk-round5/tier-change-is-one-object-per-part", "why": "The tier change as one object per part (Q-13): a View Transition in which the page does not cross-fade, the tier switch takes no part, a tile's header does not fade, a tile's old and new faces are never shown together, the prompt card's words do not fade, and nothing is left named after it. (Waited on package 9 in fix-core.json.)"},
-    {"id": "19-desk-round5/tier-change-keeps-the-place-pointer", "why": "The tile under the pointer keeps its top edge through each tier change (Q-14): the anchor takes the pointer's tile. (Waited on package 9 in fix-core.json.)"},
-    {"id": "23-sa3-hm-round5/reduced-motion-arrivals-are-ringed", "why": "S-27: under reduced motion a tile that arrives carries the still ring. (Excluded in fix-core.json as motion's.)"}
+    {
+      "id": "19-desk-round5/tier-change-is-one-object-per-part",
+      "why": "The tier change as one object per part (Q-13): a View Transition in which the page does not cross-fade, the tier switch takes no part, a tile's header does not fade, a tile's old and new faces are never shown together, the prompt card's words do not fade, and nothing is left named after it. (Waited on package 9 in fix-core.json.)"
+    },
+    {
+      "id": "19-desk-round5/tier-change-keeps-the-place-pointer",
+      "why": "The tile under the pointer keeps its top edge through each tier change (Q-14): the anchor takes the pointer's tile. (Waited on package 9 in fix-core.json.)"
+    },
+    {
+      "id": "23-sa3-hm-round5/reduced-motion-arrivals-are-ringed",
+      "why": "S-27: under reduced motion a tile that arrives carries the still ring. (Excluded in fix-core.json as motion's.)"
+    },
+    {
+      "id": "38-motion/tier-change-frames-grow-in-place",
+      "why": "The tier change read at 0, 32 ... 270ms: Tempo's frame starts on the tile's old box, grows step by step and ends on its new one; its old face is gone by 60ms and the new one never shows before; its header never fades; nothing is left named after."
+    },
+    {
+      "id": "38-motion/a-tile-arrives-and-pushes",
+      "why": "A tile added starts unseen at .96 scale; what it pushed starts where it stood and ends where it stands."
+    },
+    {
+      "id": "38-motion/a-tile-leaves-and-comes-back",
+      "why": "A tile removed is shown where it stood and fades; its neighbours close up from where they stood; nothing of it is left after; Undo brings it back by its entrance to its place, focus on its grip."
+    },
+    {
+      "id": "38-motion/a-tile-moved-by-key-slides",
+      "why": "A tile moved by an arrow key starts where it stood and slides through the places between. (The concept's tile moved up jumps up at once, then slides sideways: this check does not hold there.)"
+    },
+    {
+      "id": "38-motion/a-drop-lands-from-its-preview",
+      "why": "A dropped tile starts on its preview's box, 2% larger, and settles into the same box (M-13, Q-15; deviation 39 closed)."
+    },
+    {
+      "id": "38-motion/a-pedal-drops-on-and-its-cables-draw",
+      "why": "A pedal that joins starts unseen 10px above where it lands, the new cables draw out of their jacks and follow it, and it is rung once it has landed."
+    },
+    {
+      "id": "38-motion/reduced-motion-nothing-moves-every-change-shows",
+      "why": "Under reduced motion a tile arrives and leaves by fading only, is rung with the still outline (S-27), and the tier changes with no transition."
+    },
+    {
+      "id": "38-motion/a-tile-that-grows-moves-the-rest-smoothly",
+      "why": "A tile whose content grows (the lyric sheet typed into) re-packs the desk with the tiles it moves sliding over --t-base."
+    },
+    {
+      "id": "38-motion/what-the-prompt-card-opens-moves-what-follows-smoothly",
+      "why": "Undo shrinking the prompt box, a suggestion opening and closing, Song info opening: what follows starts where it stood and moves (deviation 52 closed)."
+    },
+    {
+      "id": "38-motion/the-small-motions-of-a-change",
+      "why": "An LED switch turned on kicks (a redraw does not), a stamp chosen thunks, a folded side panel fades its rail in, Generate's label cross-fades."
+    },
+    {
+      "id": "38-motion/what-arrives-is-shown",
+      "why": "Show in Lab rings the module it reveals; a tile added below the fold is brought into view."
+    },
+    {
+      "id": "38-motion/the-loops-rest-when-nothing-happens",
+      "why": "After 12 seconds with nothing happening the page is calm (its loops rest); a key wakes it."
+    },
+    {
+      "id": "38-motion/the-player-slides-in-beside-the-line",
+      "why": "The player joining the go bar moves the line beside it over from where it stood (compositor only)."
+    }
   ]
 }

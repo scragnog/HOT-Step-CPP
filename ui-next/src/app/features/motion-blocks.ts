@@ -10,8 +10,9 @@
 import { booted, easing, mtime, reduced } from '../kit/motion.ts';
 
 const BOX = '#prompt', BLOCKS = '#suggest, #songInfo, #saveRow';
-/** The frame a block stands in: revealed down to its new edge while what follows slides. */
-const FRAME = '.prompt-card, .side';
+/** The card a block stands in: revealed down to its new edge while what follows slides (a side panel runs the window's
+ *  height, so its foot is not an edge that moves: nothing is clipped there). */
+const FRAME = '.prompt-card';
 const last = new WeakMap<Element, { h: number; copy: HTMLElement | null; r: DOMRect | null }>();
 
 /** What follows `el` down the page, up to the centre column or the side panel: later siblings at each level, those in

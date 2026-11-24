@@ -29,6 +29,8 @@ node tools/visual-baseline/gallery.mjs   every part on every surface, both theme
 npm run switches                   each feature switched off makes a scenario fail (slow: a build per switch)
 npm run switches:apply             each switch's and planted defect's text is still in its file, once (in npm run check)
 node tools/visual-baseline/plants.mjs    each planted visual defect is caught
+node tools/motion/frames.mjs        each motion against the concept, every 16ms of its run, with its accepted differences
+node tools/motion/cost.mjs          what each motion costs the main thread on a full desk (a measure, not a check)
 ```
 
 [09](09-architecture.md), "The test layer", says what each covers.

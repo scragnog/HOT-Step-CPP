@@ -125,9 +125,10 @@ function slidePack(fn: () => void): void {
   const was = still ? null : new Map(tiles().map(t => [t.dataset.m!, t.getBoundingClientRect()]));
   fn();
   if (!was) return;
-  tiles().forEach(t => {
+  /* every box is read before any animation starts: one layout, not one a tile */
+  tiles().map(t => [t, t.getBoundingClientRect()] as const).forEach(([t, r]) => {
     const b = was.get(t.dataset.m!); if (!b || t.getAnimations().some(a => a.playState === 'running')) return;
-    const r = t.getBoundingClientRect(), dx = b.left - r.left, dy = b.top - r.top;
+    const dx = b.left - r.left, dy = b.top - r.top;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-base'), easing: easing('--e-out') });
   });
 }

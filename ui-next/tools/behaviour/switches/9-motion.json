@@ -1,0 +1,143 @@
+{
+ "about": "Package 9's motions, each switched off by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of the acceptance fail (most are caught by scenarios/38-motion.mjs, which reads the page at moments of each motion).",
+ "switches": [
+  {
+   "feature": "motion tier view transition",
+   "file": "src/app/shell/tier.ts",
+   "find": "if (VT_OK && !o.instant && !reduced() && !document.hidden) {",
+   "replace": "if (VT_OK && false) {"
+  },
+  {
+   "feature": "motion tier anchor under the pointer",
+   "file": "src/app/shell/tier.ts",
+   "find": "const under = lastPointer ? document.elementFromPoint(...lastPointer)?.closest(ANCHORS) ?? null : null;",
+   "replace": "const under = null;"
+  },
+  {
+   "feature": "motion tier reveal rings",
+   "file": "src/app/shell/tier.ts",
+   "find": "    if (o.reveal) {",
+   "replace": "    if (o.reveal && false) {"
+  },
+  {
+   "feature": "motion desk arrivals scale in",
+   "file": "src/app/features/motion.ts",
+   "find": "      t.animate(calm ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'scale(.96)' }",
+   "replace": "      void 0; if (calm) t.animate(calm ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'scale(.96)' }"
+  },
+  {
+   "feature": "motion desk tiles slide",
+   "file": "src/app/features/motion.ts",
+   "find": "if (Math.abs(dx) > 1 || Math.abs(dy) > 1) t.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out });",
+   "replace": "void dx; void dy;"
+  },
+  {
+   "feature": "motion desk exits fade where they stood",
+   "file": "src/app/features/motion.ts",
+   "find": "    if (seen.has(m) || b.el.isConnected || !wrap) return;",
+   "replace": "    if (seen.has(m) || b.el.isConnected || !wrap || true) return;"
+  },
+  {
+   "feature": "motion desk landing from the preview",
+   "file": "src/app/features/motion.ts",
+   "find": "    if (land && m === land.id) {",
+   "replace": "    if (land && m === land.id && false) {"
+  },
+  {
+   "feature": "motion reduced arrivals ringed",
+   "file": "src/app/features/motion.ts",
+   "find": "      if (calm && was.added) ringStill(t, 'flash');",
+   "replace": ""
+  },
+  {
+   "feature": "motion what arrives is brought into view",
+   "file": "src/app/features/motion.ts",
+   "find": "  bring?.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });",
+   "replace": "  void bring;"
+  },
+  {
+   "feature": "motion pedals land",
+   "file": "src/app/features/motion.ts",
+   "find": "      moved = true; p.classList.add('landing');",
+   "replace": "      moved = true; return;"
+  },
+  {
+   "feature": "motion pedals slide",
+   "file": "src/app/features/motion.ts",
+   "find": "if (Math.abs(dx) > 1 || Math.abs(dy) > 1) { moved = true; p.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: mtime('--t-move'), easing: out }); }",
+   "replace": "if (Math.abs(dx) > 1 || Math.abs(dy) > 1) { moved = true; }"
+  },
+  {
+   "feature": "motion cables draw out",
+   "file": "src/app/board/cables.ts",
+   "find": "    if (!out || reduced()) return;",
+   "replace": "    return;"
+  },
+  {
+   "feature": "motion cables follow the pedals",
+   "file": "src/app/board/cables.ts",
+   "find": "  until = performance.now() + ms;",
+   "replace": "  return;"
+  },
+  {
+   "feature": "motion content re-pack slides",
+   "file": "src/app/desk/layout.ts",
+   "find": "  const still = !booted() || reduced() ||",
+   "replace": "  const still = true || !booted() || reduced() ||"
+  },
+  {
+   "feature": "motion prompt box eases",
+   "file": "src/app/features/motion-blocks.ts",
+   "find": "    if (!reduced() && was.h && Math.abs(h - was.h) > line * 1.5) carry(",
+   "replace": "    if (false) carry("
+  },
+  {
+   "feature": "motion blocks open",
+   "file": "src/app/features/motion-blocks.ts",
+   "find": "  if (!was.h && h) blockIn(el, h);",
+   "replace": "  if (!was.h && h) void 0;"
+  },
+  {
+   "feature": "motion blocks close",
+   "file": "src/app/features/motion-blocks.ts",
+   "find": "  else if (was.h && !h && was.copy && was.r) blockOut(el, was.copy, was.r);",
+   "replace": ""
+  },
+  {
+   "feature": "motion led kick",
+   "file": "src/app/features/motion-kicks.ts",
+   "find": "kick(el, 'kick', 400); }",
+   "replace": "void el; }"
+  },
+  {
+   "feature": "motion stamp thunk",
+   "file": "src/app/features/motion-kicks.ts",
+   "find": "  if (w) requestAnimationFrame(() => kick(w, 'thunk', mtime('--t-slow') + 40));",
+   "replace": ""
+  },
+  {
+   "feature": "motion side panel fades",
+   "file": "src/app/features/motion-kicks.ts",
+   "find": "    if (was !== now) fadeIn(",
+   "replace": "    if (false) fadeIn("
+  },
+  {
+   "feature": "motion text cross-fades",
+   "file": "src/app/features/motion-kicks.ts",
+   "find": "  seen.forEach(textIn);",
+   "replace": ""
+  },
+  {
+   "feature": "motion loops rest when calm",
+   "file": "src/app/features/motion-kicks.ts",
+   "find": "else document.body.classList.add('calm'); }, 12000);",
+   "replace": "}, 12000);"
+  },
+  {
+   "feature": "motion player slides in",
+   "file": "src/app/generate/Player.tsx",
+   "find": "      slideLine('--t-base', '--e-out');",
+   "replace": ""
+  }
+ ]
+}

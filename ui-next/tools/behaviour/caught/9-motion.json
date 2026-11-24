@@ -1,0 +1,28 @@
+{
+ "about": "The scenarios that caught each switch of switches/9-motion.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "motion tier view transition": ["19-desk-round5/tier-change-is-one-object-per-part","38-motion/tier-change-frames-grow-in-place"],
+  "motion tier anchor under the pointer": ["19-desk-round5/tier-change-keeps-the-place-pointer"],
+  "motion tier reveal rings": ["38-motion/what-arrives-is-shown"],
+  "motion desk arrivals scale in": ["38-motion/a-tile-arrives-and-pushes","38-motion/a-tile-leaves-and-comes-back"],
+  "motion desk tiles slide": ["38-motion/a-tile-arrives-and-pushes","38-motion/a-tile-leaves-and-comes-back","38-motion/a-tile-moved-by-key-slides"],
+  "motion desk exits fade where they stood": ["38-motion/a-tile-leaves-and-comes-back","38-motion/reduced-motion-nothing-moves-every-change-shows"],
+  "motion desk landing from the preview": ["38-motion/a-drop-lands-from-its-preview"],
+  "motion reduced arrivals ringed": ["23-sa3-hm-round5/reduced-motion-arrivals-are-ringed","38-motion/reduced-motion-nothing-moves-every-change-shows"],
+  "motion what arrives is brought into view": ["38-motion/what-arrives-is-shown"],
+  "motion pedals land": ["38-motion/a-pedal-drops-on-and-its-cables-draw"],
+  "motion pedals slide": ["38-motion/a-pedal-drops-on-and-its-cables-draw"],
+  "motion cables draw out": ["38-motion/a-pedal-drops-on-and-its-cables-draw"],
+  "motion cables follow the pedals": ["38-motion/a-pedal-drops-on-and-its-cables-draw"],
+  "motion content re-pack slides": ["38-motion/a-tile-that-grows-moves-the-rest-smoothly"],
+  "motion prompt box eases": ["38-motion/what-the-prompt-card-opens-moves-what-follows-smoothly"],
+  "motion blocks open": ["38-motion/what-the-prompt-card-opens-moves-what-follows-smoothly"],
+  "motion blocks close": ["38-motion/what-the-prompt-card-opens-moves-what-follows-smoothly"],
+  "motion led kick": ["38-motion/the-small-motions-of-a-change"],
+  "motion stamp thunk": ["38-motion/the-small-motions-of-a-change"],
+  "motion side panel fades": ["38-motion/the-small-motions-of-a-change"],
+  "motion text cross-fades": ["38-motion/the-small-motions-of-a-change"],
+  "motion loops rest when calm": ["38-motion/the-loops-rest-when-nothing-happens"],
+  "motion player slides in": ["38-motion/the-player-slides-in-beside-the-line"]
+ }
+}

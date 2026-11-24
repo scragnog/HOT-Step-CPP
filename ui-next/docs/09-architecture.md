@@ -34,8 +34,8 @@ The slice is a working vertical cut of the page:
 Not built, and left as seams: the bespoke parts and the modules made of them, the
 engine panel's models and the VRAM figures, generation, the go bar's contents, Latest and the player,
 workflows and revisions, drafts, the remaining overlays (score modal, song menu), and the
-choreographed tier transition (a View Transition in the concept; here the
-tier changes at once, the tile being read kept in place). "The plan for the rest" below divides them into packages.
+choreographed tier transition. "The plan for the rest" below divides them into packages; package 9 ("Motion", below)
+built the transition and every other motion.
 
 ## The folder
 
@@ -61,7 +61,9 @@ ui-next/
                            useModel.ts (a view's subscription, redrawn only when its model changes)
       register/            the registration points: keys.ts, slots.ts and Slot.tsx, actions.ts, undoable.ts, services.ts
       features/            what the page does that is not a part: each file registers keys, slot fills, named actions,
-                           undoable state (undo-keys, tier-keys, drawers, motion-offscreen)
+                           undoable state (undo-keys, tier-keys, drawers, motion-offscreen); motion.ts,
+                           motion-blocks.ts, motion-kicks.ts (package 9: the desk's own transition, what pushes what
+                           follows, the small motions)
       model/               the core indexed once (ix; the test build adds the parts gallery), definitions by id
       store/desk.ts        the desk store: desk, engines' book, modules and board order, undo/redo, autosave
       store/panels.ts      which side panels stand open, which drawer is open
@@ -74,6 +76,8 @@ ui-next/
       testing/             compat.ts (the concept's globals for the two tools) and compat/*.ts (one per package);
                            gallery.ts (every part on every surface)
   tools/
+    motion/                frames.mjs (each motion against the concept, step by step), cost.mjs (what each costs the
+                           main thread), motions.mjs, accepted.json (package 9)
     behaviour/             the concept's behaviour suite; acceptance/*.json (one per package), scenarios/30-slice.mjs
                            (the slice's own claims, which pass on the concept too), switches.mjs + switches/*.json
     visual-baseline/       the concept's visual baseline; slice-states/*.mjs (one per package), slice-accepted.json,
@@ -111,6 +115,9 @@ file of its own; a package adds one and edits no list:
   an XY pad's plane, an LED switch or a chip selector on a group's paper, a wide part across a group, the plan text and
   the beat lamps bringing their own housing, a paper-faced part keeping the page's ink inside an LCD.
 - `30-overlays.css` (package 8): the ring on the picker's drawing Enter will take while a filter is typed (F-29).
+
+Motion (package 9) needs no stylesheet of its own: the concept's `35-motion.css` (the tier change's choreography, the
+overlays' entries, reduced motion as a designed alternative) and each component's transitions apply as they are.
 
 The components emit the concept's element structure, classes and `data-*` attributes, so its rules apply unchanged;
 never style a component inline beyond what the concept sets inline (`--p` on a knob, `--h` on a pedal, the layout's grid
@@ -240,6 +247,45 @@ dragged through 60 pointer moves; CDP metrics, two runs each):
 | Before (the slice as reviewed) | 273 to 295 ms | 755 to 846 ms | 81 to 89 ms | 290 to 291 | 4,343 |
 | Now | 97 to 144 ms | 41 to 70 ms | 12 to 21 ms | 33 to 35 | 91 |
 
+## Motion
+
+Motion is drawing only, and it never fights React's rendering: React draws each state as it always does, and motion reads
+where things stood before a change and plays the difference afterwards with the Web Animations API, on `transform`,
+`opacity` and `clip-path` (nothing that lays the page out on every frame, and no component drawn again per frame). Its
+vocabulary is the concept's (`00-tokens.css`: `--t-*`, `--e-*`, read through `kit/motion.ts`), and under reduced motion
+each motion plays the concept's designed alternative: nothing moves, every change of state still shows (a 120ms fade,
+rings as still outlines).
+
+- **The tier change** (`shell/tier.ts`) is one View Transition in which every part present in both tiers is one object:
+  `PARTS` names each part with its `view-transition-class` (`frame`, `keep`, `head`, `slide`, `swap`, `band`, `still`,
+  `only`; the choreography is the concept's `35-motion.css`, `html.tier-morph`), React draws the new tier inside the
+  transition's update (`flushSync`) and the desk is laid out there (`desk/layout.ts flushPack`), so what is captured is
+  the page as it will stay; the tile being read keeps its place (focus, else the pointer, else the bars' edge, Q-14).
+  A new part of the page that should take part is one line in `PARTS`. `instant` changes the tier without it, for a
+  caller that acts in the new tier at once (Lab's offer).
+- **The desk's own transition** (`features/motion.ts`): the store tells it, before the page is drawn again, that the
+  modules, the board, the engine or the tier change; where every tile and pedal stands is taken then, and once the desk
+  has been laid out (`desk/layout.ts onPacked`, after the commit) arrivals scale in, exits fade where they stood (the
+  node React let go of, without ids), moves slide, a drop lands from its preview's box, a pedal drops onto the board, the
+  new cables draw out and every cable follows the pedals (`board/cables.ts drawOut`, `followCables`); what was added is
+  brought into view. A change to the desk's make-up made some other way than the store is wrapped in `transition(fn)`.
+  A content re-pack (a tile that grew) slides what it moves (`desk/layout.ts slidePack`).
+- **What pushes what follows** (`features/motion-blocks.ts`): the prompt box growing or shrinking by more than a line and
+  a half, a suggestion, Song info and the save row opening and closing; watched with a ResizeObserver (after layout,
+  before paint), what follows slides from where it stood and the card is revealed down to its new edge.
+- **The small motions** (`features/motion-kicks.ts`): an LED switch's kick, a stamp's thunk, a side panel's fade,
+  Generate's label and the saved state's word cross-fading, the decorative loops resting (`body.calm`). Each is read
+  from the markup React draws (a MutationObserver on one attribute, or on the two bars), so no part carries it.
+- **Parts and shells that move on their own** keep their motion where it is (the split-flap, the reels, the key wheel's
+  nudge, the XY pad, knob and fader settle in the concept's CSS, the go bar, Latest, the toasts and overlays of packages
+  6, 8 and 11); a playhead or the VRAM meter, which move on every frame, are set on the page from the animation loop
+  (`parts/Build.tsx`, `parts/Recording.tsx`, `shell/TopBar.tsx`), never by drawing the component again.
+
+Checked against the concept step by step (`tools/motion/frames.mjs`: 18 motions, every running animation moved to 0,
+16, 32 ... ms on both pages and the moving boxes compared within 2px; 4 differences accepted, `tools/motion/accepted.json`)
+and in the acceptance (`scenarios/38-motion.mjs`, which reads the page at moments of each motion). What each costs the
+main thread on a full desk is `tools/motion/cost.mjs` (package 9's notes give the numbers before and after).
+
 ## The rules the lint keeps
 
 `npm run lint` keeps the two rules the design rests on (eslint.config.js):
@@ -275,6 +321,8 @@ A work package adds files and registers them; it edits none of the shared ones. 
 | A server call | `src/app/services/<package>.ts` | `defineService(name, impl)` (register/services.ts) |
 | Words | `src/app/i18n/words/<package>.ts` | gathered by i18n/index.ts; an id defined twice fails at load |
 | Concept globals its scenarios call | `src/app/testing/compat/<package>.ts` | `install()`: `expose`, `onMirror`, `onScene` |
+| A part of the page that takes part in the tier change | `shell/tier.ts` | one line in `PARTS`: its selector, its name, its class (package 9) |
+| A change to the desk's make-up made outside the store | its own file | `transition(fn)` (features/motion.ts): what fn adds, removes or moves animates as the desk's own changes do |
 | Its acceptance | `tools/behaviour/acceptance/<package>.json` | `run.mjs --slice` runs every file |
 | Its features switched off | `tools/behaviour/switches/<package>.json` | `switches.mjs` checks each makes a scenario fail, and writes what caught each to `tools/behaviour/caught/<package>.json` |
 | Its visual states | `tools/visual-baseline/slice-states/<NN>-<package>.mjs`, ending with its `VISUAL_SET` | `slice-states.mjs` gathers them; `visual-all.mjs` runs every set |
@@ -648,6 +696,15 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
 `#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
 The play, stop and padlock icons are the kit's (`kit/icons.tsx`, the one icon set).
 
+**Package 9 (motion: the tier change, the desk's own transition, what pushes what follows, the small motions; above,
+"Motion")** adds `acceptance/9-motion.json` (16 scenarios: 13 of `scenarios/38-motion.mjs`, which read the page at moments
+of each motion with the timeline held and hold on the concept page too, and 3 of
+the concept's suite: the two tier-change scenarios that waited on it and the excluded S-27; one check of
+38-motion's holds on the rebuild only, P9-5), `switches/9-motion.json`
+(23 features, each switched off on its own) and `tools/motion/` (`frames.mjs`, each motion against the concept at 16ms
+steps; `cost.mjs`, what each costs the main thread). Its files are `features/motion.ts`, `motion-blocks.ts`,
+`motion-kicks.ts`, `testing/compat/motion.ts`, and the plan's `shell/tier.ts`, `desk/layout.ts`, `board/cables.ts`.
+
 **The consolidation round's core share (review r3)** adds `acceptance/fix-core.json` (the defects it fixed, driven as a
 user reaches them, `scenarios/37-fix-core.mjs`, and every concept scenario no package ran after the merge, re-read: those
 that pass are listed, the rest excluded with today's reason; `run.mjs --slice` now refuses a concept scenario in no
@@ -723,8 +780,8 @@ says how many pixels it accepts.
 39. **A drag's preview is an inert copy** (package 8): the tile's own face, as the concept's, but without ids or drag
     handles of its own, `inert` and hidden from screen readers, so no id is on the page twice while it shows. A pedal
     or side unit dragged while the Pedalboard is not on the desk previews the Pedalboard holding its drawing (the
-    picker's), where the concept draws the whole pedal. The tile that lands does not play the concept's landing (it
-    settles from the preview's box with a lift and a shadow): that is motion, package 9's.
+    picker's), where the concept draws the whole pedal. (The landing is built: the tile that lands settles from the
+    preview's box with a lift and a shadow, package 9.)
 40. **The picker's buttons, the Lab offer's and a grip's moves say their type** (deviation 6).
 41. **A move from a grip's menu merges with a key move on the same grip made in the last two seconds**: one rule of
     the store's (`move`) for a run of moves on one grip; the concept's menu moves are steps of their own.
@@ -804,9 +861,8 @@ Package 11's (the Concept notes and the engine log):
   choose a tier "from anywhere while no dialog is open" (pending F-08, built); Ctrl+Z changes nothing under a dialog
   "(the engine panel aside: there it is the page's Undo)" (deviation 30); the held takes read "Your 8 takes return on
   ACE-Step 1.5" (deviation 27: 8 at most); a knob's "double-click or Delete still resets it" (deviation 13). Every other
-  sentence holds of the rebuild as written, but one until package 9 lands: changing tier, "each tile is one object that
-  grows or shrinks in place ...", is the transition the motion package builds; the tile you were reading does stay
-  where it was (RC-11, RC-12).
+  sentence holds of the rebuild as written; the tier change's ("each tile is one object that grows or shrinks in place
+  ...") since package 9 built the transition (RC-11, RC-12).
 - P11-2. **The log tags the engine's models line with the engine's short id** (`engines.ts short`: `[yue2]`), where the
   concept writes its own (`[yue]`); ACE-Step, MiniMax-Music3, Stable Audio 3 and HeartMuLa read the same.
 - P11-3. **An overlay's exit copy carries no ids** (`ovOut`), so no id is on the page twice while it plays (deviation
@@ -881,8 +937,7 @@ Package 4's:
     reads the first dataset the server lists for "".
 51. **Presets & genres** open in package 8's popover (features/prompt-presets.tsx); a genre already in the box is pressed
     and a press takes it out (C-20), as the concept's. **Import latent** takes a file chosen or dropped on it.
-52. **No motion yet**: the box's height eases and a suggestion opens by height in the concept (19-text-boxes.js,
-    18-motion.js blockIn); here they change at once (package 9).
+52. **(Closed by package 9, differently: P9-1.)** The box's height eases and a suggestion opens smoothly.
 53. **Song info's open state is the card's own**, not kept with the desk (the concept saves S.songInfoOpen); it opens by
     itself when info arrives from outside, as the concept's does.
 54. **Compose caption writes the key as the page writes it** ("F# major"); the concept spells it with ♯ and flats
@@ -942,6 +997,28 @@ The desk's fix round's (numbered FD- so that the round's three shares do not col
   says "Cleared the file"; both offer Undo.
 - FD-6. **The reference blend is a percent everywhere** (Format `percent`), its Also set line too ("Reference blend 95%");
   the concept's Also set line alone writes 0.95.
+
+Package 9's (motion; numbered P9- so that the packages built beside it number theirs without a clash):
+
+- P9-1. **What pushes what follows moves on the compositor** (the owner's rule for motion: no property that lays the
+  page out is animated): the prompt box's height, a suggestion, Song info and the save row change at once, and what
+  follows slides from where it stood (`transform`) while the card is revealed down to its new edge (`clip-path`); a
+  block that opens is at its full height from the first frame and fades in, one that closes leaves a copy fading where it
+  stood. The concept animates their height. What follows stands where the concept's does at every step
+  (`tools/motion/frames.mjs`, `prompt-shrinks-on-undo`, `suggestion-opens`, `song-info-opens`); the block's own box is
+  accepted as different there.
+- P9-2. **The prompt box eases when it is typed into, too**, by more than a line and a half (F-09); the concept's input
+  handler measures the box twice, the second measure cancelling the first's ease, so it eases only when Undo or a tool
+  sets the text.
+- P9-3. **The player joins the go bar on the compositor**: the line beside it slides over (`transform`) and the player is
+  revealed from its left edge (`clip-path`), where the concept animates its `max-width` (package 6 had built the
+  concept's).
+- P9-4. **Under reduced motion every tile that arrives is rung** with the still outline (an add, a drop, an Undo or Redo
+  that brings one back), not an add alone (S-27): every change of state still shows.
+- P9-5. **A tile moved by an arrow key starts where it stood**; the concept's tile moved up a row jumps up at once and
+  then slides sideways (its FLIP loses the vertical part).
+- P9-6. **The playheads and the VRAM meter are set on the page from the animation loop**, not drawn again by React on each
+  frame (Build by section's take, Continue's recording, the meter's LEDs): the same markup at every moment.
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
