@@ -540,7 +540,7 @@ node tools/visual-baseline/plants.mjs                # each planted visual defec
   `scenarios/`, each with what it exercises (`run.mjs` refuses a scenario in no list). The files numbered below 30 are
   the page's oldest scenarios, written against the concept during the design rounds and kept because each checks
   something the rebuild does; those that only drove the concept's own script, or held the concept's behaviour where the
-  rebuild decided otherwise, were rewritten to the rebuild's behaviour or removed at the cutover (its commit lists
+  rebuild decided otherwise, were rewritten to the rebuild's behaviour or removed at the cutover (commit 1f974479 lists
   which). Every scenario ends with three checks: every change to the desk was an undo step, every step is named in the
   page's words, no console error. `switches/*.json` switch each feature off in turn (`HS_SWITCH`, `vite.config.ts`):
   each must make a scenario fail that passes with it on.

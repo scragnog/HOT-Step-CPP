@@ -29,9 +29,10 @@ const OUT = path.join(here, 'out');
 const dirOf = n => /[\\/]/.test(n) || path.isAbsolute(n) ? path.resolve(n) : path.join(OUT, n);
 /* The one tolerance, for rasterising, which is not bit-exact between runs (anti-aliasing on an edge, a level or two on
    a blurred shadow or a gradient): a pixel differs when a channel moves by more than PIXEL_DELTA of 255, and a
-   screenshot differs when more than NOISE_PIXELS of its pixels do. Computed styles, roles, names, words and attributes
-   have none. */
-const PIXEL_DELTA = 8, NOISE_PIXELS = 64;
+   screenshot differs when more than NOISE_PIXELS of its pixels do (measured: the Avoid note's paper and shadow came out
+   149 pixels apart, by up to 31 of 255, in two captures of one build). Computed styles, roles, names, words and
+   attributes have none. */
+const PIXEL_DELTA = 8, NOISE_PIXELS = 256;
 const require = createRequire(import.meta.url);
 const loadPW = () => { for (const m of [process.env.PLAYWRIGHT_MODULE, 'playwright'].filter(Boolean)) { try { return require(m); } catch (e) {} } throw new Error('Playwright not found: run npm install (devDependency), or set PLAYWRIGHT_MODULE to a playwright folder'); };
 

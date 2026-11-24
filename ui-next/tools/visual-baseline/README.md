@@ -71,8 +71,9 @@ inside the scope, which is what an approved recording holds.
 Computed styles, roles, names, words and attributes are compared exactly: two captures of one build are identical.
 Screenshots have one tolerance, for rasterising, which is not bit-exact between runs (anti-aliasing on an edge, a level
 or two on a blurred shadow or a gradient): a pixel counts as different when a channel moves by more than 8 of 255
-(`PIXEL_DELTA` in `vb.mjs`), and a screenshot differs when more than 64 pixels do (`NOISE_PIXELS`); fewer are printed
-as noise. A one-line change to a stylesheet that anything in a set shows changes a computed style, and fails.
+(`PIXEL_DELTA` in `vb.mjs`), and a screenshot differs when more than 256 pixels do (`NOISE_PIXELS`); fewer are printed
+as noise. 256 is measured: two captures of one build drew the Avoid note's paper and shadow 149 pixels apart (by up to
+31 of 255); a screenshot of 900 by 839 has 755,100. A one-line change to a stylesheet that anything in a set shows changes a computed style, and fails.
 
 ## Why the approved recordings are committed
 
