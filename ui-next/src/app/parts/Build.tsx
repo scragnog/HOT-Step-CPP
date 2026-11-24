@@ -77,7 +77,7 @@ export function BuildBoard(v: PartView) {
     landing.current = true;
     void buildSession.plan(m.plan.sections).then(r => { v.act('planned', r); });
   };
-  if (!m.planned) {
+  if (!m.planned || m.planning) {
     return (
       <>
         <div ref={root} className="b-empty">

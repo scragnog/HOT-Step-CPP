@@ -45,6 +45,10 @@ export default [
     await t.eq('(no step)', () => UNDO.length, n);
     await t.click(`${B} .b-src [data-bsec="Verse#1"]`);
     await t.eq('back on the verse, its takes are there', () => __b.n(`${B} .b-take`), 2);
+    await t.click(`${B} .b-take:nth-child(2) [data-bplay]`, 300);
+    await t.ok('a take can be heard before it is kept: its card plays, its button says Stop (B-07)', () => { const c = document.querySelector(`${B} .b-take.playing`); return !!c && c === document.querySelectorAll(`${B} .b-take`)[1] && c.querySelector('[data-bplay]').getAttribute('aria-pressed') === 'true' && /^Stop/.test(c.querySelector('[data-bplay]').getAttribute('aria-label')); });
+    await t.click(`${B} .b-take:nth-child(1) [data-bplay]`, 300);
+    await t.ok('playing another stops the first', () => document.querySelectorAll(`${B} .b-take.playing`).length === 1 && document.querySelector(`${B} .b-take.playing`) === document.querySelectorAll(`${B} .b-take`)[0]);
   } },
   { id: 'build-keeps-and-discards-are-steps', run: async t => {
     await desk('lab', ['build'])(t);
@@ -126,6 +130,7 @@ export default [
     await t.ok('a click outside that barely moves changes nothing', a => S.contSel[0] === a, a);
     await t.mouseDrag('[data-contwave]', [[120, 0]], [await at(120), 0.5]);
     await t.ok('a drag outside draws a new part, never longer than 30 seconds', () => S.contSel[0] >= 119 && S.contSel[1] - S.contSel[0] <= 30 && S.contSel[1] - S.contSel[0] > 1);
+    await t.ok('the caption follows the part', () => { const [a, z] = S.contSel; const m = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; return __b.text('.tile[data-m="cont"] .cap').startsWith(`${m(a)} – ${m(z)} · ${z - a} s of 30 s max`); });
     await t.dblclick('[data-contwave]');
     await t.eq('a double-click puts back the first 20 seconds', () => S.contSel, [0, 20]);
     await t.ok('the caption and the slider say the part in the recording\'s times', () => /^0:00 – 0:20 · 20 s of 30 s max/.test(__b.text('.tile[data-m="cont"] .cap')) && document.querySelector('[data-contwave]').getAttribute('aria-valuetext') === '0:00 to 0:20');
