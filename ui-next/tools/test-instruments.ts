@@ -12,7 +12,7 @@ import {
   type Change, type Desk, type Msg,
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
-import { MODEL_FILES, FIGURES } from '../src/app/services/models.ts';
+import { MODEL_FILES, FIGURES } from '../src/app/services/mock/models.ts';
 
 const ix = indexOf(DEFINITIONS);
 const J = (x: unknown) => JSON.stringify(x);

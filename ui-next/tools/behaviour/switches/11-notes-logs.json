@@ -27,7 +27,7 @@
     {"feature":"log exit","file":"src/app/features/logs-dock.ts","find":"    ovOut(l, 'sheet');","replace":"    void ovOut;"},
     {"feature":"log toast above","file":"src/app/shell/placeToast.ts","find":": 24 + dockH();","replace":": 24;"},
     {"feature":"log lines","file":"src/derive/logs.ts","find":"  return { head, lines: [server, models, plugins, vram, q] };","replace":"  void models; return { head, lines: [server, plugins, vram, q] };"},
-    {"feature":"log head models","file":"src/derive/logs.ts","find":"models: list(HEAD.filter(k => used.includes(k))","replace":"models: list(HEAD.filter(k => used.includes(k)).slice(0, 1)"},
+    {"feature":"log head models","file":"src/derive/logs.ts","find": "models: list(HEAD.map(r => roleKey(ix, r, desk.engine)).filter((k): k is string => !!k && used.includes(k))","replace": "models: list(HEAD.map(r => roleKey(ix, r, desk.engine)).filter((k): k is string => !!k && used.includes(k)).slice(0, 1)"},
     {"feature":"log tag column","file":"src/derive/logs.ts","find":"pad: ' '.repeat(Math.max(1, 10 - tag.length - 2))","replace":"pad: ' '"},
     {"feature":"log server status","file":"src/app/features/logs.tsx","find":".status().then(status => useNotesLogs.setState({ status }),","replace":".status().then(status => useNotesLogs.setState({ status: status && null }),"},
     {"feature":"log follows the desk","file":"src/app/features/logs.tsx","find":"engineLogModel(ix, s.desk, status, queue)","replace":"engineLogModel(ix, { ...s.desk, vals: {}, engine: 'ace' }, status, queue)"}

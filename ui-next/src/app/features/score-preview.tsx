@@ -17,7 +17,7 @@ import { close, open, save, useView, type View } from '../score/state.ts';
 import { useDesk } from '../store/desk.ts';
 import { defineAction } from '../register/actions.ts';
 import { fill } from '../register/slots.ts';
-import { scoreRuns } from '../services/score.ts';
+import { scoreRuns } from '../score/runs.ts';
 import { generate } from '../generate/actions.ts';
 import { Icon, Glyph, ui, useSay } from '../kit/index.ts';
 import { reduced } from '../parts/motion.ts';

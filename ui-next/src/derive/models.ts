@@ -8,6 +8,7 @@
 // that moves redraws the parts that show it and nothing else (docs/09, "Rendering"). Nothing here has a branch for
 // any one module.
 
+import type { Role } from '../definitions/roles.ts';
 import { CATEGORIES, type Definition, type EngineId, type ModuleDef, type Node, type PedalDef, type Tier, type UnitDef, type Value } from '../definitions/types.ts';
 import { PARTS, type PartSpec } from '../definitions/parts.ts';
 import { ENGINES, engineName, engineTag } from '../definitions/engines.ts';
@@ -52,6 +53,9 @@ export interface CellWords {
 /** A parameter as a part draws it. */
 export interface ParamModel {
   key: string;
+  /** What the page needs it for, when its definition says (roles.ts): a part that lays out several parameters finds
+   *  each by its role, never by its key. */
+  role?: Role;
   value: Value;
   text: Slot;
   changed: boolean;
@@ -161,7 +165,7 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   const out: ParamModel = {
     key, value: v, text: textMsg(ix, key, desk), changed: changed(ix, key, desk), auto: isAuto(ix, key, desk), applies: applies(ix, key, desk),
     label: w.label, lcd: lcdMsg(ix, key, desk), pick: pickMsg(ix, key, desk),
-    ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}),
+    ...(w.short ? { short: w.short } : {}), ...(w.tip ? { tip: w.tip } : {}), ...(p.role ? { role: p.role } : {}),
   };
   if (p.type === 'number' && f.range) {
     /* while automatic, a number stands at the value auto stands for (L-11) */

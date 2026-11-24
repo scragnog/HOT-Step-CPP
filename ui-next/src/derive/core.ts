@@ -7,6 +7,7 @@ import type {
   Condition, Definition, EngineId, EngineOverride, Json, Node, NodeOverride, Option, OptionsFrom, ParamDef, ParamFace,
   StateDef, Tier, Value, WordsOverride,
 } from '../definitions/types.ts';
+import type { Role } from '../definitions/roles.ts';
 import { engineName } from '../definitions/engines.ts';
 import { DESK_FACTS, type FactInput } from '../definitions/parts.ts';
 
@@ -21,17 +22,42 @@ export interface Index {
   /** Former ids (`was`) to their definition's id, and former state keys to their state's. */
   formerIds: Map<string, string>;
   formerStates: Map<string, string>;
+  /** Each role (definitions/roles.ts) to the keys of the parameters or states that play it, in definition order. */
+  roles: Map<Role, string[]>;
 }
 
 export function indexOf(defs: readonly Definition[]): Index {
   const params = new Map<string, { p: ParamDef; d: Definition }>(), states = new Map<string, { s: StateDef; d: Definition }>();
   const former = new Map<string, string>(), formerIds = new Map<string, string>(), formerStates = new Map<string, string>();
+  const roles = new Map<Role, string[]>(), play = (r: Role | undefined, k: string) => { if (r) roles.set(r, [...(roles.get(r) ?? []), k]); };
   for (const d of defs) {
     (d.was || []).forEach(w => formerIds.set(w, d.id));
-    for (const p of d.params) { params.set(p.key, { p, d }); (p.was || []).forEach(w => former.set(w, p.key)); }
-    for (const s of d.state || []) { states.set(s.key, { s, d }); (s.was || []).forEach(w => formerStates.set(w, s.key)); }
+    for (const p of d.params) { params.set(p.key, { p, d }); (p.was || []).forEach(w => former.set(w, p.key)); play(p.role, p.key); }
+    for (const s of d.state || []) { states.set(s.key, { s, d }); (s.was || []).forEach(w => formerStates.set(w, s.key)); play(s.role, s.key); }
   }
-  return { defs, params, states, former, formerIds, formerStates };
+  return { defs, params, states, former, formerIds, formerStates, roles };
+}
+
+/* ---------------------------------------------------------------- roles
+   What the page needs a particular parameter or state for is its role (definitions/roles.ts), which its definition
+   declares: the core and the view ask for the role, never the key or the module's id, so a renamed key keeps working
+   and the validator checks every role against the definitions. */
+
+/** The key that plays a role: on engine `e` when given (a parameter the engine has), else the first in definition
+ *  order; undefined when nothing plays it (the page then does without, as roles.ts says). */
+export function roleKey(ix: Index, role: Role, e?: EngineId): string | undefined {
+  const ks = ix.roles.get(role) ?? [];
+  return e === undefined ? ks[0] : ks.find(k => !ix.params.has(k) || has(ix, k, e));
+}
+/** Every key that plays a role (a `many` role: the reference tracks). */
+export const roleKeys = (ix: Index, role: Role): string[] => ix.roles.get(role) ?? [];
+/** The definition whose parameter or state plays a role: the module that repaints, builds, continues, counts takes. */
+export function roleOwner(ix: Index, role: Role): Definition | undefined {
+  const k = roleKey(ix, role); return k === undefined ? undefined : (ix.params.get(k)?.d ?? ix.states.get(k)?.d);
+}
+/** The definition that plays a role is on the desk and the desk's engine uses it (a built-in module always is). */
+export function roleOn(ix: Index, role: Role, desk: Desk): boolean {
+  const d = roleOwner(ix, role); return !!d && onDesk(d, desk) && d.engines.includes(desk.engine);
 }
 
 /* ---------------------------------------------------------------- a parameter on an engine */
@@ -105,7 +131,8 @@ export interface VramFigures {
   engines: { [e in EngineId]?: {
     fixed: { name: string; gb: number }[];
     adapters?: { gb: number; most: number };
-    take: { gb: number; when?: string; first: boolean };
+    /** What each take adds; `when`: the role of the switch it is added while (the planner). */
+    take: { gb: number; when?: Role; first: boolean };
     over: 'passes' | 'refuse' | 'tight';
   } };
 }

@@ -10,8 +10,8 @@ import { ENGINE_IDS } from '../src/definitions/engines.ts';
 import type { EngineId, Tier } from '../src/definitions/types.ts';
 import { engineLogModel, indexOf, listKey, selectionKey, type Desk } from '../src/derive.ts';
 import { say, type Slot } from '../src/derive/messages.ts';
-import { mockEngine } from '../src/app/services/mockEngine.ts';
-import { MODEL_FILES, mockModels } from '../src/app/services/models.ts';
+import { mockLists } from '../src/app/services/mock/lists.ts';
+import { MODEL_FILES, mockModels } from '../src/app/services/mock/models.ts';
 import { WORDS } from '../src/app/i18n/words/notes.ts';
 
 const J = (x: unknown) => JSON.stringify(x);
@@ -22,7 +22,7 @@ const s = (m: Slot) => say(m);
 const ix = indexOf(DEFINITIONS);
 
 /* what the page is told: the server's lists, every engine's model files and the file it selected, the figures */
-const told: Pick<Desk, 'lists' | 'selection' | 'vram'> = { lists: { ...await mockEngine().lists() }, selection: {}, vram: await mockModels().vram() };
+const told: Pick<Desk, 'lists' | 'selection' | 'vram'> = { lists: { ...await mockLists().lists() }, selection: {}, vram: await mockModels().vram() };
 for (const e of ENGINE_IDS) for (const [b, files] of Object.entries(MODEL_FILES[e])) {
   told.lists![listKey({ from: 'models', bucket: b }, e)] = files; told.selection![selectionKey(e, b)] = files[0]!.value;
 }

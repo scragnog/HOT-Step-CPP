@@ -16,6 +16,7 @@ export const score = {
   params: [
     {
       key: 'yue.abc',
+      role: 'leadSheet',
       type: 'text',
       label: 'Lead sheet (ABC)',
       default: '',

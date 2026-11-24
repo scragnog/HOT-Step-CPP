@@ -22,6 +22,7 @@ export const prompt = {
   params: [
     {
       key: 'prompt.text',
+      role: 'prompt',
       type: 'text',
       label: 'Describe the song',
       undoName: 'the description',
@@ -51,6 +52,7 @@ export const prompt = {
     },
     {
       key: 'wild.auto',
+      role: 'wildcards',
       type: 'boolean',
       label: 'Expand {a|b|c} wildcards at Generate',
       undoName: 'Expand on Generate',
@@ -60,11 +62,12 @@ export const prompt = {
       stored: 'settings',
       wire: 'intent:compose.autoExpand',
     },
-    { key: 'song.artist', type: 'text', label: 'Artist', placeholder: 'optional', maxLength: 60, default: '', wire: 'content:artist' },
-    { key: 'song.title', type: 'text', label: 'Title', placeholder: 'optional', maxLength: 80, default: '', wire: 'content:title' },
-    { key: 'song.subject', type: 'text', label: 'Subject', placeholder: 'what the song is about', maxLength: 120, default: '', wire: 'content:subject' },
+    { key: 'song.artist', role: 'songArtist', type: 'text', label: 'Artist', placeholder: 'optional', maxLength: 60, default: '', wire: 'content:artist' },
+    { key: 'song.title', role: 'songTitle', type: 'text', label: 'Title', placeholder: 'optional', maxLength: 80, default: '', wire: 'content:title' },
+    { key: 'song.subject', role: 'songSubject', type: 'text', label: 'Subject', placeholder: 'what the song is about', maxLength: 120, default: '', wire: 'content:subject' },
     {
       key: 'ad.trigger',
+      role: 'trigger',
       type: 'text',
       label: 'Trigger',
       undoName: 'Trigger word',
@@ -92,6 +95,7 @@ export const prompt = {
     },
     {
       key: 'cap.src',
+      role: 'captionSource',
       type: 'choice',
       label: 'Caption source',
       default: 'custom',
@@ -105,6 +109,7 @@ export const prompt = {
     },
     {
       key: 'cap.ds',
+      role: 'captionDataset',
       type: 'choice',
       label: 'Dataset',
       default: '',
@@ -119,6 +124,7 @@ export const prompt = {
   state: [
     {
       key: 'latent',
+      role: 'latent',
       kind: 'file',
       noun: 'the latent',
       /* importing a latent brings its tempo and key, and fills an empty lyric sheet and box (concept importLatent) */

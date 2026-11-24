@@ -160,9 +160,9 @@ ok('and compared whatever their capitals', sameName('My  polish ', 'my polish') 
   const dr = { ...draftOf(ix, d, ''), id: 'a', at: Date.parse('2026-11-23T10:00:00') };
   ok('a draft holds the content', dr.vals['prompt.text'] === 'first draft' && dr.vals['lyrics.text'] === '[Verse]\nhello there');
   ok('the same content is the same draft', sameDraft(dr, draftOf(ix, d, 'x')) && !sameDraft(dr, draftOf(ix, { ...d, engine: 'yue2' }, '')));
-  ok('its second line: when, and its first lyric line', /^.+ · “hello there”$/.test(s(draftSub(dr, 'ace', Date.parse('2026-11-23T12:00:00')))), s(draftSub(dr, 'ace', Date.parse('2026-11-23T12:00:00'))));
-  ok('another engine\'s draft says the engine', /Yesterday .+ · ACE-Step 1\.5 · /.test(s(draftSub(dr, 'yue2', Date.parse('2026-11-24T12:00:00')))));
-  ok('a draft is named by its name, else its words, else Untitled', draftTitle(dr) === 'first draft' && s(draftTitle({ name: '', vals: {} })) === 'Untitled');
+  ok('its second line: when, and its first lyric line', /^.+ · “hello there”$/.test(s(draftSub(ix, dr, 'ace', Date.parse('2026-11-23T12:00:00')))), s(draftSub(ix, dr, 'ace', Date.parse('2026-11-23T12:00:00'))));
+  ok('another engine\'s draft says the engine', /Yesterday .+ · ACE-Step 1\.5 · /.test(s(draftSub(ix, dr, 'yue2', Date.parse('2026-11-24T12:00:00')))));
+  ok('a draft is named by its name, else its words, else Untitled', draftTitle(ix, dr) === 'first draft' && s(draftTitle(ix, { name: '', vals: {} })) === 'Untitled');
   const on = applyDraft(ix, desk('ace', 'studio', [], { 'prompt.text': 'other', 'song.title': 'T' }), dr);
   ok('loading a draft replaces the content: what it does not hold goes back to its default', on.vals['prompt.text'] === 'first draft' && !('song.title' in on.vals), on.vals);
   ok('a draft of a shape the page cannot read is skipped', cleanDraft(ix, { v: 9, at: 1, engine: 'ace', vals: {} }) === null);

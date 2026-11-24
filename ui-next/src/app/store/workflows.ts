@@ -365,7 +365,7 @@ export function saveDraft(name: string): void {
     undo: () => { useWf.setState({ drafts: [...useWf.getState().drafts.filter(x => x.id !== dr.id), ...structuredClone(gone)] }); persistDrafts(); },
     redo: () => { useWf.setState({ drafts: [structuredClone(dr), ...useWf.getState().drafts.filter(x => !gone.some(g => g.id === x.id))] }); persistDrafts(); },
   });
-  if (ok) toast(msg('draft.saved.room', { name: draftTitle(gone[0]!) }), undoAction(entry));
+  if (ok) toast(msg('draft.saved.room', { name: draftTitle(ix, gone[0]!) }), undoAction(entry));
 }
 /** Deletes a draft at once: it is undoable, so it does not ask first (C-23). */
 export function deleteDraft(id: string): void {
@@ -383,7 +383,7 @@ export function deleteDraft(id: string): void {
 /** Loads a draft: on another engine, the engine switches first; its content replaces the desk's content. */
 export function loadDraft(id: string): void {
   const d = useWf.getState().drafts.find(x => x.id === id); if (!d) return;
-  const from = now(), moved = onEngine(from, d.engine), to: Plan = { ...moved, desk: applyDraft(ix, moved.desk, d) }, t = draftTitle(d);
+  const from = now(), moved = onEngine(from, d.engine), to: Plan = { ...moved, desk: applyDraft(ix, moved.desk, d) }, t = draftTitle(ix, d);
   const e = desk().deskStep(draftStep('draftLoad', typeof t === 'string' ? t.slice(0, 24) : t, putOf(from, to)), () => apply(to));
   toast(draftLoaded(d, from.desk.engine !== d.engine), undoAction(e));
 }

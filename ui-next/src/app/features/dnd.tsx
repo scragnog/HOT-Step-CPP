@@ -14,7 +14,7 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { ModuleDef } from '../../definitions/types.ts';
 import { deskModel } from '../../derive.ts';
-import { BOARD, defOf, ix } from '../model/index.ts';
+import { BOARD, LEAD, defOf, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { usePicker } from '../store/overlays.ts';
 import { Tile } from '../render/Tile.tsx';
@@ -38,7 +38,7 @@ const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.des
 const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 const dragKey = () => (dragId?.startsWith('move:') ? dragId.slice(5) : dragId);
 /** The tiles on the desk in order (not the lyric sheet, not the one travelling). */
-const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving') && !t.classList.contains('ghost')).map(t => t.dataset.m!);
+const deskTiles = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== LEAD?.id && !t.classList.contains('moving') && !t.classList.contains('ghost')).map(t => t.dataset.m!);
 /** The module the tile goes before, to stand at place k among `list` (null: the end; past the last shown tile, before
  *  the next module that is not shown here). */
 function beforeAt(list: string[], k: number): string | null {

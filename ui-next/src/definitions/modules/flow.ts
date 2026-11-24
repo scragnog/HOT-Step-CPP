@@ -59,7 +59,7 @@ export const flow = {
       when: { param: 'mm.rend', not: 'ggml' },
       wire: { to: 'ext:mm3DitPrecision', note: 'Read by backends/minimax/generate.ts; not declared as an extension.' },
     },
-    { key: 'mm.stream', type: 'boolean', label: 'Play while rendering', default: false, wire: 'ext:mm3Stream' },
+    { key: 'mm.stream', role: 'stream', type: 'boolean', label: 'Play while rendering', default: false, wire: 'ext:mm3Stream' },
   ],
   face: [
     { part: 'flowWindows', reads: ['mm.hop'] },

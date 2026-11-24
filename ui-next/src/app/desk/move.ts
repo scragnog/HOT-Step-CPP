@@ -4,14 +4,14 @@
 // on one grip is one move (the store).
 
 import { defName } from '../../derive.ts';
-import { defOf } from '../model/index.ts';
+import { LEAD, defOf } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui } from '../i18n/index.ts';
 import { deskSlots, lastMeasure } from './layout.ts';
 
 type Slot = { k: number; x: number; y: number; w: number; h: number };
 const sameSlot = (a: Slot, b: Slot) => Math.abs(a.x - b.x) < 2 && Math.abs(a.y - b.y) < 2;
-const tilesNow = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== 'lyrics' && !t.classList.contains('moving')).map(t => t.dataset.m!);
+const tilesNow = () => [...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].filter(t => t.dataset.m !== LEAD?.id && !t.classList.contains('moving')).map(t => t.dataset.m!);
 
 function slotToward(now: Slot, slots: Slot[], dir: 'left' | 'right' | 'up' | 'down'): Slot | null {
   const mid = (s: Slot) => [s.x + s.w / 2, s.y + s.h / 2] as const, [cx, cy] = mid(now), moved = slots.filter(s => s.k !== now.k && !sameSlot(s, now));

@@ -30,3 +30,26 @@ export const engineTag = (id: EngineId): string => ENGINES.find(e => e.id === id
 export const engineShort = (id: EngineId): string => ENGINES.find(e => e.id === id)!.short;
 /** Every engine's field prefix, for telling a backend's own request field (mm3Steps) from a shared one. */
 export const FIELD_PREFIXES: readonly string[] = ENGINES.map(e => e.prefix).filter(Boolean);
+
+/** What the page needs to know of an engine beyond its card: facts of the engine itself, a row each, so that a new
+ *  engine must say every one (the type check refuses a row that is missing or short). */
+export interface EngineFacts {
+  /** What the main box is (S-05): the word the page calls it by everywhere, and whether it holds tags. */
+  box: 'description' | 'caption' | 'prompt' | 'tags';
+  /** It renders from lyrics alone (or Instrumental), so Generate asks for the box only without them. */
+  lyricsAlone: boolean;
+  /** Its tempo field reaches the song (E-38): a BPM written in the box is offered to the field. */
+  tempoInSong: boolean;
+  /** It structures its caption: Compose caption is its own, and a dataset's structured caption is the one it reads. */
+  structured: boolean;
+  /** How it takes the song's length: exactly, as the longest a song may run, or not at all (it ends each song). */
+  length: 'exact' | 'most' | 'none';
+}
+export const ENGINE_FACTS: { [e in EngineId]: EngineFacts } = {
+  ace: { box: 'description', lyricsAlone: true, tempoInSong: true, structured: false, length: 'exact' },
+  'minimax-m3': { box: 'caption', lyricsAlone: false, tempoInSong: false, structured: true, length: 'none' },
+  yue2: { box: 'description', lyricsAlone: false, tempoInSong: true, structured: false, length: 'none' },
+  sa3: { box: 'prompt', lyricsAlone: false, tempoInSong: false, structured: false, length: 'exact' },
+  heartmula: { box: 'tags', lyricsAlone: false, tempoInSong: false, structured: false, length: 'most' },
+};
+export const factsOf = (e: EngineId): EngineFacts => ENGINE_FACTS[e];

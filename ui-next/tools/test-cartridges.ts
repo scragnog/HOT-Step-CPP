@@ -73,7 +73,7 @@ const TWO = [{ file: 'tape-lofi-v2', type: 'LoRA' }, { file: 'folk-voice', type:
   ok('a planner housing is never offered a DoRA (B-02)', carts(desk('yue2', 'lab', {}, [])).list!.items.every(x => x.type !== 'DoRA'));
   const pl = carts(desk('ace', 'lab', { 'ad.planner': 'folk-voice-planner' }, [TWO[0]]));
   ok('the planner adapter as its cartridge, its note where a fader would be', !!pl.planner && 'cart' in pl.planner && s(pl.planner.cart.note) === 'Shapes the plan, not the sound' && pl.planner.cart.housing === 'plan');
-  ok('another engine\'s adapters, said from the book', adaptersAway({ stash: { ace: { state: { slots: TWO } } } } as never, 'yue2') === ' · ACE-Step 1.5 keeps its 2 adapters for when you switch back');
+  ok('another engine\'s adapters, said from the book', adaptersAway({ stash: { ace: { state: { slots: TWO } } } } as never, 'yue2', 'slots') === ' · ACE-Step 1.5 keeps its 2 adapters for when you switch back');
 }
 
 /* ---- the hands */

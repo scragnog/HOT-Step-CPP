@@ -33,5 +33,3 @@ export const surfaceOf = (name: string, opts: Record<string, unknown>): Surface 
 export const drawsDim = (name: string): boolean => !!HOW.get(name)?.dims;
 /** The container draws its children's standing back (a deck's replay that is not used, said on its own line). */
 export const drawsKidsDim = (name: string): boolean => !!HOW.get(name)?.kidsDim;
-/** Every part built so far, for the checks. */
-export const partsBuilt = (): string[] => [...VIEWS.keys()].sort();

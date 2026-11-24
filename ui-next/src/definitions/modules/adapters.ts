@@ -392,6 +392,7 @@ export const adapters = {
   state: [
     {
       key: 'slots',
+      role: 'adapters',
       kind: 'slots',
       noun: 'the adapters',
       /* a second adapter loaded while Stack is Single stacks them; removing one moves the later strengths up and

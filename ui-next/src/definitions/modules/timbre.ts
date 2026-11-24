@@ -27,6 +27,7 @@ export const timbre = {
   state: [
     {
       key: 'timbreFile',
+      role: 'reference',
       kind: 'file',
       noun: 'the timbre reference',
       steps: { load: 'Load {file} as the timbre reference' },

@@ -14,8 +14,7 @@
 // a plan lands while it was on Plan (E-09).
 
 import { Children, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { definePart, Glyph, Icon, useSay, type PartView } from '../kit/index.ts';
-import { buildSession } from '../services/build.ts';
+import { definePart, Glyph, Icon, service, useSay, type PartView } from '../kit/index.ts';
 import { reduced } from './motion.ts';
 
 /* the concept's seeded generator (00-util.js rng): a take's waveform is the same on every visit */
@@ -59,7 +58,7 @@ export function BuildBoard(v: PartView) {
   });
   /* the section shown is the one the session looks at: it stays there after a keep (B-37) */
   const sess = m?.session, curId = m?.cur?.id, looked = m?.looked;
-  useEffect(() => { if (sess && curId && looked !== curId) buildSession.look(sess, curId); }, [sess, curId, looked]);
+  useEffect(() => { if (sess && curId && looked !== curId) service('build').look(sess, curId); }, [sess, curId, looked]);
   if (!m) return null;
   const kids = Children.toArray(v.children), keep = (sel: string) => { focusKey.current = sel; };
   const lockedAt = new Map((m.locked ?? []).map(l => [l.at, l]));
@@ -75,7 +74,7 @@ export function BuildBoard(v: PartView) {
   const doPlan = () => {
     setPlay(null);
     landing.current = true;
-    void buildSession.plan(m.plan.sections).then(r => { v.act('planned', r); });
+    void service('build').plan(m.plan.sections).then(r => { v.act('planned', r); });
   };
   if (!m.planned || m.planning) {
     return (
@@ -90,14 +89,14 @@ export function BuildBoard(v: PartView) {
     );
   }
   const session = m.session!, cur = m.cur;
-  const look = (id: string) => { buildSession.look(session, id); keep(`.b-src [data-bsec="${CSS.escape(id)}"]`); };
+  const look = (id: string) => { service('build').look(session, id); keep(`.b-src [data-bsec="${CSS.escape(id)}"]`); };
   const toggle = (take: string, dur: number) => { setPos(0); setPlay(p => (p?.take === take && !p.queue.length && !p.section ? null : { take, dur, t0: performance.now(), queue: [], section: null })); };
   const playKept = () => { setPos(0); setPlay(p => { if (p?.section) return null; const [a, ...rest] = m.keptOrder; return a ? { take: a.take, section: a.section, dur: a.dur, t0: performance.now(), queue: rest } : null; }); };
   const replan = <button type="button" className="small-btn" data-breplan="" title={say(m.replanTip)} onClick={() => { keep('[data-breplan]'); doPlan(); }}>{say({ id: 'build.replan' })}</button>;
   const render = () => {
     if (!m.render || busy) return;
     setPlay(null); setBusy(true);
-    void buildSession.render(session, { title: m.render.title, style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: m.render!.title }); });
+    void service('build').render(session, { title: say(m.render.title), style: say(m.render.style), dur: m.render.dur, takes: m.render.takes, engine: v.engine }).then(r => { setBusy(false); v.act('rendered', { song: r.song, title: say(m.render!.title) }); });
   };
   return (
     <>
@@ -116,7 +115,7 @@ export function BuildBoard(v: PartView) {
       {cur ? (
         <div className="b-cur">
           <b style={{ color: cur.colour }}>{cur.label}</b><span className="lbl">{say(cur.says)}</span>
-          <button type="button" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake="" onClick={() => { keep('[data-btake]'); buildSession.takes(session, cur.make.ask.section, cur.make.ask.words, cur.make.ask.n, cur.make.ask.ownChords); }}>{say(cur.make.label)}</button>
+          <button type="button" className={`small-btn${cur.make.primary ? ' primary' : ''}`} data-btake="" onClick={() => { keep('[data-btake]'); service('build').takes(session, cur.make.ask.section, cur.make.ask.words, cur.make.ask.n, cur.make.ask.ownChords); }}>{say(cur.make.label)}</button>
           {cur.next ? <button type="button" className="small-btn" data-bsec={cur.next.id} onClick={() => look(cur.next!.id)}>{say(cur.next.label)}</button> : null}
         </div>
       ) : null}

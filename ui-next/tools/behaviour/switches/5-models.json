@@ -28,8 +28,8 @@
     {
       "feature": "take cost",
       "file": "src/derive/vram.ts",
-      "find": "each = !t || (t.when && !valueOf(ix, t.when, desk)) ? 0 : t.gb;",
-      "replace": "each = 0 * (t?.gb ?? 0);"
+      "find": "each = !t || (t.when && !(when && valueOf(ix, when, desk))) ? 0 : t.gb;",
+      "replace": "each = 0 * (t?.gb ?? 0) * (when ? 1 : 1);"
     },
     {
       "feature": "refused run",

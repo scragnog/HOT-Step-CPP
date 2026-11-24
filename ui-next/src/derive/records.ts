@@ -133,6 +133,7 @@ const STEPS: { [from: number]: (r: Record<string, unknown>) => Record<string, un
     if ('pedals' in r) { out.board = r.pedals; delete out.pedals; }
     const content = r.content as { vals?: unknown; prompt?: unknown } | undefined;
     const { v, a } = split({ ...(r.vals as object), ...(content?.vals as object) });
+    /* the concept's own keys at version 0, frozen: a key renamed since is read through its `was` */
     if (content && typeof content.prompt === 'string') v['prompt.text'] = content.prompt;
     if (content) { out.withContent = true; delete out.content; }
     if ('slots' in r) { out.state = { ...(out.state as object), slots: r.slots }; delete out.slots; }

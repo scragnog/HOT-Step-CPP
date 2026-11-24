@@ -11,7 +11,7 @@ import { useDesk } from '../../store/desk.ts';
 import { CONCEPT_ID } from '../../shell/engines.ts';
 import { cancelCards, seekPlayer, togglePlay as toggle, useGen, type Card } from '../../store/generate.ts';
 import { cancelAll as cancelAllNow, generate as press } from '../../generate/actions.ts';
-import { mockCard, mockFail } from '../../services/generate.ts';
+import { mockCard, mockFail } from '../../services/mock/generate.ts';
 import { expose, onScene, S } from '../compat.ts';
 
 const num = (id: string | number): string | number => (typeof id === 'string' && /^\d+$/.test(id) ? +id : id);

@@ -18,6 +18,7 @@ export const models = {
   params: [
     {
       key: 'model.var',
+      role: 'variant',
       type: 'choice',
       label: 'Variant',
       short: 'Variant',
@@ -35,6 +36,7 @@ export const models = {
     },
     {
       key: 'model.dit',
+      role: 'soundModel',
       type: 'choice',
       label: 'DiT model',
       short: 'Sound',
@@ -71,6 +73,7 @@ export const models = {
     },
     {
       key: 'model.lm',
+      role: 'plannerModel',
       type: 'choice',
       label: 'LM model',
       short: 'Planner',

@@ -19,6 +19,12 @@ export const defOf = (id: string): Definition | undefined => BY_ID.get(id) ?? BY
 export const BUILT_IN: readonly string[] = DEFINITIONS.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id);
 /** The module that holds the board (the Pedalboard). */
 export const BOARD = DEFINITIONS.find((d): d is ModuleDef => d.kind === 'module' && !!d.board)!;
+/** The desk's lead tile: the built-in module whose face holds the lyric sheet (the concept packs it first, and it is
+ *  never moved), and the one whose face holds the model rows (the engine panel's). Found by what they hold, never by
+ *  id, so a rename keeps them. */
+const holding = (part: string) => DEFINITIONS.find((d): d is ModuleDef => d.kind === 'module' && !!d.builtIn && d.face.some(function has(n): boolean { return n.part === part || (n.children ?? []).some(has); }));
+export const LEAD = holding('lyricSheet');
+export const MODELS = holding('modelPicker')!;
 /** Pedals, then side units, each in their place on the board (`at`). */
 export const PEDALS = DEFINITIONS.filter(d => d.kind === 'pedal').sort((a, b) => a.at - b.at);
 export const UNITS = DEFINITIONS.filter(d => d.kind === 'unit').sort((a, b) => a.at - b.at);

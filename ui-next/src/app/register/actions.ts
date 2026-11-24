@@ -1,10 +1,8 @@
 // The named actions a definition's node may run (parts.ts ACTIONS: open the VST3 host, the adapter list, compose a
-// caption...), each run by the feature that builds it, registered from its own file (src/app/features/). An action no
-// package has built yet says what it will do.
+// caption...), each run by the feature that builds it, registered from its own file (src/app/features/). Every action
+// a definition runs has a runner (tools/test-code.ts fails until it does).
 
 import type { ActionName } from '../../definitions/parts.ts';
-import { useDesk } from '../store/desk.ts';
-import { ui } from '../i18n/index.ts';
 
 const RUN = new Map<string, (arg?: string, from?: string) => void>();
 
@@ -16,5 +14,6 @@ export function defineAction(name: ActionName, run: (arg?: string, from?: string
 }
 export function runNamed(name: string, arg?: string, from?: string): void {
   const f = RUN.get(name);
-  if (f) f(arg, from); else useDesk.getState().showToast({ text: ui(`action.${name}`) });
+  if (!f) throw new Error(`the action "${name}" has no runner: register it with defineAction (tools/test-code.ts)`);
+  f(arg, from);
 }

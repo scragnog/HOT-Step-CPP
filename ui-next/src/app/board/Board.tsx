@@ -7,7 +7,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Definition, ModuleDef, Node, PedalDef, UnitDef } from '../../definitions/types.ts';
 import { boardModel, nodeKeys, pedalModel, type CellModel } from '../../derive.ts';
-import { defOf, ix } from '../model/index.ts';
+import { BOARD, defOf, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Icon } from '../kit/icons.tsx';
@@ -88,7 +88,7 @@ const setFoot = (def: PedalDef | UnitDef, key: string | undefined, on: boolean) 
 function pedalFocusAfter(id: string): string[] {
   const s = useDesk.getState(), ring = boardModel(ix, s.desk, s.board), all = [...ring.pedals, ...ring.units], i = all.indexOf(id);
   const sel = (x: string) => (defOf(x)?.kind === 'unit' ? [`[data-xid="${x}"] .u-pow`] : [`[data-pid="${x}"] .foot`, `[data-pid="${x}"] .px`]);
-  return [all[i + 1], all[i - 1]].filter((x): x is string => !!x).flatMap(sel).concat('[data-m="post"] .grip');
+  return [all[i + 1], all[i - 1]].filter((x): x is string => !!x).flatMap(sel).concat(`[data-m="${BOARD.id}"] .grip`);
 }
 
 export function Board({ def }: { def: ModuleDef }) {

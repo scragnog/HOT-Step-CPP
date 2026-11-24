@@ -6,7 +6,7 @@
 import type { Action, Definition, Draft, Node, NodeOverride, Tier, Value, Workflow } from '../definitions/types.ts';
 import { layOut, pedalUnits, type PartName } from '../definitions/parts.ts';
 import { RETIRED } from '../definitions/retired.ts';
-import { type Desk, type Index, applies, changed, has, holds, nodeAt, onDesk, onOf, resolve, valueOf } from './core.ts';
+import { type Desk, type Index, applies, changed, has, holds, nodeAt, onDesk, onOf, resolve, roleKey, valueOf } from './core.ts';
 import { type Msg, type Slot, list, msg } from './messages.ts';
 import { applyChange, type Change } from './parts.ts';
 import { migrate } from './records.ts';
@@ -118,7 +118,7 @@ export function runAction(ix: Index, d: Definition, a: Action, desk: Desk, node?
       return one(Object.fromEntries([...keys].map(k => [k, null])), Object.fromEntries([...keys].filter(k => resolve(ix.params.get(k)!.p, desk.engine).auto).map(k => [k, true])));
     }
     case 'tag': {
-      const key = d.params.find(p => p.type === 'text')?.key ?? 'lyrics.text', text = String(valueOf(ix, key, desk) ?? '');
+      const key = d.params.find(p => p.type === 'text')?.key ?? roleKey(ix, 'lyrics') ?? '', text = String(valueOf(ix, key, desk) ?? '');
       return one({ [key]: `${text}${text && !text.endsWith('\n') ? '\n' : ''}${a.tag}\n` }, {});
     }
     case 'tier': return { go: a.tier, ring: a.ring ?? [] };

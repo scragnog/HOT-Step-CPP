@@ -9,12 +9,16 @@ import { SAVED_VERSION } from '../definitions/types.ts';
 import { ENGINE_IDS, engineName, engineShort } from '../definitions/engines.ts';
 import { FACTORY_REVISIONS, FACTORY_WORKFLOWS } from '../definitions/factory.ts';
 import { RETIRED } from '../definitions/retired.ts';
-import { type Desk, type Index, has, resolve } from './core.ts';
+import type { Role } from '../definitions/roles.ts';
+import { type Desk, type Index, has, resolve, roleKey } from './core.ts';
 import { cleanStates, cleanValues } from './values.ts';
 import { EN, list, msg, type Msg, type Slot } from './messages.ts';
 import { migrate } from './records.ts';
 import { formatMsg, paramWords } from './strings.ts';
 import { defName, stepName, type StepWords } from './steps.ts';
+
+/* the content the records name (the main box, the lyrics) is found by its role (definitions/roles.ts); '' when nothing plays it */
+const role = (ix: Index, r: Role): string => roleKey(ix, r) ?? '';
 
 /* ---------------------------------------------------------------- the words */
 
@@ -418,10 +422,10 @@ export const revisionModified = (ix: Index, r: Revision, desk: Desk): boolean =>
   revisionDiff(ix, r, desk).length > 0 || revisionStateDiffers(ix, r, desk) || revisionContentDiffers(ix, r, desk);
 
 /** What a revision holds besides settings: lyrics, or the main box's text. */
-export function revisionHolds(r: Revision): 'lyrics' | 'box' | null {
+export function revisionHolds(ix: Index, r: Revision): 'lyrics' | 'box' | null {
   if (!r.withContent) return null;
   const t = (k: string) => typeof r.vals[k] === 'string' && !!(r.vals[k] as string).trim();
-  return t('lyrics.text') ? 'lyrics' : t('prompt.text') ? 'box' : null;
+  return t(role(ix, 'lyrics')) ? 'lyrics' : t(role(ix, 'prompt')) ? 'box' : null;
 }
 /** What the main box is called on an engine, inside a sentence ("the description", "the tags"). */
 export const boxWord = (_ix: Index, desk: Desk, e: EngineId = desk.engine): Msg => boxWordOf(e);
@@ -466,15 +470,16 @@ export function revisionDetail(ix: Index, r: Revision, desk: Desk, modified: boo
   if (post.length) groups.push({ name: msg('rev.detail.post'), rows: post });
   if (r.withContent) {
     const rows: DetailRow[] = [], text = (k: string) => (typeof r.vals[k] === 'string' ? (r.vals[k] as string) : '');
-    const box = text('prompt.text');
+    const box = text(role(ix, 'prompt'));
     if (box.trim()) rows.push({ label: '', value: msg('rev.detail.quote', { text: box.length > 80 ? box.slice(0, 80) + '…' : box }), wide: true });
     for (const k of revisionKeys(ix, r.engine, 'content')) {
-      if (k === 'prompt.text' || !(k in r.vals) || k === 'lyrics.text' || ix.params.get(k)!.p.type === 'text') continue;
+      if (k === role(ix, 'prompt') || !(k in r.vals) || k === role(ix, 'lyrics') || ix.params.get(k)!.p.type === 'text') continue;
       const v = r.vals[k]!, f = resolve(ix.params.get(k)!.p, r.engine);
       if (JSON.stringify(v) === JSON.stringify(f.default)) continue;
       rows.push({ label: paramWords(ix, k, d0).label, value: words(ix, k, d0, v) });
     }
-    if (text('lyrics.text').trim()) rows.push({ label: msg('rev.detail.lyrics'), value: msg('rev.detail.lines', { n: text('lyrics.text').split('\n').length }) });
+    const lyr = text(role(ix, 'lyrics'));
+    if (lyr.trim()) rows.push({ label: msg('rev.detail.lyrics'), value: msg('rev.detail.lines', { n: lyr.split('\n').length }) });
     if (rows.length) groups.push({ name: msg('rev.detail.content'), rows });
   }
   return { groups, empty: groups.length ? null : msg('rev.detail.empty') };
@@ -508,7 +513,7 @@ export function listModel(ix: Index, saved: Saved, open: Open, desk: Desk, mods:
   const revRow = (wf: string, r: Revision, user: boolean): RevRow => {
     const id: RevId = { workflow: wf, engine: r.engine, name: r.name };
     const on = open.workflow === wf && open.revision === r.name && open.revFor === r.engine, modified = on && revisionModified(ix, r, desk);
-    const mine = user && FACTORY_WORKFLOWS.some(w => w.name === wf), holds = revisionHolds(r), n = modified ? revisionDiff(ix, r, desk).length : 0;
+    const mine = user && FACTORY_WORKFLOWS.some(w => w.name === wf), holds = revisionHolds(ix, r), n = modified ? revisionDiff(ix, r, desk).length : 0;
     const tip: Slot = modified ? (n ? msg('rev.row.tip.changed', { n }) : revisionContentDiffers(ix, r, desk) ? msg('rev.row.tip.content') : msg('rev.row.tip.mod')) : r.note ?? msg('rev.row.tip.load', { wf });
     return { id, user, mine, on, modified, holds, engine: r.engine, tip,
       label: msg('rev.row.label', { name: r.name, mine: String(mine), engine: engineName(r.engine), holds: holds ?? 'none', box: boxWord(ix, desk, r.engine), mod: String(modified) }),
@@ -561,7 +566,7 @@ export function putWords(ix: Index, before: Desk, after: Desk, mods: boolean, bo
 
 /** A load's toast: where it loaded, what came with it, and the adapters it unloaded (S-09). */
 export function loadedWords(ix: Index, wf: string, r: Revision, desk: Desk, switched: boolean, unloaded: string[], revert: boolean): Msg {
-  const h = revisionHolds(r), inc = h === 'lyrics' ? msg('wf.inc.lyrics') : h === 'box' ? msg('wf.inc.box', { box: boxWord(ix, desk, r.engine) }) : '';
+  const h = revisionHolds(ix, r), inc = h === 'lyrics' ? msg('wf.inc.lyrics') : h === 'box' ? msg('wf.inc.box', { box: boxWord(ix, desk, r.engine) }) : '';
   const un = unloaded.length ? msg('wf.unloaded', { files: list(unloaded) }) : '';
   return revert ? msg('wf.rev.reverted', { name: r.name, inc, un }) : msg('wf.loaded', { wf, name: r.name, on: switched ? msg('wf.loaded.on', { engine: engineName(r.engine) }) : '', inc, un });
 }
@@ -640,6 +645,7 @@ export interface StoredDraft extends Draft { id: string; at: number }
 export function cleanDraft(ix: Index, raw: unknown): StoredDraft | null {
   if (!isRec(raw) || typeof raw.at !== 'number' || !Number.isFinite(raw.at)) return null;
   const v0 = !('v' in raw);
+  /* the concept's draft (version 0) keeps its box as `prompt`: its key then, frozen (read through `was` after a rename) */
   const r = v0 ? { ...raw, vals: { ...(isRec(raw.vals) ? raw.vals : {}), ...(typeof raw.prompt === 'string' ? { 'prompt.text': raw.prompt } : {}) } } : raw;
   const m = migrate(r);
   if (!m || m.kind !== 'draft') return null;
@@ -664,11 +670,11 @@ export const sameDraft = (a: Pick<Draft, 'engine' | 'vals'> | undefined, b: Pick
 
 const textIn = (d: Pick<Draft, 'vals'>, k: string) => (typeof d.vals[k] === 'string' ? (d.vals[k] as string) : '');
 /** A draft's name in the list: its own, or the start of its main box, or Untitled. */
-export const draftTitle = (d: Pick<Draft, 'name' | 'vals'>): Slot => d.name || textIn(d, 'prompt.text').slice(0, 60) || msg('draft.untitled');
+export const draftTitle = (ix: Index, d: Pick<Draft, 'name' | 'vals'>): Slot => d.name || textIn(d, role(ix, 'prompt')).slice(0, 60) || msg('draft.untitled');
 /** The second line tells drafts apart: when, the engine if it is not this one, and the first lyric line or the length. */
-export function draftSub(d: StoredDraft, engine: EngineId, now: number, lang = 'en'): Msg {
-  const ly = textIn(d, 'lyrics.text').split('\n').map(x => x.trim()).find(x => x && !/^\[.*\]$/.test(x));
-  const n = textIn(d, 'prompt.text').trim().split(/\s+/).filter(Boolean).length;
+export function draftSub(ix: Index, d: StoredDraft, engine: EngineId, now: number, lang = 'en'): Msg {
+  const ly = textIn(d, role(ix, 'lyrics')).split('\n').map(x => x.trim()).find(x => x && !/^\[.*\]$/.test(x));
+  const n = textIn(d, role(ix, 'prompt')).trim().split(/\s+/).filter(Boolean).length;
   const what = ly ? msg('draft.line', { line: ly }) : n ? msg('draft.words', { n }) : msg('draft.empty');
   return msg('draft.sub', { when: draftWhen(d.at, now, lang), other: String(d.engine !== engine), engine: engineName(d.engine), what });
 }
@@ -688,7 +694,7 @@ export function applyDraft(ix: Index, desk: Desk, d: Draft): Desk {
 }
 /** The words over the Drafts list: what a draft saves on this engine. */
 export function draftsAbout(ix: Index, desk: Desk): { says: Msg; tip: Msg } {
-  const lyrics = has(ix, 'lyrics.text', desk.engine), box = msg('wf.box.cap', { e: desk.engine });
+  const lyrics = has(ix, role(ix, 'lyrics'), desk.engine), box = msg('wf.box.cap', { e: desk.engine });
   return { says: msg('draft.about', { box, lyrics: String(lyrics), n: DRAFT_MAX }), tip: msg('draft.about.title', { box: boxWord(ix, desk), lyrics: String(lyrics) }) };
 }
 export const draftLoaded = (d: Draft, switched: boolean): Msg =>

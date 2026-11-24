@@ -89,6 +89,8 @@ export interface InstrumentModel {
   region?: { title: string; style: Slot; dur: number; durText: string; hue: number; id: number; a: number; b: number; cap: Slot; text: Slot; ctl: boolean; one: boolean };
   /** timbreBlend: the blend as its percent. */
   blend?: { pct: Slot };
+  /** recentRefs: the recent reference tracks, newest first, as the server told them (desk.lists `refs.recent`). */
+  refs?: string[];
 }
 
 /* the one registry of instruments: what each bespoke part draws and the hands it takes, filled only by defineInstrument
@@ -112,6 +114,7 @@ const DRAWN: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) 
   samplerScope: (ix, node, desk) => ({ scope: scopeOf(ix, node, desk) }),
   latentCurve: (ix, node, desk) => ({ dist: distOf(num(ix, desk, node.reads?.[0], 0), num(ix, desk, node.reads?.[1], 1)) }),
   repaintRegion: (ix, node, desk) => { const r = regionOf(ix, node, desk); return r ? { region: r } : {}; },
+  recentRefs: (_ix, _node, desk) => ({ refs: (desk.lists?.['refs.recent'] ?? []).map(x => String(x.value)) }),
   timbreBlend: (ix, node, desk) => ({ blend: { pct: msg('blend.pct', { v: Math.round(num(ix, desk, node.param, 0) * 100) }) } }),
 };
 

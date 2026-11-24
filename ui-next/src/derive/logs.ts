@@ -7,7 +7,8 @@
 
 import { ENGINES } from '../definitions/engines.ts';
 import type { EngineId } from '../definitions/types.ts';
-import { type Desk, type Index, applies, formatValue, resolve, shownValue, valueOf } from './core.ts';
+import type { Role } from '../definitions/roles.ts';
+import { type Desk, type Index, applies, formatValue, resolve, roleKey, shownValue, valueOf } from './core.ts';
 import { EN, list, msg, type Msg, type Slot } from './messages.ts';
 import { paramWords } from './strings.ts';
 import { modelKeys, vramNeed } from './vram.ts';
@@ -42,7 +43,7 @@ for (const [id, text] of Object.entries(WORDS)) {
 
 /** The models the head names, in this order (the variant, the sound model, the planner), and every model the engine
  *  loads, in the definitions' order, for the models line. */
-const HEAD = ['model.var', 'model.dit', 'model.lm'];
+const HEAD: Role[] = ['variant', 'soundModel', 'plannerModel'];
 /** The plugin lists the server gives (parts.ts OPTION_SOURCES), counted on the plugins line. */
 const PLUGINS = { solvers: 'plugins.solver', schedules: 'plugins.scheduler', guidance: 'plugins.guidance' } as const;
 
@@ -64,7 +65,7 @@ export interface EngineLogModel {
 /** The engine log for the desk, given what the server says about itself and what the queue holds. */
 export function engineLogModel(ix: Index, desk: Desk, status: EngineStatus | null, queue: QueueSummary | null = null): EngineLogModel {
   const e = desk.engine, me = engineOf(e), used = modelKeys(ix, e).filter(k => applies(ix, k, desk));
-  const head = msg('log.head', { engine: me.name, models: list(HEAD.filter(k => used.includes(k)).map(k => fileName(ix, k, desk)), 'comma') });
+  const head = msg('log.head', { engine: me.name, models: list(HEAD.map(r => roleKey(ix, r, desk.engine)).filter((k): k is string => !!k && used.includes(k)).map(k => fileName(ix, k, desk)), 'comma') });
   const testing = status ? status.engines.filter(id => 'testing' in engineOf(id) && (engineOf(id) as { testing?: boolean }).testing).map(id => engineOf(id).name) : [];
   const server = !status ? msg('log.engine.wait') : !status.up ? msg('log.engine.down')
     : msg('log.engine', { n: status.engines.length, testing: testing.length ? msg('log.engine.testing', { names: list(testing) }) : '' });

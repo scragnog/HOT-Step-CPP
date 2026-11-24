@@ -19,8 +19,6 @@ import { useModel } from '../render/useModel.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { useNotesLogs } from '../store/notes-logs.ts';
-import type { LogsService } from '../services/logs.ts';
-import '../services/logs.ts';
 import { dockLogs, logsDock, toggleLogs, vramMeter } from './logs-dock.ts';
 
 export function Logs() {
@@ -57,4 +55,4 @@ export function Logs() {
 fill('overlays', Logs);
 
 /** What the server says about itself, told once when the page loads. */
-void service<LogsService>('logs').status().then(status => useNotesLogs.setState({ status }), () => { /* the log says it is waiting for the server */ });
+void service('logs').status().then(status => useNotesLogs.setState({ status }), () => { /* the log says it is waiting for the server */ });

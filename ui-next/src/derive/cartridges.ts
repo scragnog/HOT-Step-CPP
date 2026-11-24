@@ -382,7 +382,7 @@ export function adapterLists(engine: string, slots: { file: string; type: string
 
 /** The desk fact `adaptersAway` (parts.ts DESK_FACTS): the other engines that keep adapters for when you switch back,
  *  from the engines' book, as words after a separator, or nothing (25-module-adapters.js awayText). */
-export function adaptersAway(book: { stash: { [engine: string]: { state: { [k: string]: Json } } } }, engine: string, key = 'slots'): string {
+export function adaptersAway(book: { stash: { [engine: string]: { state: { [k: string]: Json } } } }, engine: string, key: string): string {
   const away = Object.entries(book.stash).filter(([e, st]) => e !== engine && Array.isArray(st.state?.[key]) && (st.state[key] as Json[]).length);
   if (!away.length) return '';
   return ' · ' + away.map(([e, st]) => { const n = (st.state[key] as Json[]).length; return `${engineName(e as Parameters<typeof engineName>[0])} keeps its ${n === 1 ? 'adapter' : `${n} adapters`} for when you switch back`; }).join('; ');

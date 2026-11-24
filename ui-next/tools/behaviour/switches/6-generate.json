@@ -16,8 +16,8 @@
     {
       "feature": "takes cards",
       "file": "src/derive/generate.ts",
-      "find": "const songs: SongSpec[] = Array.from({ length: n }, (_, i) => {",
-      "replace": "const songs: SongSpec[] = Array.from({ length: 1 }, (_, i) => {"
+      "find": "const songs: SongAsk[] = Array.from({ length: n }, (_, i) => ({",
+      "replace": "const songs: SongAsk[] = Array.from({ length: 1 }, (_, i) => ({"
     },
     {
       "feature": "cancel one",
@@ -45,13 +45,13 @@
     },
     {
       "feature": "queue head",
-      "file": "src/app/services/generate.ts",
+      "file": "src/app/services/mock/generate.ts",
       "find": "const head = live()[0];",
       "replace": "const head = live()[live().length - 1];"
     },
     {
       "feature": "stages",
-      "file": "src/app/services/generate.ts",
+      "file": "src/app/services/mock/generate.ts",
       "find": "stage: stageOf(takeProgress(f, i), sp.engine, sp.steps, sp.lit)",
       "replace": "stage: stageOf(0.9, sp.engine, sp.steps, [])"
     },
@@ -165,7 +165,7 @@
     },
     {
       "feature": "server refusal",
-      "file": "src/app/services/generate.ts",
+      "file": "src/app/services/mock/generate.ts",
       "find": "if (v.refuses) { head.status = 'refused';",
       "replace": "if (false as boolean) { head.status = 'refused';"
     },
@@ -358,7 +358,7 @@
     {
       "feature": "repaint label",
       "file": "src/derive/generate.ts",
-      "find": "const label = repaintSource(ix, desk) && modOn(ix, 'repaint', desk) ? msg('gen.go.repaint') : msg('gen.go'),",
+      "find": "const label = repaintSource(ix, desk) && modOn(ix, 'repaintSource', desk) ? msg('gen.go.repaint') : msg('gen.go'),",
       "replace": "const label = msg('gen.go'),"
     },
     {

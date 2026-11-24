@@ -4,7 +4,8 @@
 
 import { flushSync } from 'react-dom';
 import type { Value } from '../../definitions/types.ts';
-import { boxHolds, changesUnmarked, refusalOf, repaintDesk, reuseRefused, reuseWords, runOf, sentTo, type Msg } from '../../derive.ts';
+import type { Role } from '../../definitions/roles.ts';
+import { boxHolds, changesUnmarked, refusalOf, repaintDesk, reuseRefused, reuseWords, roleKey, runOf, sentTo, type Msg } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { cancelStep, dismissCard, startRun, useGen, type Card } from '../store/generate.ts';
@@ -13,7 +14,8 @@ import { setTierFromView } from '../shell/tier.ts';
 import { ui } from '../i18n/index.ts';
 import { inView, reduced } from './motion.ts';
 
-const setValue = (key: string, v: Value, label?: Msg) => useDesk.getState().setValue(key, v, label);
+/* a value set for the user, found by its role (definitions/roles.ts): the main box, the takes count */
+const setValue = (r: Role, v: Value, label?: Msg) => { const k = roleKey(ix, r, useDesk.getState().desk.engine); return k ? useDesk.getState().setValue(k, v, label) : null; };
 const focus = (sel: string) => requestAnimationFrame(() => document.querySelector<HTMLElement>(sel)?.focus({ preventScroll: true }));
 /** A link or a control pulses where it is (the concept's ping). */
 export function ping(els: Element[]): void {
@@ -25,7 +27,7 @@ export function ping(els: Element[]): void {
 export function generate(o: { seed?: number } = {}): boolean {
   const s = useDesk.getState(), r = refusalOf(ix, s.desk, { scoreChosen: o.seed !== undefined });
   if (r?.kind === 'empty') {
-    s.showToast({ text: r.says, action: { label: ui('gen.example'), run: () => { setValue('prompt.text', r.example); focus('#prompt'); } } });
+    s.showToast({ text: r.says, action: { label: ui('gen.example'), run: () => { setValue('prompt', r.example); focus('#prompt'); } } });
     focus('#prompt'); return false;
   }
   if (r?.kind === 'score') { runNamed('scorePreview'); return false; }
@@ -55,7 +57,7 @@ export function retry(id: string): void {
   const c = useGen.getState().cards.find(x => x.id === id); if (!c?.error) return;
   dismissCard(id);
   /* a run that stopped goes back in the queue as it was started; a refused one runs again with the takes that fit */
-  if (c.error.again) flushSyncRun(() => startRun(c.error!.spec)); else { setValue('takes.n', c.error.retry); generate(); }
+  if (c.error.again) flushSyncRun(() => startRun(c.error!.spec)); else { setValue('takes', c.error.retry); generate(); }
   focus('#go');
 }
 /** Dismiss a notice: focus goes to the next notice's first button, else to Generate (F-13). */
@@ -77,7 +79,7 @@ export function showChanges(): void {
   ping(els);
 }
 /** "Use N takes": Takes set to what fits, said. */
-export function takesFit(n: number): void { setValue('takes.n', n); useDesk.getState().say(ui('gen.takesSet', { n })); }
+export function takesFit(n: number): void { setValue('takes', n); useDesk.getState().say(ui('gen.takesSet', { n })); }
 
 /* ---------------------------------------------------------------- the song menu */
 
@@ -93,7 +95,7 @@ export function reuse(c: Card): void {
   const s = useDesk.getState(), had = boxHolds(ix, s.desk).trim(), w = reuseWords(s.desk.engine);
   /* a caption a dataset supplies is not written over: Edit a copy first (E-31) */
   const locked = reuseRefused(ix, s.desk); if (locked) { s.showToast({ text: locked }); return; }
-  const entry = setValue('prompt.text', c.text ?? c.style, w.label);
+  const entry = setValue('prompt', c.text ?? c.style, w.label);
   /* the toast offers Undo of this step only: none when the box already said it (RA-09) */
   if (had && entry) useDesk.getState().showToast({ text: w.replaced, action: { label: ui('undo'), run: () => useDesk.getState().runUndo(entry) } });
 }

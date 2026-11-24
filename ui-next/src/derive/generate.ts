@@ -7,13 +7,15 @@
 // take's length and colour where the engine ends the song itself, a wildcard's pick), so a test can fix it.
 
 import type { Definition, EngineId, Json } from '../definitions/types.ts';
-import { engineName } from '../definitions/engines.ts';
-import { type Desk, type Index, applies, changed, countOf, has, isAuto, mmss, onDesk, stateOf, valueOf } from './core.ts';
+import { engineName, factsOf } from '../definitions/engines.ts';
+import type { Role } from '../definitions/roles.ts';
+import { type Desk, type Index, applies, changed, countOf, has, isAuto, mmss, onDesk, roleKey, roleOn, roleOwner, stateOf, valueOf } from './core.ts';
 import { list, msg, type Msg, type Slot } from './messages.ts';
 import { realState } from './request.ts';
 import type { CreateIntent } from './request.ts';
 import { defName, stepName } from './steps.ts';
 import { tileAtTier, usedHere, parkedOn } from './desk.ts';
+import { chainOf } from './models.ts';
 import { vramNeed, type VramNeed } from './vram.ts';
 import type { SourceSong } from './instruments.ts';
 import { cleanBuild } from './build.ts';
@@ -21,17 +23,17 @@ import { switchEngine, type EngineBook } from './engine.ts';
 import { boxA, exampleText, expandWild } from './fields.ts';
 import { boxWordOf } from './workflows.ts';
 
-const K = {
-  prompt: 'prompt.text', lyrics: 'lyrics.text', instr: 'lyrics.instr', title: 'song.title', artist: 'song.artist', wild: 'wild.auto',
-  takes: 'takes.n', steps: 'samp.steps', chain: 'pp.on', stream: 'mm.stream', dur: 'tempo.dur', max: 'tempo.max',
-  preview: 'lm.preview', abc: 'yue.abc', replan: 'yue.replan', tries: 'yue.tries',
-} as const;
-const S = { source: 'source', region: 'region', latent: 'latent', cont: 'contFile', contSel: 'contSel', build: 'build', slots: 'slots' } as const;
-
+/* what a run reads is found by its role (definitions/roles.ts), never by its key: a value on the desk's engine, a switch
+   that is on and applies, a state, and whether the module that plays a role is on the desk */
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-const val = (ix: Index, key: string, desk: Desk) => (ix.params.has(key) && has(ix, key, desk.engine) ? valueOf(ix, key, desk) : undefined);
-const on = (ix: Index, key: string, desk: Desk) => ix.params.has(key) && applies(ix, key, desk) && val(ix, key, desk) === true;
-const modOn = (ix: Index, id: string, desk: Desk) => desk.on.has(id) && !!ix.defs.find(d => d.id === id && usedHere(d, desk.engine));
+const keyOf = (ix: Index, r: Role, desk: Desk) => roleKey(ix, r, desk.engine);
+const val = (ix: Index, r: Role, desk: Desk) => { const k = keyOf(ix, r, desk); return k && ix.params.has(k) && has(ix, k, desk.engine) ? valueOf(ix, k, desk) : undefined; };
+const on = (ix: Index, r: Role, desk: Desk) => { const k = keyOf(ix, r, desk); return !!k && ix.params.has(k) && applies(ix, k, desk) && val(ix, r, desk) === true; };
+const st = (ix: Index, r: Role, desk: Desk) => { const k = roleKey(ix, r); return k ? stateOf(ix, k, desk) : undefined; };
+const modOn = (ix: Index, r: Role, desk: Desk) => roleOn(ix, r, desk);
+
+/** A state set by its role, for a desk's state ({} when nothing plays the role). */
+const stateBy = (ix: Index, r: Role, v: Json): { [k: string]: Json } => { const k = roleKey(ix, r); return k ? { [k]: v } : {}; };
 
 /* ---------------------------------------------------------------- the main box's word, per engine (S-05) */
 
@@ -41,7 +43,7 @@ const modOn = (ix: Index, id: string, desk: Desk) => desk.on.has(id) && !!ix.def
 /* ---------------------------------------------------------------- the song a repaint works on */
 
 export function repaintSource(ix: Index, desk: Desk): SourceSong | null {
-  const v = stateOf(ix, S.source, desk) as Partial<SourceSong> | null | undefined;
+  const v = st(ix, 'repaintSource', desk) as Partial<SourceSong> | null | undefined;
   return v && typeof v === 'object' && typeof v.dur === 'number' && typeof v.title === 'string' ? { song: v.song ?? '', title: v.title, style: str(v.style), dur: v.dur, hue: Number(v.hue) || 0 } : null;
 }
 
@@ -58,42 +60,54 @@ export type Refusal =
 
 /** `scoreChosen`: the run renders a score the preview showed (its seed), so it is not previewed again (package 3c). */
 export function refusalOf(ix: Index, desk: Desk, o: { scoreChosen?: boolean } = {}): Refusal | null {
-  const e = desk.engine, src = repaintSource(ix, desk), typed = str(val(ix, K.prompt, desk)).trim();
+  const e = desk.engine, src = repaintSource(ix, desk), typed = str(val(ix, 'prompt', desk)).trim();
   if (!src && !typed) {
-    const lyr = has(ix, K.lyrics, e) && str(val(ix, K.lyrics, desk)).trim(), needStyle = e !== 'ace';
-    if (needStyle || (!lyr && val(ix, K.instr, desk) !== true)) return { kind: 'empty', says: needStyle ? msg('gen.needs', { engine: engineName(e), box: boxA(desk) }) : msg('gen.needs.ace'), example: exampleText(e) };
+    const lyr = str(val(ix, 'lyrics', desk)).trim(), needStyle = !factsOf(e).lyricsAlone;
+    if (needStyle || (!lyr && val(ix, 'instrumental', desk) !== true)) return { kind: 'empty', says: needStyle ? msg('gen.needs', { engine: engineName(e), box: boxA(desk) }) : msg('gen.needs.ace'), example: exampleText(e) };
   }
-  if (!o.scoreChosen && on(ix, K.preview, desk) && !str(val(ix, K.abc, desk)).trim() && !src) return { kind: 'score' };
+  if (!o.scoreChosen && on(ix, 'scorePreview', desk) && !str(val(ix, 'leadSheet', desk)).trim() && !src) return { kind: 'score' };
   /* a build is planned while its record names a session (derive/build.ts, package 3c) */
-  const build = stateOf(ix, S.build, desk);
-  if (stateOf(ix, S.cont, desk) && modOn(ix, 'build', desk) && build && cleanBuild(build).session) return { kind: 'clash', says: msg('gen.clash') };
+  const build = st(ix, 'build', desk);
+  if (st(ix, 'recording', desk) && modOn(ix, 'build', desk) && build && cleanBuild(build).session) return { kind: 'clash', says: msg('gen.clash') };
   const n = takesOf(ix, desk), v = vramNeed(ix, desk, n);
   if (v.refuses) return { kind: 'wontFit', says: msg('gen.blocked', { need: v.need.toFixed(1), card: cardText(v.card), fits: lineFits(ix, desk) }), fits: lineFits(ix, desk) };
   return null;
 }
 
 /** What the main box holds now. */
-export const boxHolds = (ix: Index, desk: Desk): string => str(val(ix, K.prompt, desk));
+export const boxHolds = (ix: Index, desk: Desk): string => str(val(ix, 'prompt', desk));
 
 /** How many songs the next run makes: the takes on the desk (1 without them); a repaint makes one. */
 export function takesOf(ix: Index, desk: Desk): number {
-  if (repaintSource(ix, desk) && modOn(ix, 'repaint', desk)) return 1;
-  return modOn(ix, 'takes', desk) ? Math.max(1, Number(val(ix, K.takes, desk) ?? 1)) : 1;
+  if (repaintSource(ix, desk) && modOn(ix, 'repaintSource', desk)) return 1;
+  return modOn(ix, 'takes', desk) ? Math.max(1, Number(val(ix, 'takes', desk) ?? 1)) : 1;
 }
 const cardText = (card: number) => String(+card.toFixed(1));
 
-/** One song a run will make, as its card shows it while it renders and as the server is asked for it. */
-export interface SongSpec {
-  title: string; take?: number; of?: number;
+/** One song a run asks for, as the page knows it: Song info's title, the take, the card's line, the words it is made
+ *  from, its length where the page sets one (an exact length, the song a repaint works on), the longest it may run,
+ *  the song a repaint works on, and its seed for this run. What the page does not know (a title from the words, a
+ *  length the engine decides, the art's hue) the generation service says when it takes the run (its `draft`): the
+ *  server's, never the core's. */
+export interface SongAsk {
+  title?: string; take?: number; of?: number;
   /** Its card's line: the artist, then the description (a Structured Caption's Global Metadata line, E-35). */
   style: string;
   /** The whole text it was made from, for Reuse (E-20). */
   text: string;
-  /** Seconds. */
-  dur: number;
-  hue: number;
+  /** Seconds, where the page sets the length. */
+  dur?: number;
+  /** The longest it may run, in seconds, where the engine ends the song itself. */
+  most?: number;
+  hue?: number;
+  /** The song a repaint works on. */
+  repaints?: { title: string; hue: number };
   seed?: number;
 }
+/** A song of a run as the server took it: its title, length and hue said. */
+export type SongSpec = SongAsk & { title: string; dur: number; hue: number };
+/** A run as the page asks for it (runOf), before the server says what its songs are (RunSpec). */
+export type RunAsk = Omit<RunSpec, 'songs'> & { songs: SongAsk[] };
 /** A run as it is started: its engine and everything it renders with, kept with it, so it keeps its engine whatever is
  *  selected later and goes back in the queue exactly as it was (F-13). */
 export interface RunSpec {
@@ -117,8 +131,6 @@ export interface RunSpec {
 
 /** A song's card line from what it was made from (E-35). */
 export const songStyle = (p: string): string => ((/^Global Metadata:[ \t]*(.+)$/m.exec(p) ?? [])[1] ?? p).replace(/\n/g, ' ').trim();
-/** A song's title from its words: the first three words of the description, the first one capitalised. */
-const titleFrom = (p: string): string => { const w = p.split(/[,.\n]/)[0]!.replace(/Global Metadata:\s*/, '').trim().split(/\s+/).slice(0, 3).join(' '); return w ? w[0]!.toUpperCase() + w.slice(1) : 'Untitled'; };
 
 /** The request the page sends for the desk: the desk in the real application's names (request.ts realState). The real
  *  adapter (package 10) finishes it with the application's own resolver (request.ts createIntent). */
@@ -127,42 +139,50 @@ export function pageIntent(ix: Index, desk: Desk): CreateIntent {
   return { kind: 'create', params: { backend: desk.engine, ...rs.params, ...(Object.keys(rs.backendParams).length ? { backendParams: rs.backendParams } : {}), ...rs.body, ...rs.content }, compose: (rs.intent.compose ?? {}) as { [k: string]: Json } };
 }
 
-/** What a press of Generate starts (35-gobar.js generate): one song per take, each titled, described and timed as the
- *  concept does it; `seed` is for this run only (a score being rendered, E-08). Refusals are refusalOf's. */
-export function runOf(ix: Index, desk: Desk, rnd: () => number, seed?: number): RunSpec {
-  const e = desk.engine, src = modOn(ix, 'repaint', desk) ? repaintSource(ix, desk) : null, typed = str(val(ix, K.prompt, desk)).trim();
-  const p0 = typed || (src ? src.style : ''), p = on(ix, K.wild, desk) ? expandWild(p0, rnd) : p0;
-  const n = takesOf(ix, desk), steps = Number(valueOf(ix, K.steps, desk) ?? 12);
-  const lit: Slot[] = val(ix, K.chain, desk) === false ? [] : ix.defs.filter(d => d.kind === 'pedal' && desk.on.has(d.id) && usedHere(d, e) && d.on && valueOf(ix, d.on, desk) === true).sort((a, b) => a.at - b.at).map(d => defName(d, desk));
-  const tempo = modOn(ix, 'tempo', desk), title = str(val(ix, K.title, desk)), artist = str(val(ix, K.artist, desk));
-  const exact = tempo && applies(ix, K.dur, desk) && !isAuto(ix, K.dur, desk);
-  const durMax = ix.params.get(K.dur)?.p.range?.[1] ?? 240;
-  /* an exact length where the engine takes one; where the model ends the song itself, never past the longest it may run (S-07) */
-  const cap = exact && e === 'heartmula' ? Number(val(ix, K.dur, desk)) : tempo && applies(ix, K.max, desk) ? Number(val(ix, K.max, desk)) : e === 'heartmula' ? Number(resolveMax(ix, desk) ?? durMax) : Infinity;
-  const songs: SongSpec[] = Array.from({ length: n }, (_, i) => {
-    const dur = src ? src.dur : (e === 'ace' || e === 'sa3') && exact ? Number(val(ix, K.dur, desk)) : e === 'sa3' ? 30 : Math.min(cap, 150 + Math.round(rnd() * 90));
-    return {
-      title: src ? `${src.title} (repainted)` : title || titleFrom(p), ...(n > 1 ? { take: i + 1, of: n } : {}),
-      style: (artist ? artist + ' · ' : '') + songStyle(p), text: String(p).slice(0, 4000), dur,
-      hue: src ? (src.hue + 25) % 360 : Math.round(rnd() * 360), ...(seed !== undefined ? { seed } : {}),
-    };
-  });
+/** What a press of Generate starts (35-gobar.js generate): one song per take, as the page knows each (SongAsk); `seed`
+ *  is for this run only (a score being rendered, E-08). Refusals are refusalOf's. What each song is called, how long it
+ *  runs where the engine decides and its colour are the server's (the generation service's draft). */
+export function runOf(ix: Index, desk: Desk, rnd: () => number, seed?: number): RunAsk {
+  const e = desk.engine, facts = factsOf(e), src = modOn(ix, 'repaintSource', desk) ? repaintSource(ix, desk) : null, typed = str(val(ix, 'prompt', desk)).trim();
+  const p0 = typed || (src ? src.style : ''), p = on(ix, 'wildcards', desk) ? expandWild(p0, rnd) : p0;
+  const n = takesOf(ix, desk), steps = Number(val(ix, 'steps', desk) ?? 12);
+  const chain = chainOf(ix), chainOff = chain !== null && valueOf(ix, chain, desk) === false;
+  const lit: Slot[] = chainOff ? [] : ix.defs.filter(d => d.kind === 'pedal' && desk.on.has(d.id) && usedHere(d, e) && d.on && valueOf(ix, d.on, desk) === true).sort((a, b) => a.at - b.at).map(d => defName(d, desk));
+  const tempo = modOn(ix, 'length', desk), title = str(val(ix, 'songTitle', desk)), artist = str(val(ix, 'songArtist', desk)), kDur = keyOf(ix, 'length', desk), kMax = keyOf(ix, 'longest', desk);
+  const exact = tempo && !!kDur && applies(ix, kDur, desk) && !isAuto(ix, kDur, desk);
+  const durMax = (kDur ? ix.params.get(kDur)?.p.range?.[1] : undefined) ?? 240;
+  /* an exact length where the engine takes one (engines.ts ENGINE_FACTS); where the model ends the song itself, never
+     past the longest it may run (S-07) */
+  const most = exact && facts.length === 'most' ? Number(val(ix, 'length', desk)) : tempo && !!kMax && applies(ix, kMax, desk) ? Number(val(ix, 'longest', desk)) : facts.length === 'most' ? Number(resolveMax(ix, desk) ?? durMax) : undefined;
+  const dur = src ? src.dur : facts.length === 'exact' && exact ? Number(val(ix, 'length', desk)) : undefined;
+  const songs: SongAsk[] = Array.from({ length: n }, (_, i) => ({
+    ...(title ? { title } : {}), ...(n > 1 ? { take: i + 1, of: n } : {}),
+    style: (artist ? artist + ' · ' : '') + songStyle(p), text: String(p).slice(0, 4000),
+    ...(dur !== undefined ? { dur } : {}), ...(most !== undefined ? { most } : {}),
+    ...(src ? { repaints: { title: src.title, hue: src.hue } } : {}), ...(seed !== undefined ? { seed } : {}),
+  }));
   const says: Msg[] = [];
-  const latent = stateOf(ix, S.latent, desk), cont = stateOf(ix, S.cont, desk);
-  if (e === 'ace' && typeof latent === 'string' && latent) says.push(msg('gen.continuing', { file: latent }));
-  if (e === 'yue2' && modOn(ix, 'cont', desk) && typeof cont === 'string' && cont) {
-    const sel = stateOf(ix, S.contSel, desk) as { start?: number; end?: number } | number[] | undefined;
+  /* a latent or a recording continued from is said as the run starts, where the engine takes it (its state's wire) */
+  const latent = st(ix, 'latent', desk), cont = st(ix, 'recording', desk);
+  if (typeof latent === 'string' && latent && sentHere(ix, 'latent', desk)) says.push(msg('gen.continuing', { file: latent }));
+  if (modOn(ix, 'recording', desk) && typeof cont === 'string' && cont) {
+    const sel = st(ix, 'recordingPart', desk) as { start?: number; end?: number } | number[] | undefined;
     const [a, b] = Array.isArray(sel) ? sel : [sel?.start ?? 0, sel?.end ?? 0];
     says.push(msg('gen.continuing.part', { a: mmss(Number(a)), b: mmss(Number(b)), file: cont }));
   }
   return {
     engine: e, desk, intent: pageIntent(ix, desk), n, steps, lit, songs, says,
-    stream: e === 'minimax-m3' && on(ix, K.stream, desk),
-    tries: e === 'yue2' && on(ix, K.replan, desk) ? Math.max(1, Number(val(ix, K.tries, desk) ?? 1)) : 0,
+    stream: on(ix, 'stream', desk),
+    tries: on(ix, 'replan', desk) ? Math.max(1, Number(val(ix, 'replanTries', desk) ?? 1)) : 0,
     need: vramNeed(ix, desk, n).need,
   };
 }
-const resolveMax = (ix: Index, desk: Desk): number | undefined => { const hit = ix.params.get(K.dur); if (!hit) return undefined; const line = (hit.p.per ?? []).find(l => 'engines' in l && l.engines.includes(desk.engine) && 'range' in l) as { range?: [number, number, number] } | undefined; return (line?.range ?? hit.p.range)?.[1]; };
+/** A state's wire sends it on the desk's engine (a latent is ACE-Step's). */
+function sentHere(ix: Index, r: Role, desk: Desk): boolean {
+  const k = roleKey(ix, r), w = k ? ix.states.get(k)?.s.wire : undefined;
+  return Array.isArray(w) ? w.some(x => typeof x === 'object' && x !== null && 'engines' in x && (x as { engines: string[] }).engines.includes(desk.engine)) : !!w;
+}
+const resolveMax = (ix: Index, desk: Desk): number | undefined => { const k = keyOf(ix, 'length', desk), hit = k ? ix.params.get(k) : undefined; if (!hit) return undefined; const line = (hit.p.per ?? []).find(l => 'engines' in l && l.engines.includes(desk.engine) && 'range' in l) as { range?: [number, number, number] } | undefined; return (line?.range ?? hit.p.range)?.[1]; };
 
 /** What a run says it is doing at `f` (0 to 1) of its own song (35-gobar.js stage): planning for the first fifth, then
  *  the steps, then decoding, then each pedal that runs. HeartMuLa writes as it goes (S-11). */
@@ -228,7 +248,7 @@ export function goLine(ix: Index, desk: Desk): GoLine {
   const pedals = ix.defs.filter(d => d.kind === 'pedal' && desk.on.has(d.id) && usedHere(d, e)).length;
   const units = ix.defs.filter(d => d.kind === 'unit' && desk.on.has(d.id) && usedHere(d, e)).length;
   const parked = parkedOn(ix, desk), np = parked.modules.length + parked.board.length;
-  const ads = ix.defs.some(d => d.id === 'adapters' && usedHere(d, e)) ? countOf(ix, S.slots, desk) : 0;
+  const ad = roleKey(ix, 'adapters'), ads = ad && roleOwner(ix, 'adapters')?.engines.includes(e) ? countOf(ix, ad, desk) : 0;
   const ch = changedKeys(ix, desk).length + ads, tier = msg(`tier.${desk.tier}`);
   const rest: GoLine['rest'] = [{ says: shownN ? msg('gen.line.modules', { n: shownN }) : msg('gen.line.noModules') }];
   if (pedals) rest.push({ says: msg('gen.line.pedals', { n: pedals }) });
@@ -266,7 +286,7 @@ export interface GoModel {
 /** Generate and Cancel (35-gobar.js updateGo): the button keeps its width and label; the queue is a badge on it (B-11,
  *  M-12); its title says how many render now and how many wait (C-26). */
 export function goModel(ix: Index, desk: Desk, running: number, waiting: number): GoModel {
-  const label = repaintSource(ix, desk) && modOn(ix, 'repaint', desk) ? msg('gen.go.repaint') : msg('gen.go'), q = running + waiting;
+  const label = repaintSource(ix, desk) && modOn(ix, 'repaintSource', desk) ? msg('gen.go.repaint') : msg('gen.go'), q = running + waiting;
   return {
     label, title: q ? msg('gen.go.busy', { label, run: running, wait: waiting, q }) : msg('gen.go.title', { label }),
     queued: q, cancel: msg('gen.cancel', { q }), cancelLabel: msg('gen.cancel.label', { q }), count: q > 1 ? String(q) : '',
@@ -364,10 +384,10 @@ export const sentTo = (page: string, title: string): Msg => msg('gen.sent', { pa
 /** "Repaint a region": the song as the repaint's record holds it, the region it starts with (the concept's
  *  0.35 to 0.55 of the song), and the step's and the toast's words. From another engine it switches to ACE-Step first,
  *  as one step (E-14). */
-export function repaintFrom(s: { id: string | number; title: string; take?: number; of?: number; style: string; dur: number; hue: number }, desk: Desk): { source: SourceSong; region: { start: number; end: number }; label: Msg; says: Msg; engine: EngineId } {
-  const sw = desk.engine !== 'ace', name = songName(s);
+export function repaintFrom(s: { id: string | number; title: string; take?: number; of?: number; style: string; dur: number; hue: number }, desk: Desk, engine: EngineId = desk.engine): { source: SourceSong; region: { start: number; end: number }; label: Msg; says: Msg; engine: EngineId } {
+  const sw = desk.engine !== engine, name = songName(s);
   return {
-    source: { song: typeof s.id === 'string' && /^\d+$/.test(s.id) ? +s.id : s.id, title: s.title, style: s.style, dur: s.dur, hue: s.hue }, region: { start: +(s.dur * 0.35).toFixed(2), end: +(s.dur * 0.55).toFixed(2) }, engine: 'ace',
+    source: { song: typeof s.id === 'string' && /^\d+$/.test(s.id) ? +s.id : s.id, title: s.title, style: s.style, dur: s.dur, hue: s.hue }, region: { start: +(s.dur * 0.35).toFixed(2), end: +(s.dur * 0.55).toFixed(2) }, engine,
     label: msg(sw ? 'gen.repaint.switch' : 'gen.repaint', { name }), says: msg('gen.repaint.says', { name }),
   };
 }
@@ -375,10 +395,10 @@ export function repaintFrom(s: { id: string | number; title: string; take?: numb
  *  own words, E-14), the song as the repaint's record, its first region, and Repaint first on the desk in place of any
  *  other source module. */
 export function repaintDesk(ix: Index, desk: Desk, book: EngineBook, mods: string[], s: Parameters<typeof repaintFrom>[0]): { desk: Desk; book: EngineBook; mods: string[]; label: Msg; says: Msg } {
-  const r = repaintFrom(s, desk), sw = desk.engine !== r.engine ? switchEngine(ix, desk, book, r.engine) : null;
+  const rp = roleOwner(ix, 'repaintSource'), r = repaintFrom(s, desk, rp?.engines[0]), sw = desk.engine !== r.engine ? switchEngine(ix, desk, book, r.engine) : null;
   const d1 = sw ? sw.desk : desk, kept = mods.filter(id => (!sw || sw.desk.on.has(id)) && !ix.defs.some(d => d.id === id && d.kind === 'module' && d.source));
   return {
-    desk: { ...d1, state: { ...d1.state, [S.source]: r.source as unknown as Json, [S.region]: r.region } }, book: sw ? sw.book : book, mods: ['repaint', ...kept],
+    desk: { ...d1, state: { ...d1.state, ...stateBy(ix, 'repaintSource', r.source as unknown as Json), ...stateBy(ix, 'repaintRegion', r.region) } }, book: sw ? sw.book : book, mods: [...(rp ? [rp.id] : []), ...kept],
     label: r.label, says: sw ? msg('gen.repaint.after', { news: sw.toast, says: r.says }) : r.says,
   };
 }

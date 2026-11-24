@@ -28,6 +28,7 @@ export const master = {
   state: [
     {
       key: 'masterRef',
+      role: 'reference',
       kind: 'file',
       noun: 'the mastering reference',
       steps: { load: 'Load {file} as the mastering reference' },
