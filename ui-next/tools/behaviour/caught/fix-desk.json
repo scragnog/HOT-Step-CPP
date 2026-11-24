@@ -1,0 +1,28 @@
+{
+ "about": "The scenarios that caught each switch of switches/fix-desk.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "fix-desk: the opener's own click": ["37-fix-desk/first-adapter-from-the-empty-strip","37-fix-desk/first-planner-adapter-and-other-engines"],
+  "fix-desk: a dim keeps a control only while it holds": ["37-fix-desk/a-dim-keeps-a-control-only-for-its-reason"],
+  "fix-desk: an empty housing is not drawn": ["37-fix-desk/no-empty-housing-at-quick"],
+  "fix-desk: held notes on controls": ["37-fix-desk/held-takes-said-where-they-are"],
+  "fix-desk: held notes on strips": ["37-fix-desk/held-takes-said-where-they-are"],
+  "fix-desk: takes strip a row at Quick": ["37-fix-desk/held-takes-said-where-they-are"],
+  "fix-desk: the sleeve's waveform": ["37-fix-desk/the-reference-sleeve-draws-its-wave"],
+  "fix-desk: the plan cursor's line": ["37-fix-desk/the-plan-text-is-as-tall-as-the-concept-draws-it"],
+  "fix-desk: a plugin without controls says so": ["37-fix-desk/a-plugin-without-controls-says-so"],
+  "fix-desk: the source ring": ["37-fix-desk/repaint-rings-its-tile-and-leaves-with-its-song"],
+  "fix-desk: a source leaves with its song": ["37-fix-desk/repaint-rings-its-tile-and-leaves-with-its-song"],
+  "fix-desk: a note's words after its action": ["37-fix-desk/mm3-quick-tempo-note-reads-whole"],
+  "fix-desk: a board knob says its pedal": ["37-fix-desk/a-pedal-knob-step-names-its-pedal"],
+  "fix-desk: an owner named once": ["37-fix-desk/a-pedal-knob-step-names-its-pedal"],
+  "fix-desk: cfg rescale by hundredths": ["37-fix-desk/yue-cfg-rescale-steps-by-hundredths"],
+  "fix-desk: a state step undone back to": ["37-fix-desk/continue-part-undo-says-back-to"],
+  "fix-desk: a value in force is no step": ["37-fix-desk/a-key-at-the-end-of-the-range-is-no-step"],
+  "fix-desk: the score preview without the lead sheet": ["37-fix-desk/score-preview-from-the-planner-alone"],
+  "fix-desk: the terminal seed says follows": ["37-fix-desk/mm3-planner-seed-reads-as-a-token"],
+  "fix-desk: the lip's focus ring inside": ["37-fix-desk/side-unit-lip-focus-is-a-whole-ring"],
+  "fix-desk: a resize keeps the widths": ["37-fix-desk/a-resize-at-the-same-width-keeps-the-desk"],
+  "fix-desk: a pedal snaps again when it grows": ["37-fix-desk/a-pedal-that-grows-a-line-snaps-again"],
+  "fix-desk: a unit's text field holds its words": ["37-fix-desk/cover-art-subject-field-holds-its-words"]
+ }
+}
