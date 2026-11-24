@@ -19,8 +19,8 @@
    "state": "",
    "key": "^#go$",
    "field": "^sem:data-tip-held$",
-   "n": 8,
-   "why": "The concept's tooltip system marks Generate while its tip is held (data-tip-held); the tooltips are package 8's."
+   "n": 4,
+   "why": "The concept's tooltip system marks Generate while its tip is held (data-tip-held), in the states where the rebuild's (package 8) has not held it."
   },
   {
    "state": "^gen-notice$",
