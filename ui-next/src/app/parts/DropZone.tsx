@@ -4,10 +4,27 @@
 // and the step it is, are the core's (StateView.load: a file that is no audio is refused and said); a file another
 // definition lends it (its `from` words) is shown and never taken or cleared here.
 
-import { useState, type DragEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type DragEvent } from 'react';
 import { definePart, Icon, ui, useSay, type PartView } from '../kit/index.ts';
 
 const hasFiles = (e: DragEvent) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+
+/** A loaded file's waveform on the sleeve (the concept's drawMini): a bar every 3px in the reference's own blue, as its
+ *  label and circle (G-D-23); the bars' heights are the core's (StateModel.wave). Drawn again when the sleeve resizes. */
+function MiniWave({ wave }: { wave: number[] }) {
+  const cv = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const c = cv.current; if (!c) return;
+    const draw = () => {
+      const w = c.clientWidth, h = 36, dpr = devicePixelRatio || 1; if (!w) return;
+      c.width = w * dpr; c.height = h * dpr; const g = c.getContext('2d'); if (!g) return; g.scale(dpr, dpr); g.fillStyle = '#4c6fff';
+      for (let i = 0; i < w / 3 && i < wave.length; i++) { const a = wave[i]! * (h / 2 - 2); g.fillRect(i * 3, h / 2 - a, 2, a * 2); }
+    };
+    draw();
+    const ro = new ResizeObserver(draw); ro.observe(c); return () => ro.disconnect();
+  }, [wave]);
+  return <canvas ref={cv} className="minwave" data-minwave="" />;
+}
 
 export function DropZone(v: PartView) {
   const say = useSay(), st = v.state[0], [over, setOver] = useState(false);
@@ -38,7 +55,7 @@ export function DropZone(v: PartView) {
     <label className={cls} {...over$}>
       <i className="vinyl" aria-hidden="true" />
       <span className="sl-txt">
-        {name ? <><b title={name}>{name}</b>{lent && v.words.from ? <small className="sl-from">{say(v.words.from)}</small> : st.detail ? <small>{say(st.detail)}</small> : null}</>
+        {name ? <><b title={name}>{name}</b>{lent && v.words.from ? <small className="sl-from">{say(v.words.from)}</small> : st.detail ? <small>{say(st.detail)}</small> : null}{st.wave ? <MiniWave wave={st.wave} /> : null}</>
           : <><b>{v.words.empty ? say(v.words.empty) : null}</b>{v.words.hint ? <small>{say(v.words.hint)}</small> : null}</>}
       </span>
       {input}{clear}

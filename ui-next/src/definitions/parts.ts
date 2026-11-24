@@ -214,6 +214,7 @@ export const PARTS = {
       empty: { type: 'text', doc: 'Its words while empty.' },
       hint: { type: 'text', doc: 'Its second line while empty.' },
       from: { type: 'text', doc: 'Shows a file another part lends it (its node\'s `state` is that part\'s file): the name, then these words, and it takes no file of its own.' },
+      wave: { type: 'boolean', doc: 'Draws a loaded file\'s waveform under its name, as the timbre reference\'s sleeve does (RD-05).' },
     },
   },
   // ---------------------------------------------------------------- containers

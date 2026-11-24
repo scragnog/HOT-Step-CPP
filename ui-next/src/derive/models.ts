@@ -28,6 +28,8 @@ import { instrumentModel, type InstrumentModel } from './instruments.ts';
 import { mmss, stateOf } from './core.ts';
 import type { Json } from '../definitions/types.ts';
 import { modelRows, type ModelRow } from './vram.ts';
+import { heldNote } from './engine.ts';
+import { rng } from './generate.ts';
 import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
 
 /* ---------------------------------------------------------------- a part's model */
@@ -87,6 +89,9 @@ export interface ParamModel {
   canAuto?: true;
   /** Presses within this many milliseconds are one step (taps on TAP, keys on the key wheel). */
   run?: number;
+  /** A song value this engine cannot take, held for another: what its control says (held.note: "Your 8 takes return
+   *  on ACE-Step 1.5"), until the value is changed here. */
+  held?: Msg;
 }
 
 /** What a node reads; `changed` when a parameter it reads is changed (an LCD's word carries the changed mark of what it
@@ -150,9 +155,19 @@ function fileDetail(kind: string, v: Json | undefined, desk: Desk): { detail?: S
   return typeof t === 'number' ? { detail: msg('file.long', { t: mmss(t) }) } : {};
 }
 
+/** A file's waveform on its sleeve (the concept's drawMini, 25-module-timbre.js): bars seeded by the name, the same on
+ *  every visit; enough for the widest sleeve, a bar every 3px. */
+const WAVE_BARS = 400;
+function fileWave(v: Json | undefined): { wave?: number[] } {
+  if (typeof v !== 'string' || !v) return {};
+  const r = rng(v.length * 13);
+  return { wave: Array.from({ length: WAVE_BARS }, () => 0.3 + 0.7 * r()) };
+}
+
 /** A state a node names, as a part draws it. */
 /** `detail`: a file's length, when the page was told it (a recording given to Continue from recording: package 3c). */
-export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot; detail?: Slot }
+/** `wave`: a loaded file's waveform as its sleeve draws it (dropZone's `wave`), each bar's height from 0 to 1. */
+export interface StateModel { key: string; kind: string; value: Json | null; lent: boolean; owner: string; noun: Slot; detail?: Slot; wave?: number[] }
 
 
 /** A parameter on the desk as a part draws it. */
@@ -188,6 +203,8 @@ export function paramModel(ix: Index, key: string, desk: Desk, cell?: CellWords)
   if (kept) out.kept = kept;
   if (f.auto) out.canAuto = true;
   if (p.run) out.run = p.run;
+  const held = p.held ? heldNote(ix, key, desk) : null;
+  if (held) out.held = held;
   return out;
 }
 
@@ -236,7 +253,7 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   if (ro) m.readout = ro;
   const ins = instrumentModel(ix, node, desk, key);
   if (ins) m.instrument = ins;
-  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun, ...fileDetail(hit.s.kind, stateOf(ix, k, desk), desk) }; });
+  if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun, ...fileDetail(hit.s.kind, stateOf(ix, k, desk), desk), ...(opts.wave && hit.s.kind === 'file' ? fileWave(stateOf(ix, k, desk)) : {}) }; });
   if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
   if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
@@ -324,7 +341,9 @@ export interface TileModel {
   group: Slot;
   /** The engine does not use it: what the tile says. */
   unsup: Slot | null;
-  strip: { says: Slot; actions: { label: Slot; tip?: Slot }[] } | null;
+  /** `held`: what a value of its own held for another engine says, the one place it shows while the tile is a strip
+   *  (RD-03: "Your 4 takes return on ACE-Step 1.5" under Takes' one-song strip). */
+  strip: { says: Slot; actions: { label: Slot; tip?: Slot }[]; held: Slot | null } | null;
   also: { text: Slot; link: Tier; ring: string; linkWords: Slot } | null;
   board: boolean;
 }
@@ -351,7 +370,7 @@ export function tileModel(ix: Index, d: ModuleDef, desk: Desk): TileModel {
     id: d.id, cls: `tile ${w} ${d.labUnder ? 'labmod' : ''} ${unsup ? 'unsup' : ''}`, attrs,
     name: tileName(d, desk), group: parent ? msg('tile.group.lab', { parent: defName(parent, desk) }) : categoryWord(d.category),
     unsup: unsup ? msg('tile.unsup', { engine: engineName(desk.engine) }) : null,
-    strip: s ? { says: s.says, actions: s.actions.map(x => ({ label: x.label, ...(x.tip ? { tip: x.tip } : {}) })) } : null,
+    strip: s ? { says: s.says, actions: s.actions.map(x => ({ label: x.label, ...(x.tip ? { tip: x.tip } : {}) })), held: d.params.map(p => (p.held ? heldNote(ix, p.key, desk) : null)).find(x => !!x) ?? null } : null,
     also: a ? { text: a.text, link: a.link, ring: a.keys.join(' '), linkWords: alsoLinkWords(a) } : null,
     board: !!d.board,
   };

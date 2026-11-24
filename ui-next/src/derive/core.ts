@@ -73,8 +73,9 @@ export interface Desk {
   state: { [key: string]: Json };
   /** The two desk facts the page is told rather than works out (parts.ts DESK_FACTS without `of`): the plugin host's
    *  count and the words for another engine's adapters. Every other fact is worked out when it is read (factOf), so
-   *  none can be stale. */
-  told?: { vstPlugins?: number; adaptersAway?: string };
+   *  none can be stale. And the song values the engines' book holds for another engine (EngineBook.hold), which a held
+   *  value's control says where it is (heldNote, RD-03). */
+  told?: { vstPlugins?: number; adaptersAway?: string; hold?: { [key: string]: { value: number; shown: number; from: EngineId } } };
   /** What the generation service tells (package 6): the newest song's colour, which the cover swatch shows, and how
    *  many re-planning tries the run that renders has used, which the dice light. */
   songs?: { hue?: number; attempts?: number };

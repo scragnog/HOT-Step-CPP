@@ -35,7 +35,7 @@ export const Tile = memo(function Tile({ def }: { def: ModuleDef }) {
       {m.unsup ? <div className="unsup-note"><b>{say(m.unsup)}</b>{say(ui('tile.unsup.more'))}</div> : null}
       <div className="tile-body">
         {m.strip ? (
-          <div className="mod-strip"><span className="ms-why">{say(m.strip.says)}</span>{m.strip.actions.length ? <span className="ms-act">{m.strip.actions.map((a, i) => <button key={i} className="sbtn" title={a.tip ? say(a.tip) : undefined} onClick={() => runStrip(def, i)}>{say(a.label)}</button>)}</span> : null}</div>
+          <div className="mod-strip"><span className="ms-why">{say(m.strip.says)}{m.strip.held ? <span className="tk-held">{say(m.strip.held)}</span> : null}</span>{m.strip.actions.length ? <span className="ms-act">{m.strip.actions.map((a, i) => <button key={i} className="sbtn" title={a.tip ? say(a.tip) : undefined} onClick={() => runStrip(def, i)}>{say(a.label)}</button>)}</span> : null}</div>
         ) : m.board ? <Board def={def} /> : <Face def={def} surface={quick ? 'quick' : 'tile'} />}
       </div>
       {m.also ? <p className="q-also"><span>{say(m.also.text)}</span> <button type="button" className="linkbtn" data-tier={m.also.link} data-ring={m.also.ring} onClick={() => setTierFromView(m.also!.link, { ring: m.also!.ring.split(' ') })}>{say(m.also.linkWords)}</button></p> : null}

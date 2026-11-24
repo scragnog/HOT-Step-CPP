@@ -104,8 +104,9 @@ export function switchEngine(ix: Index, deskIn: Desk, book0: EngineBook, to: Eng
   return { desk, book, toast: said.length ? msg('switch.toast.said', { engine: engineName(to), said: list(said, 'sentences') }) : msg('switch.toast', { engine: engineName(to) }) };
 }
 
-/** What a held parameter's control says while its value is held: its `held.note`, filled. */
-export function heldNote(ix: Index, key: string, desk: Desk, book: EngineBook): Msg | null {
+/** What a held parameter's control says while its value is held: its `held.note`, filled. The book's holds are the
+ *  desk's as the page tells them (Desk.told.hold) unless a book is given. */
+export function heldNote(ix: Index, key: string, desk: Desk, book: Pick<EngineBook, 'hold'> = { hold: desk.told?.hold ?? {} }): Msg | null {
   const h = book.hold[key], hit = ix.params.get(key);
   if (!h || !hit?.p.held || desk.vals[key] !== h.shown) return null;
   const f = resolve(hit.p, desk.engine), from = resolve(hit.p, h.from);

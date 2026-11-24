@@ -266,7 +266,7 @@ function* combos(conds: Condition[], e: EngineId): Generator<Desk> {
     ...desks.map(k => ({ set: (o: any, v: unknown) => { if (!v) o.on.delete(k); }, values: [true, false] })),
   ];
   let count = 1; for (const a of axes) count *= Math.max(1, a.values.length);
-  if (count > 20000) return;
+  if (count > 40000) return; /* the Sampler's HeartMuLa dim names three plugin lists and their switch: 31,500 */
   const idx = axes.map(() => 0);
   for (;;) {
     /* everything is on the desk but what a condition asks about: a definition off the desk reads as its defaults */
@@ -767,6 +767,10 @@ for (const d of DEFINITIONS) {
     }
     (d.per || []).forEach((l, i) => { l.engines.forEach(e => { if (!d.engines.includes(e)) err(`${at} per line ${i + 1}`, `names ${e}, which it is not on`); }); if (l.name) checkText(l.name, `${at} per line ${i + 1} name`); if (l.desc) checkText(l.desc, `${at} per line ${i + 1} desc`); });
     if (d.strip) checkStrips(d.strip, d, 'strip');
+    /* a strip that keeps its width holds its row at every tier, Quick too (RD-04: the concept's one-song Takes strip) */
+    [d.size, ...(d.per || []).map(l => l.size ? { ...d.size, ...l.size } : null)].forEach((s, i) => {
+      if (s?.stripKeepsWidth && s.w !== 1 && s.quickW !== s.w) err(i ? `${at} per line ${i} size` : `${at} size`, `keeps its width as a strip (stripKeepsWidth), but is ${s.quickW ?? 1} wide at Quick and ${s.w} elsewhere: give it quickW: ${s.w}`);
+    });
   }
   if (d.kind === 'pedal' && d.idle) checkStrips(d.idle, d, 'idle');
   ('face' in d ? d.face || [] : []).forEach((n, i) => checkNode(n, { d, where: `${at} face#${i} ${n.part}`, engines: d.engines, tiers }));

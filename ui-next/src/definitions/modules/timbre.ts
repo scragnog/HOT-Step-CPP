@@ -48,15 +48,15 @@ export const timbre = {
     {
       part: 'dropZone',
       state: ['timbreFile'],
-      opts: { look: 'sleeve', empty: 'Drop a reference track', hint: 'or click to choose audio' },
+      opts: { look: 'sleeve', empty: 'Drop a reference track', hint: 'or click to choose audio', wave: true },
       per: [
-        { tiers: ['quick'], opts: { look: 'sleeve', empty: 'Drop a track', hint: 'or choose a file' } },
+        { tiers: ['quick'], opts: { look: 'sleeve', empty: 'Drop a track', hint: 'or choose a file', wave: true } },
         {
           when: {
             all: [{ param: 'pp.master.timbre', is: true }, { state: 'masterRef', set: true }, { onDesk: 'master' }],
           },
           state: ['masterRef'],
-          opts: { look: 'sleeve', from: 'from Mastering' },
+          opts: { look: 'sleeve', from: 'from Mastering', wave: true },
         },
       ],
     },

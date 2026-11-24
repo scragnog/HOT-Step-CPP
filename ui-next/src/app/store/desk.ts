@@ -107,7 +107,7 @@ export interface DeskStore extends Parts {
   recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
   /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
    *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string; songs?: Desk['songs'] }): void;
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; adaptersAway?: string; songs?: Desk['songs']; hold?: NonNullable<Desk['told']>['hold'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -262,6 +262,8 @@ export const useDesk = create<DeskStore>()((set, get) => {
       set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
       /* the words for another engine's adapters (package 3b: features/adapters.tsx, from the engines' book) */
       if (o.adaptersAway !== undefined && o.adaptersAway !== get().desk.told?.adaptersAway) set({ desk: { ...get().desk, told: { ...get().desk.told, adaptersAway: o.adaptersAway } } });
+      /* what the engines' book holds for another engine, which a held value's control says (features/held.ts, RD-03) */
+      if (o.hold !== undefined && JSON.stringify(o.hold) !== JSON.stringify(get().desk.told?.hold ?? {})) set({ desk: { ...get().desk, told: { ...get().desk.told, hold: o.hold } } });
     },
   };
 });

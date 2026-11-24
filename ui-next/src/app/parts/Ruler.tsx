@@ -50,7 +50,7 @@ export function Ruler(v: PartView) {
       </div>
       <div className="ruler-labels" aria-hidden="true">{r.labels.map(l => <span key={l.at} style={{ left: `${l.at}%` }}>{l.text}</span>)}</div>
       {r.held || m ? <p className="held-note" data-ionote="" hidden={!m?.note}>{m?.note ? say(m.note) : null}</p> : null}
-      {r.held ? <p className="held-note" data-held={p.key} hidden /> : null}
+      {r.held ? <p className="held-note" data-held={p.key} hidden={!p.held}>{p.held ? say(p.held) : null}</p> : null}
     </div>
   );
 }

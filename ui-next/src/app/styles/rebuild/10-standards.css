@@ -8,3 +8,7 @@
    the button's own font, a pixel or two off its centre. Their line takes no height, so the icon is centred as it is in
    the concept. */
 .pk-lcdwrap .cyc { line-height: 0; }
+/* the planner's cursor stands on a line of its own after the plan's last line: in quirks mode a line that holds only
+   it is as tall as it is (13px), here it would be the text's 20px, and every desk with the Planner packed 7px
+   differently (RD-07). As a block it takes its own height, where the concept draws it. */
+[data-term] > .cursor:last-child { display: block; }

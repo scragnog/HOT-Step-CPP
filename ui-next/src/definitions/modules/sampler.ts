@@ -801,7 +801,7 @@ export const sampler = {
           part: 'knob',
           param: 'samp.shift',
           /* HeartMuLa reads its flow shift only with one of the three picks set (heartmula/generate.ts samplerPlugins) */
-          dim: { when: { all: [{ engine: ['heartmula'] }, { param: 'samp.solver', is: '' }, { param: 'samp.sched', is: '' }, { param: 'samp.guide', is: '' }] }, says: 'Native picks · not used' },
+          dim: { when: { all: [{ engine: ['heartmula'] }, { param: 'samp.plugins', is: true }, { param: 'samp.solver', is: '' }, { param: 'samp.sched', is: '' }, { param: 'samp.guide', is: '' }] }, says: 'Native picks · not used' },
         },
         { part: 'knob', param: 'samp.retake', label: 'Retake', engines: ['ace'] },
         { part: 'pick', param: 'samp.solver', opts: { variant: 'plugin', title: 'Solvers' }, engines: ['yue2'] },

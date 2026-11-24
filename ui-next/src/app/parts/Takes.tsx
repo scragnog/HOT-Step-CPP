@@ -62,6 +62,7 @@ export function TakesReels(v: PartView) {
         {c.msg ? <span>{say(c.msg)}</span> : null}
         {c.each ? <span>{say(c.each)}</span> : null}
       </div>
+      {p.held ? <p className="tk-held" title={say(ui('takes.held.title'))}>{say(p.held)}</p> : null}
     </>
   );
 }

@@ -14,7 +14,7 @@ export const takes = {
   owner: 'song',
   stored: 'settings',
   size: { w: 1, grow: true, stretch: 144 },
-  per: [{ engines: ['sa3', 'heartmula'], size: { w: 4, stripKeepsWidth: true } }],
+  per: [{ engines: ['sa3', 'heartmula'], size: { w: 4, quickW: 4, stripKeepsWidth: true } }],
   tierSummary: ['Songs per run', 'The same', 'The same'],
   params: [
     {

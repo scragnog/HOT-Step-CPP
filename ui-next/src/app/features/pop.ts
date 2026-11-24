@@ -75,6 +75,8 @@ document.addEventListener('click', e => {
   if (!popOpen()) return;
   const t = e.target as Element;
   if (t.closest?.('[data-closepop]') && host()?.contains(t)) { closePop(); return; }
+  /* the click that opened it, from whatever button (a strip's named action carries none of the hooks above: RD-01) */
+  if (usePop.getState().anchor?.contains(t)) return;
   if (t.isConnected && !t.closest('#pop, #toast') && !t.closest(OPENERS)) closePop();
 });
 
