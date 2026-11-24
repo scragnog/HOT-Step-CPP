@@ -80,3 +80,7 @@ export const SCOPES = {
   desk: ['#bento'],
   panel: ['#browser'],
 };
+
+/** This file's visual set (the slice's states and 01-parts.mjs's (all named slice-)), for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'slice', only: '^slice-', scope: 'slice', accept: 'slice-accepted.json' };

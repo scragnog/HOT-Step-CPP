@@ -54,3 +54,7 @@ add({ id: 'ov8-drag-pedal', w: 1600, h: 1080, run: async h => { await desk(h); a
 
 export const STATES = LIST;
 export const SCOPES = { overlays: ['#pickerWrap', '#pop', '#tip', '#bento', '#browser'] };
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'overlays', only: '^ov8-', scope: 'overlays', accept: 'overlays-accepted.json' };
