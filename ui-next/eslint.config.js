@@ -57,7 +57,7 @@ const NO_VALUE_FUNCTIONS = { name: '../../derive.ts', importNames: VALUE_FUNCTIO
 const VALUE_FILES = ['src/app/store/**', 'src/app/render/bind.ts', 'src/app/testing/**', 'src/app/model/**', 'src/app/i18n/**', 'src/app/services/**']
 /* drawing: coordinates and sizes read from the page (parseFloat of a computed style) and key names, not values; the
    engines' marks and colours and the definitions' drawings, which are per engine by what they are */
-const DRAWING = ['src/app/board/cables.ts', 'src/app/parts/xyMotion.ts', 'src/app/parts/motion.ts', 'src/app/desk/layout.ts', 'src/app/desk/ring.ts', 'src/app/register/keys.ts']
+const DRAWING = ['src/app/board/cables.ts', 'src/app/parts/xyMotion.ts', 'src/app/kit/motion.ts', 'src/app/desk/layout.ts', 'src/app/desk/ring.ts', 'src/app/register/keys.ts']
 const IDENTITY = ['src/app/shell/engines.ts', 'src/app/thumbs/**']
 
 export default defineConfig([

@@ -18,6 +18,7 @@ import {
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
 import { deskSolve, type PackItem } from '../src/app/desk/pack.ts';
+import { need, section, skips } from './lib/sections.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ix = indexOf(DEFINITIONS);
@@ -26,7 +27,7 @@ const fails: string[] = [];
 const ok = (what: string, cond: boolean, detail: unknown = '') => { if (!cond) fails.push(`${what}${detail === '' ? '' : ': ' + (typeof detail === 'string' ? detail : J(detail))}`); };
 const desk = (engine: EngineId, tier: Tier, on: string[], vals: Desk['vals'] = {}): Desk =>
   ({ engine, tier, vals, auto: {}, state: {}, on: new Set([...DEFINITIONS.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id), ...on]) });
-const def = (id: string) => DEFINITIONS.find(d => d.id === id)!;
+const def = (id: string) => need(DEFINITIONS.find(d => d.id === id), id);
 
 /* ---------------------------------------------------------------- the layout against the concept's */
 const PACK = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 'pack.json'), 'utf8')) as { cases: { id: string; cols: number; items: PackItem[]; out: { i: number; c: number; w: number; y: number; h: number }[]; plan: { o: number; c: number }[] }[] };
@@ -66,7 +67,7 @@ if (gone.length) console.log(`the view's examples name ${gone.join(', ')}, which
 else {
 const ace = (tier: Tier, on: string[], vals: Desk['vals'] = {}) => desk('ace', tier, on, vals);
 /* a container none of whose children is drawn is not drawn; a control bound to what the engine lacks is not drawn */
-{
+section(() => {
   const g = def('guidance') as Extract<Definition, { kind: 'module' }>;
   const row = g.face.find(n => n.part === 'row')!, pad = g.face.find(n => n.part === 'xyPad')!;
   ok('the minimax-m3 row is drawn on minimax-m3 with APG', nodeShown(ix, row, desk('minimax-m3', 'lab', ['guidance', 'sampler'], { 'samp.plugins': true, 'samp.guide': 'apg' })));
@@ -75,17 +76,17 @@ const ace = (tier: Tier, on: string[], vals: Desk['vals'] = {}) => desk('ace', t
   ok('the minimax-m3 row is not drawn on ace', !nodeShown(ix, row, ace('lab', ['guidance'])));
   ok('the APG pad is drawn on ace', nodeShown(ix, pad, ace('lab', ['guidance'])));
   ok('a row whose only knob is on no engine it is shown on is not drawn', !nodeShown(ix, { part: 'row', children: [{ part: 'knob', param: 'apg.mom' }] } as Node, desk('minimax-m3', 'lab', ['guidance'])));
-}
+});
 /* a pedal's text that stands beside a switch is laid out once, beside it */
-{
+section(() => {
   const cells = boardNodes(ix, def('ss'), ace('lab', ['post', 'ss'])).cells.filter(c => c.param === 'pp.ss.seed');
   ok('the fixed seed is laid out once, beside its switch', cells.length === 1 && cells[0]!.beside === 'pp.ss.seedf', cells);
-}
+});
 /* a side unit's setting in "Also set" carries the unit's name, as a pedal's does (the concept's alsoWords) */
-{
+section(() => {
   const a = alsoSet(ix, def('post'), ace('studio', ['post', 'wh'], { 'pp.wh.beam': 8 }));
   ok('Also set names the side unit', !!a && /Whisper lyrics beam 8/.test(say(a.text)), a && say(a.text));
-}
+});
 /* a module's name at Quick is its quickName when Quick shows less of it */
 ok('Tempo is "Tempo & length" at Quick on ACE-Step', say(tileName(def('tempo'), ace('quick', ['tempo']))) === 'Tempo & length');
 ok('and "Tempo, key & length" at Studio', say(tileName(def('tempo'), ace('studio', ['tempo']))) === 'Tempo, key & length');
@@ -97,21 +98,21 @@ ok('removing the board says its pedals', say(removedWords(def('post'), ace('stud
 ok('removing a module with no pedals says none', say(removedWords(def('avoid'), ace('studio', []), 0, false)) === 'Removed Avoid');
 ok('the last pedal takes the board with it', say(removedWords(def('ss'), ace('studio', []), 0, true)) === 'Took StableStep off the board. That was the last one, so the Pedalboard left the desk too');
 /* what a pedal arrives as: engaged, unless it would have nothing to run */
-{
+section(() => {
   const d0 = ace('studio', ['post']);
   ok('StableStep arrives engaged', applyChange(d0, arrivalChange(ix, def('ss'), d0)).vals['pp.ss.on'] === true);
   ok('the VST3 chain with no plugins arrives bypassed', applyChange(d0, arrivalChange(ix, def('vst'), d0)).vals['pp.vst.on'] === false);
-}
+});
 /* the board's count, in the concept's words */
 ok('board count', say(boardCount(ix, ace('lab', ['post', 'ss', 'refiner', 'wh'], { 'pp.ss.on': true, 'pp.wh.on': true }), 'pp.on')) === '2 pedals · 1 on · 1 side unit, 1 on');
 ok('board count, bypassed', say(boardCount(ix, ace('lab', ['post', 'ss'], { 'pp.on': false, 'pp.ss.on': true }), 'pp.on')) === '1 pedal · chain bypassed: no pedal runs');
 ok('board count, empty', say(boardCount(ix, ace('lab', ['post']), 'pp.on')) === 'No pedals in the chain yet');
 ok('board count, an engaged pedal with nothing to run', say(boardCount(ix, ace('lab', ['post', 'vst'], { 'pp.vst.on': true }), 'pp.on')) === '1 pedal · 0 on · 1 needs setting up');
 /* parked: what the engine in use does not use */
-{
+section(() => {
   const p = parkedOn(ix, desk('yue2', 'studio', ['avoid', 'post', 'ppvae', 'ss']));
   ok('parked modules and pedals', J(p.modules.map(d => d.id)) === '["avoid"]' && J(p.board.map(d => d.id)) === '["ppvae"]' && /^Parked: YuE2 doesn't use these\. Each returns/.test(say(p.says!)), { m: p.modules.map(d => d.id), b: p.board.map(d => d.id) });
-}
+});
 /* words the parts print */
 ok('an LCD prints an option\'s lcd words', say(lcdMsg(ix, 'pp.norm.target', ace('lab', ['post', 'norm']))) === '-14 LUFS');
 ok('a pedal knob\'s number without its unit', J(bareText(ix, 'pp.norm.ceil', ace('lab', ['post', 'norm']))) === J({ text: '−1.0', unit: 'dBFS' }));
@@ -119,19 +120,19 @@ ok('a percent stays on its number', bareText(ix, 'pp.ss.str', ace('lab', ['post'
 ok('a checked text says why it is not taken', say(checkText(ix, 'pp.ss.seed', ace('lab', ['post', 'ss']), 'not a seed')!) === 'The fixed seed is a whole number from 0 to 4294967295.');
 ok('and nothing when it is', checkText(ix, 'pp.ss.seed', ace('lab', ['post', 'ss']), '1234') === null);
 /* the desk's order is kept by the records */
-{
+section(() => {
   const d0 = ace('studio', ['post', 'avoid', 'ss', 'wh']);
   const saved = savedDeskOf(ix, d0, emptyBook());
   ok('the autosave keeps the modules in the desk\'s order', J(saved.modules) === '["post","avoid"]', saved.modules);
   const back = readDesk(ix, JSON.parse(J(saved)))!;
   ok('and reading it back keeps the order', J([...back.desk.on].filter(id => id === 'post' || id === 'avoid')) === '["post","avoid"]');
   ok('a workflow keeps it too', J(workflowOf(ix, d0, 'x').modules) === '["post","avoid"]');
-}
+});
 /* ---------------------------------------------------------------- the parts' contract, at run time (SL-03, SL-11)
    A setter writes only what its node binds, against the desk in force when it is called: held across another change it
    names its step from the value it really changes; called once its definition has left the desk it changes nothing; a
    typed value is read, clamped and said; a key past an end stops there and says nothing. */
-{
+section(() => {
   let live = ace('lab', ['post', 'ss'], { 'pp.ss.on': true });
   const got: Change[] = [], told: Msg[] = [];
   const ss = def('ss'), knob = { part: 'knob', param: 'pp.ss.str' } as Node;
@@ -157,9 +158,9 @@ ok('and nothing when it is', checkText(ix, 'pp.ss.seed', ace('lab', ['post', 'ss
   live = { ...live, on: new Set([...live.on].filter(x => x !== 'ss')) };
   const before = got.length; held.params['pp.ss.str']!.set(40);
   ok('a setter whose definition has left the desk changes nothing (an answer that came too late)', got.length === before);
-}
+});
 /* the desk's make-up rules are the core's (addTo, removeFrom) */
-{
+section(() => {
   const d0 = ace('studio', ['avoid']);
   const a = addTo(ix, d0, ['avoid'], [], 'ss', undefined, {});
   ok('the first pedal brings the Pedalboard', a.did === 'added' && J(a.mods) === '["avoid","post"]' && J(a.board) === '["ss"]', a);
@@ -171,20 +172,20 @@ ok('and nothing when it is', checkText(ix, 'pp.ss.seed', ace('lab', ['post', 'ss
   ok('the Pedalboard takes its pedals, and remembers where it stood', rb.pedals === 2 && !rb.board.length && rb.stood === 'avoid', rb);
   const back = addTo(ix, d0, ['tempo', 'avoid'], [], 'post', undefined, { post: 'avoid' });
   ok('a module added back goes where it stood', back.did === 'added' && J(back.mods) === '["tempo","post","avoid"]', back);
-}
+});
 /* what pedals and units are, and the empty desk's offers, are the core's */
-{
+section(() => {
   const d = ace('lab', ['post', 'ss', 'gain', 'wh'], { 'pp.on': false, 'pp.ss.on': true, 'pp.wh.on': true });
   ok('a pedal on while the chain is bypassed is held', pedalState(ix, def('ss') as never, d) === 'held');
   ok('a pedal with no switch always runs, and stops with the chain', pedalState(ix, def('gain') as never, d) === 'always' && pedalModel(ix, def('gain') as never, d).cls.split(' ').includes('off'));
   ok('the empty Quick desk names what the first offer is on its engine', say(deskModel(ix, desk('sa3', 'quick', []), []).empty!.says!) === 'Add a length, a seed or pedals from Modules' && say(deskModel(ix, ace('quick', []), []).empty!.says!) === 'Add tempo, a seed or pedals from Modules');
   ok('a VU meter prints the scale of the concept', J(meterScale({}, undefined).marks.filter(m => m.words).map(m => m.words)) === '["-20","-10","-5","0","+3"]');
   ok('an own scale writes a true minus', meterScale({ min: -24, max: -6 }, -14).marks[0]!.words === '−24');
-}
+});
 }
 void ENGINE_IDS;
 
 console.log(`layout: ${packed} layouts the concept chose, ${PACK.cases.length - fails.filter(f => f.startsWith('layout')).length} reproduced`);
 console.log(`node words: ${looked} looked up, every one a key the definitions give`.replace('every one', fails.some(f => f.includes('is a key')) ? 'NOT every one' : 'every one'));
 if (fails.length) { console.log(`\n${fails.length} failed:`); fails.slice(0, 40).forEach(f => console.log('  ' + f.slice(0, 400))); process.exit(1); }
-console.log('the view\'s selectors: ok');
+console.log(`the view's selectors: ok${skips()}`);

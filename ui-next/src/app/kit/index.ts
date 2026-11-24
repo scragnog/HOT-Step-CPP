@@ -9,7 +9,6 @@ export { ui, useSay } from '../i18n/index.ts';
 export { Icon } from './icons.tsx';
 export { LcdFace } from './LcdFace.tsx';
 export { onValueKey, onValueKeyUp, onWheelStep } from './value.ts';
-export { Glyph } from './glyphs.tsx';
 /* the server boundary (services/index.ts), for a bespoke part responsible for its own conversation with the server
    (parts.ts PARTS `responsible`: Build by section's session) */
 export { service } from '../register/services.ts';

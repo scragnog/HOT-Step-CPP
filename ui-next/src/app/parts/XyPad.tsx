@@ -6,6 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { definePart, ui, useSay, type ParamView, type PartView } from '../kit/index.ts';
 import { newMotion, stopMotion, toTarget, xyBox, XY_IN, type Motion } from './xyMotion.ts';
+import { reduced } from '../kit/motion.ts';
 
 /* which axis a key moves: left and right and the ends move X, up and down and Page move Y */
 const AXIS: Record<string, 0 | 1> = { ArrowLeft: 0, ArrowRight: 0, Home: 0, End: 0, ArrowUp: 1, ArrowDown: 1, PageUp: 1, PageDown: 1 };
@@ -38,7 +39,7 @@ export function XyPad(v: PartView) {
     m.dragging = true; working(true); v.gesture.begin('drag');
     if (e.shiftKey) { m.fine = { x: e.clientX, y: e.clientY, fx, fy }; return; }
     m.fine = null;
-    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) { const r = t.getBoundingClientRect(), rip = document.createElement('span'); rip.className = 'xy-rip'; rip.style.left = e.clientX - r.left + 'px'; rip.style.top = e.clientY - r.top + 'px'; t.appendChild(rip); rip.addEventListener('animationend', () => rip.remove()); }
+    if (!reduced()) { const r = t.getBoundingClientRect(), rip = document.createElement('span'); rip.className = 'xy-rip'; rip.style.left = e.clientX - r.left + 'px'; rip.style.top = e.clientY - r.top + 'px'; t.appendChild(rip); rip.addEventListener('animationend', () => rip.remove()); }
     setAt(e);
   };
   const up = (e: PointerEvent<HTMLDivElement>) => {

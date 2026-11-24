@@ -4,7 +4,7 @@
     { "feature": "undo", "file": "src/app/store/desk.ts", "find": "    runUndo(entry) {", "replace": "    runUndo(entry) { return;" },
     { "feature": "redo", "file": "src/app/store/desk.ts", "find": "    runRedo(entry) {", "replace": "    runRedo(entry) { return;" },
     { "feature": "autosave", "file": "src/app/store/desk.ts", "find": "  if (writeStored(DESK_KEY, text)) written = text;", "replace": "  void writeStored; void text;" },
-    { "feature": "restore", "file": "src/app/store/desk.ts", "find": "text = localStorage.getItem(DESK_KEY);", "replace": "text = null as string | null;" },
+    { "feature": "restore", "file": "src/app/store/desk.ts", "find": "  const got = readStored(DESK_KEY), text = got.raw;", "replace": "  const got = { v: null as unknown, raw: null as string | null }, text = got.raw; void readStored;" },
     { "feature": "knob keys", "file": "src/app/parts/Knob.tsx", "find": "    onValueKey(e, p, v.gesture);", "replace": "" },
     { "feature": "keyboard moves", "file": "src/app/render/Tile.tsx", "find": "moveTile(def.id, dir);", "replace": "void moveTile;" },
     { "feature": "add", "file": "src/app/store/desk.ts", "find": "    add(id, before) {", "replace": "    add(id, before) { return 'there';" },

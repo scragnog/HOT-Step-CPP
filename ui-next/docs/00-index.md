@@ -64,6 +64,7 @@ ui-next/
       engines.ts             the engines, in one place
       parts.ts               the parts inventory, what a part is given, and the other lists (units, checks, option
                              sources, desk facts, actions)
+      roles.ts               what the page needs a particular parameter or state for, which the definitions declare
       transforms.ts          the named transforms a wire may use
       index.ts               every definition, in one list
       factory.ts             the factory workflows and revisions
@@ -114,5 +115,6 @@ npm install
 npm run check
 ```
 
-runs the type check, the validator, the request comparison and the core's tests. All four must pass before a definition
-change is done; `npm test` runs the planted mistakes.
+runs the type checks, the validator, the request comparison, every test of the core and the view, the code's contract
+with the definitions and the switches' texts ([07](07-checking.md) lists them). It must pass before a change is done;
+`npm test` runs the planted mistakes, and [06](06-how-to.md) says, for each job, what else to run.

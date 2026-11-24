@@ -10,6 +10,7 @@ import { definePart, Icon, ui, useSay, type ParamView, type PartView, type Role,
 import { Pick } from './Pick.tsx';
 import { subView } from './subView.ts';
 import { useGrow } from './textGrow.ts';
+import { reduced } from '../kit/motion.ts';
 
 /* the parameters it lays out beside its box are found by their role (definitions/roles.ts), never by key */
 const INFO: Role[] = ['songArtist', 'songTitle', 'songSubject'];
@@ -18,13 +19,6 @@ const CAP = () => Math.max(150, Math.round(innerHeight * 0.3));
 /* the placeholder turns through the examples every 3.5 s while the box is empty and has no focus (S-35: not under
    reduced motion) */
 const TURN_MS = 3500;
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-const LOCK = (
-  <svg className="ico" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-  </svg>
-);
 
 export function PromptBox(v: PartView) {
   const say = useSay(), ta = useRef<HTMLTextAreaElement>(null), info = useRef<HTMLDivElement>(null), m = v.prompt, box = v.params[0];
@@ -74,7 +68,7 @@ export function PromptBox(v: PartView) {
         onChange={e => { if (locked) return; v.gesture.begin('text'); box.set(e.currentTarget.value); }}
         onKeyDown={lockedKey} onClick={() => { if (locked) ring(); }} />
       <div className="cap-lock" id="capLock" hidden={!locked}>
-        {m.locked ? <>{LOCK}<span>{say(m.locked.line)}</span><button type="button" className={`linkbtn${ping ? ' ping' : ''}`} data-capcustom="" onClick={() => act('editCaptionCopy')}>{say(words('editCaptionCopy')?.label)}</button></> : null}
+        {m.locked ? <><Icon name="lock" size={12} /><span>{say(m.locked.line)}</span><button type="button" className={`linkbtn${ping ? ' ping' : ''}`} data-capcustom="" onClick={() => act('editCaptionCopy')}>{say(words('editCaptionCopy')?.label)}</button></> : null}
       </div>
       <div className="dstags" id="dsTags" hidden={!m.tools.tags}>
         {m.tools.tags ? <><div className="dst-head" title={say(m.tagsTip)}><b>{say(words('datasetTag')?.label)}</b></div>

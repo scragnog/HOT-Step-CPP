@@ -34,7 +34,8 @@
    "key": "^shot$",
    "field": "^pixels$",
    "n": 2,
-   "why": "The same From chip (\"The adapter's dataset\" for \"my-band-ep\") in the screenshots of MiniMax-Music3's card; nothing else differs in them (both shots are in tools/visual-baseline/out/*-fields/shots)."
+   "pixels": 1450,
+   "why": "(1322 and 1297 pixels when measured; at most 1450, RA-17.) The same From chip (\"The adapter's dataset\" for \"my-band-ep\") in the screenshots of MiniMax-Music3's card; nothing else differs in them (both shots are in tools/visual-baseline/out/*-fields/shots)."
   }
  ]
 }

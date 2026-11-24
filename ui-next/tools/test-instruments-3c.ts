@@ -13,6 +13,7 @@ import {
   type Change, type Desk, type Msg, type Score,
 } from '../src/derive.ts';
 import { say } from '../src/derive/messages.ts';
+import { need, section, skips } from './lib/sections.ts';
 
 const ix = indexOf(DEFINITIONS);
 const J = (x: unknown) => JSON.stringify(x);
@@ -21,7 +22,7 @@ let n = 0;
 const ok = (what: string, cond: boolean, detail: unknown = '') => { n++; if (!cond) fails.push(`${what}${detail === '' ? '' : ': ' + (typeof detail === 'string' ? detail : J(detail))}`); };
 const desk = (engine: EngineId, tier: Tier, on: string[], vals: Desk['vals'] = {}, state: Desk['state'] = {}, sessions?: Desk['sessions']): Desk =>
   ({ engine, tier, vals, auto: {}, state, on: new Set([...DEFINITIONS.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id), ...on]), ...(sessions ? { sessions } : {}) });
-const def = (id: string) => DEFINITIONS.find(d => d.id === id)!;
+const def = (id: string) => need(DEFINITIONS.find(d => d.id === id), id);
 const s = (m: unknown) => say(m as Msg);
 const node = (id: string, part: string): Node => {
   let out: Node | undefined;
@@ -39,19 +40,19 @@ function act(id: string, part: string, d0: Desk, name: string, arg?: unknown) {
 }
 
 /* ---- the sections the build knows */
-{
+section(() => {
   const secs = buildSections('untagged\n[Verse]\na\nb\n[Chorus]\nc\n[Verse]\nd');
   ok('words before a tag are a Verse, and a repeated name is numbered (B-05)', J(secs.map(x => [x.id, x.label, x.n])) === J([['Verse#1', 'Verse 1', 1], ['Verse#2', 'Verse 2', 2], ['Chorus#1', 'Chorus', 1], ['Verse#3', 'Verse 3', 1]]), secs);
   ok('a section keeps its words', secs[1]!.words === 'a\nb');
   ok('a section has its colour by its name', sectionColour('Verse 2') === '#3f5ef0' && sectionColour('Pre-Chorus') === '#9440f5' && sectionColour('Solo') === '#8b8496');
   ok('a stored build is cleaned: a keep is kept, junk dropped', J(cleanBuild({ session: 's1', seed: 5, plan: ['Verse#1', 3], kept: { 'Verse#1': 't' }, songs: ['a', 1] } as unknown as Json)) === J({ session: 's1', seed: 5, plan: ['Verse#1'], kept: { 'Verse#1': 't' }, dropped: [], rendered: null, songs: ['a'] }));
-}
+});
 
 /* ---- the build board through its life */
 const LYR = '[Verse]\nline\n[Chorus]\nline';
 const take = (id: string, words = 'line', ready = true) => ({ id, ready, hue: 10, dur: 20, w: 1, words, note: '' });
 const SESS = (takes: object, cur?: string) => ({ build: { planning: false, sessions: { s1: { takes, ...(cur ? { cur } : {}) } } } as unknown as Json });
-{
+section(() => {
   const empty = desk('yue2', 'lab', ['build'], { 'lyrics.text': LYR });
   const m0 = model('build', 'buildBoard', empty)!.instrument!.build!;
   ok('empty, the board is not planned and asks to plan the sections as they stand', !m0.planned && J(m0.plan.sections) === J([{ id: 'Verse#1', words: 'line' }, { id: 'Chorus#1', words: 'line' }]));
@@ -96,16 +97,16 @@ const SESS = (takes: object, cur?: string) => ({ build: { planning: false, sessi
   ok('Keep building is a step; the plan is the lyrics as they are', s(gl.steps[0]!.words.label) === 'Keep building on the new lyrics' && mg.drift?.goon === false && !mg.sections.some(x => x.fresh));
   ok('the section looked at is the session\'s, so it stays after a keep (B-37)', model('build', 'buildBoard', { ...kept, sessions: SESS({ 'Verse#1': [take('a'), take('b')] }, 'Verse#1') })!.instrument!.build!.cur!.id === 'Verse#1' && model('build', 'buildBoard', { ...kept, sessions: SESS({ 'Verse#1': [take('a'), take('b')] }) })!.instrument!.build!.cur!.id === 'Chorus#1');
   ok('at Quick the board draws none of its settings (E-19)', model('build', 'buildBoard', { ...planned, tier: 'quick' })!.instrument!.build!.ctl === false && model('build', 'buildBoard', { ...planned, tier: 'studio' })!.instrument!.build!.ctl === true);
-}
+});
 
 /* ---- Build by section's strip at Quick names Studio for its settings (E-25) */
-{
+section(() => {
   const t = tileModel(ix, def('build') as Extract<ReturnType<typeof def>, { kind: 'module' }>, desk('yue2', 'quick', ['build'], { 'yue.btakes': 3 }));
   ok('a strip says what is set at another tier, and names the tier its face edits it at', !!t.also && t.also.link === 'studio' && /Takes per section 3/.test(s(t.also.text)), t.also && s(t.also.text));
-}
+});
 
 /* ---- the recording span */
-{
+section(() => {
   ok('arrows move it a second, Shift its end, never past 30 s (B-28)', J(spanMove(10, 30, 200, { key: 'ArrowRight' })) === J([11, 31]) && J(spanMove(10, 30, 200, { key: 'ArrowRight', shift: true })) === J([10, 31]) && J(spanMove(10, 40, 200, { key: 'ArrowRight', shift: true })) === J([10, 40]));
   ok('Page moves it by its length, Home and End to the file\'s ends', J(spanMove(10, 30, 231, { key: 'PageUp' })) === J([30, 50]) && J(spanMove(10, 30, 231, { key: 'End' })) === J([211, 231]) && J(spanMove(10, 30, 231, { key: 'Home' })) === J([0, 20]));
   ok('a drag moves the edge it pressed, carries the part, or draws a new one of at most 30 s (G-B-01)', J(spanMove(10, 30, 200, { mode: 'a', t: 0.025 })) === J([5, 30]) && J(spanMove(10, 30, 200, { mode: 'move', t0: 0.1, t: 0.2, a0: 10, z0: 30 })) === J([30, 50]) && J(spanMove(10, 30, 200, { mode: 'new', t0: 0.5, t: 0.9 })) === J([100, 130]));
@@ -121,10 +122,10 @@ const SESS = (takes: object, cur?: string) => ({ build: { planning: false, sessi
   ok('a key it does not take is refused', act('cont', 'recordingSpan', d, 'move', { key: 'a' }).done === false);
   ok('without a recording it draws nothing', model('cont', 'recordingSpan', desk('yue2', 'lab', ['cont']))!.instrument!.span === undefined);
   ok('a file the page was told the length of says it (the sleeve\'s second line)', s(model('cont', 'dropZone', d)!.state![0]!.detail) === '3:51 long');
-}
+});
 
 /* ---- the lead sheet */
-{
+section(() => {
   const foot = (vals: Desk['vals']) => model('score', 'abcFoot', desk('yue2', 'studio', ['score', 'planner'], vals))!.instrument!.abc!;
   const kinds = (m: { show: { kind: string }[] }) => m.show.map(x => x.kind).join(',');
   ok('empty: Insert example and Plan and preview a score', kinds(foot({})) === 'example,preview' && s(foot({}).preview) === 'Plan and preview a score' && foot({}).note === null);
@@ -148,7 +149,7 @@ const SESS = (takes: object, cur?: string) => ({ build: { planning: false, sessi
   const off = desk('yue2', 'studio', ['score', 'planner'], { 'lm.cotmode': 'off' });
   const ta = model('score', 'textArea', off);
   ok('with Chain of Thought off the sheet stands back and says why', !!ta && nodeShown(ix, node('score', 'textArea'), off) && /Not used while the Planner is set to write nothing down/.test(s(ta.dim)) && /Planner is set to write nothing down/.test(s(ta.params[0]!.placeholder)));
-}
+});
 
 if (fails.length) { console.log(`instruments (3c): ${fails.length} of ${n} checks failed:\n  ` + fails.join('\n  ')); process.exit(1); }
-console.log(`instruments (3c): ${n} checks of package 3c's core: ok`);
+console.log(`instruments (3c): ${n} checks of package 3c's core: ok${skips()}`);

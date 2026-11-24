@@ -3,7 +3,7 @@
 // only: what to ring is the store's (flash).
 
 import { BOARD } from '../model/index.ts';
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+import { reduced } from '../kit/motion.ts';
 const slow = () => (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--t-slow')) || 600) * 2;
 
 export function ring(id: string, kind: 'flash' | 'here'): void {

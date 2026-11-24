@@ -4,6 +4,8 @@
 import { useEffect, useLayoutEffect, useState, type KeyboardEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { ui, useSay } from '../i18n/index.ts';
+import { reduced } from '../kit/motion.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 export const THEME_KEY = 'hotstep.theme';
 const THEMES = ['system', 'light', 'dark'] as const;
@@ -14,10 +16,10 @@ const ICON: Record<Theme, React.ReactNode> = {
   dark: <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />,
 };
 
-const read = (): Theme => { let t: string | null = null; try { t = localStorage.getItem(THEME_KEY); } catch { t = null; } return (THEMES as readonly string[]).includes(t ?? '') ? t as Theme : 'system'; };
+const read = (): Theme => readPref<Theme>(THEME_KEY, 'system', t => ((THEMES as readonly unknown[]).includes(t) ? t as Theme : undefined));
 function apply(t: Theme) {
   if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  try { if (t === 'system') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t); } catch { /* not remembered */ }
+  writePref(THEME_KEY, t === 'system' ? null : t);
 }
 
 export function Theme() {
@@ -33,7 +35,7 @@ export function Theme() {
     type VT = { finished: Promise<void>; ready: Promise<void>; updateCallbackDone: Promise<void> };
     const start = (document as Document & { startViewTransition?: (f: () => void) => VT }).startViewTransition;
     /* a switch made while another runs skips the first (F-20): that is expected, never an error */
-    if (start && !matchMedia('(prefers-reduced-motion: reduce)').matches) { const vt = start.call(document, () => flushSync(go)); vt.finished.then(end, end); vt.ready.catch(() => {}); vt.updateCallbackDone.catch(() => {}); }
+    if (start && !reduced()) { const vt = start.call(document, () => flushSync(go)); vt.finished.then(end, end); vt.ready.catch(() => {}); vt.updateCallbackDone.catch(() => {}); }
     else { go(); end(); }
   };
   const key = (e: KeyboardEvent<HTMLDivElement>) => {

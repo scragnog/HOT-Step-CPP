@@ -12,7 +12,8 @@ import { cancelStep, dismissCard, startRun, useGen, type Card } from '../store/g
 import { runNamed } from '../register/actions.ts';
 import { setTierFromView } from '../shell/tier.ts';
 import { ui } from '../i18n/index.ts';
-import { inView, reduced } from './motion.ts';
+import { inView } from './motion.ts';
+import { reduced } from '../kit/motion.ts';
 
 /* a value set for the user, found by its role (definitions/roles.ts): the main box, the takes count */
 const setValue = (r: Role, v: Value, label?: Msg) => { const k = roleKey(ix, r, useDesk.getState().desk.engine); return k ? useDesk.getState().setValue(k, v, label) : null; };

@@ -154,8 +154,8 @@
   {
    "feature": "3c span play",
    "file": "src/app/parts/Recording.tsx",
-   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>",
-   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Glyph name={on ? 'stop' : 'play'} />{say(on ? m.stop : m.play)}</button></div>"
+   "find": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0); setPlay(on ? null : { t0: performance.now(), file }); }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>",
+   "replace": "        <button type=\"button\" className=\"small-btn cw-play\" data-contplay=\"\" aria-pressed={on} onClick={() => { setPos(0);  }}><Icon name={on ? 'stop' : 'play'} size={12} />{say(on ? m.stop : m.play)}</button></div>"
   },
   {
    "feature": "3c span words",

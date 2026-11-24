@@ -11,6 +11,7 @@ import type { Job, Song } from '../services/generate.ts';
 import { useDesk } from './desk.ts';
 import { tellQueue } from './notes-logs.ts';
 import { ix } from '../model/index.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 /** A card in Latest: a song, a song still rendering (`pending`), or a run the server refused (`error`). */
 export interface Card extends Omit<Song, 'createdAt'> {
@@ -169,13 +170,12 @@ useDesk.subscribe((s, p) => { if (s.desk.engine !== p.desk.engine) tellLog(); })
 useGen.subscribe((s, p) => {
   if (s.runs === p.runs && s.cards === p.cards) return;
   const live = s.runs.filter(r => r.jobId).map(r => ({ job: r.jobId!, n: r.ids.filter(i => s.cards.some(c => c.id === i && c.pending)).length }));
-  try { if (live.length) localStorage.setItem(LIVE_KEY, JSON.stringify(live)); else localStorage.removeItem(LIVE_KEY); } catch { /* not kept */ }
+  writePref(LIVE_KEY, live.length ? live : null);
 });
 
 /** Loads the server's songs and starts listening to its queue; says what a reload lost. */
 export async function bootGenerate(): Promise<void> {
-  let was: { job: string; n: number }[] = [];
-  try { const a = JSON.parse(localStorage.getItem(LIVE_KEY) ?? '[]'); if (Array.isArray(a)) was = a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number'); } catch { was = []; }
+  const was = readPref<{ job: string; n: number }[]>(LIVE_KEY, [], a => (Array.isArray(a) ? a.filter(x => x && typeof x.job === 'string' && typeof x.n === 'number') : undefined));
   gen().watch(heardJobs);
   const [songs, live] = await Promise.all([gen().songs(), gen().live()]);
   const max = songs.reduce((a, x) => (/^\d+$/.test(x.id) ? Math.max(a, +x.id) : a), 99);

@@ -47,7 +47,9 @@ export interface GenerateService {
   /** What the songs of a run will be, as the server takes it: each one's title, length and colour, where the page did
    *  not set them. A run already drafted (one queued again) is given back as it is. */
   draft(run: RunAsk): RunSpec;
-  /** Queues a run: the run as it was drafted, and the ids its songs will have. */
+  /** Queues a run: the run as it was drafted, and the ids its songs will have. The request is the core's
+   *  `createIntent(ix, spec.desk, real)` with the application's resolver and content builder (`RealApp`, what the
+   *  request comparison runs it with), never one the adapter assembles; the simulated server sends none. */
   submit(spec: RunSpec, ids: string[]): Promise<{ jobId: string }>;
   /** Cancels some songs of a run (the run ends when none is left). */
   cancel(jobId: string, songIds: string[]): Promise<void>;

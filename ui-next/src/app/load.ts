@@ -2,7 +2,7 @@
 // registers what it adds. A work package adds its files here and edits none of these lines (docs/09, "Adding without
 // colliding").
 //
-//   features/*.ts(x)       keyboard shortcuts (register/keys.ts), slots it fills (register/slots.tsx), named actions
+//   features/*.ts(x)       keyboard shortcuts (register/keys.ts), slots it fills (register/slots.ts), named actions
 //                          (register/actions.ts), undoable state (register/undoable.ts)
 //   parts/*.tsx            the parts (kit/define.ts definePart)
 //   i18n/words/*.ts        the page's own words (i18n/index.ts gathers them)

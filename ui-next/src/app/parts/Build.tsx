@@ -14,8 +14,8 @@
 // a plan lands while it was on Plan (E-09).
 
 import { Children, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { definePart, Glyph, Icon, service, useSay, type PartView } from '../kit/index.ts';
-import { reduced } from './motion.ts';
+import { definePart, Icon, service, useSay, type PartView } from '../kit/index.ts';
+import { reduced } from '../kit/motion.ts';
 
 /* the concept's seeded generator (00-util.js rng): a take's waveform is the same on every visit */
 const rng = (seed: number) => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -66,7 +66,7 @@ export function BuildBoard(v: PartView) {
     <div className="b-ctl">
       {kids.map((k, i) => { const l = lockedAt.get(i); return l ? (
         <span key={i} className="foot-ctl locked"><span className="kl" title={l.ktip ? say(l.ktip) : undefined}>{say(l.label)}</span>
-          <span className="tok-ro" tabIndex={0} role="note" title={say(l.tip)} aria-label={say(l.aria)}>{l.text}<Glyph name="lock" /></span></span>
+          <span className="tok-ro" tabIndex={0} role="note" title={say(l.tip)} aria-label={say(l.aria)}>{l.text}<Icon name="lock" size={12} /></span></span>
       ) : k; })}
       {m.locked ? <span className="lbl b-locknote">{say({ id: 'build.locknote' })}</span> : null}
     </div>
@@ -125,7 +125,7 @@ export function BuildBoard(v: PartView) {
           return (
             <div key={t.id} className={['b-take', t.keep ? 'keep' : '', t.ready ? '' : 'busy', on ? 'playing' : ''].filter(Boolean).join(' ')} data-take={t.id} style={on ? { '--pos': `${pos * 100}%` } as CSSProperties : undefined}>
               <span className="b-wave" style={{ '--h': t.hue } as CSSProperties}>
-                {t.ready ? <button type="button" className="b-play" data-bplay={t.id} aria-pressed={on} aria-label={say(on ? t.stop : t.play)} title={say({ id: on ? 'build.take.stop.tip' : 'build.take.play.tip' })} onClick={() => { keep(`[data-bplay="${t.id}"]`); toggle(t.id, t.dur); }}><Glyph name={on ? 'stop' : 'play'} size={14} /></button> : null}
+                {t.ready ? <button type="button" className="b-play" data-bplay={t.id} aria-pressed={on} aria-label={say(on ? t.stop : t.play)} title={say({ id: on ? 'build.take.stop.tip' : 'build.take.play.tip' })} onClick={() => { keep(`[data-bplay="${t.id}"]`); toggle(t.id, t.dur); }}><Icon name={on ? 'stop' : 'play'} size={14} /></button> : null}
                 <span className="b-bars">{bars(t.w).map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}<i className="b-head" aria-hidden="true" /></span>
               </span>
               <b>{say(t.name)}</b>
@@ -141,7 +141,7 @@ export function BuildBoard(v: PartView) {
         {m.drift ? null : replan}
         {m.foot.reset ? <button type="button" className="small-btn" data-bnew="" onClick={() => { keep('[data-bplan]'); setPlay(null); v.act('reset'); }}>{say({ id: 'build.new' })}</button> : null}
         <span className="lbl b-count">{say(m.foot.count)}</span>
-        {m.keptOrder.length ? <button type="button" className="small-btn" data-bplaykept="" aria-pressed={!!play?.section} title={say({ id: 'build.playKept.tip' })} onClick={playKept}><Glyph name={play?.section ? 'stop' : 'play'} />{say({ id: play?.section ? 'build.playKept.stop' : 'build.playKept' })}</button> : null}
+        {m.keptOrder.length ? <button type="button" className="small-btn" data-bplaykept="" aria-pressed={!!play?.section} title={say({ id: 'build.playKept.tip' })} onClick={playKept}><Icon name={play?.section ? 'stop' : 'play'} size={12} />{say({ id: play?.section ? 'build.playKept.stop' : 'build.playKept' })}</button> : null}
         <button type="button" className="small-btn primary" data-brender="" disabled={!m.foot.canRender} aria-busy={busy ? true : undefined} onClick={() => { keep('[data-brender]'); render(); }}>{say(m.foot.render)}</button>
       </div>
     </>

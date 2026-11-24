@@ -8,8 +8,8 @@ import { createPortal } from 'react-dom';
 import { playerSeek, playerWords, songArt, songCard, songWave } from '../../derive.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { pausePlayer, seekPlayer, togglePlay, useGen, type Card } from '../store/generate.ts';
-import { GIcon } from './icons.tsx';
-import { easing, mtime, reduced } from './motion.ts';
+import { Icon } from '../kit/index.ts';
+import { easing, mtime, reduced } from '../kit/motion.ts';
 
 function Wave({ id }: { id: string }) {
   return <svg viewBox="0 0 288 20" preserveAspectRatio="none" aria-hidden="true"><path d={songWave(id)} /></svg>;
@@ -27,7 +27,7 @@ function PlayerBody({ c }: { c: Card }) {
   return (
     <>
       <div className="art" style={{ background: songArt(c.id, c.hue) }} />
-      <button className="iconbtn" id="ppause" type="button" data-st={paused ? 'play' : 'pause'} aria-label={say(w.act)} title={say(w.tip)} onClick={pausePlayer}><GIcon name={paused ? 'play' : 'pause'} /></button>
+      <button className="iconbtn" id="ppause" type="button" data-st={paused ? 'play' : 'pause'} aria-label={say(w.act)} title={say(w.tip)} onClick={pausePlayer}><Icon name={paused ? 'play' : 'pause'} /></button>
       <div className="pi">
         <b ref={title}>{card.take ? <span className="ptk">{say(card.take)}</span> : null}{c.title}</b>
         <div className="track" id="ptrack" ref={track} role="slider" tabIndex={0} aria-label={say(ui('gen.position', { name }))} aria-valuemin={0} aria-valuemax={Math.round(c.dur)} aria-valuenow={Math.round(pos)} aria-valuetext={say(w.valueText)} style={{ '--pp': (pos / c.dur).toFixed(4) } as CSSProperties}
@@ -36,7 +36,7 @@ function PlayerBody({ c }: { c: Card }) {
         </div>
       </div>
       <span className="mono" id="ptime">{w.time}</span>
-      <button className="iconbtn pclose" id="pstop" type="button" aria-label={say(ui('gen.close'))} title={say(ui('gen.closeTip'))} onClick={() => stopFrom(c.id)}><GIcon name="x" /></button>
+      <button className="iconbtn pclose" id="pstop" type="button" aria-label={say(ui('gen.close'))} title={say(ui('gen.closeTip'))} onClick={() => stopFrom(c.id)}><Icon name="x" /></button>
     </>
   );
 }

@@ -24,6 +24,7 @@ import { sayNow } from '../i18n/index.ts';
 import { defName } from '../../derive.ts';
 import { closePicker } from './picker-keys.ts';
 import { sayParked } from './adding.ts';
+import { reduced } from '../kit/motion.ts';
 
 type Place = { k: number; x: number; y: number; w: number; h: number };
 let dragId: string | null = null, ghost: HTMLElement | null = null, ghostKey: string | null = null;
@@ -31,7 +32,6 @@ let dropBefore: { k: number; m: string | null } | null = null, dragRects: Place[
 /** Every place the dragged tile could take, as the preview chooses among them (the test layer reads it). */
 export const currentDragRects = (): Place[] | null => dragRects;
 
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const bento = () => document.getElementById('bento');
 const centre = () => document.getElementById('centre');
 const make = () => { const s = useDesk.getState(); return `${deskModel(ix, s.desk, s.mods).make}|${innerWidth}`; };
@@ -187,5 +187,5 @@ document.addEventListener('drop', e => {
   sayParked(d.id, r.step);
   const sel = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
   /* what arrived is brought into view by the shortest scroll, as the concept's flash does (30-desk.js) */
-  requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(sel); el?.focus({ preventScroll: true }); el?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });
+  requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(sel); el?.focus({ preventScroll: true }); el?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' }); });
 });

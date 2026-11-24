@@ -975,6 +975,10 @@ for (const [r, spec] of Object.entries(ROLES) as [Role, RoleSpec][]) {
   if (spec.of === 'state' && ks.length > 1) err(`roles.ts › ${r}`, `is played by ${ks.join(' and ')}: the page takes the first; give the role to one`);
   if (spec.of === 'param') for (const e of ENGINE_IDS) { const on = ks.filter(k => has(k, e)); if (on.length > 1) err(`roles.ts › ${r}`, `is played by ${on.join(' and ')} on ${e}: give the role to one, or tell them apart by engines`); }
 }
+/* a meter that reads a number is on its range: a scale of its own would state the range twice (RA-21) */
+for (const d of DEFINITIONS) { const walk = (n: Node) => { const o = (n.opts ?? {}) as { min?: unknown; max?: unknown }, r = n.reads?.[0];
+  if (n.part === 'meter' && r && ix.params.get(r)?.p.type === 'number' && (o.min !== undefined || o.max !== undefined)) err(`${fileOf(d)} › meter`, `reads "${r}" and gives its own min or max: the meter is on ${r}'s range already, so leave them out`);
+  (n.children ?? []).forEach(walk); }; ('face' in d ? d.face ?? [] : []).forEach(walk); }
 const rolesTable = ['| Role | Played by | What the page does with it |', '| --- | --- | --- |',
   ...(Object.entries(ROLES) as [Role, RoleSpec][]).map(([r, s]) => `| \`${r}\`${s.needed ? ' (needed)' : ''}${s.many ? ' (several)' : ''} | ${(ix.roles.get(r) ?? []).map(k => `\`${k}\` (${(ix.params.get(k)?.d ?? ix.states.get(k)?.d)!.id})`).join(', ') || 'nothing'} | ${s.doc.replace(/\|/g, '\\|')} |`)].join('\n');
 

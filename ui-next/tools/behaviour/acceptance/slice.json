@@ -49,6 +49,6 @@
     { "id": "13-quick-studio/focus-lands-on-what-arrived", "why": "Its second check (a click on a Modules card moves focus to the new tile) is what F-25 found wrong and the slice puts right (21-chrome-round5/adding-from-the-panel-answers-one-way); its first (a starter) is in 30-slice/add-and-remove-with-undo." },
     { "id": "20-lab-round5/add-by-enter-focuses-what-arrived", "why": "The same conflict with F-25: Enter on a card keeps focus on the card here." },
     { "id": "05-modules/pedalboard", "why": "Mostly the slice's, but it also opens Song info and Cover art (the generation package's). Its slice checks (a pedal knob turns, adding a pedal already there rings it, x with Undo) are in 30-slice/add-and-remove-with-undo and 30-slice/knob-keys-keep-the-value-contract." },
-    { "id": "07-overlays-keys/theme-nav", "why": "It reads the concept's storage key (hs3-theme; deviation 8) and the other pages (navigation stubs here). Its theme checks are in 30-slice/theme-is-chosen-kept-and-keyed." }
+    { "id": "07-overlays-keys/theme-nav", "why": "It reads the concept's storage key (hs3-theme; deviation 5) and the other pages (navigation stubs here). Its theme checks are in 30-slice/theme-is-chosen-kept-and-keyed." }
   ]
 }

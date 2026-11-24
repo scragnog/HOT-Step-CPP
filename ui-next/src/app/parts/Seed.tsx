@@ -15,7 +15,7 @@
 
 import { Children, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { definePart, Icon, ui, useSay, type PartView } from '../kit/index.ts';
-import { motionVar, mtime, reduced } from './motion.ts';
+import { motionVar, mtime, reduced } from '../kit/motion.ts';
 
 /* a flip is two folds on one hinge: the old character's top leaf falls, then the new one's bottom leaf lands */
 const FLIP = 55, FOLD = 28;

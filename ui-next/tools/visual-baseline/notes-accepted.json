@@ -41,7 +41,8 @@
    "key": "^shot$",
    "field": "^pixels$",
    "n": 1,
-   "why": "The drawer's shot differs in the four changed sentences (P11-1) and the lines below them."
+   "pixels": 4800,
+   "why": "The drawer's shot differs in the four changed sentences (P11-1) and the lines below them: 4358 pixels when it was measured (RA-17: at most 4800, so a change elsewhere in the drawer is not taken for these)."
   }
  ]
 }

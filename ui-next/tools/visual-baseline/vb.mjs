@@ -203,9 +203,11 @@ async function compare(a, b, o = {}) {
   let states = 0, elRecs = 0, forcedRecs = 0, semRecs = 0, partRecs = 0, diffs = 0; const lines = [], byProp = new Map();
   /* accepted differences: { state, key, field, why, n }, each a regular expression but why and n */
   const accepted = o.accept ? JSON.parse(fs.readFileSync(o.accept, 'utf8')).accepted.map(x => ({ ...x, re: [x.state, x.key, x.field].map(r => new RegExp(r || '')), seen: 0 })) : [];
-  const note = (st, s, key, field) => {
-    const hit = key !== undefined && accepted.find(x => x.re[0].test(st) && x.re[1].test(key) && x.re[2].test(field));
-    if (hit) { hit.seen++; return; }
+  /* an accepted screenshot difference says how many pixels it accepts at most (`pixels`), so a later change of any
+     size in that shot is not taken for it (RA-17); one without a bound accepts nothing */
+  const note = (st, s, key, field, amount) => {
+    const hit = key !== undefined && accepted.find(x => x.re[0].test(st) && x.re[1].test(key) && x.re[2].test(field) && (field !== 'pixels' || (typeof x.pixels === 'number' && typeof amount === 'number' && amount <= x.pixels)));
+    if (hit) { hit.seen++; if (field === 'pixels') (hit.shots ||= []).push(`${st} ${amount}`); return; }
     diffs++; if (lines.length < max) lines.push(st + ': ' + s);
   };
   for (const id of ids) {
@@ -261,13 +263,13 @@ async function compare(a, b, o = {}) {
            when a channel moves by more than 8 of 255 */
         let n = 0; for (let i = 0; i < d1.length; i += 4) if (Math.max(Math.abs(d1[i] - d2[i]), Math.abs(d1[i + 1] - d2[i + 1]), Math.abs(d1[i + 2] - d2[i + 2]), Math.abs(d1[i + 3] - d2[i + 3])) > 8) n++; return n; }, [x.toString('base64'), y.toString('base64')]);
       /* and a few dozen such pixels (antialiasing on an edge) are noise: listed, not counted */
-      if (typeof n === 'string' || n > 64) note(f.replace(/\.png$/, ''), `shot: ${n} pixels differ`, 'shot', 'pixels'); else if (n) noise.push(`${f}: ${n} pixels`); }
+      if (typeof n === 'string' || n > 64) note(f.replace(/\.png$/, ''), `shot: ${n} pixels differ`, 'shot', 'pixels', n); else if (n) noise.push(`${f}: ${n} pixels`); }
     await br.close(); }
   console.log(`compared ${states} states, ${elRecs} element records, ${semRecs} role/name/text/attribute records, ${partRecs} part records, ${forcedRecs} forced-state records, ${shots} screenshots`);
   if (noise.length) console.log('screenshot noise (64 pixels or fewer, ignored): ' + noise.join(', '));
   if (accepted.length) {
     console.log('accepted on purpose (' + path.basename(o.accept) + '):');
-    for (const x of accepted) { const ok = x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
+    for (const x of accepted) { const ok = x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}${x.shots ? ` [screenshots, at most ${x.pixels} pixels: ${x.shots.join(', ')}]` : ''}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
   }
   if (!diffs) { console.log('RESULT: identical'); return 0; }
   console.log(`RESULT: ${diffs} differences` + (diffs > lines.length ? ` (first ${lines.length} shown)` : ''));

@@ -12,14 +12,15 @@ import {
 } from '../../derive.ts';
 import { defOf, ix } from '../model/index.ts';
 import { undoables } from '../register/undoable.ts';
-import { keepAside, tellOnBoot, writeStored } from './stored.ts';
+import { keepAside, readStored, tellOnBoot, writeStored } from './stored.ts';
+import { readPref, writePref } from '../kit/storage.ts';
 
 /** Where the desk is kept between visits. */
 export const DESK_KEY = 'hotstep.create.desk';
 /** The engines this browser has been on (the concept's hs3-engseen): the first switch to another says what it brings. */
 const SEEN_KEY = 'hotstep.create.engines';
-const seenEngines = (): string[] => { try { const a = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string') : []; } catch { return []; } };
-const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) try { localStorage.setItem(SEEN_KEY, JSON.stringify([...a, e])); } catch { /* not kept */ } };
+const seenEngines = (): string[] => readPref<string[]>(SEEN_KEY, [], (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined));
+const seeEngine = (e: string) => { const a = seenEngines(); if (!a.includes(e)) writePref(SEEN_KEY, [...a, e]); };
 
 /* ---------------------------------------------------------------- undo: what a step changed, path by path */
 
@@ -130,9 +131,8 @@ let gestures = 0;
 
 function initial(): Parts & { told: Msg | null } {
   const empty: Desk = emptyDesk(ix);
-  let raw: unknown = null, text: string | null = null;
-  try { text = localStorage.getItem(DESK_KEY); raw = text ? JSON.parse(text) : null; } catch { raw = null; }
-  const r = raw ? readDesk(ix, raw) : null;
+  const got = readStored(DESK_KEY), text = got.raw;
+  const r = got.v ? readDesk(ix, got.v) : null;
   /* a desk that cannot be used is copied aside before the next autosave writes over it, and said once (F-16) */
   if (!r && text) { keepAside(DESK_KEY, text); tellOnBoot(msg('store.desk')); }
   if (!r) return { desk: empty, book: emptyBook(), mods: [], board: [], told: null };

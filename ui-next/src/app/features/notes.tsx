@@ -13,7 +13,7 @@ import { Icon } from '../kit/icons.tsx';
 import { fill } from '../register/slots.ts';
 import { useEdgeFade } from '../shell/edgeFade.ts';
 import { useNotesLogs } from '../store/notes-logs.ts';
-import { closeNotes, notesDrawer, notesScrim, openNotes } from './notes-open.ts';
+import { closeNotes, notesDrawer, notesScrim } from './notes-open.ts';
 
 /** The notes' sections, in the concept's order (notes/10-tiers.html ... 34-grounding.html). */
 const SECTIONS = ['tiers', 'adding', 'workflows', 'kept', 'grounding'] as const;
@@ -34,12 +34,9 @@ export function Notes() {
     n.setAttribute('aria-labelledby', 'notesTitle'); n.classList.add('fade-own');
   }, []);
   useEdgeFade(ref);
-  /* the notes button opens it; a press on the scrim closes it */
+  /* a press on the scrim closes it (the top bar's notes button opens it: shell/TopBar.tsx) */
   useEffect(() => {
-    const press = (e: MouseEvent) => {
-      const t = e.target as Element;
-      if (t.closest?.('#notesBtn')) openNotes(); else if (t === notesScrim()) closeNotes();
-    };
+    const press = (e: MouseEvent) => { if (e.target === notesScrim()) closeNotes(); };
     document.addEventListener('click', press);
     return () => document.removeEventListener('click', press);
   }, []);

@@ -6,7 +6,9 @@
 // as the existing frontend's API layer groups the routes (ui/src/services/api.ts).
 //
 // What is sent is built by the core, never here: generate.submit takes the run the core worked out (derive/generate.ts
-// runOf: its intent is pageIntent, the desk in the real application's names).
+// runOf) and sends the desk it was started from as the core's createIntent (derive/request.ts) finishes it with the
+// application's own resolver: the one request, which the request comparison verifies (docs/07). The simulated server
+// sends nothing.
 
 import type { AdaptersService } from './adapters.ts';
 import type { BuildService } from './build.ts';

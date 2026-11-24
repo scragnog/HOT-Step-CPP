@@ -11,7 +11,8 @@ import { Slot } from '../register/Slot.tsx';
 import { ui, useSay } from '../i18n/index.ts';
 import { useGen } from '../store/generate.ts';
 import { cancelAll, generate, showChanges, takesFit } from './actions.ts';
-import { easing, mtime, places, reduced, slide } from './motion.ts';
+import { places, slide } from './motion.ts';
+import { easing, mtime, reduced } from '../kit/motion.ts';
 import { PlayerHost } from './Player.tsx';
 
 /** The status line: the next run judged where Generate is (G-B-08), the tier, what is on the desk, the changes. Where

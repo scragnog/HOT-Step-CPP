@@ -4,9 +4,9 @@
 
 import type { Tier } from '../../definitions/types.ts';
 import { useDesk } from '../store/desk.ts';
+import { reduced } from '../kit/motion.ts';
 
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean } = {}): void {
   const s = useDesk.getState();

@@ -241,7 +241,8 @@ export function partModel(ix: Index, d: Definition, node0: Node, desk: Desk, key
   const ins = instrumentModel(ix, node, desk, key);
   if (ins) m.instrument = ins;
   if (node.state?.length) m.state = node.state.filter(k => ix.states.has(k)).map(k => { const hit = ix.states.get(k)!; return { key: k, kind: hit.s.kind, value: stateOf(ix, k, desk) ?? null, lent: hit.d.id !== d.id || !!opts.from, owner: hit.d.id, noun: stateWords(ix, k).noun, ...fileDetail(hit.s.kind, stateOf(ix, k, desk), desk) }; });
-  if (node.part === 'meter') m.meter = meterScale(opts, m.reads[0]?.value);
+  /* a meter that reads a number is on that number's scale (its range on the engine): stated once, in the parameter */
+  if (node.part === 'meter') { const r = node.reads?.[0], range = r && ix.params.has(r) && has(ix, r, desk.engine) ? resolve(ix.params.get(r)!.p, desk.engine).range : undefined; m.meter = meterScale(range ? { min: range[0], max: range[1], ...opts } : opts, m.reads[0]?.value); }
   if (node.part === 'modelPicker') m.models = modelRows(ix, node, desk);
   if (node.part === 'unitLcd') m.lines = lcdLines(ix, node, desk, key, m);
   /* the lyric sheet and the prompt card (src/derive/fields.ts) */

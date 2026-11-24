@@ -238,3 +238,37 @@ failing; a field the existing page does send, sent wrongly, still fails. Today t
 definitions send that the existing page does not is an exact entry naming its own question. A user sees the new control
 and gets what it says. Following the existing page strictly would mean a new parameter is not sent until this is
 answered, so each new knob would ship inert.
+
+## 20. Saved seeds and parameter profiles: the page's or the server's?
+
+The existing frontend keeps saved seeds on the server (`ui/src/components/global-bar/SeedManagerDrawer.tsx`: `/seeds`,
+with favourites and a random pick) and parameter profiles per backend (`ui/src/services/api.ts`: `/profiles`). The
+rebuild keeps saved seeds as the Seed module's state (`stars`, a list kept with the desk in this browser, every change
+an undo step: deviation 32 in [09](09-architecture.md)), and has no profiles: its revisions (`hotstep.create.workflows`)
+play their part, also in this browser.
+
+- Following the server: the seeds and the revisions (or profiles) become services of the boundary (`services/index.ts`),
+  each change a request, so they are shared between browsers and with the existing pages; Undo of a saved seed then
+  posts again (as question 6 asks for engine state), or saved seeds leave Undo.
+- Keeping the page's model: nothing to wire in package 10, but a seed saved on the existing page is not seen here, and
+  one saved here is lost with the browser's storage.
+
+Meanwhile the page keeps both in the browser, as the concept does. Moving the seeds is one service and the Seed part's
+list read from it (the `stars` state then holds nothing, as `recentRefs` does for the reference tracks); moving the
+revisions is the workflows store's reads and writes (`store/stored.ts`) behind a service.
+
+## 21. The Concept notes in the real application
+
+The Notes button opens the concept's design notes (`src/app/i18n/words/notes.ts`, about 14 KB: what the page does and
+why, the review's remarks). They are right for the concept's published page, where they explain the redesign; in the
+real application they are text to translate into five languages that a user of HOT-Step does not need. Choices: drop
+the button and the drawer in package 10 (one `fill` and one file), keep them behind a developer setting, or rewrite
+them as the page's own help. Meanwhile they ship as the concept's.
+
+## 22. The page's language
+
+The application has five locales and a language detector (`ui/src/i18n/index.ts`); the rebuild runs i18next on an
+instance of its own (so it never takes over the application's) fixed to English, and every word it says is a message
+(question 7 is where the tables go). Package 10 needs one line to follow the application's language
+(`i18n.changeLanguage` when the application's changes), once the tables exist: which language the page follows is the
+application's choice, and whether a missing table falls back to English or to the application's own words is yours.

@@ -19,6 +19,7 @@ import { closePop } from './popPlace.ts';
 import { openSave } from './save.ts';
 import { rowSel, useWfView, type RowRef } from './state.ts';
 import { useWfModel } from './useWfModel.ts';
+import { reduced } from '../kit/motion.ts';
 
 const sel = (r: RowRef) => rowSel(r, e => CONCEPT_ID[e]);
 const ico = (name: IconName, size = 14) => <Icon name={name} size={size} />;
@@ -259,7 +260,7 @@ export function WorkflowList() {
   useEffect(() => {
     if (!wash) return;
     const row = document.querySelector<HTMLElement>(wash.sel); if (!row) return;
-    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const still = reduced();
     row.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
     if (!still) row.animate([{ backgroundColor: '#1d9a5b33' }, { backgroundColor: 'transparent' }], { duration: 500, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }, [wash]);

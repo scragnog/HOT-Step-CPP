@@ -11,8 +11,6 @@ import { engineName, factsOf } from '../definitions/engines.ts';
 import type { Role } from '../definitions/roles.ts';
 import { type Desk, type Index, applies, changed, countOf, has, isAuto, mmss, onDesk, roleKey, roleOn, roleOwner, stateOf, valueOf } from './core.ts';
 import { list, msg, type Msg, type Slot } from './messages.ts';
-import { realState } from './request.ts';
-import type { CreateIntent } from './request.ts';
 import { defName, stepName } from './steps.ts';
 import { tileAtTier, usedHere, parkedOn } from './desk.ts';
 import { chainOf } from './models.ts';
@@ -112,9 +110,10 @@ export type RunAsk = Omit<RunSpec, 'songs'> & { songs: SongAsk[] };
  *  selected later and goes back in the queue exactly as it was (F-13). */
 export interface RunSpec {
   engine: EngineId;
-  /** The desk it was started from: what it holds on the card (B-34) and what Undo of a cancel queues again. */
+  /** The desk it was started from: what it holds on the card (B-34), what Undo of a cancel queues again, and what the
+   *  request is built from (the generation service's submit: request.ts createIntent, the request the comparison
+   *  verifies). */
   desk: Desk;
-  intent: CreateIntent;
   n: number; steps: number;
   /** The pedals that run after decoding, by name, for the stage line. */
   lit: Slot[];
@@ -131,13 +130,6 @@ export interface RunSpec {
 
 /** A song's card line from what it was made from (E-35). */
 export const songStyle = (p: string): string => ((/^Global Metadata:[ \t]*(.+)$/m.exec(p) ?? [])[1] ?? p).replace(/\n/g, ' ').trim();
-
-/** The request the page sends for the desk: the desk in the real application's names (request.ts realState). The real
- *  adapter (package 10) finishes it with the application's own resolver (request.ts createIntent). */
-export function pageIntent(ix: Index, desk: Desk): CreateIntent {
-  const rs = realState(ix, desk);
-  return { kind: 'create', params: { backend: desk.engine, ...rs.params, ...(Object.keys(rs.backendParams).length ? { backendParams: rs.backendParams } : {}), ...rs.body, ...rs.content }, compose: (rs.intent.compose ?? {}) as { [k: string]: Json } };
-}
 
 /** What a press of Generate starts (35-gobar.js generate): one song per take, as the page knows each (SongAsk); `seed`
  *  is for this run only (a score being rendered, E-08). Refusals are refusalOf's. What each song is called, how long it
@@ -171,7 +163,7 @@ export function runOf(ix: Index, desk: Desk, rnd: () => number, seed?: number): 
     says.push(msg('gen.continuing.part', { a: mmss(Number(a)), b: mmss(Number(b)), file: cont }));
   }
   return {
-    engine: e, desk, intent: pageIntent(ix, desk), n, steps, lit, songs, says,
+    engine: e, desk, n, steps, lit, songs, says,
     stream: on(ix, 'stream', desk),
     tries: on(ix, 'replan', desk) ? Math.max(1, Number(val(ix, 'replanTries', desk) ?? 1)) : 0,
     need: vramNeed(ix, desk, n).need,

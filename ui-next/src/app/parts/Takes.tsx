@@ -7,7 +7,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { definePart, ui, useSay, type PartView } from '../kit/index.ts';
-import { motionVar, mtime, reduced } from './motion.ts';
+import { motionVar, mtime, reduced } from '../kit/motion.ts';
 
 const KEYS: Record<string, (n: number, max: number) => number> = {
   ArrowRight: n => n + 1, ArrowUp: n => n + 1, ArrowLeft: n => n - 1, ArrowDown: n => n - 1, Home: () => 1, End: (_, m) => m, PageUp: (_, m) => m, PageDown: () => 1,

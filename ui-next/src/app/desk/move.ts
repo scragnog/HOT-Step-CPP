@@ -8,6 +8,7 @@ import { LEAD, defOf } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui } from '../i18n/index.ts';
 import { deskSlots, lastMeasure } from './layout.ts';
+import { reduced } from '../kit/motion.ts';
 
 type Slot = { k: number; x: number; y: number; w: number; h: number };
 const sameSlot = (a: Slot, b: Slot) => Math.abs(a.x - b.x) < 2 && Math.abs(a.y - b.y) < 2;
@@ -35,7 +36,7 @@ export function moveTile(id: string, dir: 'left' | 'right' | 'up' | 'down'): voi
   if (!to) {
     store.say(ui('tile.cantMove', { name, dir: ui(`dir.${dir}`) }));
     const v = { left: [-4, 0], right: [4, 0], up: [0, -4], down: [0, 4] }[dir], el = g.querySelector<HTMLElement>(`:scope > .tile[data-m="${id}"]`);
-    if (el && !matchMedia('(prefers-reduced-motion: reduce)').matches) el.animate([{ translate: '0 0' }, { translate: `${v[0]}px ${v[1]}px` }, { translate: '0 0' }], { duration: 160, easing: 'ease-out' });
+    if (el && !reduced()) el.animate([{ translate: '0 0' }, { translate: `${v[0]}px ${v[1]}px` }, { translate: '0 0' }], { duration: 160, easing: 'ease-out' });
     return;
   }
   /* the module it goes before, to stand at place k among the other tiles (null: the end) */

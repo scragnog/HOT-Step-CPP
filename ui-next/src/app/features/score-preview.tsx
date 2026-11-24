@@ -19,8 +19,8 @@ import { defineAction } from '../register/actions.ts';
 import { fill } from '../register/slots.ts';
 import { scoreRuns } from '../score/runs.ts';
 import { generate } from '../generate/actions.ts';
-import { Icon, Glyph, ui, useSay } from '../kit/index.ts';
-import { reduced } from '../parts/motion.ts';
+import { Icon, ui, useSay } from '../kit/index.ts';
+import { reduced } from '../kit/motion.ts';
 
 defineAction('scorePreview', () => { void open(); });
 /* Continue with this score: generation renders it with its seed, for that run only (E-08; package 6's generate) */
@@ -121,7 +121,7 @@ export function ScorePreview() {
           </svg>
         </div>
         <div className="sc-acts">
-          <button type="button" className="small-btn" data-scoreplay="" onClick={() => (p.playing ? p.stop() : p.play(0))}><Glyph name={p.playing ? 'stop' : 'play'} />{' '}{say(ui(p.playing ? 'score.stop' : 'score.play'))}</button>
+          <button type="button" className="small-btn" data-scoreplay="" onClick={() => (p.playing ? p.stop() : p.play(0))}><Icon name={p.playing ? 'stop' : 'play'} size={12} />{' '}{say(ui(p.playing ? 'score.stop' : 'score.play'))}</button>
           <button type="button" className="small-btn" data-scoredl="" onClick={() => save(m.file, score.abc)}>{say(ui('score.download'))}</button>
           <span className="sc-gap" />
           <button type="button" className="small-btn" data-scoreclose="" onClick={close}>{say(ui('score.cancel'))}</button>

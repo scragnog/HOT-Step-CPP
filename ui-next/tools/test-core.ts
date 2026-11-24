@@ -33,6 +33,12 @@ const REAL = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 're
  *  which must then be equal) or `core` (a pattern the core's output must match). */
 const ACCEPT: { derivation: string; match: string; rewrite?: [string, string][]; core?: string; why: string; n?: number }[] = fs.existsSync(ACCEPT_FILE) ? JSON.parse(fs.readFileSync(ACCEPT_FILE, 'utf8')).differences : [];
 const ix = indexOf(DEFINITIONS);
+/* the definitions as the concept page had them: every parameter added since left out (for the undo names a new
+   parameter's label renames: RA-16) */
+let conceptIx: ReturnType<typeof indexOf> | null = null;
+const ixConcept = (keys: Set<string>) => (conceptIx ??= indexOf(DEFINITIONS.map(d => ({ ...d, params: d.params.filter(p => keys.has(p.key) || (d.kind === 'module' && d.builtIn)) })) as typeof DEFINITIONS));
+const newParams = { exact: false, n: 0 };
+const pickOf = (x: { label?: Slot; undone?: Slot; redone?: Slot; put?: Slot } | null) => x && { label: x.label === undefined ? undefined : say(x.label), undone: x.undone === undefined ? undefined : say(x.undone), redone: x.redone === undefined ? undefined : say(x.redone), put: x.put === undefined ? undefined : say(x.put) };
 const J = (x: unknown) => JSON.stringify(x);
 const ENG: Record<string, EngineId> = { ace: 'ace', mm3: 'minimax-m3', yue: 'yue2', sa3: 'sa3', hm: 'heartmula' };
 const ALL = new Set(DEFINITIONS.map(d => d.id));
@@ -92,8 +98,9 @@ const used = new Set<number>(), absorbed = new Map<number, number>();
 function verdict(name: string, same: boolean, what: string, out?: { page: string; core: string }): void {
   const r = res(name); r.cases++;
   if (same) { r.agree++; return; }
-  /* a step that names a new parameter's owner because the page does not have the parameter (above) is right */
-  if (what.startsWith('shares its words with a parameter the page does not have')) { r.accepted++; return; }
+  /* a step that names a new parameter's owner because the page does not have the parameter (above) is right only when
+     the core without the parameters added since says exactly what the page says (`exactWithout`): counted apart */
+  if (what.startsWith('shares its words with a parameter the page does not have') && newParams.exact) { r.accepted++; newParams.n++; return; }
   const exact = (a: (typeof ACCEPT)[number]) => (!a.rewrite || (!!out && a.rewrite.reduce((s, [f, t]) => s.replace(new RegExp(f, 'g'), t), out.page) === out.core))
     && (!a.core || (!!out && new RegExp(a.core).test(out.core)));
   const i = ACCEPT.findIndex(a => a.derivation === name && new RegExp(a.match).test(what) && exact(a));
@@ -119,7 +126,10 @@ for (const s of FIX.steps) {
      after their owners; that is said, so it is told from a defect */
   const conceptKeys = new Set(Object.values<Record<string, unknown>>(FIX.controls).flatMap(c => Object.keys(c)));
   const shares = Object.keys(a.vals).some(k => { const l = resolve(ix.params.get(k)!.p, e).label.toLowerCase(); return [...ix.params.values()].some(x => !conceptKeys.has(x.p.key) && resolve(x.p, e).label.toLowerCase() === l); });
-  const pick = (x: { label?: Slot; undone?: Slot; redone?: Slot; put?: Slot } | null) => x && { label: x.label === undefined ? undefined : say(x.label), undone: x.undone === undefined ? undefined : say(x.undone), redone: x.redone === undefined ? undefined : say(x.redone), put: x.put === undefined ? undefined : say(x.put) };
+  /* RA-16: the core on the definitions as the page had them (the parameters added since taken out) must say exactly
+     the page's words, or the difference is not the new parameter's and fails as any other */
+  newParams.exact = shares && J(pickOf(stepWords(ixConcept(conceptKeys), before, after))) === J(pickOf(s.words));
+  const pick = pickOf;
   verdict('undo step names', J(pick(w)) === J(pick(s.words)), `${shares ? 'shares its words with a parameter the page does not have: ' : ''}${e} ${J(s.after)}: page ${J(s.words)} | core ${J(w)}`, { page: J(pick(s.words)), core: J(pick(w)) });
 }
 
@@ -414,7 +424,7 @@ const saved: string[] = [];
 let bad = 0;
 console.log('derivations against the concept page (tools/fixtures/concept.json):');
 for (const [name, r] of Object.entries(results)) {
-  console.log(`  ${name}: ${r.cases} cases, ${r.agree} agree, ${r.accepted} differ as accepted, ${r.fails.length} differ${r.skipped ? `; ${r.skipped} not comparable (a server-listed choice)` : ''}`);
+  console.log(`  ${name}: ${r.cases} cases, ${r.agree} agree, ${r.accepted} differ as accepted${name === 'undo step names' && newParams.n ? ` (${newParams.n} of them name a parameter added since by its owner, and say the page's words without it)` : ''}, ${r.fails.length} differ${r.skipped ? `; ${r.skipped} not comparable (a server-listed choice)` : ''}`);
   if (r.fails.length) { bad += r.fails.length; (process.argv.includes('--print') ? r.fails : r.fails.slice(0, 4)).forEach(f => console.log('    ' + f.slice(0, 600))); }
 }
 /* each accepted difference covers exactly the cases it was recorded with (its n): one that now covers more or fewer is

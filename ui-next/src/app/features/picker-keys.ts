@@ -15,9 +15,9 @@ import { ring } from '../desk/ring.ts';
 import { focusables, layerClosed, layerOpen, topLayer } from './layers.ts';
 import { closePop } from './pop.ts';
 import { sayParked } from './adding.ts';
+import { reduced } from '../kit/motion.ts';
 
 const host = () => document.getElementById('pickerWrap');
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** The definition a picker id names (a pedal is pd:<id>, a side unit ex:<id>). */
 export const defOfItem = (id: string) => defOf(id.includes(':') ? id.split(':')[1]! : id);
 

@@ -1,0 +1,9 @@
+{
+  "about": "The consolidation round's core share (review r3, RA-01 to RA-22 but RA-04 and RA-23): the scenarios of scenarios/37-fix-core.mjs, each a defect fixed and driven as a user reaches it, and the concept scenarios no package ran after the merge (RA-06) that now pass, each with what it checks. switches/fix-core.json puts each defect back.",
+  "scenarios": [
+    { "id": "37-fix-core/takes-tile-and-go-bar-say-one-figure", "why": "RA-01: on MiniMax-Music3 with the 8B planner at F16 and four takes, the Takes tile, the go bar and the meter say one figure, and Use N takes makes the tile fit too." },
+    { "id": "37-fix-core/reuse-with-the-same-words-offers-no-undo-of-your-typing", "why": "RA-09: Reuse of the words already in the box makes no step and offers no Undo; with other words its Undo puts back exactly what was typed." },
+    { "id": "37-fix-core/vst-chain-add-says-the-host-is-elsewhere", "why": "RA-08: every named action has a runner (the VST3 chain's + Add says the concept's words) and no placeholder part is drawn." }
+  ],
+  "excluded": []
+}

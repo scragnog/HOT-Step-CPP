@@ -39,8 +39,14 @@ is shown on has is refused.
 
 ## What a bespoke part is given
 
-A part's component receives `PartProps` (`parts.ts`), built by `bindPart()` (`src/derive/parts.ts`), and nothing else.
-The types are the contract, and the core enforces it:
+A part's React component receives a `PartView` (`src/app/kit/types.ts`): its node's model as the core works it out
+(`derive/models.ts partModel`: each parameter with its value, words, range and place, whether it is changed, on auto,
+applies, and its `role`; the node's label and words; for a bespoke part its `instrument`) and setters for exactly what
+its node binds (`p.set(value)`, `p.reset()`, `p.setAuto(on)`, `p.press`, `p.typed`, `p.toFraction`, `v.choose`,
+`v.run`, `v.batch`, `v.gesture`, and `v.act(name, arg)` for its hands). Underneath, those setters are the core's
+`PartProps` (`parts.ts`), built by `bindPart()` (`src/derive/parts.ts`), which is what a bespoke part's hands are given
+in the core (`partAct`: `defineInstrument`, [06](06-how-to.md) section 4b). The `PartProps` contract, which the core
+enforces:
 
 - `params`: the parameters its node edits (`param`, `params`), each with its face on the engine in use, its value, its
   text, whether it is changed, on auto and applies, and `set(value, step?, slots?, also?)`, `setAuto(on)`, `reset()`.
@@ -185,7 +191,7 @@ The "Used by" column is filled in from the definitions.
 | `unitStatus` | readout |  |  |  | A side unit's status words in small caps (After the render · needs MMS). |  |  | 28-side-units.css | fa |
 | `unitBadge` | readout |  |  |  | A side unit's round score badge. |  |  | 28-side-units.css | q |
 | `dice` | readout |  |  | number | A row of numbered dice, one per allowed attempt (the first of `reads`), filled as attempts are used. | `offWhen` (param): A switch that, while off, draws the dice off. |  | 25-module-replan.css | replan |
-| `meter` | readout |  |  | any | A printed meter with a needle: the first of `reads` on its scale, or a level the engine reports when it reads nothing (the Mastering pedal's VU meter). | `min` (number): The scale's left end.<br>`max` (number): Its right end.<br>`red` (number): Where the scale turns red. |  | 27-pedals.css | master |
+| `meter` | readout |  |  | any | A printed meter with a needle: the first of `reads` on its scale, or a level the engine reports when it reads nothing (the Mastering pedal's VU meter). | `min` (number): The scale's left end, for a meter that reads no number: one that reads a number is on that number's range.<br>`max` (number): Its right end, likewise.<br>`red` (number): Where the scale turns red. |  | 27-pedals.css | master |
 | `beatPulse` | readout |  |  | number | Lamps that pulse on the beat at the BPM it reads, one per beat of the bar (the time signature it reads next; four without one). |  |  | 25-module-tempo.css | tempo |
 | `flowWindows` | readout |  |  | number | MiniMax-Music3's flow windows drawn at the hop it reads, and the count of windows a 3:00 song needs. |  |  | 25-module-flow.css | flow |
 | `speedGauge` | readout |  |  | number, number, number | An LCD that estimates how much faster the trades it reads make a run. |  |  | 25-module-perf.css | perf |

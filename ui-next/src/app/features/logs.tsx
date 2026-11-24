@@ -9,7 +9,7 @@
 // (the logs service, services/logs.ts) and what the queue holds (store/notes-logs.ts tellQueue). It is drawn whether or
 // not it is open, as the concept paints it, into the skeleton's #logs.
 
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { engineLogModel } from '../../derive.ts';
 import { ix } from '../model/index.ts';
@@ -39,12 +39,6 @@ export function Logs() {
   }, [open, say]);
   useLayoutEffect(() => { logsDock()?.classList.add('fade-own'); }, []);
   useEdgeFade(ref);
-  /* the meter opens and closes it */
-  useEffect(() => {
-    const press = (e: MouseEvent) => { if ((e.target as Element).closest?.('#engMeter')) toggleLogs(); };
-    document.addEventListener('click', press);
-    return () => document.removeEventListener('click', press);
-  }, []);
   const l = logsDock(); if (!l) return null;
   return createPortal(
     <>

@@ -3,15 +3,8 @@
 // 35-songs.js renderSongs). Drawing only: places and times, no value.
 
 import { dockH } from '../shell/placeToast.ts';
+import { easing, mtime, reduced } from '../kit/motion.ts';
 
-const root = () => getComputedStyle(document.documentElement);
-export const reduced = (): boolean => matchMedia('(prefers-reduced-motion: reduce)').matches;
-/** A motion token's time, in ms (a CSS time such as "180ms" or ".3s"). */
-export function mtime(name: string): number {
-  const v = root().getPropertyValue(name).trim(), n = +v.replace(/m?s$/, '');
-  return Number.isFinite(n) ? (v.endsWith('ms') ? n : n * 1000) : 200;
-}
-export const easing = (name: string): string => root().getPropertyValue(name).trim() || 'ease-out';
 
 /** Is an element wholly on screen, between the top bar and the go bar when it sticks to the bottom (above the docked
  *  engine log while it is open, the concept's dockH)? */

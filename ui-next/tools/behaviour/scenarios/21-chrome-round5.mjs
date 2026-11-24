@@ -35,13 +35,15 @@ export default [
   } },
   { id: 'picker-category-bar', w: 1920, h: 1080, run: async t => {
     await t.press('F9');
-    await t.eq('the count says what is shown (F-09)', () => document.querySelector('#pkCount').textContent, '35 in all');
+    /* the counts are the catalogue's (what the wall draws, PEDALS, EXTRAS), so adding or removing a module or a pedal
+       changes what is expected, not the scenario (RA-03) */
+    await t.ok('the count says what is shown (F-09)', () => document.querySelector('#pkCount').textContent === `${document.querySelectorAll('#pickerWrap .fl-it[data-pkid]').length} in all` || document.querySelector('#pkCount').textContent);
     await t.click('#pkBar [data-pkcat="Pedals"]');
-    await t.eq('"10 pedals" for the Pedals filter', () => document.querySelector('#pkCount').textContent, '10 pedals');
+    await t.ok('"N pedals" for the Pedals filter', () => document.querySelector('#pkCount').textContent === `${PEDALS.length} pedals` || document.querySelector('#pkCount').textContent);
     await t.ok('the pressed category is filled, All is the size of its neighbours', () => { const p = document.querySelector('#pkBar [data-pkcat="Pedals"]'), a = document.querySelector('#pkBar [data-pkcat="All"]'), c = document.querySelector('#pkBar [data-pkcat="Compose"]');
       const bg = getComputedStyle(p).backgroundColor, fa = getComputedStyle(a).fontSize, fc = getComputedStyle(c).fontSize; return (bg !== 'rgba(0, 0, 0, 0)' && getComputedStyle(a).backgroundColor === 'rgba(0, 0, 0, 0)' && fa === fc) || [bg, fa, fc].join(' / '); });
     await t.click('#pkBar [data-pkcat="Side units"]');
-    await t.eq('"5 side units"', () => document.querySelector('#pkCount').textContent, '5 side units');
+    await t.ok('"N side units"', () => document.querySelector('#pkCount').textContent === `${EXTRAS.length} side units` || document.querySelector('#pkCount').textContent);
   } },
   /* F-10: two names that look the same are the same name */
   { id: 'names-with-inner-spaces-clash', run: async t => {

@@ -13,7 +13,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { definePart, ui, useSay, type PartView } from '../kit/index.ts';
-import { motionVar, mtime, reduced } from './motion.ts';
+import { motionVar, mtime, reduced } from '../kit/motion.ts';
 
 /* the wheel's drawing (25-module-tempo.js wheelSVG): a 150-unit square, the majors' ring from 50 to 73, the minors'
    from 25 to 50 (25 deep, so their names read at 10px: Q-32), twelve segments from the top */
