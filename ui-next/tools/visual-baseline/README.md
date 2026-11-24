@@ -133,7 +133,9 @@ screenshots of `pseudo` states were taken differently.
 - Screenshots are of the viewport: a full-page screenshot resizes the viewport, the page reacts to the resize, and the
   result is not repeatable. Everything below the fold is still covered by the computed-style records. Rasterising is not
   bit-exact between runs, so a pixel counts only when a channel moves by more than 8 of 255, and a screenshot with 64 such
-  pixels or fewer is listed as noise, not as a difference.
+  pixels or fewer is listed as noise, not as a difference. An accepted screenshot difference (`"field": "^pixels$"`)
+  says the most pixels it accepts (`"pixels": n`): a larger change in that shot is a difference, and its count `n` is
+  the most times it may occur, since an edge's anti-aliasing comes and goes between runs.
 - The states call the page's own globals (`S`, `render`, `toast`, `setVal`, `openScore`, `loadPreset`, `placeDD`, ...). If
   the JS renames them, update `states.mjs`; a state whose setup fails says so in the capture output.
 - Elements inside `<head>` are left out of the comparison: they are never rendered, and adding one (the

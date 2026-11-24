@@ -32,6 +32,14 @@
    "why": "A dropdown option's hook names its value (\"spotify\"); the concept's names its label (\"Spotify / YouTube · -14\"), as its values are labels."
   },
   {
+   "state": "^slice-desk-ace-quick-light$",
+   "key": "^shot$",
+   "field": "^pixels$",
+   "n": 1,
+   "pixels": 200,
+   "why": "One desk shot differs by about 150 pixels at the edges of the hexagonal foot switches and of Avoid's note and tape, a level of anti-aliasing: no computed style, attribute or word differs there. Measured 149 in the consolidation round, and 64 or fewer (noise) in another run: at most 200 (RA-17)."
+  },
+  {
    "state": "^slice-parts-mm3-lab",
    "key": "\\.tile-foot \\.foot-ctl",
    "field": "",

@@ -646,6 +646,14 @@ arriving are none. The score preview is `features/score-preview.tsx` with its st
 `#scoreModal` through the `overlays` slot, which `App.tsx` now draws (`<Slot name="overlays" />`). The page's
 The play, stop and padlock icons are the kit's (`kit/icons.tsx`, the one icon set).
 
+**The consolidation round's core share (review r3)** adds `acceptance/fix-core.json` (the defects it fixed, driven as a
+user reaches them, `scenarios/37-fix-core.mjs`, and every concept scenario no package ran after the merge, re-read: those
+that pass are listed, the rest excluded with today's reason; `run.mjs --slice` now refuses a concept scenario in no
+list), `switches/fix-core.json`, and `tools/test-code.ts` (in `npm run check`: no key, state or id named in the code;
+every part a definition names has a component and every action a runner). `npm run check` ends with
+`switches.mjs --applies`; `visual-all.mjs` fails on a state that belongs to no set; an accepted screenshot difference
+says how many pixels it accepts.
+
 ## Deviations from the concept's markup
 
 1. **The skeleton is static, React draws into it.** `#app` is React's root; the top bar, the toast, the live region and

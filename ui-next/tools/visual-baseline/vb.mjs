@@ -269,7 +269,9 @@ async function compare(a, b, o = {}) {
   if (noise.length) console.log('screenshot noise (64 pixels or fewer, ignored): ' + noise.join(', '));
   if (accepted.length) {
     console.log('accepted on purpose (' + path.basename(o.accept) + '):');
-    for (const x of accepted) { const ok = x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}${x.shots ? ` [screenshots, at most ${x.pixels} pixels: ${x.shots.join(', ')}]` : ''}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
+    /* a screenshot difference within its bound may also not occur (rasterising an edge is not the same every run): its
+       count is the most it accepts */
+    for (const x of accepted) { const ok = typeof x.pixels === 'number' ? x.seen <= x.n : x.seen === x.n; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${x.seen} of ${x.n}: ${x.why}${x.shots ? ` [screenshots, at most ${x.pixels} pixels: ${x.shots.join(', ')}]` : ''}`); if (!ok) { diffs++; lines.push(`accepted difference "${x.why}" occurs ${x.seen} times, ${x.n} accepted: look at what changed, then correct its count`); } }
   }
   if (!diffs) { console.log('RESULT: identical'); return 0; }
   console.log(`RESULT: ${diffs} differences` + (diffs > lines.length ? ` (first ${lines.length} shown)` : ''));
