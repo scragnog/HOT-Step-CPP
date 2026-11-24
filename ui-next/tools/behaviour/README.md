@@ -102,7 +102,9 @@ tried in stages, stopping at the first that catches it:
 
 A scenario counts as catching a switch only if it fails with the feature off **and passes with it on**: each scenario
 that fails on a switched build is run once on the test build (`dist-test/index.html`, built first when missing or
-older than the sources) to know, and one that fails there too is named on the switch's line and not counted. Waiting
+older than the sources) to know, and one that fails there too is named on the switch's line and not counted. A
+scenario the harness could not run (the browser gone, the page not loaded) is run again; if it does not run twice it
+counts neither way, and a switch nothing else catches is reported as not known, which fails the run. Waiting
 scenarios catch nothing. A stage that runs fewer scenarios can only miss a catch, never invent one, and a miss sends the
 switch on to the next stage, so a switch is reported caught exactly when the whole acceptance would catch it; what
 differs from `--whole` is only how many of its catching scenarios are listed. Every switch gets a line (caught or not,
@@ -113,6 +115,13 @@ for other work).
 
 `caught/<package>.json` is written only when what caught a switch changes; commit it with the package's work. A package
 that adds switches adds nothing else: a switch with no record starts at its own package's acceptance.
+
+Measured on the slice's and package 5's 28 switches (24 November 2026): with `caught/` filled, 4 min 20 s at 6 workers
+(about 9 s a switch, 2.9 scenarios run for each); starting from each package's own acceptance (`--fresh`), 7 min 25 s
+at 6 workers, 16 min 20 s at 2. The old way took 6 to 7 minutes a switch at 2 workers (70 min for the slice's 11), and
+every scenario the staged run named as a catcher was one the old way named too. For all 387 switches that is about an
+hour once `caught/` is filled, against about 18 hours for the old way at 6 workers (a whole acceptance is about
+2 min 40 there).
 
 ## Proving a refactor changes nothing
 

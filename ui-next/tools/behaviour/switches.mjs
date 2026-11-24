@@ -79,8 +79,8 @@ const records = Object.fromEntries(pkgs.map(p => [p.pkg, fs.existsSync(recFile(p
 
 /* runs these scenarios on a page; returns the ids that failed (with their failed checks) and passed. A scenario that
    did not run (the harness itself failed: the browser went away under load, say, or run.mjs did not report it) proves
-   nothing yet: it is run once more, and only if it fails to run again does it count as failing (named in `broken`). The
-   check on the test build then decides whether that failure is the switch's. */
+   nothing: it is run once more, and if it does not run again it is named in `broken` and counts neither way (a switch
+   nothing else catches is then reported as not known, never as caught). */
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function runOnce(ids, page) {
   const r = spawnSync(process.execPath, [path.join(here, 'run.mjs'), '--slice', '--page', page, '--workers', workers, '--only', '^(?:' + ids.map(esc).join('|') + ')$'], { cwd: repo, env: process.env, encoding: 'utf8', maxBuffer: 1 << 28 });
@@ -95,7 +95,7 @@ function run(ids, page) {
   if (!ids.length) return { failed: [], passed: [], broken: [], checks: {} };
   const a = runOnce(ids, page); if (!a.broken.length) return a;
   const b = runOnce(a.broken, page);
-  return { failed: [...a.failed, ...b.failed, ...b.broken], passed: [...a.passed, ...b.passed], broken: b.broken, retried: a.broken.length, checks: { ...a.checks, ...b.checks }, note: b.note };
+  return { failed: [...a.failed, ...b.failed], passed: [...a.passed, ...b.passed], broken: b.broken, retried: a.broken.length, checks: { ...a.checks, ...b.checks }, note: b.note };
 }
 /* each scenario's result with every feature on, run once when first needed */
 const base = new Map();
@@ -123,11 +123,11 @@ for (const { feature, pkg } of features) {
       row.onBase.push(...r.failed.filter(id => !good.includes(id)));
       if (good.length) { row.by = good; row.stage = stage; for (const id of good) row.checks[id] = r.checks[id]; break; }
     }
-    if (!row.stage) row.stage = 'NOTHING FAILS';
+    if (!row.stage) row.stage = row.broken.length ? 'NOT KNOWN: scenarios did not run' : 'NOTHING FAILS';
   }
   row.took = Date.now() - t1; rows.push(row);
   const caught = row.by.length > 0;
-  console.log(`${caught ? 'ok  ' : 'FAIL'} ${pkg.padEnd(15)} ${feature.padEnd(24)} ${caught ? `caught (${row.stage}, ${row.ran} run) by ${row.by.length}: ${row.by.slice(0, 3).join(', ')}${row.by.length > 3 ? ', ...' : ''}` : row.stage + (row.error ? ': ' + row.error : ` (${row.ran} scenarios run)`)}${row.onBase.length ? `  [failing with the feature on too, not counted: ${row.onBase.join(', ')}]` : ''}${row.retried ? `  [${row.retried} did not run and were run again${row.broken.length ? `; did not run twice, counted as failing: ${row.broken.slice(0, 3).join(', ')}${row.broken.length > 3 ? ', ...' : ''} (${row.note})` : ''}]` : ''}  ${sec(row.took)}`);
+  console.log(`${caught ? 'ok  ' : 'FAIL'} ${pkg.padEnd(15)} ${feature.padEnd(24)} ${caught ? `caught (${row.stage}, ${row.ran} run) by ${row.by.length}: ${row.by.slice(0, 3).join(', ')}${row.by.length > 3 ? ', ...' : ''}` : row.stage + (row.error ? ': ' + row.error : ` (${row.ran} scenarios run)`)}${row.onBase.length ? `  [failing with the feature on too, not counted: ${row.onBase.join(', ')}]` : ''}${row.retried ? `  [${row.retried} did not run and were run again${row.broken.length ? `; did not run twice, not counted: ${row.broken.slice(0, 3).join(', ')}${row.broken.length > 3 ? ', ...' : ''} (${row.note})` : ''}]` : ''}  ${sec(row.took)}`);
 }
 fs.rmSync(path.join(repo, 'dist-switch'), { recursive: true, force: true });
 
