@@ -100,7 +100,7 @@ const SESS = (takes: object, cur?: string) => ({ build: { planning: false, sessi
 
 /* ---- Build by section's strip at Quick names Studio for its settings (E-25) */
 {
-  const t = tileModel(ix, def('build'), desk('yue2', 'quick', ['build'], { 'yue.btakes': 3 }));
+  const t = tileModel(ix, def('build') as Extract<ReturnType<typeof def>, { kind: 'module' }>, desk('yue2', 'quick', ['build'], { 'yue.btakes': 3 }));
   ok('a strip says what is set at another tier, and names the tier its face edits it at', !!t.also && t.also.link === 'studio' && /Takes per section 3/.test(s(t.also.text)), t.also && s(t.also.text));
 }
 
