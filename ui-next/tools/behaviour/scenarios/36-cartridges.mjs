@@ -36,6 +36,13 @@ export default [
     await t.ok('focus lands on its fader (L-07)', () => document.activeElement?.matches('[data-m="adapters"] [data-fader="s1"]') || document.activeElement?.outerHTML.slice(0, 80));
     await t.ok('in a stack each cartridge says what it sends', () => __c.text('.tile[data-m="adapters"] [data-eff="0"]') === 'sends 0.38' && __c.text('.tile[data-m="adapters"] .cart .slot') === '#1 · DiT');
   } },
+  { id: 'unused-adapters-and-stack-them', run: async t => {
+    await desk('studio', ['adapters'], {}, 'ace', { slots: TWO })(t);
+    await t.ok('while Stack is Single one cartridge is used, no empty slot beside it', () => __c.tile().querySelectorAll('.cart:not(.empty)').length === 1 && !__c.tile().querySelector('[data-cartadd]'));
+    await t.eq('the other is said loaded but not used, with the way to stack them (A-14)', () => __c.text('.tile[data-m="adapters"] .unused .lbl'), 'folk-voice is loaded but not used while Stack is Single.');
+    await t.click('.tile[data-m="adapters"] .unused .sbtn');
+    await t.ok('Stack them stacks them', () => document.querySelectorAll('.tile[data-m="adapters"] .cart:not(.empty)').length === 2 && !!document.querySelector('.tile[data-m="adapters"] .stackbar') && !document.querySelector('.tile[data-m="adapters"] .unused'));
+  } },
   { id: 'section-masks-force-runtime', run: async t => {
     await desk('lab', ['adapters'], { 'ad.adv': 'Advanced', 'ad.mode': 'Merge', 'lyrics.text': LYRICS }, 'ace', { slots: TWO })(t);
     await t.eq('each cartridge has a chip per section, tagged by its initial (L-25)', () => [...document.querySelectorAll('.tile[data-m="adapters"] [data-secband="0"] button')].map(b => b.textContent + ':' + b.className), ['V1:full', 'C:full', 'V2:full']);
@@ -48,7 +55,7 @@ export default [
     await t.eq('Apply as shows Runtime pressed, the others disabled; the choice is kept', () => [[...document.querySelectorAll('[data-adfoot] [data-seg="ad.mode"]')].map(b => b.textContent.toLowerCase() + ':' + b.getAttribute('aria-pressed') + ':' + b.disabled), get('ad.mode')],
       [['merge:false:true', 'runtime:true:false', 'low-rank:false:true'], 'Merge']);
     await t.mouseDrag('.tile[data-m="adapters"] [data-mask="1-0"]', [[30, 0], [30, 0]], [0.5, 0.5]);
-    await t.ok('a drag across the strip paints the first chip\'s level on the rest, one step', () => /\[Verse\]\{#1=1; #2=0\.5\}/.test(get('lyrics.text')) && /^Section masks of folk-voice$|: folk-voice full → half$/.test(__c.undo()) || [get('lyrics.text'), __c.undo()]);
+    await t.ok('a drag across the strip paints the first chip\'s level on the rest, one step', () => /\[Verse\]\{#1=1; #2=0\.5\}/.test(get('lyrics.text')) && /\[Chorus\]\{#1=0; #2=0\.5\}/.test(get('lyrics.text')) && __c.undo() === 'Section masks of folk-voice' || [get('lyrics.text'), __c.undo()]);
   } },
   { id: 'phase-window-keys-drag-and-steps', run: async t => {
     await desk('lab', ['adapters'], { 'ad.adv': 'Advanced' }, 'ace', { slots: TWO })(t);
@@ -73,6 +80,7 @@ export default [
     await desk('lab', ['adapters'], {}, 'ace', { slots: [TWO[0]] })(t);
     await t.ok('one adapter: the bank stands beside the cartridge, the tile under 600px (L-05)', () => { const c = __c.tile().querySelector('.cart:not(.empty)').getBoundingClientRect(), f = __c.tile().querySelector('.faders').getBoundingClientRect(); return f.left > c.right && __c.tile().offsetHeight < 600 || __c.tile().offsetHeight; });
     await t.ok('Lab offers the planner adapter beside the DiT adapter', () => __c.text('.tile[data-m="adapters"] [data-plannerpick]') === '+ Planner adapter' && __c.text('.tile[data-m="adapters"] .cart .slot') === 'DiT');
+    await t.ok('a bank fader is named in full, its short tape carrying the full name (V-01)', () => { const f = __c.tile().querySelector('.faders .fdr'); return f.querySelector('.fdr-l').title === 'Self-Attn' && f.querySelector('[data-fader]').getAttribute('aria-label') === 'Self-Attn strength'; });
     await t.click('.tile[data-m="adapters"] [data-plannerpick]');
     await t.eq('its list: the planner LM adapters, and what they change', () => [document.querySelectorAll('#pop [data-pickplanner]').length, __c.text('#pop h4'), /what the planner writes/.test(__c.text('#pop .lbl'))], [2, 'Planner LM adapters', true]);
     await t.click('#pop [data-pickplanner="folk-voice-planner (LoRA)"]');
@@ -91,6 +99,7 @@ export default [
   { id: 'yue-pair-and-hm-one-column', w: 1920, h: 1080, run: async t => {
     await desk('studio', ['adapters'], {}, 'yue', { slots: [{ file: 'folk-voice-ar', type: 'LoRA' }] })(t);
     await t.eq('the AR cartridge: its strength beside Plan and Compose (E-05)', () => [...document.querySelectorAll('.tile[data-m="adapters"] .fdr-pair .fdr-l')].map(x => x.textContent), ['Strength', 'Plan', 'Compose']);
+    await t.ok('the AR composer is the planner\'s housing, the NAR slot the sound\'s', () => __c.tile().querySelector('.cart:not(.empty)').classList.contains('h-plan') && __c.tile().querySelector('[data-cartadd]').classList.contains('h-sound'));
     await t.ok('the empty slot names the NAR renderer, the column says what it does (E-10)', () => __c.text('.tile[data-m="adapters"] [data-cartadd]') === '+ NAR · renderer adapter' && /second slot takes a NAR renderer adapter/.test(__c.tile().textContent));
     await desk('studio', ['adapters'], {}, 'hm', { slots: [{ file: 'heart-folk-lm', type: 'LoRA' }] })(t);
     await t.ok('HeartMuLa: one column, its one limit said beside the cartridge (S-14, S-21)', () => __c.tile().getBoundingClientRect().width < 400 && /HeartMuLa takes one adapter/.test(__c.tile().textContent));
