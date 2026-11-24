@@ -44,3 +44,7 @@ export const STATES = [
 
 /** The regions compared: the engine panel, the VRAM meter, the dropdown. */
 export const SCOPES = { models: ['#engPanel', '#engMeter', '#dd'] };
+
+/** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
+ *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
+export const VISUAL_SET = { name: 'models', only: '^models-', scope: 'models', accept: 'models-accepted.json' };
