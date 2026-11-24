@@ -5,7 +5,7 @@
 // vramNeed). None has a branch for any module or engine: what differs per engine is data (engines.ts, the figures).
 
 import type { EngineId, Node, Tier } from '../definitions/types.ts';
-import { ENGINES } from '../definitions/engines.ts';
+import { ENGINES, engineName } from '../definitions/engines.ts';
 import { type Desk, type Index, applies, countOf, has, listKey, modelDefault, resolve, valueOf } from './core.ts';
 import { type Msg, type Slot, msg } from './messages.ts';
 import { paramWords, textMsg } from './strings.ts';
@@ -84,16 +84,22 @@ export interface MeterModel {
 
 /** The VRAM meter in the top bar (34-engine-panel.js paintEngine): when the next run will be refused, the read-out shows
  *  what it needs, not what is loaded (G-B-08). */
-export function meterModel(ix: Index, desk: Desk): MeterModel {
+export function meterModel(ix: Index, desk: Desk, run?: Desk | null): MeterModel {
   const v = vramNeed(ix, desk), card = cardText(v.card);
+  /* while another engine renders, "loaded" is what that engine holds; the next Generate is the selected engine's (B-34) */
+  const other = run && run.engine !== desk.engine ? run : null, held = other ? vramNeed(ix, other).models : v.models;
   return {
-    use: v.models, est: v.need, card: v.card,
-    read: gb1(v.refuses || v.tight ? v.need : v.models), of: msg('vram.of', { card }),
+    use: held, est: v.need, card: v.card,
+    read: gb1(v.refuses || v.tight ? v.need : held), of: msg('vram.of', { card }),
     over: v.refuses, tight: v.tight,
     peak: Math.min(1, v.need / v.card), ticks: [8, 16, 24].map(g => g / v.card),
-    aria: msg('vram.aria', { loaded: gb1(v.models), need: gb1(v.need), card }), title: msg('vram.title', { card }),
+    aria: other ? msg('vram.aria.run', { engine: engineName(other.engine), held: gb1(held), next: engineName(desk.engine), need: gb1(v.need), card })
+      : msg('vram.aria', { loaded: gb1(v.models), need: gb1(v.need), card }), title: msg('vram.title', { card }),
   };
 }
+/** Where the meter's needle heads: what is loaded, and while a run renders, most of the way to what it needs, a little
+ *  differently each frame (34-engine-panel.js stepMeter). */
+export const meterTarget = (use: number, est: number, busy: boolean, rnd: () => number): number => use + (busy ? Math.max(0, est - use) * (0.75 + rnd() * 0.25) : 0);
 
 /** The meter's LED segments: lit up to what it shows now (`cur`), outlined up to what the next run needs, amber from
  *  68% of the bar and red from 86% (34-engine-panel.js stepMeter). */

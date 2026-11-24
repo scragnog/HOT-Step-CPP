@@ -61,6 +61,9 @@ export interface Entry {
   at: number;
   /** Where focus goes when the step is undone (a selector). */
   back?: string;
+  /** A step that is no change to the desk (a saved record replaced, renamed or deleted: store/workflows.ts) undoes and
+   *  redoes itself, by name, on the records as they are then; either may say what it left alone. */
+  run?: { undo(): Slot | void; redo(): Slot | void };
 }
 
 export interface Toast { text: Slot; action?: { label: Slot; run: () => void } }
@@ -99,9 +102,11 @@ export interface DeskStore extends Parts {
   setFocus(sel: string | string[] | null): void;
   /** A change to a package's undoable state (register/undoable.ts), made by fn: one step with the core's words. */
   deskStep(words: StepWords, fn: () => void): void;
+  /** A step that undoes and redoes itself (Entry.run): a saved record's replacement, rename or deletion. */
+  recordStep(words: StepWords, run: NonNullable<Entry['run']>, back?: string): Entry;
   /** What the engine told the page: its lists, the selected models, the plugin host's count, the VRAM figures. Lists
    *  and selections are added to what it was told before (each engine's model buckets arrive on their own). */
-  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram'] }): void;
+  told(o: { lists?: Desk['lists']; selection?: Desk['selection']; vstPlugins?: number; vram?: Desk['vram']; songs?: Desk['songs'] }): void;
 }
 
 const UNDO_MAX = 100;
@@ -217,23 +222,30 @@ export const useDesk = create<DeskStore>()((set, get) => {
       const s = get(), e = entry ?? s.undo[s.undo.length - 1]; if (!e) return;
       const i = s.undo.indexOf(e); if (i < 0) return;
       set({ undo: s.undo.filter(x => x !== e), gesture: null });
-      cross(e, e.after, e.before);
+      const note = e.run ? e.run.undo() : (cross(e, e.after, e.before), undefined);
       set({ redo: [...get().redo, e], focus: e.back ? [e.back] : null });
-      get().showToast({ text: { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } }, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
+      const said: Slot = { id: 'ui.undone', slots: { what: e.words.undone ?? e.words.label } };
+      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.redo' }, run: () => get().runRedo(e) } });
     },
     runRedo(entry) {
       const s = get(), e = entry ?? s.redo[s.redo.length - 1]; if (!e) return;
       const i = s.redo.indexOf(e); if (i < 0) return;
       set({ redo: s.redo.filter(x => x !== e), gesture: null });
-      cross(e, e.before, e.after);
+      const note = e.run ? e.run.redo() : (cross(e, e.before, e.after), undefined);
       set({ undo: [...get().undo, e] });
-      get().showToast({ text: { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } }, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
+      const said: Slot = { id: 'ui.redone', slots: { what: e.words.redone ?? e.words.label } };
+      get().showToast({ text: note ? { list: [said, note], join: 'sentences' } : said, action: { label: { id: 'ui.undo' }, run: () => get().runUndo(e) } });
     },
     deskStep(words, fn) {
       const prev = parts(), before = flatOf(prev); fn();
       const s = get(), after = flatOf(parts());
       if ([...after].every(([k, v]) => before.get(k) === v)) return;
       set({ undo: [...s.undo, { words, first: prev.desk, before, after, gesture: null, at: Date.now() }].slice(-UNDO_MAX), redo: [] });
+    },
+    recordStep(words, run, back) {
+      const s = get(), f = flatOf(parts()), e: Entry = { words, first: s.desk, before: f, after: f, gesture: null, at: Date.now(), run, ...(back ? { back } : {}) };
+      set({ undo: [...s.undo, e].slice(-UNDO_MAX), redo: [] });
+      return e;
     },
     showToast(t) { set({ toast: t }); if (t) get().say(t.text); },
     say(text) {
@@ -244,7 +256,7 @@ export const useDesk = create<DeskStore>()((set, get) => {
     setFocus(sel) { set({ focus: sel === null ? null : [sel].flat() }); },
     told(o) {
       const d = get().desk;
-      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
+      set({ desk: { ...d, ...(o.lists ? { lists: { ...d.lists, ...o.lists } } : {}), ...(o.selection ? { selection: { ...d.selection, ...o.selection } } : {}), ...(o.vram ? { vram: o.vram } : {}), ...(o.songs ? { songs: { ...d.songs, ...o.songs } } : {}), ...(o.vstPlugins !== undefined ? { told: { ...d.told, vstPlugins: o.vstPlugins } } : {}) } });
     },
   };
 });

@@ -76,11 +76,11 @@ function pulse(ix: Index, node: Node, desk: Desk): NonNullable<ReadoutModel['pul
   return { beats: top, beat: bpm ? `${(60 / bpm).toFixed(3)}s` : '0s', idle: !bpm };
 }
 
-/** The dice: as many as the attempts it reads; off while the switch named by `offWhen` is off. None is used until a
- *  run reports its attempts (the planner's runs, a later package). */
+/** The dice: as many as the attempts it reads; off while the switch named by `offWhen` is off. Those used are the tries
+ *  the run that renders reports (desk.songs, told by the generation service). */
 function dice(ix: Index, node: Node, desk: Desk): NonNullable<ReadoutModel['dice']> {
   const off = (node.opts as { offWhen?: string } | undefined)?.offWhen;
-  return { n: Math.min(50, Math.max(0, Math.round(num(ix, desk, node.reads?.[0])))), off: !!off && read(ix, desk, off) === false, used: 0, tip: msg('dice.tip') };
+  return { n: Math.min(50, Math.max(0, Math.round(num(ix, desk, node.reads?.[0])))), off: !!off && read(ix, desk, off) === false, used: Math.min(desk.songs?.attempts ?? 0, 50), tip: msg('dice.tip') };
 }
 
 /** MiniMax-Music3's flow windows: an 8-second window every hop (frames at 25 a second) over the first 48 s, in two
@@ -181,7 +181,7 @@ export function readoutModel(ix: Index, node: Node, desk: Desk): ReadoutModel | 
     case 'adhereCurve': return { curve: curve(ix, node, desk) };
     case 'planText': return { plan: plan(ix, node, desk) };
     case 'lrcPreview': return { lrc: lrc(ix, node, desk) };
-    case 'coverSwatch': return { cover: { hue: coverHue() } };
+    case 'coverSwatch': return { cover: { hue: coverHue(desk.songs?.hue === undefined ? null : { hue: desk.songs.hue }) } };
   }
   return undefined;
 }
