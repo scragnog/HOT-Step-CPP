@@ -20,6 +20,8 @@ const file = path.resolve(ui, opt('page', 'dist-test/index.html')), only = opt('
 const ACE = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes', 'guidance', 'latent', 'perf', 'post'];
 const PEDS = ['ss', 'lift', 'gain', 'norm', 'nat'];
 const full = (tier, mods = ACE, pedals = PEDS) => new Function(`S.tier = ${JSON.stringify(tier)}; S.mods = ${JSON.stringify(mods)}; S.pedals = ${JSON.stringify(pedals)}; S.pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = true; render(); scrollTo(0, 0);`);
+/* a full Quick desk long enough to fold (the concept's two stand-ins), folded or open */
+const folded = open => new Function(`['tx1', 'tx2'].forEach((id, i) => { defineModule(id, { at: 300 + i, name: 'Stand-in ' + (i + 1), cat: 'Engine', w: 1, keys: [] }); defineFace(id, () => '<span>stand-in</span>'); }); S.tier = 'quick'; S.mods = ${JSON.stringify([...ACE, 'tx1', 'tx2'])}; S.pedals = ${JSON.stringify(PEDS)}; S.pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = ${open}; render(); scrollTo(0, 0);`);
 const LINES = 'a\nb\nc\nd\ne\nf';
 const COSTS = [
   { id: 'tier studio to lab', scene: full('studio'), act: p => p.click('#tiers [data-tier="lab"]') },
@@ -30,8 +32,8 @@ const COSTS = [
   { id: 'move a tile by key', scene: full('lab'), before: p => p.focus('[data-move="takes"]'), act: p => p.keyboard.press('ArrowLeft') },
   { id: 'a pedal joins', scene: full('lab', ACE, PEDS.filter(x => x !== 'lift')), act: p => p.evaluate(() => addItem('pd:lift')) },
   { id: 'a pedal leaves', scene: full('lab'), act: p => p.click('[data-pedalx="lift"]') },
-  { id: 'the fold opens', scene: full('quick'), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
-  { id: 'the fold folds', scene: full('quick'), before: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
+  { id: 'the fold opens', scene: folded(false), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
+  { id: 'the fold folds', scene: folded(true), act: p => p.evaluate(() => document.querySelector('#bento > [data-qall]').click()) },
   { id: 'prompt grows', scene: full('quick'), before: p => p.focus('#prompt'), act: p => p.keyboard.insertText(LINES) },
   { id: 'song info opens', scene: full('quick'), act: p => p.click('#songInfoBtn') },
 ];

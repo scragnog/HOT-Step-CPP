@@ -23,6 +23,8 @@
   "motion side panel fades": ["38-motion/the-small-motions-of-a-change"],
   "motion text cross-fades": ["38-motion/the-small-motions-of-a-change"],
   "motion loops rest when calm": ["38-motion/the-loops-rest-when-nothing-happens"],
-  "motion player slides in": ["38-motion/the-player-slides-in-beside-the-line"]
+  "motion player slides in": ["38-motion/the-player-slides-in-beside-the-line"],
+  "motion the fold moves": ["38-motion/the-fold-opens-and-folds-again-by-moving"],
+  "motion exits stand exactly where they stood": ["38-motion/the-fold-opens-and-folds-again-by-moving"]
  }
 }
