@@ -3,13 +3,17 @@
 // its ABC. Not a step, not saved: it is a view of the planner's answer.
 
 import { useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import { abcInfo, msg, scoreAsk, scoreModel, type Score, type ScoreModel, type Slot } from '../../derive.ts';
 import { ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { scorePlanner } from '../services/score.ts';
+import { layerClosed, layerOpen } from '../features/layers.ts';
+import { ovOut } from '../features/overlay-exit.ts';
 
 export type View = { pasted: { abc: string; title: string; meta: Slot; file: string } } | { score: Score; m: ScoreModel } | null;
-let view: View = null, back: HTMLElement | null = null;
+let view: View = null;
+const host = () => document.getElementById('scoreModal');
 const subs = new Set<() => void>();
 const show = (v: View) => { view = v; subs.forEach(f => f()); };
 export const useView = () => useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => view);
@@ -17,12 +21,20 @@ export const useView = () => useSyncExternalStore(f => { subs.add(f); return () 
 /** Opens the preview: the sheet's own score, or one planned from `seed` (a fresh one when none is given). */
 export async function open(seed?: number): Promise<void> {
   const ask = scoreAsk(ix, useDesk.getState().desk); if (!ask) return;
-  if (!view) back = document.activeElement as HTMLElement | null;
-  if (ask.abc && seed === undefined) { show({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }
+  /* a modal layer of the page's (features/layers.ts): Tab goes round it, Escape closes it, focus goes back to what opened
+     it; Retry keeps the layer and its trigger */
+  const trigger = document.activeElement as HTMLElement | null;
+  const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); if (h && !was) layerOpen(h, { trigger, modal: true, close }); };
+  if (ask.abc && seed === undefined) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }
   const score = await scorePlanner.plan(seed ?? Math.floor(Math.random() * 2147483647), ask);
-  show({ score, m: scoreModel(score) });
+  opened({ score, m: scoreModel(score) });
 }
-export function close(): void { show(null); const b = back; back = null; if (b?.isConnected) b.focus({ preventScroll: true }); }
+export function close(): void {
+  const h = host(); if (!view || !h) return;
+  ovOut(h, 'modal');
+  flushSync(() => show(null));
+  layerClosed(h);
+}
 export function save(name: string, text: string): void {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));

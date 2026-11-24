@@ -7,10 +7,10 @@
 // The playhead stands on the system being played, as tall as its five lines, and reaches each note as it sounds; at a
 // system's end it moves to the next, and the paper scrolls to keep it in view. The section playing lights in the trail
 // and on the staff (E-01). Under reduced motion it steps bar by bar. The dialog is modal: Tab goes round it, Escape and
-// a press on the scrim close it, and focus goes back where it was. Package 8's layers may take its opening and closing
-// over (as package 7's popover).
+// a press on the scrim close it, and focus goes back to what opened it: the page's layers (package 8's layers.ts: a
+// modal layer, its Tab and Escape) and its exit (package 11's ovOut).
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { SCORE_Q, msg } from '../../derive.ts';
 import { close, open, save, useView, type View } from '../score/state.ts';
@@ -79,21 +79,7 @@ export function ScorePreview() {
     const k = svg.getBoundingClientRect().height / v.m.staff.H, R = v.m.rows[row]!, y = pp.scrollTop + svg.getBoundingClientRect().top - pp.getBoundingClientRect().top + R.top * k;
     if (y < pp.scrollTop || y + R.h * k > pp.scrollTop + pp.clientHeight) pp.scrollTo({ top: Math.max(0, y - 12), behavior: reduced() ? 'auto' : 'smooth' });
   }, [row, v]);
-  useEffect(() => {
-    if (!v) return;
-    const esc = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
-    document.addEventListener('keydown', esc, true);
-    return () => document.removeEventListener('keydown', esc, true);
-  }, [v]);
   if (!host || !v) return null;
-  /* Tab goes round the dialog */
-  const tab = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab' || !card.current) return;
-    const f = [...card.current.querySelectorAll<HTMLElement>('button, [tabindex="0"]')].filter(x => !x.hasAttribute('disabled'));
-    if (!f.length) return;
-    const i = f.indexOf(document.activeElement as HTMLElement), n = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i < 0 || i === f.length - 1 ? 0 : i + 1);
-    e.preventDefault(); f[n]!.focus();
-  };
   const x = <button type="button" className="icon-btn" data-scoreclose="" aria-label={say(ui('score.close'))} onClick={close}><Icon name="x" size={15} /></button>;
   let body;
   if ('pasted' in v) {
@@ -143,7 +129,7 @@ export function ScorePreview() {
     );
   }
   return createPortal(
-    <div className="sc-card" ref={card} role="dialog" aria-modal="true" aria-label={say(ui('score.dialog'))} onKeyDown={tab}>{body}</div>,
+    <div className="sc-card" ref={card} role="dialog" aria-modal="true" aria-label={say(ui('score.dialog'))}>{body}</div>,
     host,
   );
 }

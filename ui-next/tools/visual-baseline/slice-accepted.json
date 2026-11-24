@@ -46,13 +46,6 @@
    "why": "The same shorter page: the go bar is not stuck to the window's foot, so the toast stands 24px from it instead of 16px above the go bar (placeToast is the concept's rule)."
   },
   {
-   "state": "^slice-hidden-lab-note$",
-   "key": "^#tiers>button",
-   "field": "^sem:(title|data-tip-held)$",
-   "n": 2,
-   "why": "The concept's tooltip layer holds a button's title (data-tip-held) while its own tip shows after a press; tooltips are package 8's."
-  },
-  {
    "state": "^slice-(desk-ace-quick-light|desk-yue-studio-dark|changed-yue-studio)$",
    "key": "^shot$",
    "field": "^pixels$",

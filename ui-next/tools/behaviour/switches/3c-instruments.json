@@ -194,22 +194,16 @@
    "replace": "defineAction('scorePreview', () => { void 0; });"
   },
   {
-   "feature": "3c preview tab",
-   "file": "src/app/features/score-preview.tsx",
-   "find": "    if (e.key !== 'Tab' || !card.current) return;",
-   "replace": "    return;"
-  },
-  {
-   "feature": "3c preview escape",
-   "file": "src/app/features/score-preview.tsx",
-   "find": "    const esc = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };",
-   "replace": "    const esc = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape-off') { e.preventDefault(); e.stopPropagation(); close(); } };"
+   "feature": "3c preview layer",
+   "file": "src/app/score/state.ts",
+   "find": "  const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); if (h && !was) layerOpen(h, { trigger, modal: true, close }); };",
+   "replace": "  const opened = (v: View) => { const was = !!view; flushSync(() => show(v)); const h = host(); void was; };"
   },
   {
    "feature": "3c preview focus back",
    "file": "src/app/score/state.ts",
-   "find": "export function close(): void { show(null); const b = back; back = null; if (b?.isConnected) b.focus({ preventScroll: true }); }",
-   "replace": "export function close(): void { show(null); const b = back; back = null;  }"
+   "find": "  const trigger = document.activeElement as HTMLElement | null;",
+   "replace": "  const trigger = null;"
   },
   {
    "feature": "3c preview playhead",
@@ -226,8 +220,8 @@
   {
    "feature": "3c pasted preview",
    "file": "src/app/score/state.ts",
-   "find": "  if (ask.abc && seed === undefined) { show({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }",
-   "replace": "  if (ask.abc && seed === -1) { show({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }"
+   "find": "  if (ask.abc && seed === undefined) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }",
+   "replace": "  if (ask.abc && seed === -1) { opened({ pasted: { abc: ask.abc, ...abcInfo(ask.abc) } }); return; }"
   },
   {
    "feature": "3c runaway drawn",

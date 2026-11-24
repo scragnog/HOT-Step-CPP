@@ -1,0 +1,5 @@
+/* Package 8: the picker, the popover, the drag preview. The concept's own stylesheets draw them (30-picker.css,
+   30-popover.css, 20-tile.css, 21-desk.css); this adds what the concept left undrawn.
+   - With a filter typed in the picker, the drawing Enter will take is ringed while focus stays in the filter (F-29):
+     the ring the keys' position has, without the lift, so the eye finds what Enter does before pressing it. */
+.fl-it.target .box { outline: 2px solid var(--hot); outline-offset: 3px; }
