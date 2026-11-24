@@ -5,17 +5,15 @@
 //   legible    its label (and a button's own words) reads at 3:1 or better against what it stands on;
 //   styled     its label is the page's mono caps label, not a bare browser default;
 //   marked     changed, it carries the page's changed mark (a 5px dot);
-//   concept    where the concept draws the same part on the same kind of surface, its label's type and colours and its
-//              face's colours are the concept's (the concept page, same theme, the modules that have it).
 // Screenshots of each theme and tier go to tools/visual-baseline/out/gallery/ for the eye.
 //
 //   kept       every part's look on every surface is what it was when it was last looked at and recorded
 //              (tools/fixtures/gallery.json; --record writes it, after the screenshots have been looked at);
 //   semantics  a segmented choice says which one is pressed, a choice row which one is checked;
-//   new part   a part the concept never drew (markup alone: data-ctl, .changed, a .kl label) gets the page's label
+//   new part   a part's bare markup (data-ctl, .changed, a .kl label) gets the page's label
 //              and changed mark from the shared rule (styles/rebuild/35-part-states.css), on every surface.
 //
-//   node tools/visual-baseline/gallery.mjs [--page dist-test/index.html] [--concept <hotstep-tiers.html>] [--record]
+//   node tools/visual-baseline/gallery.mjs [--page dist-test/index.html] [--record]
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +26,6 @@ const require = createRequire(import.meta.url);
 const pw = (() => { for (const m of [process.env.PLAYWRIGHT_MODULE, 'playwright'].filter(Boolean)) { try { return require(m); } catch { /* next */ } } throw new Error('Playwright not found: set PLAYWRIGHT_MODULE'); })();
 const args = process.argv.slice(2), opt = (k, d) => { const i = args.indexOf('--' + k); return i < 0 ? d : args[i + 1]; };
 const PAGE = path.resolve(opt('page', path.join(repo, 'dist-test', 'index.html')));
-const CONCEPT = opt('concept', 'C:/Users/sneth/misc/HOT-Step-UI/hotstep-tiers.html');
 const OUT = path.join(here, 'out', 'gallery'); fs.mkdirSync(OUT, { recursive: true });
 
 /* the ports Chromium refuses to load from (net::ERR_UNSAFE_PORT, its kRestrictedPorts): the system can hand one out
@@ -78,36 +75,10 @@ const MEASURE = `(() => {
   return out;
 })()`;
 
-/* the concept's own: the parts it draws, on the surface it draws them, for comparison */
-const REFS = [
-  { part: 'knob', surface: 'row', scene: 'mm3', sel: '.tile[data-m="guidance"] .kn' },
-  { part: 'knob', surface: 'pedal', scene: 'ace', sel: '.pedal[data-pid="ss"] .kn' },
-  { part: 'ledButton', surface: 'rack', scene: 'mm3', sel: '.tile[data-m="flow"] .rackrow .led-btn' },
-  { part: 'ledButton', surface: 'pedal', scene: 'ace', sel: '.pedal[data-pid="ss"] .psw .led-btn' },
-  { part: 'segmented', surface: 'foot', scene: 'mm3', sel: '.tile[data-m="flow"] .tile-foot .seg' },
-  { part: 'labelled', surface: 'foot', scene: 'mm3', sel: '.tile[data-m="flow"] .tile-foot .foot-ctl' },
-  { part: 'pick', surface: 'pedal', scene: 'ace', sel: '.pedal[data-pid="ss"] .pk-lcdwrap' },
-  { part: 'meter', surface: 'pedal', scene: 'ace', sel: '.pedal[data-pid="master"] .vu' },
-  { part: 'note', surface: 'tile', scene: 'sa3', sel: '.tile[data-m="guidance"] .tile-body > .lbl' },
-  { part: 'textArea', surface: 'tile', scene: 'ace', sel: '.tile[data-m="avoid"] textarea' },
-  { part: 'powerButton', surface: 'tile', scene: 'ace', sel: '.master' },
-  { part: 'xyPad', surface: 'tile', scene: 'ace', sel: '.tile[data-m="guidance"] .xy' },
-];
-const SCENE = { ace: ['ace', ['avoid', 'guidance', 'sampler', 'post'], ['ss', 'master', 'wh']], mm3: ['mm3', ['guidance', 'flow', 'plans', 'sampler', 'post'], ['ss', 'wh']], sa3: ['sa3', ['guidance', 'sampler', 'post'], ['tile', 'wh']] };
-const SURFACE_OF = { tile: ['tile', 'labelled'], row: ['row'], rack: ['rack'], foot: ['foot', 'labelled'], pedal: ['pedal'] };
-
 async function run() {
-  const browser = await pw.chromium.launch(), page = await serve(PAGE), concept = fs.existsSync(CONCEPT) ? await serve(CONCEPT) : null;
-  const rows = [], refs = {};
+  const browser = await pw.chromium.launch(), page = await serve(PAGE);
+  const rows = [];
   for (const scheme of ['light', 'dark']) {
-    /* the concept's references, at Lab */
-    if (concept) for (const [sc, [bk, mods, pedals]] of Object.entries(SCENE)) {
-      const ctx = await browser.newContext({ viewport: { width: 1600, height: 1080 }, colorScheme: scheme }); await ctx.route(u => !u.href.startsWith(concept.url.replace(/p\.html$/, '')), r => r.abort());
-      const p = await ctx.newPage(); await p.goto(concept.url); await p.waitForTimeout(300);
-      await p.evaluate(([bk, mods, pedals]) => { if (bk !== S.backend) enterEngine(bk); S.tier = 'lab'; S.mods = mods; S.pedals = pedals; render(); }, [bk, mods, pedals]); await p.waitForTimeout(500);
-      for (const r of REFS.filter(x => x.scene === sc)) refs[`${scheme}|${r.part}|${r.surface}`] = await p.evaluate(([sel, m]) => { const el = document.querySelector(sel); if (!el) return null; return (0, eval)(m.replace('const out = [];', 'const out = []; return (() => { const el0 = document.querySelector(' + JSON.stringify(sel) + '); const label = el0.querySelector(":scope > .kl"); return { label: sig(label), words: sig(label || el0), face: face(el0) }; })();')); }, [r.sel, MEASURE]);
-      await ctx.close();
-    }
     for (const tier of ['quick', 'studio', 'lab']) {
       const ctx = await browser.newContext({ viewport: { width: 1600, height: 1080 }, colorScheme: scheme }); await ctx.route(u => !u.href.startsWith(page.url.replace(/p\.html$/, '')), r => r.abort());
       const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error' && !/Failed to load/.test(m.text())) errs.push(m.text()); });
@@ -125,7 +96,7 @@ async function run() {
       await ctx.close();
     }
   }
-  await browser.close(); page.close(); concept?.close();
+  await browser.close(); page.close();
   /* the verdicts */
   const fails = [], seen = new Map();
   /* every part's look, kept: by place (theme, tier, host, part, the parameter it edits, its index among those), so a
@@ -142,22 +113,14 @@ async function run() {
     else if (!r.inside) fails.push(`${at}: stands outside its ${r.surface === 'pedal' || r.surface === 'unit' ? r.surface : 'tile'}`);
     if (r.contrast !== null && r.contrast < 3) fails.push(`${at}: its words read at ${r.contrast}:1 (want 3:1)`);
     if (r.label && (r.label.transform !== 'uppercase' || !/mono|Mono/.test(r.label.family) && !/var|Geist/.test(r.label.family))) { if (r.label.transform !== 'uppercase' && r.part !== 'knob') fails.push(`${at}: its label is not the page's caps label (${JSON.stringify(r.label)})`); }
-    /* a text area's words are its change (the concept marks Avoid's note no other way) */
+    /* a text area's words are its change (Avoid's note is marked no other way) */
     if (r.pressed !== null && r.pressed !== undefined && r.pressed !== 1) fails.push(`${at}: ${r.pressed} of its options say they are chosen (want 1)`);
-    /* a look-back strip in a terminal is unmarked, as the concept's (its window's token on the line carries the mark) */
+    /* a look-back strip in a terminal is unmarked (its window's token on the line carries the mark) */
     const unmarked = r.part === 'textArea' || (r.part === 'labelled' && r.textArea) || (/:codes$/.test(r.ctl) && (r.surface === 'term' || r.surface === 'termbar'));
     if (r.changed && !r.marked && !unmarked) fails.push(`${at}: changed, and no changed mark`);
-    const surfaceKind = Object.entries(SURFACE_OF).find(([, ss]) => ss.includes(r.surface))?.[0] ?? r.surface;
-    const ref = refs[`${r.scheme}|${r.part}|${surfaceKind}`];
-    if (ref && r.tier === 'lab') {
-      const want = { ...ref }, have = { label: r.label, words: r.words, face: r.face };
-      for (const k of ['size', 'weight', 'transform', 'family']) for (const w of ['label', 'words']) if (want[w] && have[w] && want[w][k] !== have[w][k]) fails.push(`${at}: ${w} ${k} ${have[w][k]}, the concept's ${want[w][k]}`);
-      if (surfaceKind !== 'pedal') { for (const w of ['label', 'words']) if (want[w] && have[w] && want[w].color !== have[w].color) fails.push(`${at}: ${w} colour ${have[w].color}, the concept's ${want[w].color}`);
-        if (want.face && (want.face.bg !== have.face.bg || want.face.img !== have.face.img)) fails.push(`${at}: face ${JSON.stringify(have.face)}, the concept's ${JSON.stringify(want.face)}`); }
-    }
   }
   const parts = [...new Set(rows.filter(r => r.part).map(r => r.part))], surfaces = [...new Set(rows.filter(r => r.surface).map(r => r.surface))];
-  console.log(`gallery: ${rows.length} part instances, ${parts.length} parts on ${surfaces.length} surfaces (${surfaces.join(', ')}), 2 themes x 3 tiers; ${Object.keys(refs).filter(k => refs[k]).length} concept references compared at Lab`);
+  console.log(`gallery: ${rows.length} part instances, ${parts.length} parts on ${surfaces.length} surfaces (${surfaces.join(', ')}), 2 themes x 3 tiers`);
   const missing = []; for (const p of Object.keys(ROOTS)) for (const s of [...Object.values(SURFACES), 'pedal', 'unit']) if (!seen.has(`${p}|${s}`)) missing.push(`${p} on ${s}`);
   if (missing.length) console.log(`not drawn on (by the definition or the tier; checked where drawn): ${missing.join(', ')}`);
   console.log(`screenshots: ${path.relative(repo, OUT)}`);

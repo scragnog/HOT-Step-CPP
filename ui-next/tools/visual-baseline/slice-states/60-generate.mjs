@@ -4,9 +4,7 @@
 // menu; the toast stack. In both themes, at 1920, 1440 and 1280, and with reduced motion. The desk is not compared:
 // the scope `generate` is the go bar, Latest, the song menu, the player and the toasts.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-generate --states slice --scope generate --only "^gen-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-generate --states slice --scope generate --only "^gen-" --plan-from concept-generate
-//   node tools/visual-baseline/vb.mjs compare concept-generate rebuild-generate --scope generate --accept tools/visual-baseline/generate-accepted.json
+//   npm run visual:all -- --only "^generate$"            (and visual:approve, README.md)
 
 const scene = (bk, tier, mods = [], vals = {}, text = 'warm folk song') => async h => {
   await h.js(([bk, tier, mods, vals, text]) => { if (bk !== S.backend) enterEngine(bk); S.tier = tier; S.mods = mods; S.pedals = []; Object.assign(S.vals, vals); const p = document.querySelector('#prompt'); if (p) p.value = text; S.vals['prompt.text'] = text; render(); }, [bk, tier, mods, vals, text]);
@@ -59,5 +57,5 @@ export const STATES = [
 export const SCOPES = { generate: ['#centre>div:4', '#player', '#meter', '#draftsBtn', '#cancelGo', '#go', '#centre>section:5', '#songCount', '#latest', '#menu', '#toast', 'html>body:1>div:13'] };
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'generate', only: '^gen-', scope: 'generate', accept: 'generate-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'generate', only: '^gen-', scope: 'generate' };

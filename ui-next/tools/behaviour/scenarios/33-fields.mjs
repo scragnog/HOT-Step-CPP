@@ -1,10 +1,8 @@
-// The prompt card and the lyric sheet (package 4), as scenarios that hold on the concept page too (run them there with
-// --page): each text field's own Ctrl+Z and the page's Undo together, Ctrl+Z in a field that has nothing of its own
+// The prompt card and the lyric sheet (package 4), as scenarios: each text field's own Ctrl+Z and the page's Undo together, Ctrl+Z in a field that has nothing of its own
 // left, the field drawn again keeping its history, the lyric sheet's tabs, strip, stamp and Instrumental, how it grows
-// and scrolls, the caption a dataset supplies, and the tools that need no popover. Several are the concept's own
-// scenarios with the one step they share with a later package (the popover's presets) replaced by a step of this
-// package's (Expand on the box), or with an option found by its value as well as its words (deviation 10: the concept's
-// data-opt and data-v are labels, the rebuild's values). Each uses only what both pages share.
+// and scrolls, the caption a dataset supplies, and the tools that need no popover. Several are older
+// scenarios with the one step they shared with a later package (the popover's presets) replaced by a step of this
+// package's (Expand on the box), or with an option found by its value as well as its words (design decision 10).
 
 const desk = (tier, mods, vals = {}, backend = 'ace') => t => t.do(`${backend} ${tier} desk`, ([tier, mods, vals, backend]) => {
   if (backend !== S.backend) { if (typeof enterEngine === 'function') enterEngine(backend); else S.backend = backend; }

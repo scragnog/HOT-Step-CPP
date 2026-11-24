@@ -1,5 +1,5 @@
 {
-  "about": "Package 3b (the Adapters' cartridges, the planner's XY pad: its top-p off rail and its fade with the planner off; the Repetition guard, Mastering and the side units were drawn whole by packages 1 and 2): every scenario this package makes runnable, each with what it exercises. 36-cartridges.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there). `excluded` lists the concept's scenarios that exercise these instruments and cannot pass as written, each with why.",
+  "about": "The Adapters' cartridges and the planner's XY pad (its top-p off rail, its fade with the planner off), with the Repetition guard, Mastering and the side units (36-cartridges.mjs and the older scenarios that exercise them).",
   "scenarios": [
     { "id": "36-cartridges/adapter-list-loads-and-stacks", "why": "cartridges and the adapter list (features/adapters.tsx): the column beside one cartridge (Q-19), the list under its button with the files of its kind but the one loaded, focus on its first file, the arrows through the grid and Escape back to the button (L-22), a second adapter stacking them in one step named for the file, focus on its fader (L-07), the slot's #n label and what each sends in Blend." },
     { "id": "36-cartridges/unused-adapters-and-stack-them", "why": "cartridges while Stack is Single: one cartridge used and no empty slot, the other said loaded but not used with Stack them (A-14), which stacks them (the node's action)." },
@@ -19,8 +19,5 @@
     { "id": "22-engines-round5/mm3-topp-off-is-on-the-wide-edge", "why": "The XY pad's off rail along the top, the puck on it (E-32)." },
     { "id": "23-sa3-hm-round5/heartmula-adapters-hug-one-cartridge", "why": "HeartMuLa's Adapters at Studio: one column, not widened (S-14)." },
     { "id": "04-controls/ruler-fader-scrub", "why": "A cartridge's fader follows the pointer and Home, the art stills at 0 (package 1 excluded it for the cartridges)." }
-  ],
-  "excluded": [
-    { "id": "23-sa3-hm-round5/revision-without-adapters-unloads-them", "why": "It opens a factory revision ([data-wfopen], package 7's Workflows panel)." }
   ]
 }

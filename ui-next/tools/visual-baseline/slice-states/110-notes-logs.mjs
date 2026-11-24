@@ -1,13 +1,11 @@
-// Package 11's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the concept's
-// overlay states for the notes and the engine log (states.mjs ov-notes, ov-log, at 1440 in both themes and at 1000 and
+// Package 11's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the
+// notes and the engine log open (at 1440 in both themes and at 1000 and
 // 390), and besides them the notes scrolled to their foot on a short window (the × in reach, S-35, the edge fades), the
 // log on the other engines and with a model changed, and the notes over the open log. The desk is the slice's (its
 // modules, pedals and side unit drawn whole) and is not compared: the scope `notes` is the drawer, its scrim, the log
 // and the VRAM meter.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-notes --states slice --scope notes --only "^nl11-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-notes --states slice --scope notes --only "^nl11-" --plan-from concept-notes
-//   node tools/visual-baseline/vb.mjs compare concept-notes rebuild-notes --scope notes --accept tools/visual-baseline/notes-accepted.json
+//   npm run visual:all -- --only "^notes$"            (and visual:approve, README.md)
 
 const scene = (bk = 'ace', vals = {}) => async h => {
   await h.js(([bk, vals]) => { if (bk !== S.backend) { if (typeof enterEngine === 'function') enterEngine(bk); else S.backend = bk; } S.backend = bk; S.tier = 'studio'; S.mods = ['avoid', 'guidance', 'post']; S.pedals = ['gain', 'norm', 'wh']; Object.assign(S.vals, vals); render(); }, [bk, vals]);
@@ -40,5 +38,5 @@ export const STATES = [
 export const SCOPES = { notes: ['#notes', '#notesScrim', '#notesClose', '#notesTitle', '#logs', '#logEngine', '#logsClose', '#logText', '#engMeter', '#emBar', '#emRead', '#emUse'] };
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'notes', only: '^nl11-', scope: 'notes', accept: 'notes-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'notes', only: '^nl11-', scope: 'notes' };

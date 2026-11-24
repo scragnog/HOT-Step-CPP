@@ -1,5 +1,5 @@
 {
-  "about": "Package 1 (shared controls): every scenario this package makes runnable, each with what it exercises. 31-controls.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there but its S-18 one, which is pending as the concept gets it wrong); 32-controls-gallery.mjs drives the parts no module the page draws yet can show (they stand in containers packages 2 and 3 build), in the test build's parts gallery, and runs on the rebuild only. `excluded` lists the concept's scenarios that exercise these controls and still cannot run, each with what it waits for.",
+  "about": "The shared controls (knobs, LED buttons, segmented choices, pickers and dropdowns, Quick's choice rows, number boxes, rulers, faders, tokens, the look-back strip), each where a module draws it (31-controls.mjs) or in the test build's parts gallery (32-controls-gallery.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "31-controls/number-box-types-steps-and-scrubs", "why": "numberBox: typing, Enter, the arrows, Page, Shift, a word refused and said, out of range clamped and said, Escape, scrubbing, the seconds under it (21-numbox.js)." },
     { "id": "31-controls/ruler-drags-keys-and-leaves-auto", "why": "ruler: the estimate on auto, the auto button, a press and a drag, the value contract's keys, the cap at the end, a double-click back to auto." },
@@ -11,7 +11,7 @@
     { "id": "31-controls/pill-and-how-adventurous", "why": "pill; choiceRow's mood look with its radio keys." },
     { "id": "31-controls/checked-text-keeps-or-refuses", "why": "textField: a check marks while typing, a keeping field keeps and says nothing is applied, a valid list set on Enter, a field that does not keep refuses, puts back and says what it kept." },
     { "id": "31-controls/side-unit-chip-selector", "why": "chips on a side unit: its caps label, its short words, a press chooses and marks it changed." },
-    { "id": "31-controls/delete-resets-tokens-and-rulers", "why": "Pending (S-18) in the concept, right here: Delete and Backspace reset a ruler and a token." },
+    { "id": "31-controls/delete-resets-tokens-and-rulers", "why": "S-18: Delete and Backspace reset a ruler and a token." },
     { "id": "32-controls-gallery/fader-keys-drag-and-reset", "why": "fader: a slider with its value and unity line, the keys, a press and a drag, a double-click and Delete reset." },
     { "id": "32-controls-gallery/lcd-number-types-and-steps", "why": "lcdNumber: typing, an arrow, clamped and said, scrubbing." },
     { "id": "32-controls-gallery/switches-in-a-modules-look", "why": "lcdButton, flag, recButton, lockButton: each switches on and off, says it is pressed, is marked, is one named step." },
@@ -23,12 +23,7 @@
     { "id": "11-engines/number-box-tab-changes-nothing", "why": "numberBox: passing through it with Tab stores and marks nothing (B-27)." },
     { "id": "17-undo-net/undo-after-leaving-a-field-stays-out-of-it", "why": "numberBox: an arrow in the box, then Undo after leaving it leaves focus out of it (L-05)." },
     { "id": "18-tips-touch/short-plugin-menu-is-named-cards", "why": "pick, plugin variant: a short list is cards with their names (S-02)." },
-    { "id": "23-sa3-hm-round5/delete-resets-a-value-control", "why": "Pending (S-18) in the concept, right here: Delete on a focused knob resets it (the value contract, kit/value.ts, which this package extended)." },
-    { "id": "23-sa3-hm-round5/length-drag-snaps-to-round-values", "why": "Pending (S-31) in the concept, right here: dragging a length ruler snaps to round values." }
-  ],
-  "excluded": [
-    { "id": "04-controls/number-boxes", "why": "Its BPM box is Tempo's lcdNumber inside an LCD row (lcdRow, package 2). Its number-box checks are in 31-controls/number-box-types-steps-and-scrubs; the lcdNumber's in 32-controls-gallery/lcd-number-types-and-steps." },
-    { "id": "23-sa3-hm-round5/topk-scrub-scales-with-the-value", "why": "Pending (S-28): the token's scrub moves with the value (src/derive/controls.ts scrubValue); the token it drags is in the planner's terminal (package 2), which then makes it runnable." },
-    { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06): the ruler's markers read the tempo the song will have (src/derive/controls.ts songTempo, S-07); the scenario presses the BPM chips (capChips, package 3) and types in the prompt (package 4)." }
+    { "id": "23-sa3-hm-round5/delete-resets-a-value-control", "why": "S-18: Delete on a focused knob resets it (the value contract, kit/value.ts, which this package extended)." },
+    { "id": "23-sa3-hm-round5/length-drag-snaps-to-round-values", "why": "S-31: dragging a length ruler snaps to round values." }
   ]
 }

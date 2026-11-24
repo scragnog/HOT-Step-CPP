@@ -1,9 +1,8 @@
 // The instruments of package 3c (YuE2's Build by section, Continue from recording and Lead sheet, MiniMax-Music3's
-// Flow renderer), as scenarios that hold on the concept page too (run them there with --page): the build's whole life
+// Flow renderer), as scenarios: the build's whole life
 // from empty to planned, takes made, kept, discarded and rendered, every user decision a step and every arrival none;
 // a build following new lyrics; the strip's ways out; the recording's selection under the hand; the lead sheet's foot,
-// its preview and its lyric-timing line. Each uses only what both pages share (S, render, get, setVal, openScore, the
-// markup's data-* hooks and the concept's own classes, which the instruments emit).
+// its preview and its lyric-timing line.
 
 const desk = (tier, mods, vals = {}, backend = 'yue', more = {}) => async t => {
   await t.js(() => { window.B = '.tile[data-m="build"]'; window.__b = {

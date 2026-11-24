@@ -1,12 +1,9 @@
-// Package 8's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the concept's
-// overlay and drag states (states.mjs ov-picker, picker-filter, picker-cat, the popover, the keyboard tip, drag-card,
-// drag-move, drag-picker-peek, drag-pedal) on a desk of the modules, pedals and side unit the rebuild draws whole (the
-// slice's), with the lyric sheet in place (package 4). The scope `overlays` compares
+// Package 8's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the
+// overlays and drags (the picker, filtered and by category, the popover, the keyboard tip, a card, a tile, a picker
+// item and a pedal being dragged) on a desk of the slice's modules, pedals and side unit, with the lyric sheet in place (package 4). The scope `overlays` compares
 // the picker, the popover, the tip and the desk under a drag.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-overlays --states slice --scope overlays --only "^ov8-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-overlays --states slice --scope overlays --only "^ov8-" --plan-from concept-overlays
-//   node tools/visual-baseline/vb.mjs compare concept-overlays rebuild-overlays --scope overlays --accept tools/visual-baseline/overlays-accepted.json
+//   npm run visual:all -- --only "^overlays$"            (and visual:approve, README.md)
 
 const scene = (tier, mods, pedals = [], bk = 'ace') => async h => {
   await h.js(([bk, tier, mods, pedals]) => { if (bk !== S.backend) { if (typeof enterEngine === 'function') enterEngine(bk); else S.backend = bk; } S.tier = tier; S.mods = mods; S.pedals = pedals; render(); }, [bk, tier, mods, pedals]);
@@ -56,5 +53,5 @@ export const STATES = LIST;
 export const SCOPES = { overlays: ['#pickerWrap', '#pop', '#tip', '#bento', '#browser'] };
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'overlays', only: '^ov8-', scope: 'overlays', accept: 'overlays-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'overlays', only: '^ov8-', scope: 'overlays' };

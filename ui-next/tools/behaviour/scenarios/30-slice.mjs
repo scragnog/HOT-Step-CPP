@@ -1,8 +1,8 @@
-// The slice's own claims, as scenarios that hold on the concept page too (run them there with --page): a number
+// The slice's own claims: a number
 // control's keys, undo and redo by key and by button with what they say, the autosave and its restore, the theme, an
 // engine switch from its panel, the tier keys, adding and removing, and adding what is already there. Written for the
-// rebuild's acceptance (tools/behaviour/acceptance/slice.json), where the concept's own scenarios did not test a slice
-// feature at all; each uses only what both pages share (S, render, get, the markup's data-* hooks).
+// rebuild's acceptance (tools/behaviour/acceptance/slice.json), where the older scenarios did not test a slice
+// feature at all.
 
 const desk = (tier, mods, pedals = [], vals = {}) => t => t.do(`${tier} desk`, ([tier, mods, pedals, vals]) => { S.tier = tier; S.mods = mods; S.pedals = pedals; Object.assign(S.vals, vals); render(); }, [tier, mods, pedals, vals]);
 const KNOB = '.pedal[data-pid="ss"] [data-knob="pp.ss.str"]';

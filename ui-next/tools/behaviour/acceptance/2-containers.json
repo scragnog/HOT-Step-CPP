@@ -1,5 +1,5 @@
 {
-  "about": "Package 2 (containers and read-outs): every scenario this package makes runnable, each with what it exercises. 33-containers.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there). `excluded` lists the concept's scenarios that exercise these containers and read-outs and still cannot run, each with what it waits for or why it cannot pass as written.",
+  "about": "The containers and read-outs: the planner's terminal and its lines, the repetition guard, the LCD rows, rack groups, decks, the plans and their Endings, the dice, the flow windows, the speed gauge, the schedule strip, the fader bank, the drop zones and the side units' objects (33-containers.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "33-containers/terminal-prints-flags-and-gathers-lab-lines", "why": "terminal, termLine, termBar: each control after its flag, a command line that hangs, the Lab lines under the rule (.tparams), a terminal chip that brings its token, a flag, Studio without the Lab lines." },
     { "id": "33-containers/planner-off-stands-the-terminal-back", "why": "terminal: with its power switch off the lines stand back at 45% and stay editable, the switch does not; planText says the planner is off." },
@@ -17,11 +17,6 @@
     { "id": "22-engines-round5/planner-seed-keeps-what-was-typed", "why": "termLine with a terminal text field (--seed): what was typed is kept and what is in force is said (E-33)." },
     { "id": "11-engines/ruler-markers-follow-the-engine", "why": "lcdRow: Tempo's Beat I/O switch stands in its LCD row on Stable Audio 3 and draws its markers (B-04)." },
     { "id": "15-other-engines/plans-follow-the-fader", "why": "bank and deck: the Plan fader of the master section below 1.00 brings Compact planner cache into the Last plan row at once, and focus stays on the fader (E-07)." },
-    { "id": "23-sa3-hm-round5/topk-scrub-scales-with-the-value", "why": "Pending (S-28) in the concept, right here: the top-K token on the planner's terminal line scrubs with the value (package 1's core, runnable once the terminal is drawn)." }
-  ],
-  "excluded": [
-    { "id": "04-controls/number-boxes", "why": "Its BPM box now stands in Tempo's LCD row and works, but the scenario writes the box's value straight into the DOM (el.value = 'fast'), which a React controlled input does not see: the box (package 1's NumberBox) keeps the text it had. Its typing checks are in 31-controls and 32-controls-gallery." },
-    { "id": "22-engines-round5/yue-adapters-say-what-yue-does", "why": "The adapters' cartridges and their side note (package 3); the bank itself is in 33-containers/fader-bank-scale-and-tapes." },
-    { "id": "17-undo-net/continue-selection-is-a-step", "why": "Its selection is the recording span (recordingSpan, package 3)." }
+    { "id": "23-sa3-hm-round5/topk-scrub-scales-with-the-value", "why": "S-28: the top-K token on the planner's terminal line scrubs with the value (package 1's core, runnable once the terminal is drawn)." }
   ]
 }

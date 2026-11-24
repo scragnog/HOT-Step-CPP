@@ -1,11 +1,9 @@
-// The Concept notes and the engine log (package 11), as scenarios that hold on the concept page too (run them there with
-// --page), but for the one marked pending, which is the concept's F-18 for the notes. The notes: a modal drawer from the
+// The Concept notes and the engine log (package 11), as scenarios. The notes: a modal drawer from the
 // top bar (its scrim, focus in and back, Tab round it, Escape, the scrim and × closing it, its exit, the page's keys
 // waiting under it, its sections, its × staying in reach as it scrolls, its edge fades, how it stacks over the log);
 // the engine log: a dock opened from the VRAM meter (aria-expanded, focus to Close and back, the page's room at its
 // foot, the go bar and the toast standing on it, a press elsewhere leaving it, Escape closing it last of all, its exit)
-// and what it says on each engine, following a model choice. Each uses only what both pages share (S, render, get,
-// toast, UNDO, the markup's ids and data-* hooks).
+// and what it says on each engine, following a model choice.
 
 /* a desk, and the log's lines as a helper in the page (the checks run there) */
 const desk = (tier, mods = [], pedals = []) => t => t.do(`${tier} desk`, ([tier, mods, pedals]) => {

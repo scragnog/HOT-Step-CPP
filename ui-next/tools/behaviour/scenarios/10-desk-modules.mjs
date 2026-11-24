@@ -31,25 +31,6 @@ export default [
     await t.eq('and after a tier switch', marks, want);
     await t.ok('an XY pad marks only the axis that changed', () => document.querySelector('.tile[data-m="planner"] .xy-ax.y').classList.contains('changed') && !document.querySelector('.tile[data-m="planner"] .xy-ax.x').classList.contains('changed'));
   } },
-  { id: 'typed-field-commits-on-leave', run: async t => {
-    await desk('lab', ['latent', 'sampler'])(t);
-    await t.click('.tile[data-m="latent"] [data-bind="lat.ts"]'); await t.type('0.5, 0.9, 2'); await t.press('Tab');
-    await t.ok('an invalid list is never committed, not even its valid prefix; the text stays, marked, with its reason (A-08, L-13)', () => get('lat.ts') === '' && document.querySelector('[data-bind="lat.ts"]').value === '0.5, 0.9, 2' && document.querySelector('[data-bind="lat.ts"]').getAttribute('aria-invalid') === 'true' && !!document.querySelector('[data-err="lat.ts"]').textContent);
-    await t.click('.tile[data-m="latent"] [data-bind="lat.ts"]'); await t.press('Control+a'); await t.type('0.9, 0.6, 0.3, 0'); await t.press('Enter');
-    await t.eq('a valid list commits on Enter', () => get('lat.ts'), '0.9, 0.6, 0.3, 0');
-    await t.ok('the Sampler says custom timesteps replace its steps and schedule (A-09)', () => { const s = document.querySelector('.tile[data-m="sampler"]'); return /4 custom timesteps from Latent/.test(s.querySelector('[data-scoperead]').textContent) && s.querySelector('.numbox.overridden .num').value === '4' && !!s.querySelector('.overridden [inert] [data-pick="samp.sched"]'); });
-    await t.click('.tile[data-m="sampler"] [data-showmod="latent"]', 50);
-    await t.ok('its link takes you to the module that sets them', () => document.querySelector('.tile[data-m="latent"]').classList.contains('flash'));
-  } },
-  { id: 'quick-rows-tell-the-truth', run: async t => {
-    await desk('studio', ['sampler', 'planner'])(t);
-    await t.do('20 steps, guidance 6.5, temperature 0.95', () => { setVal('samp.steps', 20); setVal('samp.cfg', 6.5); setVal('lm.temp', .95); });
-    await t.click('#tiers [data-tier="quick"]');
-    await t.ok('a value between the options presses none of them (A-29)', () => [...document.querySelectorAll('.qchoice[data-q="samp.steps"] button, .qchoice[data-q="samp.cfg"] button, .mood button')].every(b => b.getAttribute('aria-checked') === 'false'));
-    await t.ok('and the row says what the value is', () => /20 steps/.test(document.querySelector('.qchoice[data-q="samp.steps"] .kl').textContent) && /temperature 0.95/.test(document.querySelector('.mood .kl').textContent));
-    await t.click('.qchoice[data-q="samp.steps"] [data-setq="samp.steps|12"]');
-    await t.ok('pressing an option makes it the value, and pressed', () => +get('samp.steps') === 12 && document.querySelector('[data-setq="samp.steps|12"]').getAttribute('aria-checked') === 'true' && !/steps,/.test(document.querySelector('.qchoice[data-q="samp.steps"] .kl').textContent));
-  } },
   { id: 'focus-after-pedal-removal-and-undo', run: async t => {
     await desk('lab', ['tempo', 'post'], { pedals: ['tile', 'ss', 'norm'] })(t);
     await t.focus('.pedal[data-pid="ss"] .foot'); await t.press('Shift+Tab'); await t.press('Shift+Tab');
@@ -76,7 +57,7 @@ export default [
     await desk('lab', ['takes', 'sampler', 'planner', 'tempo'])(t);
     await t.focus('.tile[data-m="takes"] [data-takes]'); await t.press('ArrowRight'); await t.press('ArrowRight');
     await t.eq('the reels are one slider: arrows step it (A-23)', () => [+get('takes.n'), document.activeElement.matches('[data-takes]'), document.activeElement.getAttribute('aria-valuenow')], [3, true, '3']);
-    await t.press('End'); await t.eq('End takes it to the most', () => +get('takes.n'), 9);
+    await t.press('End'); await t.eq('End takes it to the most, eight (design decision 27)', () => +get('takes.n'), 8);
     await t.ok('the reels are not tab stops of their own', () => [...document.querySelectorAll('.tile[data-m="takes"] .reel2')].every(r => r.tabIndex === -1));
     await t.focus('.tile[data-m="sampler"] [data-num="samp.steps"]'); await t.do('type 20', () => { document.activeElement.value = '20'; }); await t.press('Enter');
     await t.ok('Enter in a number box commits and keeps focus (A-24)', () => +get('samp.steps') === 20 && document.activeElement.matches('[data-num="samp.steps"]'));

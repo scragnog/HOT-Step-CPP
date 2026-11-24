@@ -1,8 +1,7 @@
 // The desk's fix round (review r1, RD-01 to RD-18, and RA-23): each defect the review found, driven the way a person
 // reaches it. A module comes from its card in the Modules panel, an engine from the engine panel, a tier from its key, a
 // file from the file field, a value from the control's own keys; the test layer's scenes are used only to read what the
-// page holds (S, get, UNDO). Unless its `why` says the concept has the defect too, each holds on the concept page
-// (run it there with --page).
+// page holds (S, get, UNDO).
 
 const W = { w: 1600, h: 900 };
 const helpers = async t => {

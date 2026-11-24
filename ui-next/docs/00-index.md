@@ -49,7 +49,7 @@ one day supplies parameter lists, [08](08-open-questions.md) question 1 says wha
 | [06-how-to.md](06-how-to.md) | Add a parameter, a pedal, a module, a side unit, a part, an engine, a state entry, a transform; change a range, a condition, a real name; move, rename or remove things. Steps and line counts |
 | [07-checking.md](07-checking.md) | The type check, the validator, the request comparison over the value space, the core's tests against the concept page, and the planted mistakes |
 | [08-open-questions.md](08-open-questions.md) | What needs the maintainer's decision, and what was chosen meanwhile |
-| [09-architecture.md](09-architecture.md) | The React layer: its folders, how a part and the generic renderer work, the store, the service boundary, the test layer and its results, the deviations from the concept's markup, and the plan for the rest |
+| [09-architecture.md](09-architecture.md) | The React layer: its folders, how a part and the generic renderer work, the store, the service boundary, the test layer, the design decisions, and the plan for the rest |
 
 ## The folder
 
@@ -82,9 +82,8 @@ ui-next/
     make-fixtures.ts         reads what the real application declares into tools/fixtures/real-app.json
     thumb.ts                 draws a pedal's thumbnail from its definition
     real-app/                runs the existing Create page's bar and CreatePanel in Node (page.ts), with a small React
-    concept/                 collects what the concept page does (concept.json, concept-tiers.json)
-    fixtures/                real-app.json, the existing page's recorded requests, the concept's, shipped.json and the
-                             two lists of accepted differences
+    fixtures/                real-app.json, the existing page's recorded requests, what the concept page did (recorded
+                             before the cutover), shipped.json and the two lists of accepted differences
   package.json, tsconfig.json
 ```
 
@@ -98,10 +97,12 @@ ui-next/
 
 ## The two references
 
-- **The concept**: `C:\Users\sneth\misc\HOT-Step-UI`. Open `hotstep-tiers.html` in a browser; read its `README.md` for
-  the layout of `src`. When this format and the concept disagree about how something looks or behaves, the concept is
-  right and the definition is wrong, unless [03](03-definitions-coverage.md) or `tools/fixtures/concept-differences.json`
-  records the difference.
+- **The rebuild itself**, for how the page looks and behaves: its acceptance, its approved visual recordings and its
+  approved motion samples ([07](07-checking.md)) say what is right, and a deliberate change approves them again. The
+  concept page it was ported from (`C:\Users\sneth\misc\HOT-Step-UI\hotstep-tiers.html`) was the reference until the
+  tag `rebuild-parity`, the last commit proved against it; [03](03-definitions-coverage.md),
+  `tools/fixtures/concept-differences.json` and [09](09-architecture.md)'s design decisions say where the rebuild chose
+  otherwise.
 - **The real application**: this repository. The real names, ranges and defaults are read from its source into
   `tools/fixtures/real-app.json` by `npm run fixtures` ([07](07-checking.md)); the request is built with its own
   `resolveGenerationParams()` and `createContentParams()` and finished by the server's `resolveCreateIntent()`

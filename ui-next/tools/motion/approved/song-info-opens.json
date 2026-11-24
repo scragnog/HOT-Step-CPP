@@ -1,0 +1,16 @@
+{"motion":"song-info-opens","what":"Song info opens under the card's tools","commit":"3e66102542","steps":{
+"0":{"#songInfo":[502,323,866,108],"#songInfo:op":[0],"#bento > .tile[data-m=\"tempo\"]":[485,640,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"16":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.32],"#bento > .tile[data-m=\"tempo\"]":[485,674.7,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"32":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.59],"#bento > .tile[data-m=\"tempo\"]":[485,703.5,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"48":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.75],"#bento > .tile[data-m=\"tempo\"]":[485,721.3,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"64":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.85],"#bento > .tile[data-m=\"tempo\"]":[485,731.4,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"80":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.9],"#bento > .tile[data-m=\"tempo\"]":[485,737.6,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"96":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.94],"#bento > .tile[data-m=\"tempo\"]":[485,741.4,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"112":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.96],"#bento > .tile[data-m=\"tempo\"]":[485,744,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"128":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.98],"#bento > .tile[data-m=\"tempo\"]":[485,745.6,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"144":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.99],"#bento > .tile[data-m=\"tempo\"]":[485,746.7,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"160":{"#songInfo":[502,323,866,108],"#songInfo:op":[0.99],"#bento > .tile[data-m=\"tempo\"]":[485,747.4,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"176":{"#songInfo":[502,323,866,108],"#songInfo:op":[1],"#bento > .tile[data-m=\"tempo\"]":[485,747.8,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"192":{"#songInfo":[502,323,866,108],"#songInfo:op":[1],"#bento > .tile[data-m=\"tempo\"]":[485,748,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]},
+"208":{"#songInfo":[502,323,866,108],"#songInfo:op":[1],"#bento > .tile[data-m=\"tempo\"]":[485,748,444,390],"#bento > .tile[data-m=\"tempo\"]:op":[1]}
+}}

@@ -1,13 +1,11 @@
 // Package 3b's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the Adapters'
-// cartridges compared where the concept draws them, as parts on their own (vb.mjs `parts`): Quick's flat cartridge and
+// cartridges where the page draws them, as parts on their own (vb.mjs `parts`): Quick's flat cartridge and
 // its line, one cartridge with its column at Studio (ACE-Step Single, two loaded and one unused, YuE2's pair and its NAR
 // slot, HeartMuLa's one), a stack with its bar and section masks, at Lab with phase windows, the planner adapter and
 // the forced Apply as, YuE2's master section and rebase, the adapter list; and the planner's XY pad (MiniMax-Music3's
 // top-p off rail, the pad and How adventurous with the planner off).
 //
-//   node tools/visual-baseline/vb.mjs capture concept-cartridges --states slice --only "^cartridges-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-cartridges --states slice --only "^cartridges-" --plan-from concept-cartridges
-//   node tools/visual-baseline/vb.mjs compare concept-cartridges rebuild-cartridges --accept tools/visual-baseline/cartridges-accepted.json
+//   npm run visual:all -- --only "^cartridges$"            (and visual:approve, README.md)
 
 /* the concept's page as it is, its lyric sheet in place (package 4 draws it) */
 const scene = (bk, tier, mods, vals = {}, more = {}) => async h => {
@@ -45,5 +43,5 @@ export const STATES = [
 ];
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'cartridges', only: '^cartridges-', accept: 'cartridges-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'cartridges', only: '^cartridges-' };

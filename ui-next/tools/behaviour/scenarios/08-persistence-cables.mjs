@@ -30,15 +30,6 @@ export default [
     await t.reload();
     await t.ok('a finished one is', () => S.songs[0].title === 'Saved song' && S.songs.length === 7 && S.nextId > 100);
   } },
-  { id: 'restore-cleans', storage: { 'hs3-desk': JSON.stringify({ v: 1, desk: { tier: 'nope', backend: 'xx', mods: ['tempo', 'tempo', 'ghost', 'repaint'], pedals: ['norm', 'zz'], vals: { 'samp.steps': 'many', 'tempo.bpm': 999, 'tempo.key': 'H major', 'seed.lock': 1, 'tempo.bpm.auto': false, 'nope.k': 3 }, slots: [{ file: 'a', type: 'LoRA' }, 'x'], seed: -4, source: { song: 999 }, region: [2, 3], workflow: 'Not a workflow', prompt: 'p' }, songs: [{ id: 1, title: 'ok', style: 's', dur: 100, hue: 1, bk: 'ace' }, { id: 'bad' }], stars: [{ v: 3, n: 'x' }, { v: -1 }], refs: ['a.wav', 5], left: false, wfOpen: ['Songwriter', 7] }) }, run: async t => {
-    await t.eq('unknown values fall back, bad ones are dropped', () => [S.tier, S.backend, S.mods, S.pedals, S.vals, S.slots.length, S.seed, S.source, S.region, S.workflow, document.querySelector('#prompt').value],
-      ['quick', 'ace', ['tempo', 'post'], ['norm'], { 'tempo.bpm': 240, 'tempo.bpm.auto': false }, 1, null, null, [0.35, 0.55], 'Start fresh', 'p']);
-    await t.eq('songs, seeds, references and panels too', () => [S.songs.map(s => s.id), S.stars.map(s => s.v), S.refs, S.left, [...S.wfOpen]], [[1], [3], ['a.wav'], false, ['Songwriter']]);
-  } },
-  { id: 'old-shape-ignored', storage: { 'hs3-desk': JSON.stringify({ v: 0, desk: { tier: 'lab' } }) }, run: async t => {
-    /* F-16: an older shape is a desk this page can't use, so it is kept aside and the page says so like any other */
-    await t.eq('a desk saved in an older shape starts clean, kept aside, and says so', () => [S.tier, localStorage.getItem('hs3-desk-unreadable'), /couldn't be read.*A copy is kept/.test(document.querySelector('#toast .toast-msg')?.textContent || ''), document.querySelector('#toast .toast-act')?.textContent], ['quick', JSON.stringify({ v: 0, desk: { tier: 'lab' } }), true, 'Download the copy']);
-  } },
   { id: 'cables', run: async t => {
     await t.do('lab ten pedals', () => { S.tier = 'lab'; S.mods = ['post']; S.pedals = ['tile', 'refiner', 'ss', 'ppvae', 'lift', 'nat', 'gain', 'vst', 'master', 'norm']; render(); }, null, 900);
     await cables(t, 'lab, ten pedals at 1920');

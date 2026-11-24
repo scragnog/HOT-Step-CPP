@@ -1,7 +1,6 @@
 // The picker, the popover, tooltips, touch, the focus ring, the keys that walk the desk and drag and drop (package 8),
-// as scenarios that hold on the concept page too (run them there with --page). Each is a concept scenario's own checks
-// with the steps that need another package's part taken out (the prompt, the workflows list, the seed manager, the
-// takes' reels, the generation queue), the same behaviour reached through parts both pages draw.
+// as scenarios. Each is an older scenario's own checks with the steps that needed another package's part taken out
+// (the prompt, the workflows list, the seed manager, the takes' reels, the generation queue).
 
 const desk = (tier, mods, pedals = [], backend = 'ace') => t => t.do(`${tier} desk`, ([tier, mods, pedals, backend]) => {
   if (backend !== S.backend) { if (typeof enterEngine === 'function') enterEngine(backend); else S.backend = backend; }

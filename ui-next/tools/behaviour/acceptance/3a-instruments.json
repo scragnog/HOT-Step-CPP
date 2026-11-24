@@ -1,5 +1,5 @@
 {
-  "about": "Package 3a (the instruments of Tempo, Seed, Takes, the Sampler, Repaint, Timbre reference, Latent & correction and Performance trades): every scenario this package makes runnable, each with what it exercises. 34-instruments.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there). Entries marked `waiting` need a package built in parallel (4: the prompt card; 6: Latest's songs and the go bar; 8: tooltips). `excluded` lists the concept's scenarios that exercise these instruments and cannot pass as written, each with why.",
+  "about": "The instruments of Tempo, Seed, Takes, the Sampler, Repaint, Timbre reference, Latent & correction and Performance trades (34-instruments.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "34-instruments/key-wheel-stands-beside-the-lcd", "why": "keyWheel: the .tempo housing beside the LCD it holds, the two rings and Auto, keys spelled as a musician spells them (G-D-25), a segment chooses and the LCD spells it, the arrows walk from the key in force and focus follows, Enter chooses; the LCD alone at Quick and on Stable Audio 3." },
     { "id": "34-instruments/tap-tempo-arms-then-sets", "why": "tapTempo: the first tap arms it (AGAIN), the second sets the BPM off auto, a run of taps is one step, the button rests after the run." },
@@ -31,7 +31,5 @@
     { "id": "05-modules/continue-and-repaint", "why": "repaintRegion from the song menu's Repaint a region: arrows, Shift, a drag that draws a new region, removing Repaint drops the source (RA-23, fix-desk: derive/desk.ts leavesWith)." },
     { "id": "11-engines/prompt-chips-and-ranges", "why": "capChips on Stable Audio 3 and HeartMuLa, and the length's range per engine." },
     { "id": "14-lab-desk/tip-keeps-off-the-read-out", "why": "The reels' and the knobs' tips open clear of their read-outs (L-06)." }
-  ],
-  "excluded": [
   ]
 }

@@ -1,0 +1,24 @@
+{
+ "set": "workflows",
+ "at": "2026-11-24T20:06:04.197Z",
+ "commit": "3e66102542",
+ "states": [
+  "wf-panel-fresh",
+  "wf-panel-fresh-dark",
+  "wf-panel-yours",
+  "wf-panel-modified",
+  "wf-panel-modified-dark",
+  "wf-panel-factory-modified",
+  "wf-panel-details",
+  "wf-panel-details-factory-dark",
+  "wf-save-row-rev",
+  "wf-save-row-rev-warn",
+  "wf-save-row-refused-dark",
+  "wf-save-row-replace",
+  "wf-rename-refused",
+  "wf-row-menu",
+  "wf-row-menu-armed-dark",
+  "wf-drafts-empty",
+  "wf-drafts-two-engines-dark"
+ ]
+}

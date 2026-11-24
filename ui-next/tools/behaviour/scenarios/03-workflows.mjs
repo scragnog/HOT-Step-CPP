@@ -81,38 +81,6 @@ export default [
     await t.click('[data-saveasnew="wf|Radio master"]');
     await t.ok('Save as… on a factory row opens the save row with a name', () => !document.querySelector('#saveRow').hidden && document.querySelector('#saveName').value === 'Radio master (mine)' && document.querySelector('[data-saveas="wf"]').getAttribute('aria-pressed') === 'true');
   } },
-  { id: 'rename-delete-menu', run: async t => {
-    await t.do('two user workflows with a revision', () => { S.workflows = [{ name: 'Alpha', tier: 'studio', mods: ['tempo'], pedals: [] }, { name: 'Beta', tier: 'lab', mods: ['seed'], pedals: [] }]; S.revs = { Alpha: [{ name: 'r1', backend: 'ace', vals: { 'samp.steps': 20 }, slots: [] }] }; saveUser(); S.wfOpen.add('Alpha'); renderPresets(); });
-    await t.click('.pre.wfrow[data-preset="Alpha"] [data-rowmore]');
-    await t.ok('⋯ opens the row menu', () => !document.querySelector('#pop').hidden && document.querySelectorAll('#pop [data-rowact]').length === 2);
-    await t.click('#pop [data-rowact="wfren"]');
-    await t.ok('Rename turns the name into a field', () => document.activeElement?.classList.contains('pren'));
-    await t.type('Gamma'); await t.press('Enter');
-    await t.ok('Enter renames it, and its revisions follow', () => S.workflows[0].name === 'Gamma' && S.revs.Gamma?.length === 1 && !S.revs.Alpha && document.activeElement?.dataset.preset === 'Gamma');
-    await t.click('.pre.wfrow[data-preset="Gamma"] [data-rowmore]'); await t.click('#pop [data-rowact="wfren"]');
-    await t.type('Beta'); await t.press('Enter');
-    await t.ok('a name in use is refused, beside the field (F-11)', () => /"Beta" workflow already exists/.test(document.querySelector('#prenHint:not([hidden])')?.textContent) && document.activeElement?.classList.contains('pren'));
-    await t.press('Escape');
-    await t.ok('Escape keeps the old name', () => S.workflows[0].name === 'Gamma' && !document.querySelector('.pren'));
-    await t.click('.pre.rev[data-rev="Gamma"][data-rn="r1"] [data-rowmore]'); await t.click('#pop [data-rowact="rren"]');
-    await t.type('r2'); await t.click('.top .brand');
-    await t.eq('a revision renames on blur', () => S.revs.Gamma[0].name, 'r2');
-    await t.click('.pre.rev[data-rn="r2"] [data-rowmore]'); await t.click('#pop [data-rowact="rdel"]');
-    await t.ok('Delete in the menu asks once', () => /^Delete\?$/.test(document.querySelector('#pop [data-rowact="rdel"]')?.textContent || '') && S.revs.Gamma.length === 1);
-    await t.click('#pop [data-rowact="rdel"]');
-    await t.ok('the second press deletes it, with Undo', () => !(S.revs.Gamma || []).length && /Deleted Gamma › r2/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.click('#toast .toast-act');
-    await t.eq('Undo restores it', () => S.revs.Gamma?.length, 1);
-    await t.click('.pre.wfrow[data-preset="Beta"] [data-rowmore]'); await t.click('#pop [data-rowact="delpreset"]'); await t.click('#pop [data-rowact="delpreset"]');
-    await t.ok('a workflow deletes from the menu', () => !S.workflows.some(w => w.name === 'Beta') && /Deleted the "Beta" workflow/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.click('#undoBtn');
-    await t.ok('and Undo brings it back', () => S.workflows.some(w => w.name === 'Beta'));
-    await t.do('user revision on the open workflow', () => { S.workflow = 'Gamma'; applyRev('Gamma', S.revs.Gamma[0]); setVal('samp.steps', 44); renderPresets(); });
-    await t.click('.pre.rev.mod [data-rover]');
-    await t.eq('Update on a revision saves the changes into it at once (it is undoable)', () => [S.revs.Gamma[0].vals['samp.steps'], S.revDirty], [44, false]);
-    await t.click('#toast .toast-act');
-    await t.eq('and Undo puts the saved revision back', () => [S.revs.Gamma[0].vals['samp.steps'], S.revDirty], [20, true]);
-  } },
   /* F-02: one name rule (trimmed, any capitals) for rename, save and import; a rename never files two workflows under one
      key, so none is lost, and it can be undone */
   { id: 'one-name-rule', run: async t => {
@@ -167,10 +135,6 @@ export default [
     await t.file('#importFile', 'other.json', 'application/json', '{"a":1}');
     await t.ok('JSON that is not a revision is refused', () => /isn't a HOT-Step revision/.test(document.querySelector('#toast .toast-msg').textContent));
     await t.click('#importBtn', 300);
-  } },
-  { id: 'legacy-storage', storage: { 'hs3-layouts': JSON.stringify([{ name: 'Old layout', tier: 'studio', mods: ['tempo'], pedals: [] }]), 'hs3-presets': JSON.stringify([{ name: 'Old preset', tier: 'lab', mods: ['seed'], vals: { 'samp.steps': 9 }, backend: 'ace' }]), 'hs3-profiles': JSON.stringify([{ name: 'Old layout', backend: 'mm3', vals: { 'samp.steps': 12 } }, { name: 'Stray', backend: 'ace', vals: { 'takes.n': 2 } }]) }, run: async t => {
-    await t.eq('older layouts and presets become workflows', () => S.workflows.map(w => w.name), ['Old layout', 'Old preset']);
-    await t.eq('older profiles become revisions under their workflow or Start fresh', () => [Object.keys(S.revs).sort(), S.revs['Start fresh']?.[0]?.name], [['Old layout', 'Old preset', 'Start fresh'], 'Stray']);
   } },
   { id: 'corrupt-storage', storage: { 'hs3-wf': '{"workflows": 5}', 'hs3-desk': '{"v":1,"desk":"nope"}', 'hs3-drafts': '"x"' }, run: async t => {
     await t.ok('an unreadable desk starts fresh and says so', () => /couldn't be read/.test(document.querySelector('#toast .toast-msg')?.textContent || '') && S.tier === 'quick');

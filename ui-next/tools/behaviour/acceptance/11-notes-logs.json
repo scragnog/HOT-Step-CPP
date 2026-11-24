@@ -1,5 +1,5 @@
 {
-  "about": "Package 11 (the Concept notes and the engine log): every scenario this package makes runnable, each with what it exercises. 36-notes-logs.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there but the one marked pending, the concept's F-18 for the notes); each is a concept scenario's checks of the notes or the log, with the steps that need another package's part (the prompt card, generation) left out, so every feature here is caught by a scenario that runs today. The concept's scenarios that open the notes or the log but also need such a part are listed as waiting on that package; `excluded` lists those that touch these overlays and are left out, each with the reason.",
+  "about": "The Concept notes and the engine log: the drawer, its keys and its words, the log, its lines and its dock (36-notes-logs.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "36-notes-logs/notes-open-as-a-modal-drawer-and-give-focus-back", "why": "The notes button opens the drawer over its scrim, a modal dialog named by its heading, at the window's right edge above the scrim and the scrim above the page; focus on its ×; Tab and Shift+Tab stay inside; Escape, Enter on the ×, the scrim and a click on × close it, focus back on the button (notes-open.ts, layers.ts)." },
     { "id": "36-notes-logs/notes-leave-as-they-came", "why": "It slides in and its scrim fades in on the concept's keyframes; closing hides both at once and leaves inert copies playing the exit, gone when it has played (overlay-exit.ts ovOut)." },
@@ -10,15 +10,9 @@
     { "id": "36-notes-logs/escape-closes-the-log-last", "why": "The notes open over the log; Escape closes the notes, then the engine panel, then the log, focus left where it was; closing the log plays its exit." },
     { "id": "36-notes-logs/the-log-says-what-the-engine-holds", "why": "What the log says on ACE-Step, MiniMax-Music3, HeartMuLa and Stable Audio 3: the engine and its models whole (F-34), the server's status, the models by role, the plugins, the VRAM as the meter's, the queue; a model chosen in the engine panel follows at once (derive/logs.ts engineLogModel, services/logs.ts)." },
     { "id": "36-notes-logs/the-log-on-a-phone", "why": "At 390 the log takes at most a third of the screen with its head on one row (S-23), and the notes take the whole width." },
-    { "id": "36-notes-logs/a-toast-joins-the-notes-tab-cycle", "why": "Pending (F-18) in the concept, right here: a toast raised while the notes are open joins their Tab cycle, and Tab goes on round to the notes (layers.ts)." },
-    { "id": "21-chrome-round5/tier-keys-wait-under-a-modal", "why": "Pending (F-08) in the concept, right here: Alt+3 under the Concept notes leaves the tier (modal-keys.ts)." },
+    { "id": "36-notes-logs/a-toast-joins-the-notes-tab-cycle", "why": "F-18: a toast raised while the notes are open joins their Tab cycle, and Tab goes on round to the notes (layers.ts)." },
+    { "id": "21-chrome-round5/tier-keys-wait-under-a-modal", "why": "F-08: Alt+3 under the Concept notes leaves the tier (modal-keys.ts)." },
     { "id": "07-overlays-keys/notes-logs-escape", "why": "The notes (Shift+Tab wraps, Escape, the scrim, ×) and the engine log (the meter opens and toggles it with what it says, a click outside leaves it with the go bar standing on it, Close, Escape), then Escape closing the engine panel's list and the panel, and the save row." },
     { "id": "09-undo-storage/undo-not-under-overlays", "why": "Ctrl+Z under the presets popover and under the Concept notes changes nothing." }
-  ],
-  "excluded": [
-    { "id": "21-chrome-round5/toast-reachable-under-the-picker", "why": "F-18 for the picker, package 8's (acceptance/8-overlays.json); for the notes it is 36-notes-logs/a-toast-joins-the-notes-tab-cycle." },
-    { "id": "18-tips-touch/tips-keep-every-digit", "why": "The VRAM meter's tip (\"Click for the engine log.\"): the tooltips' package (8)." },
-    { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "The keyboard tip on the VRAM meter: the tooltips' package (8)." },
-    { "id": "23-sa3-hm-round5/touch-targets-and-words", "why": "The notes button's 40px is the slice's top bar (package 8's acceptance)." }
   ]
 }

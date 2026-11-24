@@ -1,7 +1,8 @@
 // The core's derivations against the concept page: undo step names, each tier's "Also set" line, engine switches,
 // what a revision stores and what cleaning keeps, each compared with what the page did in the same state
-// (tools/fixtures/concept.json, collected by tools/concept/collect.mjs). Then the parts' contract (bindPart), the
-// translation keys, reading the real fields back, and saved records of older shapes.
+// (tools/fixtures/concept.json, recorded from the concept page before the cutover; its collector is in the tag
+// rebuild-parity). Then the parts' contract (bindPart), the translation keys, reading the real fields back, and saved
+// records of older shapes.
 //
 //   node tools/test-core.ts            exit 1 on a disagreement tools/fixtures/concept-differences.json does not list
 //   node tools/test-core.ts --print    every disagreement
@@ -159,7 +160,7 @@ for (const t of FIX.tiers) {
 }
 
 /* ---- what each tile lets you change when its switches and choices are on their other values (concept-tiers.json,
-   collected by tools/concept/collect-tiers.cjs): a module's controls against editsAt, a pedal's or unit's against the
+   recorded from the concept page before the cutover): a module's controls against editsAt, a pedal's or unit's against the
    layout rule of docs/01 (Lab: every parameter that applies and its face's; Studio: switch, main knob and Studio face;
    Quick: its switch). A face condition on a value that disagrees with the page shows here. */
 const TIERS = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'fixtures', 'concept-tiers.json'), 'utf8'));

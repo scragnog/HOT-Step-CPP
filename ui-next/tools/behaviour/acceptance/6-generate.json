@@ -1,5 +1,5 @@
 {
- "about": "Package 6 (generation, the go bar, Latest, the player, the song menu, the toast stack): every scenario this package makes runnable, each with what it exercises. 36-generate.mjs holds on the concept page too (--page hotstep-tiers.html), except its scenarios marked pending (the concept's own findings, built here) and a-refusal-the-server-makes (the rebuild's simulated server). Entries waiting on package 4 type into or read the prompt card; `excluded` lists the scenarios that touch generation but whose subject or precondition is another package's.",
+ "about": "Generation, the go bar, Latest, the player, the song menu and the toast stack (36-generate.mjs), with the older scenarios that exercise them.",
  "scenarios": [
   {
    "id": "36-generate/generate-queues-one-card-per-take",
@@ -35,7 +35,7 @@
   },
   {
    "id": "36-generate/a-run-certain-not-to-fit-is-not-started",
-   "why": "Pending (F-21) in the concept, right here: a run certain not to fit is not started; the way out pulses and the line is said."
+   "why": "F-21: a run certain not to fit is not started; the way out pulses and the line is said."
   },
   {
    "id": "36-generate/a-refusal-the-server-makes",
@@ -47,19 +47,19 @@
   },
   {
    "id": "36-generate/cancel-puts-focus-on-generate",
-   "why": "Pending (F-13) in the concept, right here: × on a queued song puts focus on Generate."
+   "why": "F-13: × on a queued song puts focus on Generate."
   },
   {
    "id": "36-generate/separate-presses-each-queue",
-   "why": "Pending (F-22) in the concept, right here: separate presses each queue a run; a double-click queues one."
+   "why": "F-22: separate presses each queue a run; a double-click queues one."
   },
   {
    "id": "36-generate/leaving-while-rendering-asks-first",
-   "why": "Pending (F-37) in the concept, right here: beforeunload is refused while songs render."
+   "why": "F-37: beforeunload is refused while songs render."
   },
   {
    "id": "36-generate/a-reload-says-what-it-lost",
-   "why": "Pending (F-27) in the concept, right here: after a reload the songs the server did not keep are said once."
+   "why": "F-27: after a reload the songs the server did not keep are said once."
   },
   {
    "id": "36-generate/the-cards-in-every-state",
@@ -99,7 +99,7 @@
   },
   {
    "id": "36-generate/a-plain-message-never-pushes-out-an-undo",
-   "why": "Pending (F-18) in the concept, right here: three plain messages never push out an Undo, three show at most, Escape on a toast's button dismisses it."
+   "why": "F-18: three plain messages never push out an Undo, three show at most, Escape on a toast's button dismisses it."
   },
   {
    "id": "36-generate/tab-reaches-a-toasts-undo",
@@ -135,15 +135,15 @@
   },
   {
    "id": "21-chrome-round5/toasts-keep-their-undo",
-   "why": "Pending (F-18) in the concept, right here: plain messages never push out the Undo toast; Escape on its button dismisses it."
+   "why": "F-18: plain messages never push out the Undo toast; Escape on its button dismisses it."
   },
   {
    "id": "21-chrome-round5/song-menu-keeps-off-the-go-bar",
-   "why": "Pending (F-28) in the concept, right here: the song menu stays clear of the go bar and inside the centre column."
+   "why": "F-28: the song menu stays clear of the go bar and inside the centre column."
   },
   {
    "id": "23-sa3-hm-round5/tab-leaves-the-song-menu",
-   "why": "Pending (S-16) in the concept, right here: Tab in the song menu closes it and focus goes on from its button."
+   "why": "S-16: Tab in the song menu closes it and focus goes on from its button."
   },
   {
    "id": "08-persistence-cables/reload-songs",
@@ -176,28 +176,10 @@
   {
    "id": "18-tips-touch/a-held-press-still-presses",
    "why": "Generate held under a finger queues a song (S-01); its scene writes #prompt.value."
-  }
- ],
- "excluded": [
-  {
-   "id": "05-modules/continue-and-repaint",
-   "why": "Its song menu checks pass; the rest are Continue's and Repaint's instruments (package 3a), and Repaint's removal dropping its source."
   },
   {
-   "id": "05-modules/takes",
-   "why": "The Takes tile's reels (package 3a); its line checks (Use N takes, wontfit) are in 36-generate/the-line-says-when-a-run-will-not-fit."
-  },
-  {
-   "id": "21-chrome-round5/toast-reachable-under-the-picker",
-   "why": "Pending (F-18) about the picker's Tab cycle (package 8); it passes vacuously without a picker."
-  },
-  {
-   "id": "23-sa3-hm-round5/tab-stays-in-a-popover-over-a-toast",
-   "why": "Pending (S-17): the toast's side is built (it claims Tab only while focus is where it was and no layer opened since); the drafts popover is package 7's."
-  },
-  {
-   "id": "07-overlays-keys/toasts",
-   "why": "The slice's (acceptance/slice.json): it still passes with the stack."
+   "id": "21-chrome-round5/ctrl-enter-generates-from-rows-and-cards",
+   "why": "Ctrl+Enter generates from a Workflows row or a Modules card, heard before their own Enter (F-07, design decision P6-9)."
   }
  ]
 }

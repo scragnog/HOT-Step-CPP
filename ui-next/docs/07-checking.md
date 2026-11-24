@@ -15,25 +15,31 @@ npm run docs       rewrites the generated parts of these pages
 npm run record     drives the existing Create page over the value space and records what it sends
 npm run ship       records the keys, state and ids a release ships with (only when a release goes out)
 npm run fixtures   reads what the real application declares into tools/fixtures/real-app.json
-npm run concept    collects what the concept page does into tools/fixtures/concept.json (needs Playwright);
-                   tools/concept/collect-tiers.cjs collects tools/fixtures/concept-tiers.json the same way
 ```
 
 The browser tools (Playwright with Chromium; `PLAYWRIGHT_MODULE` may point at an installed `node_modules/playwright`),
 on the test build (`npm run build:test`):
 
 ```
-node tools/behaviour/run.mjs --page dist-test/index.html --slice    the acceptance: every file of tools/behaviour/acceptance
-npm run visual:all                 every package's visual set against the concept, with its accepted differences
+npm run behaviour                  the acceptance: every scenario of tools/behaviour/acceptance (about ACC_TIME)
+npm run visual:all                 every visual set against its approved recording (about VIS_TIME)
+npm run motion                     every motion against its approved samples, every 16ms of its run (about MOT_TIME)
+npm run visual:approve -- --only "^<set>$"    after a deliberate change: approve that set's recording again
+npm run motion:approve -- --only "^<id>$"     after a deliberate change to a motion: approve its samples again
 node tools/visual-baseline/gallery.mjs   every part on every surface, both themes, every tier, against its record
 npm run switches                   each feature switched off makes a scenario fail (slow: a build per switch)
 npm run switches:apply             each switch's and planted defect's text is still in its file, once (in npm run check)
 node tools/visual-baseline/plants.mjs    each planted visual defect is caught
-node tools/motion/frames.mjs        each motion against the concept, every 16ms of its run, with its accepted differences
 node tools/motion/cost.mjs          what each motion costs the main thread on a full desk (a measure, not a check)
 ```
 
-[09](09-architecture.md), "The test layer", says what each covers.
+The times are at 6 workers on a 12-thread machine. These checks compare the page with itself: the scenarios with what
+each says is right, the visual sets and the motions with recordings approved after they were looked at, committed in
+`tools/visual-baseline/approved/` and `tools/motion/approved/`. A deliberate change that shows fails them until the sets
+and motions it was meant to change are approved again ([06](06-how-to.md), "Approve a change the page shows"). Until
+the tag `rebuild-parity` they compared the page with the concept it was ported from; that tag is where parity was last
+proved. [09](09-architecture.md), "The test layer", says what each covers; the READMEs of `tools/behaviour`,
+`tools/visual-baseline` and `tools/motion` say how.
 
 ## The type check
 
@@ -173,7 +179,8 @@ be used.
 
 `tools/test-core.ts` runs the derivations on the states the concept page was put in and compares what they return with
 what the page did (`tools/fixtures/concept.json` and `concept-tiers.json`, recorded from the page's own functions in
-Chromium): undo step names, what each tile shows at each tier at default values and with each switch and choice of the
+Chromium before the cutover; they are the derivations' expected outputs now, and their collectors are in the tag
+`rebuild-parity`): undo step names, what each tile shows at each tier at default values and with each switch and choice of the
 module on its other values, the "Also set" line and its link, engine switches and their toasts, what a revision
 stores, and what cleaning keeps. A value the definitions cannot say (a server-listed choice whose names the server
 gives) is left out of a case; an option of a fixed list the page shows that is none of the definition's labels fails.
@@ -208,5 +215,5 @@ take about three minutes on a twelve-core machine; the live comparison after the
 backend reads, the plugin ids, the model buckets, the existing UI's sliders, the values a field takes, each backend's
 batch and length limits, and the Create intent's compose fields. Run `npm run fixtures` after the server changes and
 commit the result. `existing-requests.json` is the existing page's requests (`npm run record`); `concept.json` and
-`concept-tiers.json` the concept page's behaviour; `shipped.json` what a release shipped; `request-differences.json` and
+`concept-tiers.json` the concept page's behaviour, recorded before the cutover; `shipped.json` what a release shipped; `request-differences.json` and
 `concept-differences.json` the accepted differences.

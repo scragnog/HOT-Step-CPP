@@ -74,7 +74,8 @@ export default [
     await t.ok('Undo restores it', () => S.stars.some(s => s.v === 77104));
     await t.click('.tile[data-m="seed"] [data-smrand]');
     await t.ok('From saved loads one of them', () => S.stars.some(s => s.v === S.seed) && /^Loaded (“.+” \(\d+\)|saved seed \d+)$/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.do('lab', () => { S.tier = 'lab'; render(); });
+    /* LM seed follows stands on the Seed tile while the planner is on the desk (design decision 31) */
+    await t.do('lab, with the planner', () => { S.tier = 'lab'; S.mods = ['seed', 'planner']; render(); });
     await t.click('.tile[data-m="seed"] [data-ledtog="lm.seedlock"]');
     await t.ok('in Lab the LM seed link toggles', () => get('lm.seedlock') === false && /LM seed: random/.test(document.querySelector('[data-lmseed]').textContent));
   } },
@@ -90,163 +91,6 @@ export default [
     await t.ok('a run that will not fit is said under Generate', () => !!document.querySelector('#meter [data-takesfit]') && document.querySelector('#go').classList.contains('wontfit'));
     await t.click('#meter [data-takesfit]');
     await t.ok('Use N takes fixes it', () => +get('takes.n') < 4 && !document.querySelector('#go').classList.contains('wontfit'));
-  } },
-  { id: 'adapters', run: async t => {
-    await desk('studio', ['adapters'])(t);
-    await t.click('.tile[data-m="adapters"] [data-cartadd]');
-    await t.ok('+ Load opens the adapter list', () => !document.querySelector('#pop').hidden && document.querySelectorAll('#pop [data-loadad]').length === 6);
-    await t.click('#pop [data-loadad="folk-voice|LoKr"]');
-    await t.ok('choosing one loads a cartridge', () => S.slots.length === 1 && !!document.querySelector('.tile[data-m="adapters"] .cart.t-lokr'));
-    await t.ok('focus lands on its fader (L-07)', () => document.activeElement?.matches('[data-m="adapters"] [data-fader="s0"]') || document.activeElement?.outerHTML.slice(0, 80));
-    await t.click('.tile[data-m="adapters"] [data-seg="ad.adv"][data-v="Advanced"]');
-    await t.eq('Stack: Stacked switches to Advanced', () => get('ad.adv'), 'Advanced');
-    await t.click('.tile[data-m="adapters"] [data-cartadd]'); await t.click('#pop [data-loadad="tape-lofi-v2|LoRA"]');
-    await t.ok('two cartridges bring the stack bar', () => S.slots.length === 2 && !!document.querySelector('.stackbar [data-seg="ad.stack"]'));
-    await t.do('lyrics with sections, lab', () => { S.tier = 'lab'; S.vals['lyrics.text'] = '[Verse]\na\nb\n[Chorus]\nc'; render(); });
-    await t.click('.tile[data-m="adapters"] [data-mask="0-1"]');
-    await t.ok('a press on a section strip writes a directive into the lyrics', () => /^\[Verse\]\n[\s\S]*\[Chorus\]\{#1=0\.5; #2=1\}/.test(get('lyrics.text')) || /\[Chorus\]\{#1=0.5; #2=1\}/.test(get('lyrics.text')));
-    await t.focus('.tile[data-m="adapters"] [data-mask="0-1"]'); await t.press('Enter');
-    await t.ok('Enter steps it again', () => /\[Chorus\]\{#1=0; #2=1\}/.test(get('lyrics.text')));
-    await t.ok('directives force Runtime, and the foot says so', () => /Runtime while section directives are set/.test(document.querySelector('[data-adfoot]').textContent));
-    /* A-30: while forced, Apply as shows Runtime pressed and the other two disabled; the user's own choice is kept */
-    await t.ok('Apply as shows Runtime while forced, the others disabled', () => { const bs = [...document.querySelectorAll('[data-adfoot] [data-seg="ad.mode"]')]; return bs.find(b => b.dataset.v === 'Runtime')?.getAttribute('aria-pressed') === 'true' && bs.filter(b => b.dataset.v !== 'Runtime').every(b => b.disabled) || bs.map(b => [b.dataset.v, b.getAttribute('aria-pressed'), b.disabled]); });
-    await t.mouseDrag('.tile[data-m="adapters"] [data-phase="0"]', [[-30, 0]], [0.95, 0.5]);
-    await t.ok('dragging the phase window moves its end', () => S.slots[0].ph && S.slots[0].ph[1] < 100);
-    await t.focus('.tile[data-m="adapters"] [data-phase="1"] [data-ph="0"]'); await t.press('ArrowRight');
-    await t.eq('arrow keys move a phase handle', () => S.slots[1].ph, [5, 100]);
-    await t.click('.tile[data-m="adapters"] [data-cartx="0"]');
-    await t.ok('× removes a cartridge, renumbering the directives', () => S.slots.length === 1 && document.querySelector('#toast .toast-msg').textContent === 'Removed folk-voice' && !/{/.test(get('lyrics.text')));
-    await t.click('#toast .toast-act');
-    await t.eq('Undo puts it back', () => S.slots.length, 2);
-    await t.click('.tile[data-m="adapters"] [data-plannerpick]');
-    await t.click('#pop [data-pickplanner="folk-voice-planner (LoRA)"]');
-    await t.ok('a planner adapter loads from its own list', () => get('ad.planner') === 'folk-voice-planner (LoRA)' && document.querySelector('#pop').hidden);
-    await t.ok('focus lands on the planner cartridge remove button (L-07)', () => document.activeElement?.matches('[data-m="adapters"] [data-setv="ad.planner|None"]') || document.activeElement?.outerHTML.slice(0, 80));
-    await t.click('.tile[data-m="adapters"] [data-setv="ad.planner|None"]');
-    await t.eq('and comes out', () => get('ad.planner'), 'None');
-    await t.do('quick', () => { S.tier = 'quick'; render(); });
-    await t.click('.tile[data-m="adapters"] [data-setq="s0|1.5"]');
-    await t.eq('in Quick, strength is a choice row', () => get('s0'), 1.5);
-    await t.ok('the trigger word tape shows in the prompt', () => !document.querySelector('#trigTape').hidden);
-    await t.click('#trigTape input'); await t.type('lofi');
-    await t.eq('and binds to its setting', () => get('ad.trigger'), 'lofi');
-  } },
-  { id: 'planner-guidance', run: async t => {
-    await desk('lab', ['planner', 'guidance', 'sampler'], { backend: 'mm3' })(t);
-    await t.ok('MiniMax has its own guidance unless plugins are on', () => /uses its own guidance/.test(document.querySelector('.tile[data-m="guidance"]').textContent));
-    await t.click('.tile[data-m="guidance"] [data-luaon]');
-    await t.ok('Turn on Lua plugins re-faces Guidance and Sampler, and focus stays in the tile (E-09)', () => !!document.activeElement.closest('.tile[data-m="guidance"]') && !document.activeElement.matches('[data-remove]') && get('samp.plugins') === true && /Native guidance has no settings/.test(document.querySelector('.tile[data-m="guidance"]').textContent) && !!document.querySelector('.tile[data-m="sampler"] [data-pick="samp.solver"]'));
-    await t.click('.tile[data-m="sampler"] [data-pick="samp.guide"]'); await t.click('#dd [data-opt="CFG++"]');
-    await t.ok('another guidance mode re-faces Guidance', () => /CFG\+\+ has no settings of its own/.test(document.querySelector('.tile[data-m="guidance"]').textContent));
-    await t.do('ace', () => { S.backend = 'ace'; render(); });
-    await t.click('.tile[data-m="planner"] [data-ledtog="lm.cot"]');
-    await t.eq('a flag toggles', () => get('lm.cot'), false);
-    await t.click('.tile[data-m="planner"] [data-bind="lm.neg"]'); await t.press('End'); await t.type(' X');
-    await t.eq('an inline token field binds', () => get('lm.neg'), 'NO USER INPUT X');
-    /* A-02: a long --neg wraps downward; the terminal never scrolls sideways */
-    await t.type(' and also avoid any spoken word intro, crowd noise, applause, vinyl crackle or radio static'); await t.press('Enter');
-    await t.ok('a long --neg wraps inside the terminal, which does not scroll', () => { const term = document.querySelector('.tile[data-m="planner"] .term'), ta = document.querySelector('[data-bind="lm.neg"]');
-      return term.scrollLeft === 0 && term.scrollWidth <= term.clientWidth && ta.getBoundingClientRect().right <= term.getBoundingClientRect().right && ta.offsetHeight > 30 && !/\n/.test(get('lm.neg')) || { sl: term.scrollLeft, sw: term.scrollWidth, cw: term.clientWidth, h: ta.offsetHeight }; });
-    await t.do('yue', () => { S.backend = 'yue'; render(); });
-    await t.click('.tile[data-m="planner"] [data-seg="lm.cotmode"][data-v="Melody only"]');
-    await t.ok('YuE2 chain-of-thought chips', () => get('lm.cotmode') === 'Melody only' && /melody line, no chords/.test(document.querySelector('[data-term]').textContent));
-    await t.click('.tile[data-m="planner"] [data-scoreprev]');
-    await t.ok('▶ score preview opens the planned score', () => !document.querySelector('#scoreModal').hidden && !!document.querySelector('#scoreModal .staff'));
-    await t.press('Escape');
-    await t.do('quick', () => { S.tier = 'quick'; render(); });
-    await t.click('.tile[data-m="planner"] [data-setq="lm.cotmode|Off"]');
-    await t.eq('in Quick, a choice row', () => get('lm.cotmode'), 'Off');
-    await t.click('.tile[data-m="planner"] .mood [data-setn]:last-child');
-    await t.ok('How adventurous sets the temperature, a step past the engine default (B-30)', () => +get('yp.temp') === +document.querySelector('.mood [data-setn]:last-child').dataset.setn.split('|')[1] && +get('yp.temp') > defOf('yp.temp') && document.querySelector('.mood button:last-child').getAttribute('aria-checked') === 'true' && document.querySelector('.mood [data-setn]:nth-child(3)').dataset.setn === 'yp.temp|' + defOf('yp.temp'));
-    await t.click('.tile[data-m="sampler"] [data-setq="samp.steps|64"]');
-    await t.eq('Quality sets the steps', () => get('samp.steps'), 64);
-  } },
-  { id: 'yue-plugins-replan', run: async t => {
-    await desk('lab', ['sampler', 'replan', 'adhere', 'yuebatch', 'repetition', 'planner'], { backend: 'yue' })(t);
-    await t.click('.tile[data-m="sampler"] [data-pick="samp.solver"]'); await t.click('#dd [data-opt="Wasserstein Flow (exp.)"]');
-    await t.ok('an experimental NAR solver brings its own controls', () => !!document.querySelector('.plugctl [data-scrub="yn.wassersteinflow.0"]'));
-    await t.focus('.plugctl [data-scrub="yn.wassersteinflow.0"]'); await t.press('ArrowUp');
-    await t.ok('they work like the rest', () => 'yn.wassersteinflow.0' in S.vals);
-    await t.click('.plugctl [data-plugreset="samp.solver"]');
-    await t.ok('Reset puts them back', () => !('yn.wassersteinflow.0' in S.vals) && /plugin defaults/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.focus('.tile[data-m="replan"] [data-knob="yue.tries"]'); await t.press('ArrowUp');
-    await t.eq('more tries, more dice', () => document.querySelectorAll('.tile[data-m="replan"] .die').length, 4);
-    await t.click('.tile[data-m="adhere"] [data-adpow="pcfg"]');
-    await t.ok('a rack power chip switches its group on', () => +get('yue.pcfg') === 1.5 && !document.querySelector('[data-adg="pcfg"]').classList.contains('dim'));
-    await t.ok('and says so on the chip (E-02)', () => { const b = document.querySelector('[data-adpow="pcfg"]'); return b.textContent.trim() === 'Plan CFG' && b.getAttribute('aria-pressed') === 'true'; });
-    await t.click('.tile[data-m="adhere"] [data-adpow="pcfg"]');
-    await t.eq('and off', () => +get('yue.pcfg'), 1);
-  } },
-  { id: 'lead-sheet', run: async t => {
-    await desk('lab', ['score'], { backend: 'yue' })(t);
-    await t.click('.tile[data-m="score"] [data-scoreprev]');
-    await t.ok('with no ABC, preview plans a score', () => !document.querySelector('#scoreModal').hidden && /seed \d+/.test(document.querySelector('.sc-meta').textContent) && document.activeElement.matches('[data-scorego]'));
-    await t.press('Tab'); await t.press('Tab');
-    await t.ok('focus stays in the modal', () => document.querySelector('#scoreModal').contains(document.activeElement));
-    await t.click('#scoreModal [data-scoreretry]');
-    await t.ok('Retry draws a new seed', () => !document.querySelector('#scoreModal').hidden);
-    await t.click('#scoreModal [data-scoredl]');
-    await t.ok('Download saves the ABC', async () => { const d = window.__bh.downloads.at(-1); return !!d && /\.abc\.txt$/.test(d.name) && /^X:1/.test(await d.blob.text()); });
-    await t.click('#scoreModal [data-scoreplay]');
-    await t.ok('Play plays it and becomes Stop', () => document.querySelector('[data-scoreplay]').textContent.trim() === 'Stop');
-    await t.ok('the playhead stands on the first system, no taller than it (E-01)', () => { const h = document.querySelector('.staff .st-head'); return +h.getAttribute('y') < 30 && +h.getAttribute('height') < 45; });
-    await t.click('#scoreModal .sc-order [data-scoresec="1"]');
-    await t.ok('a section name plays from that section, lit in the trail and on the staff (E-01)', () => { const i = SC.meas.findIndex(m => m.si === 1), x = +document.querySelector('.staff .st-head').getAttribute('x'), R = scoreLayout(SC).rows.flatMap(r => r.bars)[i]; return document.querySelector('.sc-order [data-scoresec="1"]').classList.contains('cur') && !!document.querySelector('.staff .sc-sec.cur[data-si="1"]') && x >= R.notes[0] - 5.5 && x <= R.bx + R.bw; });
-    await t.click('#scoreModal [data-scoreplay]');
-    await t.ok('and stops', () => document.querySelector('[data-scoreplay]').textContent.trim() === 'Play');
-    await t.do('a prompt', () => { document.querySelector('#prompt').value = 'folk'; });
-    await t.click('#scoreModal [data-scorego]');
-    await t.ok('Continue renders it with its seed, for that run only (E-08)', () => document.querySelector('#scoreModal').hidden && get('seed.lock') === false && S.songs.some(s => s.pending && typeof s.seed === 'number') && /seed setting is unchanged/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.click('.tile[data-m="score"] [data-example="yue.abc"]');
-    await t.ok('Insert example fills the lead sheet', () => /^X:1/.test(get('yue.abc')) && /lines\. The composer follows this/.test(document.querySelector('[data-abcfoot]').textContent));
-    await t.click('.tile[data-m="score"] [data-scoreprev]');
-    await t.ok('with ABC, preview shows that score', () => /pasted on the lead sheet/.test(document.querySelector('.sc-meta').textContent));
-    await t.click('#scoreModal [data-scoredlabc]');
-    await t.ok('and downloads it', async () => { const d = window.__bh.downloads.at(-1); return !!d && d.name === 'Stay_a_little_longer.abc.txt'; });
-    await t.click('#scoreModal .sc-acts [data-scoreclose]');
-    await t.ok('Close closes it', () => document.querySelector('#scoreModal').hidden);
-    await t.click('.tile[data-m="score"] [data-seg="yue.timing"][data-v="Soft"]');
-    await t.ok('lyric timing explains itself', () => /Nudges each lyric block/.test(document.querySelector('.tile[data-m="score"]').textContent));
-  } },
-  { id: 'build-by-section', run: async t => {
-    await desk('lab', ['build', 'planner', 'cont'], { backend: 'yue' })(t);
-    await t.ok('with no tagged lyrics, Build offers tags', () => !!document.querySelector('.tile[data-m="build"].is-strip [data-tag="[Verse]"]'));
-    await t.click('.tile[data-m="build"] [data-tag="[Verse]"]');
-    await t.ok('+ [Verse] tags the lyrics and Build opens up', () => /^\[Verse\]/.test(get('lyrics.text')) && !!document.querySelector('.tile[data-m="build"] [data-bplan]'));
-    await t.do('two sections', () => setVal('lyrics.text', '[Verse]\nline\n[Chorus]\nline'));
-    await t.click('.tile[data-m="build"] [data-bplan]');
-    await t.ok('Plan the score shows it is planning', () => S.build?.planning === true || S.build?.planned === true);
-    await t.do('wait', () => {}, null, 1000);
-    await t.ok('then the sections', () => S.build.planned && document.querySelectorAll('.tile[data-m="build"] [data-bsec]').length === 2);
-    await t.click('.tile[data-m="build"] [data-btake]');
-    await t.do('wait', () => {}, null, 2000);
-    await t.ok('takes render', () => S.build.takes['Verse#1'].length === 2 && S.build.takes['Verse#1'].every(x => x.ready));
-    const tid = await t.js(() => S.build.takes['Verse#1'][1].id);
-    await t.click(`.tile[data-m="build"] [data-bkeep="${tid}"]`);
-    await t.ok('Keep stays on its section, locks the controls and offers Next (B-37)', () => S.build.kept['Verse#1'] === S.build.takes['Verse#1'][1].id && S.build.cur === 'Verse#1' && !!document.querySelector('.tile[data-m="build"] .tok-ro') && /Next: Chorus/.test(document.querySelector('.b-cur').textContent));
-    await t.click('.tile[data-m="build"] .b-cur [data-bsec="Chorus#1"]');
-    await t.eq('Next moves to the next open section', () => S.build.cur, 'Chorus#1');
-    await t.click('.tile[data-m="build"] .b-src [data-bsec="Verse#1"]');
-    await t.eq('a section can be picked', () => S.build.cur, 'Verse#1');
-    await t.click(`.tile[data-m="build"] [data-bplay="${tid}"]`);
-    await t.ok('a take can be heard before keeping (B-07)', () => document.querySelector('.b-take.playing')?.dataset.take === S.build.takes['Verse#1'][1].id);
-    await t.click('.tile[data-m="build"] [data-brender]');
-    await t.ok('Render song saves the built song and the build stays (B-06)', () => S.songs[0].bk === 'yue' && /Built from 1 section/.test(S.songs[0].style) && S.build.rendered && Object.keys(S.build.kept).length === 1);
-    await t.press('Control+z');
-    await t.ok('Render is undoable', () => S.songs[0].bk !== 'yue' || !/Built from/.test(S.songs[0].style));
-    await t.do('lyrics gain an intro above', () => setVal('lyrics.text', '[Intro]\nhi\n' + get('lyrics.text')));
-    await t.ok('the keep stays with its section, not its position (B-05)', () => S.build.kept['Verse#1'] && !!document.querySelector('.b-drift') && document.querySelector('.b-src [data-bsec="Verse#1"]').classList.contains('kept') && !document.querySelector('.b-src [data-bsec="Intro#1"]').classList.contains('kept'));
-    await t.do('let autosave run', () => {}, null, 600);
-    await t.reload();
-    await t.ok('the build comes back after a reload (B-06)', () => S.build?.planned && S.build.kept['Verse#1'] && !!document.querySelector('.b-src [data-bsec="Verse#1"].kept'));
-    await t.click('.tile[data-m="build"] [data-breplan]'); await t.do('wait', () => {}, null, 1000);
-    await t.ok('Re-plan drops the keeps with Undo', () => S.build.planned && !Object.keys(S.build.kept).length && /dropped/.test(document.querySelector('#toast .toast-msg')?.textContent || ''));
-    await t.press('Control+z');
-    await t.ok('and Undo brings the build back', () => !!S.build.kept['Verse#1']);
-    await t.click('.tile[data-m="planner"] [data-seg="lm.cotmode"][data-v="Off"]');
-    await t.ok('Chain of thought off folds Build to a strip, as wide as the tile will be (E-19)', () => !!document.querySelector('.tile[data-m="build"].is-strip.w4 [data-bcot]'));
-    await t.click('.tile[data-m="build"] [data-bcot]');
-    await t.ok('Turn it on, and focus goes to Plan the score (E-09)', () => get('lm.cotmode') !== 'Off' && !document.querySelector('.tile[data-m="build"].is-strip') && document.activeElement.matches('[data-bplan], [data-btake]'));
   } },
   { id: 'continue-and-repaint', run: async t => {
     await desk('lab', ['cont'], { backend: 'yue' })(t);
@@ -269,34 +113,6 @@ export default [
     await t.ok('dragging draws a new region', () => S.region[0] < 0.2);
     await t.click('.tile[data-m="repaint"] [data-remove="repaint"]');
     await t.eq('removing Repaint drops the source', () => [S.source, document.querySelector('#goLabel').textContent], [null, 'Generate']);
-  } },
-  { id: 'lyrics', run: async t => {
-    await desk('lab', [])(t);
-    await t.click('#bento .tile[data-m="lyrics"] [data-tag="[Verse]"]');
-    await t.eq('a tag tab inserts the tag', () => get('lyrics.text'), '[Verse]\n');
-    await t.type('hello there');
-    await t.click('#bento .tile[data-m="lyrics"] [data-tag="[Chorus]"]');
-    await t.eq('the next tag goes on a fresh line', () => get('lyrics.text'), '[Verse]\nhello there\n\n[Chorus]\n');
-    await t.ok('the strip shows the sections', () => document.querySelectorAll('[data-strip] [data-secjump]').length === 2);
-    await t.click('[data-strip] [data-secjump="0"]');
-    await t.ok('a strip segment puts the caret in its section', () => document.activeElement.matches('[data-bind="lyrics.text"]') && document.activeElement.selectionStart === 8);
-    await t.click('#bento .tile[data-m="lyrics"] [data-ledtog="lyrics.instr"]');
-    await t.ok('Instrumental keeps the lyrics read-only', () => get('lyrics.instr') === true && document.querySelector('[data-bind="lyrics.text"]').readOnly);
-    await t.click('#bento .tile[data-m="lyrics"] [data-tag="[Bridge]"]');
-    await t.ok('tags are refused while Instrumental is on', () => /Instrumental is on/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.click('#bento .tile[data-m="lyrics"] [data-ledtog="lyrics.instr"]');
-    await t.do('wildcards', () => setVal('lyrics.text', 'go {fast|slow} now'));
-    await t.click('#bento .tile[data-m="lyrics"] [data-wildx="lyrics"]');
-    await t.ok('Expand choices picks one, with Undo', () => /^go (fast|slow) now$/.test(get('lyrics.text')) && document.querySelector('#toast .toast-act')?.textContent === 'Undo');
-    await t.click('#bento .tile[data-m="lyrics"] [data-wildx="lyrics"]');
-    await t.ok('with none left it says so', () => /No \{a\|b\|c\} wildcards in the lyrics/.test(document.querySelector('#toast .toast-msg').textContent));
-    await t.click('#bento .tile[data-m="lyrics"] [data-ledtog="wild.auto"]');
-    await t.eq('on Generate', () => get('wild.auto'), true);
-    await t.do('mm3', () => { S.backend = 'mm3'; render(); });
-    await t.click('#bento .tile[data-m="lyrics"] [data-seg="lyrics.gender"][data-v="Duet"]');
-    await t.eq('MiniMax has a vocal gender', () => get('lyrics.gender'), 'Duet');
-    await t.do('sa3', () => { S.backend = 'sa3'; render(); });
-    await t.ok('Stable Audio has no lyrics', () => /has no lyrics/.test(document.querySelector('#bento').textContent));
   } },
   { id: 'pedalboard', run: async t => {
     await t.do('studio board', () => { S.tier = 'studio'; S.mods = []; S.pedals = []; render(); addItem('pd:ss'); addItem('pd:norm'); addItem('ex:wh'); addItem('ex:art'); });

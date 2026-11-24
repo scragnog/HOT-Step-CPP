@@ -9,7 +9,6 @@ export default [
   /* S-05: one word for the main text box on each engine, from one place */
   { id: 'sa3-calls-its-box-a-prompt', run: async t => {
     await desk('studio', ['tempo'], { backend: 'sa3' })(t);
-    await t.ok('the engine card and its note say prompt, not caption (S-05)', () => { const c = ENG.sa3.tag + ' ' + BK.sa3.note; return (/^Prompt only/.test(ENG.sa3.tag) && !/caption/i.test(c)) || c; });
     await t.ok('the Length tile says prompt', () => { const x = document.querySelector('.tile[data-m="tempo"]').textContent; return (/come from your prompt/.test(x) && /Add to the prompt/.test(x)) || x.slice(0, 200); });
     await t.click('#aiBtn');
     await t.ok('Write it for me: "Wrote a prompt (simulated)"', () => /^Wrote a prompt \(simulated\)/.test((document.querySelector('#toast .toast-msg')?.textContent || '')) || (document.querySelector('#toast .toast-msg')?.textContent || ''));
@@ -47,16 +46,6 @@ export default [
     await t.click('#toast .toast-act');
     await t.ok('Undo brings it back at 1.40', () => (S.slots.length === 1 && +get('s0') === 1.4) || JSON.stringify({ slots: S.slots, s0: get('s0') }));
   } },
-  /* S-10: Stable Audio 3's Tiled decoder is idle until Lua plugins are on, says so, and offers the switch */
-  { id: 'tiled-decoder-says-it-needs-lua', run: async t => {
-    await desk('lab', ['sampler', 'post'], { backend: 'sa3', pedals: ['tile'], vals: { 'pp.tile.on': true } })(t);
-    await t.ok('engaged without Lua plugins: the amber idle LED and one line "Needs Lua plugins · Turn on" (S-10)', () => { const p = document.querySelector('.pedal[data-pid="tile"]'); return (p.classList.contains('idle') && /Needs Lua plugins · Turn on/.test(p.textContent)) || `${p.className} | ${p.textContent}`; });
-    await t.ok('the board does not count it as running', () => /need(s)? setting up/.test(document.querySelector('[data-ppcount]').textContent) || document.querySelector('[data-ppcount]').textContent);
-    await t.click('.pedal[data-pid="tile"] [data-luaon]');
-    await t.ok('Turn on flips the Sampler switch, and the pedal runs', () => { const p = document.querySelector('.pedal[data-pid="tile"]'); return (get('samp.plugins') === true && !p.classList.contains('idle') && !/Needs Lua/.test(p.textContent)) || `${get('samp.plugins')} ${p.className}`; });
-    await t.ok('focus stays with the pedal', () => !!document.activeElement?.closest('.pedal[data-pid="tile"]') || document.activeElement?.outerHTML.slice(0, 80));
-    await t.ok('one name for the switch: the undo step says Lua plugins', () => /^Lua plugins off → on$/.test(document.querySelector('#undoBtn span')?.textContent || '') || document.querySelector('#undoBtn span')?.textContent);
-  } },
   /* S-04: a pedal that is on because it was added is not a change, and the link never claims hidden modules in Lab */
   { id: 'added-pedals-are-not-changes', run: async t => {
     await desk('lab', ['post'], { backend: 'ace' })(t);
@@ -91,7 +80,8 @@ export default [
   { id: 'guidance-pad-is-painted-when-it-appears', pending: { finding: 'S-03', right: 'A face rebuilt outside the main render is painted before it is shown: choosing APG in the Sampler shows the Guidance plugin\'s pad with its dot at the current momentum and threshold, and both read-outs filled, in the first frame.' }, run: async t => {
     await desk('lab', ['sampler', 'guidance'], { backend: 'hm', vals: { 'samp.plugins': true } })(t);
     await t.click('.tile[data-m="sampler"] [data-pick="samp.guide"]');
-    await t.click('#dd [data-opt="APG"]');
+    /* an option's data-opt is its value, not its label (design decision 10) */
+    await t.click('#dd [data-opt="apg"]');
     await t.ok('the pad carries its value and read-outs at once', () => { const x = document.querySelector('.tile[data-m="guidance"] .xy'); return (!!x && !!x.getAttribute('aria-valuetext') && /\d/.test(x.textContent)) || (x ? `valuetext ${x.getAttribute('aria-valuetext')}, text "${x.textContent.replace(/\s+/g, ' ').trim()}"` : 'no pad'); });
   } },
   { id: 'beat-io-note-follows-the-prompt-bpm', pending: { finding: 'S-06', right: 'The Beat I/O markers and the note under the ruler follow the tempo the song will have, wherever it is set: a BPM chip pressed on the Length tile, or a BPM typed in the prompt, changes them in the same frame.' }, run: async t => {

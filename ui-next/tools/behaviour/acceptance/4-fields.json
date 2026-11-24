@@ -1,5 +1,5 @@
 {
-  "about": "Package 4 (prompt card and lyric sheet): every scenario this package makes runnable, each with what it exercises. 33-fields.mjs holds on the concept page too (--page hotstep-tiers.html): several of its scenarios are the concept's own with the one step they share with a later package (the popover's presets) replaced by one of this package's, or with an option found by its value as well as its words (deviation 10). `waiting` entries exercise this package's work and wait on another's part; `excluded` lists the concept's scenarios about the prompt or the lyrics that are left out, each with the reason.",
+  "about": "The prompt card and the lyric sheet: the box and its tools, suggestions, Presets & genres, Song info, the caption a dataset supplies, the sheet with its sections, tabs, wildcards and language stamp (33-fields.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "33-fields/field-undo-and-page-undo", "why": "Each text field's own Ctrl+Z (F-22): the field's own texts first, then on into what the page put there (Expand), Redo the same way, a value set without telling is a step of its own, Ctrl+Z in another field never touches the box." },
     { "id": "33-fields/field-undo-never-moves-forward", "why": "F-06: Ctrl+Z in the box takes back its last typing and moves the page's step that wrote it, so Ctrl+Z outside goes on back to the setting, never the words again." },
@@ -25,15 +25,12 @@
     { "id": "12-desk-layout/tab-order-is-reading-order-studio-1920", "why": "Tab from the box visits the tiles in reading order, the lyric sheet at the desk's head (Q-01)." },
     { "id": "12-desk-layout/tab-order-is-reading-order-quick-1920", "why": "Same at Quick, the sheet under the box." },
     { "id": "12-desk-layout/tab-order-is-reading-order-lab-1280", "why": "Same at Lab, 1280 wide." },
-    { "id": "21-chrome-round5/focus-after-moving-lyrics", "why": "Pending (F-13) in the concept, right here: Move them to the lyrics sheet puts focus in the lyrics it filled." },
-    { "id": "23-sa3-hm-round5/one-tempo-for-every-estimate", "why": "Pending (S-07) in the concept, right here: the line count's estimate takes a BPM written in HeartMuLa's tags (src/derive/controls.ts songTempo, src/derive/fields.ts estimateTempo)." },
+    { "id": "21-chrome-round5/focus-after-moving-lyrics", "why": "F-13: Move them to the lyrics sheet puts focus in the lyrics it filled." },
+    { "id": "23-sa3-hm-round5/one-tempo-for-every-estimate", "why": "S-07: the line count's estimate takes a BPM written in HeartMuLa's tags (src/derive/controls.ts songTempo, src/derive/fields.ts estimateTempo)." },
     { "id": "06-prompt-generate/prompt-tools", "why": "Wildcards, Expand, Write it for me and Song info (all pass), and Presets & genres." },
     { "id": "06-prompt-generate/field-undo-and-page-undo", "why": "Each field's own Ctrl+Z with the page's Undo (F-22); the same in 33-fields/field-undo-and-page-undo." },
     { "id": "15-other-engines/lyric-length-uses-the-tempo", "why": "The line count's estimate on auto says it guesses (passes), and takes a BPM typed on YuE2." },
-    { "id": "22-engines-round5/automatic-source-follows-the-tempo", "why": "Pending (E-06) in the concept: Automatic follows the BPM at once; the lock line follows the tempo field in the core (src/derive/fields.ts trackNow)." },
-    { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "Pending (S-06) in the concept: the ruler's note follows a BPM typed in the box (passes) and a BPM chip." }
-  ],
-  "excluded": [
-    { "id": "22-engines-round5/reuse-gives-back-the-source-text", "why": "Reuse is the song menu's (package 6)." }
+    { "id": "22-engines-round5/automatic-source-follows-the-tempo", "why": "E-06: Automatic follows the BPM at once; the lock line follows the tempo field in the core (src/derive/fields.ts trackNow)." },
+    { "id": "23-sa3-hm-round5/beat-io-note-follows-the-prompt-bpm", "why": "S-06: the ruler's note follows a BPM typed in the box (passes) and a BPM chip." }
   ]
 }

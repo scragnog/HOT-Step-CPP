@@ -5,9 +5,7 @@
 // with its tabs and wildcard tools, Instrumental, the language stamp, a sheet past its cap with its marker, the box's
 // suggestions, a caption a dataset supplies (locked) and its tags, Song info open, a latent.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-fields --states slice --only "^fields-" --scope fields --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-fields --states slice --only "^fields-" --scope fields --plan-from concept-fields
-//   node tools/visual-baseline/vb.mjs compare concept-fields rebuild-fields --scope fields --accept tools/visual-baseline/fields-accepted.json
+//   npm run visual:all -- --only "^fields$"            (and visual:approve, README.md)
 
 const LYRICS = '[Verse]\nKettle on, the window fogged\nYour coat still hanging by the door\n\n[Pre-Chorus]\nStay a little\n\n[Chorus]\nStay a little longer, stay\nLet the morning wait';
 const scene = (bk, tier, mods, vals = {}, extra = {}) => async h => {
@@ -59,4 +57,4 @@ export const SCOPES = {
 };
 
 /** Its visual set (visual-all.mjs). */
-export const VISUAL_SET = { name: 'fields', only: '^fields-', scope: 'fields', accept: 'fields-accepted.json' };
+export const VISUAL_SET = { name: 'fields', only: '^fields-', scope: 'fields' };

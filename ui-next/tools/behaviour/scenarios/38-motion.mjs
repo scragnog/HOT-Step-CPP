@@ -1,8 +1,8 @@
 // Motion (package 9): each motion is set off as a user sets it off, and then, with the page's timeline held still (the
 // harness holds it), every animation is moved by hand to a few moments of its run and the page is read there: where a
 // box stands, what it shows, how opaque it is. So a motion that is missing, jumps, starts from the wrong place, stretches
-// what it carries or moves under reduced motion fails here, as on the concept's reviewers' 16ms frames. Each holds on the
-// concept page too (run it there with --page); tools/motion/frames.mjs compares the two pages step by step.
+// what it carries or moves under reduced motion fails here; tools/motion/frames.mjs
+// compares every 16ms of each motion with its approved samples.
 
 const ACE = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes'];
 const desk = (tier, mods, pedals = []) => t => t.do(`${tier} desk`, ([tier, mods, pedals]) => { S.tier = tier; S.mods = [...mods]; S.pedals = [...pedals]; pedals.forEach(id => { if (PED[id]?.on) S.vals[PED[id].on] = true; }); S.qAll = true; render(); scrollTo(0, 0); }, [tier, mods, pedals], 400);

@@ -1,5 +1,5 @@
 {
-  "about": "Package 5 (engine panel and models): every scenario this package makes runnable, each with what it exercises. 35-models.mjs holds on the concept page too (--page hotstep-tiers.html: all pass there). `excluded` lists the scenarios that touch the engine panel, the models or the VRAM meter but whose subject is another package's, each with what it waits for and where its checks of this package's work are.",
+  "about": "The engine panel and the models: the engine cards, each engine's model rows and lists, the VRAM meter (35-models.mjs), with the older scenarios that exercise them.",
   "scenarios": [
     { "id": "35-models/engine-cards-say-what-each-engine-is", "why": "The engine cards: tagline in two lines, output rate and its tip, songs per Generate and its tip, HeartMuLa's testing badge (enginePanelModel)." },
     { "id": "35-models/models-follow-the-tier-and-the-engine", "why": "The models heading and its words per tier, the testing note, each engine's rows by role, Quick showing the sound model (and HeartMuLa's variant) only, a variant without a size (the Models definition's two modelPicker nodes, modelRows)." },
@@ -13,14 +13,5 @@
     { "id": "21-chrome-round5/model-steps-named-by-role", "why": "A model change is named by the model's role: \"Sound model XL Turbo · Q8_0 → Turbo · Q8_0\" (F-12; \"\" written as the file it stands for)." },
     { "id": "15-other-engines/model-list-as-wide-as-its-row", "why": "YuE2's model list is as wide as its row and its five quant chips stand on one line (E-32): the service's full catalogue." },
     { "id": "15-other-engines/switch-toast-names-models-and-counts-settings", "why": "The engine switch's toast names the models MiniMax-Music3 keeps without a separator inside a name (E-33, F-34), from the catalogue's words." }
-  ],
-  "excluded": [
-    { "id": "01-desk/engines-panel", "why": "The slice's (acceptance/slice.json): the cards, arrows, Enter, Escape, a click outside; it still passes with the cards' new contents." },
-    { "id": "07-overlays-keys/notes-logs-escape", "why": "The notes drawer, the engine log, the go bar and the save row are other packages'. Its engine panel checks (Escape closes the model list, then the panel) are in 35-models/the-panels-keys-with-a-model-row-in-it." },
-    { "id": "18-tips-touch/tips-keep-every-digit", "why": "It reads the tooltip's tipSentences and #tip (package 8). The meter's title naming the 31.8 GB card is checked in 35-models/the-vram-meter-adds-up-the-engine." },
-    { "id": "21-chrome-round5/keyboard-tip-gives-way-to-the-pointer", "why": "Pending (F-19) about the tooltip opened on the VRAM meter by the keyboard: the tooltips' package (8)." },
-    { "id": "23-sa3-hm-round5/lua-switch-stays-with-its-engine", "why": "The Sampler's Lua switch (package 3); it only uses the panel's cards." },
-    { "id": "05-modules/takes", "why": "The Takes tile and its VRAM line (package 3), which can read the core's vramNeed (src/derive/vram.ts)." },
-    { "id": "21-chrome-round5/generate-does-not-queue-a-certain-refusal", "why": "Pending, generation's (package 6): a run the meter shows as refused is not queued; vramNeed gives it `refuses`." }
   ]
 }

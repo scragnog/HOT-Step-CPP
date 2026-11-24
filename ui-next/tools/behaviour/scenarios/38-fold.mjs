@@ -1,9 +1,8 @@
 // Quick's fold (A-28, Q-05; the concept's renderDesk and flash, 30-desk.js): past six modules, Quick shows six and a
 // button names the rest; it opens and folds again by a click, is no undo step, opens by itself for a module that arrives
 // folded away, never hides a module holding a set value, is kept over a reload, and shows only at Quick. No engine has
-// enough modules Quick shows for the fold to take three, so each scenario puts the concept's two stand-ins on the desk
-// as its scene (defineModule, as the concept's suite does; the test build's testing/standins.ts); everything after that
-// is real input. Each holds on the concept page too (--page hotstep-tiers.html) but for what its `why` names.
+// enough modules Quick shows for the fold to take three, so each scenario puts the test build's two stand-ins on the desk
+// as its scene (defineModule; testing/standins.ts); everything after that is real input.
 
 const W = { w: 1600, h: 900 };
 const EIGHT = ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'seed', 'takes'];

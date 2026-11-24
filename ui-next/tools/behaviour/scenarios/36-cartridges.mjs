@@ -1,9 +1,8 @@
-// The instruments of package 3b, as scenarios that hold on the concept page too (run them there with --page): the
+// The instruments of package 3b, as scenarios: the
 // Adapters' cartridges (the adapter list, the stack, section masks and the runtime they force, phase windows, removing
 // with the directives renumbered, the planner adapter, Quick's flat cartridge, YuE2's pair and the column beside one
-// cartridge), and the planner's XY pad (its top-p off rail, its fade with the planner off). Each uses only what both
-// pages share (S, render, get, UNDO, the markup's data-* hooks and the concept's own classes, which the parts emit);
-// where a hook's value is a choice, it is compared without case (the concept's hooks hold the option's words).
+// cartridge), and the planner's XY pad (its top-p off rail, its fade with the planner off). Where a hook's value is a choice,
+// it is compared without case.
 
 const desk = (tier, mods, vals = {}, backend = 'ace', more = {}) => async t => {
   await t.js(() => { window.__c = { toast: () => (document.querySelector('#toast').hidden ? '' : document.querySelector('#toast .toast-msg')?.textContent || ''),

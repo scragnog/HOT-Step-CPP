@@ -245,7 +245,7 @@ On a short desk at 1920x1080 (and at 1536 and 1280 with the page at its end) a s
 neither 340px above it (the go bar is in the way) nor below it (the window ends), and the page cannot move. The concept
 then puts the menu beside its card, over the go bar, and shows all seven items. Its own later rule (F-28, pending there)
 says the menu never covers the go bar, so the rebuild stands it beside its card between the go bar and the window's
-foot, 293px of 340, and its last item scrolls in (deviation P6-4, RC-04). Covering the go bar for the moment the menu
+foot, 293px of 340, and its last item scrolls in (design decision P6-4, RC-04). Covering the go bar for the moment the menu
 is open would show everything at once; keeping the go bar clear keeps Generate and the queue in sight. Meanwhile: the
 go bar stays clear.
 
@@ -254,7 +254,7 @@ go bar stays clear.
 The existing frontend keeps saved seeds on the server (`ui/src/components/global-bar/SeedManagerDrawer.tsx`: `/seeds`,
 with favourites and a random pick) and parameter profiles per backend (`ui/src/services/api.ts`: `/profiles`). The
 rebuild keeps saved seeds as the Seed module's state (`stars`, a list kept with the desk in this browser, every change
-an undo step: deviation 32 in [09](09-architecture.md)), and has no profiles: its revisions (`hotstep.create.workflows`)
+an undo step: design decision 32 in [09](09-architecture.md)), and has no profiles: its revisions (`hotstep.create.workflows`)
 play their part, also in this browser.
 
 - Following the server: the seeds and the revisions (or profiles) become services of the boundary (`services/index.ts`),

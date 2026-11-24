@@ -1,10 +1,8 @@
-// The shared controls (package 1), each in a module the page draws today, as scenarios that hold on the concept page
-// too (run them there with --page): the number box, the length ruler with its auto switch and markers, the plugin
+// The shared controls (package 1), each in a module the page draws today, as scenarios:
+// the number box, the length ruler with its auto switch and markers, the plugin
 // picker's table, grid and filter, a Quick row's value between its choices, scrub tokens, a pill and the How
-// adventurous row, a checked text field that keeps or refuses what was typed, and a side unit's chip selector. Each uses
-// only what both pages share (S, render, get, toast, the markup's data-* hooks; an option is found by its words, since
-// the concept's data-opt is its label and the rebuild's its value, deviation 10). The pending ones state what the
-// concept gets wrong (S-18) and pass here.
+// adventurous row, a checked text field that keeps or refuses what was typed, and a side unit's chip selector. An
+// option is found by its words or its value (design decision 10).
 
 const desk = (tier, mods, vals = {}, backend = 'ace', pedals = []) => async t => {
   /* the selectors and the toast's words, for the checks (which run in the page) */

@@ -1,0 +1,16 @@
+{"motion":"prompt-grows","what":"the prompt box grows by lines; what is under it does not jump (the concept's does not ease here: its input handler measures the box twice, the second cancelling the first's ease)","commit":"3e66102542","steps":{
+"0":{".pc-foot":[502,283,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,630,444,390]},
+"16":{".pc-foot":[502,316.7,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,663.7,444,390]},
+"32":{".pc-foot":[502,344.7,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,691.7,444,390]},
+"48":{".pc-foot":[502,362,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,709,444,390]},
+"64":{".pc-foot":[502,371.9,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,718.9,444,390]},
+"80":{".pc-foot":[502,377.9,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,724.9,444,390]},
+"96":{".pc-foot":[502,381.6,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,728.6,444,390]},
+"112":{".pc-foot":[502,384.1,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,731.1,444,390]},
+"128":{".pc-foot":[502,385.7,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,732.7,444,390]},
+"144":{".pc-foot":[502,386.8,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,733.8,444,390]},
+"160":{".pc-foot":[502,387.4,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,734.4,444,390]},
+"176":{".pc-foot":[502,387.8,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,734.8,444,390]},
+"192":{".pc-foot":[502,388,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,735,444,390]},
+"208":{".pc-foot":[502,388,866,30],"#bento > .tile[data-m=\"tempo\"]":[485,735,444,390]}
+}}

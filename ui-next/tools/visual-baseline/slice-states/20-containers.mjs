@@ -1,14 +1,12 @@
 // Package 2's states (one file of tools/visual-baseline/slice-states/, gathered by slice-states.mjs): the containers
-// and read-outs compared where the concept draws them, as parts on their own (vb.mjs `parts`: each and everything under
+// and read-outs where the page draws them, as parts on their own (vb.mjs `parts`: each and everything under
 // it, with its role, name, words and attributes), since the tiles around them still hold parts later packages build:
 // the planner's terminal on every engine and with the planner off, the repetition guard on and off, Tempo's LCD, the
 // rack groups of Plan adherence and Latent & correction, the plans deck and its Endings, the re-planning dice, the flow
 // windows, the speed gauge, the Sampler's schedule strip and a YuE2 plugin's controls, the fader bank, the drop zones,
 // and the side units' objects.
 //
-//   node tools/visual-baseline/vb.mjs capture concept-containers --states slice --only "^containers-" --page <concept>/hotstep-tiers.html
-//   node tools/visual-baseline/vb.mjs capture rebuild-containers --states slice --only "^containers-" --plan-from concept-containers
-//   node tools/visual-baseline/vb.mjs compare concept-containers rebuild-containers --accept tools/visual-baseline/containers-accepted.json
+//   npm run visual:all -- --only "^containers$"            (and visual:approve, README.md)
 
 /* the concept's page as it is, its lyric sheet in place (package 4 draws it) */
 const scene = (bk, tier, mods, vals = {}, pedals = [], more = {}) => async h => {
@@ -61,5 +59,5 @@ export const STATES = [
 export const SCOPES = {};
 
 /** This file's visual set, for npm run visual:all (visual-all.mjs): the states it compares (
- *  a regular expression on their ids), the scope it compares them in, and its accepted differences. */
-export const VISUAL_SET = { name: 'containers', only: '^containers-', accept: 'containers-accepted.json' };
+ *  a regular expression on their ids) and the scope it compares them in. */
+export const VISUAL_SET = { name: 'containers', only: '^containers-' };
