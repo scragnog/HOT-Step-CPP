@@ -65,7 +65,8 @@ npm run visual:all -- --workers 3                    # pages at once (default: h
 For each set it runs `vb.mjs capture` on the concept with the set's `--only` and `--scope`, `capture` on the rebuild
 with the concept's plan (`--plan-from`), and `compare` with `--scope` and `--accept`; it prints one line per set (its
 states, and `identical` or the number of differences beyond the accepted ones, with the first few and the log's path)
-and a verdict, and exits 1 if any set differs or a state of `slice-states/` belongs to no set. It builds the test page
+and a verdict, and exits 1 if any set differs. A state of `slice-states/` that belongs to no set (a states file
+without its `VISUAL_SET`), or to two, fails the run at once, before anything is captured, naming the states. It builds the test page
 first when it is missing or older than the sources (`tools/test-build.mjs`). Logs go to `out/all-logs/`.
 
 The concept page does not change, so its recordings are kept (`out/all-concept-<set>-<key>`, one per set) and

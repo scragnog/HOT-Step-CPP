@@ -57,3 +57,6 @@ export const STATES = [
 export const SCOPES = {
   fields: ['#quickcol'],
 };
+
+/** Its visual set (visual-all.mjs). */
+export const VISUAL_SET = { name: 'fields', only: '^fields-', scope: 'fields', accept: 'fields-accepted.json' };
