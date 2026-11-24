@@ -125,6 +125,10 @@ static int yue2_guide_run(const Yue2GuideArgs & a) {
     Yue2MertEncodeResult  res;
     Yue2Guide             guide;
     bool ok = yue2_mert_encode(m, &g, pcm.data(), (int64_t) pcm.size(), opt, &res, &err);
+    if (ok && m.cfg.level_band) {
+        fprintf(stderr, "[yue2-guide] tokenizer level band [%.1f, %.1f] dBFS -> gain %+.2f dB\n", m.cfg.level_low,
+                m.cfg.level_high, res.level_gain_db);
+    }
     if (ok) {
         guide.T = res.T25;
         guide.K = a.topk;

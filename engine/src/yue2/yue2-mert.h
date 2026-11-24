@@ -222,6 +222,12 @@ struct Yue2MertConfig {
     bool     interpolate   = true;   // yue2tok.interpolate.mode != "none": resample to T25
     bool     instance_norm = true;   // yue2tok.instance_norm.enabled (absent = on)
     bool     fp16_store    = false;  // yue2tok.feature_store_f16.apply: round features to f16, always
+    // yue2tok.level.band_low/high (WannabeTokenizer V3 on): level the input
+    // into this gated-RMS band before the frontend (yue2_mert_fit_level).
+    // Absent = read the track as recorded.
+    bool     level_band    = false;
+    float    level_low     = 0.0f;   // dBFS
+    float    level_high    = 0.0f;
 };
 
 // ── Weights ─────────────────────────────────────────────────────────────────
@@ -380,6 +386,11 @@ static void yue2_mert_parse_config(const GGUFModel & gf, Yue2MertConfig * c) {
         c->instance_norm = gf_get_bool(gf, "yue2tok.instance_norm.enabled");
     }
     c->fp16_store = gf_get_bool(gf, "yue2tok.feature_store_f16.apply");
+    if (gguf_find_key(gf.gguf, "yue2tok.level.band_low") >= 0) {
+        c->level_band = true;
+        c->level_low  = gf_get_f32(gf, "yue2tok.level.band_low");
+        c->level_high = gf_get_f32(gf, "yue2tok.level.band_high");
+    }
 }
 
 // Structural sanity, not taste. Every check below corresponds to something the
@@ -450,6 +461,9 @@ static void yue2_mert_validate_config(const Yue2MertConfig & c, std::vector<std:
     }
     if (c.rope_inv_freq_in_file) {
         bad("rope.inv_freq_in_file is true — inv_freq is persistent=False upstream and MUST be built (pin §3.2)");
+    }
+    if (c.level_band && !(std::isfinite(c.level_low) && c.level_low < c.level_high && c.level_high <= 0.0f)) {
+        bad("yue2tok.level.band_low/high is not [low, high] dBFS with low < high <= 0");
     }
 }
 
@@ -1922,6 +1936,7 @@ struct Yue2MertEncodeResult {
     double                     graph_ms = 0.0;
     double                     post_ms  = 0.0;
     double                     total_ms = 0.0;
+    double                     level_gain_db = 0.0;  // the loudness fit's gain (cfg.level_band), 0 = none
 };
 
 namespace yue2_mert_detail {
@@ -1978,6 +1993,82 @@ static void interp_linear_time(const float * src, int64_t T_src, int64_t C, int6
     }
 }
 
+// WannabeTokenizer's loudness fit, mode "band" (wannabe_tokenizer/audio.py
+// fit_level / level_gain / level_db / limit_peaks), on the 24 kHz mono input.
+// One gain for the whole song from its gated RMS: the RMS over 40-ms frames
+// (960 samples) within 40 dB of the loudest frame. A song outside [lo, hi]
+// moves to the nearer edge; within 0.5 dB of it, or inside, it is left alone.
+// If the gained signal peaks past 0.98, a limiter pulls it under: per sample
+// the gain that keeps it at 0.98, min over +-10 ms, then averaged over the same
+// window (edges count only real samples). Returns the gain applied, in dB.
+static double fit_level_band(std::vector<float> * x, int rate, float lo, float hi) {
+    const int64_t n = (int64_t) x->size(), F = 960, nf = n / F;
+    std::vector<double> ms((size_t) nf);
+    double              top = 0.0;
+    for (int64_t f = 0; f < nf; f++) {
+        double s = 0.0;
+        for (int64_t i = 0; i < F; i++) {
+            s += (double) (*x)[f * F + i] * (*x)[f * F + i];
+        }
+        ms[f] = s / F;
+        top   = std::max(top, ms[f]);
+    }
+    if (nf == 0 || top <= 0.0) {
+        return 0.0;  // silence: -inf, no gain
+    }
+    double sum = 0.0;
+    int64_t kept = 0;
+    for (double v : ms) {
+        if (std::sqrt(v) > std::sqrt(top) * 0.01) {  // within 40 dB of the loudest frame
+            sum += v;
+            kept++;
+        }
+    }
+    const double level = 10.0 * std::log10(sum / kept);
+    const double goal  = std::min(std::max(level, (double) lo), (double) hi);
+    if (std::fabs(goal - level) < 0.5) {
+        return 0.0;
+    }
+    const double gain = goal - level;
+    const float  g    = (float) std::pow(10.0, gain / 20.0);
+    float        peak = 0.0f;
+    for (float & v : *x) {
+        v *= g;
+        peak = std::max(peak, std::fabs(v));
+    }
+    const float ceiling = 0.98f;
+    if (peak > ceiling) {
+        const int64_t      w = std::max(1, rate * 10 / 1000);
+        std::vector<float> need((size_t) n), lowest((size_t) n);
+        for (int64_t i = 0; i < n; i++) {
+            need[i] = std::min(1.0f, ceiling / std::max(std::fabs((*x)[i]), 1e-9f));
+        }
+        std::vector<int64_t> dq((size_t) n);  // sliding-window min, monotone deque over indices
+        int64_t              head = 0, tail = 0, next = 0;
+        for (int64_t i = 0; i < n; i++) {
+            for (; next < n && next <= i + w; next++) {
+                while (tail > head && need[dq[tail - 1]] >= need[next]) {
+                    tail--;
+                }
+                dq[tail++] = next;
+            }
+            while (dq[head] < i - w) {
+                head++;
+            }
+            lowest[i] = need[dq[head]];
+        }
+        std::vector<double> pre((size_t) n + 1, 0.0);
+        for (int64_t i = 0; i < n; i++) {
+            pre[i + 1] = pre[i] + lowest[i];
+        }
+        for (int64_t i = 0; i < n; i++) {
+            const int64_t a = std::max<int64_t>(0, i - w), b = std::min<int64_t>(n, i + w + 1);
+            (*x)[i] *= (float) ((pre[b] - pre[a]) / (double) (b - a));
+        }
+    }
+    return gain;
+}
+
 }  // namespace yue2_mert_detail
 
 // The full audio -> head-input chain (pin §3.7 plus ar_prep.py's instance
@@ -2021,6 +2112,12 @@ static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, cons
     const int64_t          C = (int64_t) c.embedding_length;
 
     *out        = Yue2MertEncodeResult{};
+    std::vector<float> leveled;
+    if (c.level_band) {
+        leveled.assign(pcm, pcm + n_samples);
+        out->level_gain_db = fit_level_band(&leveled, (int) c.sample_rate, c.level_low, c.level_high);
+        pcm                = leveled.data();
+    }
     out->chunks = yue2_mert_chunk_plan(c, n_samples);
     if (out->chunks.empty()) {
         if (err) {

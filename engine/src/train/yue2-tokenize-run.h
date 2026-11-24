@@ -582,6 +582,10 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
             }
             s.T25 = res.T25;
             total_encode_ms += res.total_ms;
+            if (m.cfg.level_band) {
+                fprintf(stderr, "[yue2-tokenize] %zu/%zu %s: tokenizer level band gain %+.2f dB\n", pi + 1,
+                        picked.size(), s.name.c_str(), res.level_gain_db);
+            }
             if (a.dump_mert) {
                 std::string f16(res.feat.size() * sizeof(ggml_fp16_t), '\0');
                 ggml_fp32_to_fp16_row(res.feat.data(), (ggml_fp16_t *) f16.data(), (int64_t) res.feat.size());

@@ -23,6 +23,8 @@
 #     reference's too (yue2-guide keeps top-K log-probs).
 #   * A one-frame delay: token t comes from feature frame t - offset
 #     (to_token_clock), frame 0 repeated.
+#   * V3 and later name a loudness band (head.level_band), written as
+#     yue2tok.level.band_low/high; the engine then levels the input first.
 #
 # The reference runs encoder and head under CUDA bf16 autocast, so a port gate is
 # an agreement rate, never bit-exactness (same posture as convert-yue2-tok.py).
@@ -96,6 +98,11 @@ def read_meta(path):
         die(f"{path}: head.instnorm={meta.get('head.instnorm')!r}; only 0 is supported")
     if int(meta.get("head.dim", CVQ_DIM)) != CVQ_DIM or int(meta.get("head.hidden", CVQ_HIDDEN)) != CVQ_HIDDEN:
         die(f"{path}: head dim/hidden {meta.get('head.dim')}/{meta.get('head.hidden')} != {CVQ_DIM}/{CVQ_HIDDEN}")
+    if "head.level_band" in meta:
+        band = json.loads(meta["head.level_band"])
+        if not (isinstance(band, list) and len(band) == 2 and all(type(x) in (int, float) for x in band)
+                and all(np.isfinite(band)) and band[0] < band[1] <= 0):
+            die(f"{path}: head.level_band {meta['head.level_band']!r} is not [low, high] dBFS with low < high <= 0")
     return meta, spec, cfg
 
 
@@ -155,6 +162,14 @@ def add_meta(b, outtype, name, meta, spec, sha):
     # author's own advice, and a blind ear test agreed. yue2-tokenize copies
     # this into the cache manifest; trainers and the renderer follow it.
     b.meta("add_bool", "yue2tok.companion", False)
+    # V3 on: the reference levels the 24 kHz mono before MERT (audio.fit_level,
+    # mode "band"): a song whose gated RMS is outside [low, high] dBFS moves to
+    # the nearest edge, peaks limited if that pushes them past 0.98. A file
+    # without these keys reads the track as recorded, as V1/V2 always did.
+    if "head.level_band" in meta:
+        lo, hi = json.loads(meta["head.level_band"])
+        b.meta("add_float32", "yue2tok.level.band_low", float(lo))
+        b.meta("add_float32", "yue2tok.level.band_high", float(hi))
 
     b.meta("add_string", "yue2tok.head.kind", "cvq")
     b.meta("add_uint32", "yue2tok.head.window", HEAD_WIN)

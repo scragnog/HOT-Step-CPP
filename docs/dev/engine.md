@@ -1149,6 +1149,19 @@ the top-64 went from 1.4% unguided to 37%, 83%, 96% and 100% at scales 0.25,
 TokenizerGuideLogitsProcessor; its log-space blend was replaced by the mixture
 because the log-space version barely moved at 0.5.
 
+A tokenizer GGUF that carries `yue2tok.level.band_low`/`band_high`
+(WannabeTokenizer V3, written by `convert-yue2-wannabe.py` from the checkpoint's
+`head.level_band`) levels the 24 kHz mono input inside `yue2_mert_encode()`, so
+`yue2-guide` and `yue2-tokenize` both get it. It ports the reference's
+`fit_level` in `band` mode: gated RMS over 40 ms frames within 40 dB of the
+loudest, one gain to the nearer band edge (none within 0.5 dB), then a limiter
+to 0.98 if the gained signal peaks past it. Both tools print the gain. A file
+without the keys (v9, Wannabe V1/V2) is read unchanged and its codes are
+bit-identical to before. On five 90 s test tracks (gains from -3.5 to +20.9
+dB, two through the limiter) the port's codes matched the reference's fp32 run
+on 98.9% to 99.5% of frames and its shipped bf16 run on about 91%, which is the
+reference's own fp32-to-bf16 agreement.
+
 The post-render cover drift check matches sung lyric blocks to like-labelled
 score sections in order, skipping instrumental tags and listing unmatched sung
 blocks. A section is unscored when its opening or full-block median MMS_FA word
