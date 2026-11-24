@@ -176,6 +176,11 @@ export interface ParamFace {
   /** The parameter applies only when this holds. Otherwise its control is hidden (a pedal keeps its room), its value
    *  is kept, it never shows as changed, and it is not sent. */
   when?: Condition;
+  /** While one of these holds the engine runs `value` whatever is chosen (a choice): it is shown pressed, the others
+   *  disabled with `tip`, and `says` beside them; the choice is kept and returns when none holds (Apply as is Runtime
+   *  while section directives or phase windows are set). The first that holds wins. Nothing sent changes: the server
+   *  forces it on its own. */
+  forced?: { when: Condition; value: Value; says: Text; tip: Text }[];
   wire: Wire;
 }
 
@@ -346,6 +351,8 @@ export interface Size {
   stretch?: number;
   /** As a strip it keeps its width, so it holds the row it will take. */
   stripKeepsWidth?: true;
+  /** One column at Quick and Studio while this holds (the Adapters with one cartridge: S-14). */
+  narrowWhen?: Condition;
 }
 
 /** A thumbnail is a drawing in the thumbnail kit's classes (src/css/30-thumbnails.css in the concept), kept as an

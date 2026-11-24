@@ -420,7 +420,7 @@ export function partAct(ix: Index, node: Node, v: PartProps, desk: Desk, name: s
   return f({ ix, node, v, desk, arg, tell }) !== false;
 }
 export type Tell = (m: Msg, undo?: boolean) => void;
-interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
+export interface ActIn { ix: Index; node: Node; v: PartProps; desk: Desk; arg: unknown; tell: Tell }
 
 /** Sets the seed and its lock in one step (the seed state's `set`): a number kept, or null for random. */
 function setSeed(x: ActIn, seed: number | string | null): void {
@@ -509,3 +509,13 @@ const ACTS: { [part: string]: { [name: string]: (x: ActIn) => boolean | void } }
     },
   },
 };
+
+/* ---------------------------------------------------------------- instruments a core file of its own adds
+   A package's core file draws its own parts and works out their hands, and adds them here when it is loaded
+   (derive.ts loads it): derive/cartridges.ts, the Adapters' cartridges and the XY pad's off rail. */
+
+/** Adds a part's drawing (instrumentModel) and the hands it takes (partAct). */
+export function defineInstrument(part: string, draw?: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel, acts?: { [name: string]: (x: ActIn) => boolean | void }): void {
+  if (draw) { if (DRAW[part]) throw new Error(`the instrument "${part}" is drawn twice`); DRAW[part] = draw; }
+  if (acts) ACTS[part] = { ...ACTS[part], ...acts };
+}

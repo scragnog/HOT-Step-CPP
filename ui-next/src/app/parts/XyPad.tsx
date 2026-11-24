@@ -14,8 +14,11 @@ export function XyPad(v: PartView) {
   const say = useSay();
   const el = useRef<HTMLDivElement>(null), motion = useRef<Motion>(newMotion());
   const [px, py] = v.params as [ParamView | undefined, ParamView | undefined];
-  const fx = px?.at ?? 0, fy = py?.at ?? 0;
-  useLayoutEffect(() => { if (el.current) toTarget(el.current, motion.current, fx, 1 - fy); });
+  /* a pad whose Y minimum means off draws off as a rail along its top, past the plot's widest end: the core says where
+     the puck stands on the plot, or that it is on the rail (E-28, E-32; package 3b) */
+  const rail = v.instrument?.rail, fx = px?.at ?? 0, fy = rail ? rail.at : py?.at ?? 0;
+  const plotH = (t: HTMLElement) => Math.max(1, t.clientHeight - xyBox(t)[1] - 2 * XY_IN);
+  useLayoutEffect(() => { const t = el.current; if (t) toTarget(t, motion.current, fx, 1 - (rail?.off ? 1 + 6 / plotH(t) : fy)); });
   useEffect(() => { const m = motion.current; return () => stopMotion(m); }, []);
   if (!px || !py || !px.range || !py.range) return null;
 
@@ -27,7 +30,7 @@ export function XyPad(v: PartView) {
     let ax = (e.clientX - r.left - SL - XY_IN) / W, ay = 1 - (e.clientY - r.top - XY_IN) / H;
     if (e.shiftKey && m.fine) { ax = m.fine.fx + (e.clientX - m.fine.x) / W / 10; ay = m.fine.fy - (e.clientY - m.fine.y) / H / 10; }
     m.fine = e.shiftKey ? { x: e.clientX, y: e.clientY, fx: Math.min(1, Math.max(0, ax)), fy: Math.min(1, Math.max(0, ay)) } : null;
-    v.batch(() => { px.toFraction(ax); py.toFraction(ay); });
+    v.batch(() => { px.toFraction(ax); if (rail) v.act('y', { f: ay, over: ay > 1 + 3 / plotH(t) }); else py.toFraction(ay); });
   };
   const down = (e: PointerEvent<HTMLDivElement>) => {
     e.preventDefault(); const t = e.currentTarget, m = motion.current;
@@ -48,7 +51,8 @@ export function XyPad(v: PartView) {
     e.preventDefault();
     const p = axis ? py : px, ends = e.key === 'Home' || e.key === 'End';
     if (ends) v.gesture.end('key'); else { if (!e.repeat) v.gesture.end('key'); v.gesture.begin('key'); }
-    working(true); p.press(e.key, e.shiftKey); nudge();
+    /* Y on a pad with an off rail moves by the rail's rule (the core's) */
+    working(true); if (axis && rail) v.act('yKey', { key: e.key, shift: e.shiftKey }); else p.press(e.key, e.shiftKey); nudge();
   };
   const reset = () => { working(true); v.batch(() => { px.reset(); py.reset(); }); working(false); };
 
@@ -57,15 +61,17 @@ export function XyPad(v: PartView) {
   const corner = (i: number) => (v.words[`corners.${i}`] ? say(v.words[`corners.${i}`]) : '');
   const cap = (a: string, b: string, w: string) => (a || b ? <div className={`xy-cap ${w}`} aria-hidden="true"><span>{a}</span><span>{b}</span></div> : null);
   const corners = [0, 1, 2, 3].map(corner), look = v.opts.look ? `xy-${v.opts.look as string}` : '';
+  /* with what it moves not used (the planner off) it stands back and says so, and stays operable (Q-17; package 3b) */
   const pad = (
-    <div ref={el} className={`xy ${look} `} data-xy={`${px.key}|${py.key}`} tabIndex={0} role="slider" aria-roledescription={say(ui('xy.role'))}
-      aria-label={say(ui('xy.label', { x: xl, y: yl }))} title={say(ui('xy.title', { x: xl, y: yl }))}
+    <div ref={el} className={`xy ${look} ${rail ? 'has-yoff' : ''}${rail?.off ? ' y-off' : ''}`} data-xy={`${px.key}|${py.key}`} {...(rail ? { 'data-yoff': '' } : {})} {...(v.dim ? { 'data-dim': '' } : {})} tabIndex={0} role="slider" aria-roledescription={say(ui('xy.role'))}
+      aria-label={say(ui('xy.label', { x: xl, y: yl }))} title={say(v.dim ?? ui('xy.title', { x: xl, y: yl }))}
       aria-valuetext={say(ui('xy.text', { x: px.label, xv: px.text, y: py.label, yv: py.text }))} aria-valuemin={px.range[0]} aria-valuemax={px.range[1]} aria-valuenow={px.value as number}
       onPointerDown={down} onPointerMove={e => { if (motion.current.dragging) setAt(e); }} onPointerUp={up} onPointerCancel={up}
       onKeyDown={key} onKeyUp={() => { v.gesture.end('key'); working(false); }} onDoubleClick={reset}>
       <canvas className="xy-trail" aria-hidden="true" /><i className="xy-grid" aria-hidden="true" />
       <i className="xy-h" /><i className="xy-v" /><i className="xy-tx" /><i className="xy-ty" />
       <b className="xy-dot"><i className="ring" /><i className="core" /></b><span className="xy-tip" aria-hidden="true"><b>{say(px.text)}</b><span>·</span><b>{say(py.text)}</b></span>
+      {rail ? <i className="xy-rail" aria-hidden="true"><span>{v.words.yOff ? say(v.words.yOff) : null}</span></i> : null}
       <span className={`xy-ax x${px.changed ? ' changed' : ''}`} data-ctl={px.key}>{`${say(xl)} `}<output data-xyx="">{say(px.text)}</output></span>
       <span className={`xy-ax y${py.changed ? ' changed' : ''}`} data-ctl={py.key}>{`${say(yl)} `}<output data-xyy="">{say(py.text)}</output></span>
     </div>
@@ -73,4 +79,4 @@ export function XyPad(v: PartView) {
   return corners.some(Boolean) ? <div className={`xy-frame ${look ? look + '-frame' : ''}`}>{cap(corners[0]!, corners[1]!, 'cap-t')}{pad}{cap(corners[2]!, corners[3]!, 'cap-b')}</div> : pad;
 }
 
-definePart('xyPad', XyPad);
+definePart('xyPad', XyPad, { dims: true });

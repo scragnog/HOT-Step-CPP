@@ -181,7 +181,7 @@ export function LedButton(v: PartView) {
   if (!p) return null;
   const on = p.value === true;
   return (
-    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} onClick={() => p.set(!on)}>
+    <button type="button" className={`led-btn${on ? ' on' : ''}${p.changed ? ' changed' : ''}`} data-ledtog={p.key} data-ctl={p.key} aria-pressed={on} title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on)}>
       <i />{say(v.label)}
     </button>
   );
@@ -341,6 +341,19 @@ Each is in `src/derive/` with a test in tools/test-view.ts, and none has a branc
   it took (`Change.named`), so a gesture of several (a region dragged) is named by it. `derive/desk.ts nodeShown`: a
   bespoke part that houses children stands, on an engine without what it edits, while one of them does (the key wheel
   houses Tempo's LCD).
+- Package 3b: `derive/cartridges.ts` (`InstrumentModel.carts`: the Adapters' cartridges, each with its housing, label
+  art, name in pieces, faders, share, phase window and section masks; the empty slot, the planner adapter, the column
+  beside one cartridge, the adapters loaded but not used, what another engine keeps, Quick's line, the adapter lists;
+  the hands `load`, `remove`, `planner`, `phase`, `mask` through the slots state's steps; `directivesOf`,
+  `setDirective`, `dropDirectiveSlot`, `phaseMove`, `adapterLists`, `adaptersAway`; and the XY pad's off rail:
+  `InstrumentModel.rail`, `xyRail`, `xyRailValue`, `xyRailKey`, the hands `y` and `yKey`), registered through
+  `derive/instruments.ts defineInstrument(part, draw, acts)`, so a core file of its own adds instruments without editing
+  instruments.ts' tables. The definitions: `ParamFace.forced` (a choice the engine runs at another value while a
+  condition holds: shown pressed, the others disabled, what returns after said; `strings.ts forcedOf`,
+  `ParamModel.forced`, an option's `off`, `KidModel.forced`), `Size.narrowWhen` (one column at Quick and Studio while it
+  holds), `Desk.lists` entries' `kind`; a fader's `name` and `tape` (`ControlModel.fader`: "Self-Attn strength", its
+  short tape carrying the full name, V-01); a bespoke part that holds children it places itself is given their `kids`;
+  a state's named step may say its own `{from}` and `{to}` (a phase window's span).
 - `derive/steps.ts stepName`: a parameter is named with its owner when another parameter **on the desk** prints the same
   words, so adding a module no one has put on the desk renames nothing (SL-13).
 - `derive/workflows.ts` (package 7): the user's saved work. One rule for names (`normName`, `nameKey`, `sameName`: NFC,
@@ -467,6 +480,21 @@ pad's corner words, the scope's power switch (`look: 'scope'`), a row that is a 
 (`.padrow`, `.padside`) or a row of plugin pickers (`.picks`), the Sampler's well holding its pickers beside its numbers
 (`.with-picks`), a note's `cap` and `hint` looks, an LCD word's changed mark, and a word written into a number box put
 back.
+
+**Package 3b (the Adapters' cartridges; the planner's XY pad: its top-p off rail and its fade with the planner off)** adds
+`acceptance/3b-cartridges.json` (18 scenarios: 10 of `scenarios/36-cartridges.mjs`, which hold on the concept page too,
+and 8 of the concept's suite), `switches/3b-cartridges.json` (46 features), `slice-states/31-cartridges.mjs` (17
+states, compared with `cartridges-accepted.json`) and `tools/test-cartridges.ts` (in `npm run check`). Its parts are
+`parts/Cartridges.tsx` (cartridges, placing its node's children: Quick's strength row, the stack bar, the fader banks,
+the foot) and `parts/CartArt.tsx` (the label art); `features/adapters.tsx` runs the named actions `loadAdapter` and
+`loadPlannerAdapter` (the adapter list, in the page's popover: package 8's `features/pop.ts openPop`) and
+tells the page the installed adapters (`services/adapters.ts`) and what another engine keeps (`adaptersAway`, from the
+engines' book; `store/desk.ts told` takes it). The Adapters' face is restructured: the cartridges node holds what stands
+around the cartridges. The Repetition guard, Mastering and the side units were drawn whole by packages 1 and 2 and match
+the concept. Parts of others given what these modules show: the fader bank's heading (its small words and the rebase
+row on its line), a labelled pairing's `rebase` look, a symbol label and the `forced` mark, a segmented choice's disabled
+options and forced note, the fader's tape tip and name, the LED switch's tip, the XY pad's rail and standing back,
+Quick's How adventurous standing back with its note.
 
 **Package 7 (workflows, revisions, drafts, storage)** adds `acceptance/7-workflows.json` (40 scenarios: 21 of the
 concept's suite, three of them pending there: F-17, F-36, S-17; 14 of `scenarios/33-workflows.mjs`, nine of which hold
@@ -647,6 +675,20 @@ Package 11's (the Concept notes and the engine log):
 - P11-7. **The notes' × and the log's Close say their type** (deviation 6). The notes button and the VRAM meter open
   their overlays through a delegated click, the meter's `aria-expanded` set by the log as it opens and closes, so the top
   bar (package 5's) is not edited; the same markup and behaviour as the concept's.
+
+43. **The empty Adapters tile is its definition's strip**, drawn by the tile: its buttons run the named actions and carry
+    none of the concept's hooks (`data-cartadd`, `data-plannerpick` on the strip; deviation 10). The cartridges' own
+    buttons keep them.
+44. **A phase window's and a section mask's steps** are named as the concept names them (L-01, L-09), and their Undo and
+    Redo toasts say that name; the concept's said "… back to 0–100%". Several masks painted in one drag join their
+    files in the core's English ("Section masks of a and b").
+45. **Apply as while runtime is forced** is the definition's `forced` (ParamFace): the segmented choice draws it,
+    wherever a choice has one; what is sent does not change (the server forces runtime itself).
+46. **The LED switch carries its parameter's tip** wherever it has one (E-17: the plans' Endings); the concept wrote
+    those three by hand.
+47. **The planner adapter's list holds the server's planner LM adapters** (`adapters.lm`, told by
+    features/adapters.tsx from services/adapters.ts), as `ad.planner`'s options; their value is the file, their words
+    the concept's ("folk-voice-planner (LoRA)").
 
 The doctype (the review's deviation 1) is gone: the page is in standards mode; `styles/rebuild/10-standards.css` keeps
 the two boxes that would move (the engine caret and the LCD picker's arrows) where the concept draws them. Deviations
