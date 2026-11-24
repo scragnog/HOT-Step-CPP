@@ -88,7 +88,7 @@ export function Cartridges(v: PartView) {
         {plannerCart
           ? <button type="button" className="x" data-setv={`${c.ctl}|None`} aria-label={say(c.remove)} onClick={() => v.act('planner', '')}><Icon name="x" size={12} /></button>
           : <button type="button" className="x" data-cartx={c.i} aria-label={say(c.remove)} onClick={e => remove(e, c.i)}><Icon name="x" size={12} /></button>}
-        <div className={`label-art${art.still ? ' still' : ''}`} data-adart={key} style={{ '--p': art.p, '--spin': art.spin } as CSSProperties}><CartArt a={art} /></div>
+        <div className={`label-art${art.still ? ' still' : ''}`} data-adart={key} style={(art.spin ? { '--p': art.p, '--spin': art.spin } : { '--p': art.p }) as unknown as CSSProperties}><CartArt a={art} /></div>
         <span className="lab" title={c.full}><span className="lab-n">{c.name.map((s, i) => <Fragment key={i}>{i ? <wbr /> : null}{s}</Fragment>)}</span><em>{say(c.em)}</em></span>
         {c.split ? <div className="fdr-pair">{c.faders.map(f => fader(f))}</div> : c.faders.length ? fader(c.faders[0]!) : c.note !== null ? <span className="pl-note">{say(c.note)}</span> : null}
         {c.eff && !c.phase ? <span className="eff" data-eff={c.i}>{say(c.eff)}</span> : null}

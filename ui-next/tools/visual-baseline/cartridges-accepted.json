@@ -1,0 +1,75 @@
+{
+ "about": "Package 3b's accepted differences between the concept's page and the rebuild's in its states (slice-states/31-cartridges.mjs), each with its reason and its exact count (vb.mjs compare --accept). A difference these do not cover fails the comparison; a count that changes fails it too.",
+ "accepted": [
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:type$",
+   "n": 108,
+   "why": "Deviation 11 (slice-accepted.json): every button and input carries its type."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:(role|name|aria-label|data-v)$",
+   "n": 122,
+   "why": "Deviations 6 and 10: a segmented choice is a named group (role, name, aria-label: 22 each), and a choice's data-v is its value, not its words (56)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^sem:data-(base|setq|setn|setv)$",
+   "n": 15,
+   "why": "Deviation 10: the concept's delegation hooks on Quick's choice rows (data-setq, data-setn, data-base) and on Stack them (data-setv) are absent; the rebuild's buttons run their own actions."
+  },
+  {
+   "state": "^cartridges-(quick-|mood-)",
+   "key": "",
+   "field": "^sem:title$",
+   "n": 11,
+   "why": "Package 1's choice row says what each choice sets as the page writes the value (\"Slot 1: 0.50\", \"Temperature: 0.40\"); the concept printed the bare number (controls-accepted.json counts the same kind)."
+  },
+  {
+   "state": "",
+   "key": "",
+   "field": "^line-height$",
+   "n": 24,
+   "why": "Standards mode (slice-accepted.json): the LCD picker's arrows on the Rebase on picker take no line height; drawn in the same place."
+  },
+  {
+   "state": "^cartridges-(xy-planner-off|mood-planner-off)",
+   "key": "",
+   "field": "^sem:data-dim$",
+   "n": 2,
+   "why": "The pad and How adventurous stand back by their own mark (data-dim, styles/rebuild/25-planner.css) where the concept fades them from the tile's lm-off class: the same opacity, the same words."
+  },
+  {
+   "state": "^cartridges-mm3-lab$",
+   "key": "",
+   "field": "^sem:title$",
+   "n": 1,
+   "why": "The Plan fader carries its parameter's tip on its slot (package 2's containers-accepted.json counts the same); the concept says it on the bank's heading only, as the rebuild's heading does too."
+  },
+  {
+   "state": "^cartridges-xy-topp-off$",
+   "key": "",
+   "field": "^sem:title$",
+   "n": 1,
+   "why": "The planner's pad keeps the XY pad's own how-to as its tip; the concept's planner empties it after painting (25-module-planner.js), for no reason it states."
+  },
+  {
+   "state": "^cartridges-yue-lab-two-dark$",
+   "key": "",
+   "field": "^sem:title$",
+   "n": 1,
+   "why": "A rebase row always carries a tip, empty while it has none (the concept's ACE-Step row does so; its YuE2 row has none)."
+  },
+  {
+   "state": "^cartridges-list$",
+   "key": "#pop",
+   "field": "^animation-name$",
+   "n": 1,
+   "why": "The adapter list opens below its button where the concept's opened above it (the desk's layout puts the tile a few pixels higher here); placed by the same rule, its arrival animation follows the side."
+  }
+ ]
+}

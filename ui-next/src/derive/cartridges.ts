@@ -240,7 +240,8 @@ const TYPES = ['LoRA', 'LoKr', 'DoRA'];
 const typeOf = (t: string) => (TYPES.includes(t) ? t : 'LoRA');
 function artOf(type: string, file: string, strength: number | null): CartArt {
   const p = strength === null ? 0.6 : clamp(strength / 2, 0, 1), t = typeOf(type);
-  const base = { p, spin: p > 0 ? (1.6 / p).toFixed(2) + 's' : '4s', still: strength !== null && p === 0, cells: [], head: null };
+  /* a cartridge without a strength of its own (the planner's) stands at .6 and does not spin */
+  const base = { p, spin: strength === null ? '' : p > 0 ? (1.6 / p).toFixed(2) + 's' : '4s', still: strength !== null && p === 0, cells: [], head: null };
   if (t === 'LoKr') {
     const A = [[1, 0.45], [0.7, 0.9]], B = [[1, 0.3, 0.8], [0.5, 1, 0.35]], cells: CartArt['cells'] = [];
     for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) cells.push({ x: String(+(18 + c * 8.2).toFixed(1)), y: String(+(9 + r * 8.2).toFixed(1)), v: (A[r >> 1]![(c / 3) | 0]! * B[r & 1]![c % 3]!).toFixed(2) });

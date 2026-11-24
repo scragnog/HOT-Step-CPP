@@ -41,8 +41,12 @@ const setOpen = (o: typeof open) => { open = o; subs.forEach(f => f()); };
 /** Closes the open list; focus goes back to its button. */
 function close(refocus = true) { const a = open?.anchor; a?.setAttribute('aria-expanded', 'false'); setOpen(null); if (refocus && a?.isConnected) a.focus({ preventScroll: true }); }
 const useOpen = () => useSyncExternalStore(f => { subs.add(f); return () => subs.delete(f); }, () => open);
+/* the button a hand pressed last: the list opens under it (a click does not focus a button everywhere) */
+let pressed: HTMLElement | null = null;
+document.addEventListener('click', e => { pressed = (e.target as HTMLElement | null)?.closest?.('button') ?? null; }, true);
 const toggle = (which: 'slot' | 'planner') => () => {
-  const a = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  const f = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+  const a = pressed?.isConnected ? pressed : f;
   setOpen(open && open.which === which && open.anchor === a ? null : { which, anchor: a });
 };
 defineAction('loadAdapter', toggle('slot'));
@@ -66,7 +70,8 @@ export function AdapterList() {
   useLayoutEffect(() => {
     const pop = document.getElementById('pop'); if (!pop) return;
     pop.hidden = !list; if (!list || !o) { pop.removeAttribute('aria-label'); return; }
-    pop.setAttribute('aria-label', say(list.head));
+    /* named, as every popover is, for the button that opened it (17-popover.js openPop) */
+    pop.setAttribute('aria-label', o.anchor?.getAttribute('aria-label') || o.anchor?.textContent?.trim() || say(list.head));
     const a = o.anchor?.isConnected ? o.anchor.getBoundingClientRect() : null, vw = document.documentElement.clientWidth, w = pop.offsetWidth, h = pop.offsetHeight, gap = 6, edge = 12;
     if (a) {
       const below = innerHeight - edge - a.bottom - gap, above = a.top - gap - edge, up = h > below && above > below;

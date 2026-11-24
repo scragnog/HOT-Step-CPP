@@ -604,7 +604,7 @@ export const adapters = {
         /* 7 on: the foot */
         { part: 'labelled', label: 'Stack', engines: ['ace'], children: [{ part: 'segmented', param: 'ad.adv' }], tiers: ['studio', 'lab'] },
         { part: 'labelled', label: 'Apply as', engines: ['ace', 'minimax-m3'], children: [{ part: 'segmented', param: 'ad.mode' }], tiers: ['studio', 'lab'] },
-        { part: 'note', text: 'Merged into the model at load', engines: ['yue2'], tiers: ['studio', 'lab'] },
+        { part: 'note', text: 'Merged into the model at load', opts: { look: 'plain' }, engines: ['yue2'], tiers: ['studio', 'lab'] },
         { part: 'labelled', label: 'Precision', tip: 'Full, Q8 (half the VRAM) or Q4 (a quarter)', children: [{ part: 'segmented', param: 'ad.rq' }], tiers: ['studio', 'lab'] },
         { part: 'labelled', label: 'Precision', tip: 'HQ, or Low (a quarter of the VRAM)', children: [{ part: 'segmented', param: 'ad.mq' }], tiers: ['studio', 'lab'] },
         { part: 'pill', param: 'ad.dora', label: 'DoRA magnitudes', tiers: ['lab'] },

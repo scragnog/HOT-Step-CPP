@@ -3,7 +3,7 @@
 // stand are the core's (derive/cartridges.ts CartArt); --p on the art's box moves them. Not a part: the cartridges and
 // the adapter list (features/adapters.tsx) draw it.
 
-import type { CSSProperties } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import { ui, useSay } from '../kit/index.ts';
 
 export interface ArtModel { kind: 'tape' | 'chip' | 'vec'; cells: { x: string; y: string; v: string }[]; head: { x: string; y: string } | null }
@@ -19,7 +19,7 @@ export function CartArt({ a }: { a: ArtModel }) {
   const say = useSay();
   if (a.kind === 'chip') return (
     <svg viewBox="0 0 84 50" className="art chip-art" aria-hidden="true">
-      {[0, 1, 2, 3, 4].map(i => <g key={i}><line className="pin" x1={22 + i * 10} y1="2" x2={22 + i * 10} y2="6" /><line className="pin" x1={22 + i * 10} y1="44" x2={22 + i * 10} y2="48" /></g>)}
+      {[0, 1, 2, 3, 4].map(i => <Fragment key={i}><line className="pin" x1={22 + i * 10} y1="2" x2={22 + i * 10} y2="6" /><line className="pin" x1={22 + i * 10} y1="44" x2={22 + i * 10} y2="48" /></Fragment>)}
       <rect className="chip-body" x="14" y="6" width="56" height="38" rx="4" />
       {a.cells.map((c, i) => <rect key={i} className="chip-cell" x={c.x} y={c.y} width="7" height="7" rx="1" style={{ opacity: `calc(${c.v} * (0.18 + var(--p, .5) * 0.82))` } as CSSProperties} />)}
     </svg>
