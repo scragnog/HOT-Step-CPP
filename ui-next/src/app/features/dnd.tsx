@@ -180,11 +180,11 @@ document.addEventListener('drop', e => {
     return;
   }
   const d = defOfItem(id); if (!d) return;
-  let r: string = 'there';
+  let r: ReturnType<typeof s.add> = { did: 'there', step: null };
   flushSync(() => { r = s.add(d.id, before); });
   packNow(make());
-  if (r !== 'added') return;
-  sayParked(d.id);
+  if (r.did !== 'added') return;
+  sayParked(d.id, r.step);
   const sel = d.kind === 'module' ? `.tile[data-m="${d.id}"] .grip` : d.kind === 'unit' ? `[data-xid="${d.id}"] .u-pow` : `[data-pid="${d.id}"] .foot, [data-pid="${d.id}"] .px`;
   /* what arrived is brought into view by the shortest scroll, as the concept's flash does (30-desk.js) */
   requestAnimationFrame(() => { const el = document.querySelector<HTMLElement>(sel); el?.focus({ preventScroll: true }); el?.closest('.tile, .pedal')?.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); });

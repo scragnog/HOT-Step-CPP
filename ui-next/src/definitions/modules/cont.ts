@@ -23,6 +23,7 @@ export const cont = {
       kind: 'file',
       noun: 'the recording',
       steps: { load: 'Load {file} to continue from' },
+      tells: ['load'],
       owner: 'song',
       stored: 'none',
       wire: { to: 'content:yue2Continuation', via: 'continuation' },

@@ -9,8 +9,8 @@
 // own on purpose).
 
 import { flushSync } from 'react-dom';
-import type { Node, Value } from '../../../definitions/types.ts';
-import { applyChange, bindPart, has, isAuto, setValue, valueOf } from '../../../derive.ts';
+import type { Value } from '../../../definitions/types.ts';
+import { applyChange, has, isAuto, paramSetter, setValue, valueOf } from '../../../derive.ts';
 import { ix } from '../../model/index.ts';
 import { useDesk } from '../../store/desk.ts';
 import { asScene, expose, fromConcept, onMirror, type Scene } from '../compat.ts';
@@ -55,7 +55,7 @@ export function install(): void {
       /* the values one script sets at once (one t.do) are one step, as the concept's gesture of its own merges them */
       const s0 = useDesk.getState();
       if (!s0.gesture?.startsWith('script|')) { s0.beginGesture('script|'); queueMicrotask(() => useDesk.getState().endGesture('script|')); }
-      flushSync(() => bindPart(ix, hit.d, { part: 'knob', param: key } as Node, () => useDesk.getState().desk, c => useDesk.getState().commit(c, 'script')).params[key]?.set(x));
+      flushSync(() => paramSetter(ix, key, () => useDesk.getState().desk, c => { useDesk.getState().commit(c, 'script'); })?.set(x));
     },
     paintPromptTools() { take(written()); },
   });

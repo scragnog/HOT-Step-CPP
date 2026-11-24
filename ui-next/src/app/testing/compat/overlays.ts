@@ -33,7 +33,7 @@ export function install(): void {
   queueMicrotask(() => expose({
     addItem(id: string, before?: string | null) {
       const d = itemOf(id); if (!d) return;
-      flushSync(() => { if (useDesk.getState().add(d.id, before ?? undefined) === 'lab') offerLab(d.id); });
+      flushSync(() => { if (useDesk.getState().add(d.id, before ?? undefined).did === 'lab') offerLab(d.id); });
     },
   }));
 }

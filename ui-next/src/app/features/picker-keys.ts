@@ -54,13 +54,13 @@ export const pickerOpen = (): boolean => usePicker.getState().open && !usePicker
 export function activate(id: string): void {
   const s = useDesk.getState(), d = defOfItem(id); if (!d) return;
   const r = s.add(d.id);
-  if (r === 'lab') {
+  if (r.did === 'lab') {
     flushSync(() => usePicker.setState({ info: { kind: 'item', id } }));
     document.querySelector<HTMLElement>('#pkInfo [data-labadd]')?.focus();
     return;
   }
-  if (r === 'there') { closePicker(); ring(d.id, d.kind === 'module' ? 'flash' : 'here'); return; }
-  sayParked(d.id);
+  if (r.did === 'there') { closePicker(); ring(d.id, d.kind === 'module' ? 'flash' : 'here'); return; }
+  sayParked(d.id, r.step);
   /* the keys stay on it, and then the line says what arrived (its focus would say what it is) */
   flushSync(() => usePicker.setState({ rove: id }));
   document.querySelector<HTMLElement>(`#pickerWrap .fl-it[data-pkid="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });

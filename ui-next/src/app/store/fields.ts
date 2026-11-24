@@ -147,7 +147,7 @@ function retext(param: string, text: string): void {
     const def = JSON.stringify(valueOf(ix, param, { ...desk, vals: {} }));
     const same = (p: string, a: string | undefined, b: string | undefined) => a === b || (p === path && (a ?? def) === (b ?? def));
     const gone = [...new Set([...after.keys(), ...e.before.keys()])].every(p => same(p, after.get(p), e.before.get(p)));
-    useDesk.setState({ desk: next, undo: gone ? s.undo.filter(x => x !== e) : s.undo.map(x => (x === e ? { ...e, after } : x)) });
+    s.amendStep(e, gone ? null : after, next);
     return;
   }
   const words = stepWords(ix, desk, next); if (!words) return;

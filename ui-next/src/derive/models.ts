@@ -25,7 +25,7 @@ import { autoEstimate, controlModel, type ControlModel } from './controls.ts';
 import { kidsOf, type KidModel } from './containers.ts';
 import { readoutModel, type ReadoutModel } from './readouts.ts';
 import { instrumentModel, type InstrumentModel } from './instruments.ts';
-import { mmss, stateOf } from './core.ts';
+import { mmss, onOf, stateOf } from './core.ts';
 import type { Json } from '../definitions/types.ts';
 import { modelRows, type ModelRow } from './vram.ts';
 import { promptModel, sheetModel, type PromptModel, type SheetModel } from './fields.ts';
@@ -528,7 +528,7 @@ export function boardOrder(ix: Index, ids: Iterable<string>): string[] {
   return [...of('pedal'), ...of('unit')];
 }
 /** The desk a first visit starts on. */
-export const emptyDesk = (ix: Index): Desk => ({ engine: ENGINES[0]!.id, tier: 'quick', vals: {}, auto: {}, state: {}, on: new Set(ix.defs.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id)) });
+export const emptyDesk = (ix: Index): Desk => ({ engine: ENGINES[0]!.id, tier: 'quick', vals: {}, auto: {}, state: {}, on: onOf(ix, [], []) });
 
 /* ---------------------------------------------------------------- the Modules panel */
 

@@ -155,3 +155,12 @@ export function bindPart(ix: Index, d: Definition, node0: Node, deskIn: Desk | (
     children: [],
   };
 }
+
+/** A value set from outside any part (what the page does for the user: Reuse puts a song's words in the box, "Use N
+ *  takes" sets the count, a pedal's foot switch on the board): that parameter's setter alone, on the desk in force,
+ *  cleaned and named as a control's change is. The one way in for a value no node of the caller binds; undefined when
+ *  the parameter is not on the desk's engine or its definition is not on the desk. */
+export function paramSetter(ix: Index, key: string, desk: () => Desk, commit: (c: Change) => void, tell?: (m: Msg) => void): BoundParam | undefined {
+  const hit = ix.params.get(key); if (!hit) return undefined;
+  try { return bindPart(ix, hit.d, { part: 'knob', param: key } as Node, desk, commit, tell).params[key]; } catch { return undefined; }
+}

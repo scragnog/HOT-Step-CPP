@@ -253,6 +253,9 @@ export interface StateDef {
    *  Slots: {file}, {from}, {to}, and any the step's caller fills ({n}, {section}). A file has `load` and `clear`
    *  without saying (docs/05, "Undo step names"). */
   steps?: { [step: string]: Step };
+  /** The steps the page says in a toast with Undo when the part takes them (E-23: a recording loaded to continue
+   *  from); every other step is said only by Undo and Redo. */
+  tells?: string[];
   owner: Owner;
   stored: Stored;
   wire: Wire | { engines: EngineId[]; wire: Wire }[];

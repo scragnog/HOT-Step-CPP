@@ -28,7 +28,7 @@ export function HiddenNote() {
 }
 
 /* a starter adds its module and focus lands on it (Q-16) */
-const addStarter = (id: string) => { if (useDesk.getState().add(id) === 'added') useDesk.getState().setFocus(`.tile[data-m="${id}"] .grip`); };
+const addStarter = (id: string) => { if (useDesk.getState().add(id).did === 'added') useDesk.getState().setFocus(`.tile[data-m="${id}"] .grip`); };
 
 export function Desk() {
   const say = useSay(), m = useModel(s => deskModel(ix, s.desk, s.mods), 'desk');

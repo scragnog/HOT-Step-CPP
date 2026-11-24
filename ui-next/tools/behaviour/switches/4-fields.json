@@ -15,7 +15,7 @@
     { "feature": "line estimate", "file": "src/derive/fields.ts", "find": "const t = estimateTempo(ix, desk, bpmKey, boxKey_), bpm = t.bpm ?? 120;", "replace": "const t = estimateTempo(ix, desk, bpmKey, undefined), bpm = t.bpm ?? 120;" },
     { "feature": "sheet grows", "file": "src/app/parts/textGrow.ts", "find": "  const h = t.scrollHeight + 2;", "replace": "  const h = 160;" },
     { "feature": "suggestions", "file": "src/derive/fields.ts", "find": "if (LYRICISH.test(shown) && !STRUCT.test(shown) && lyricsHere)", "replace": "if (LYRICISH.test('') && !STRUCT.test(shown) && lyricsHere)" },
-    { "feature": "tempo brings", "file": "src/app/features/prompt-tools.ts", "find": "    if (!brings) { useDesk.setState({ desk: d }); return; }", "replace": "    { useDesk.setState({ desk: d }); return; }" },
+    { "feature": "tempo brings", "file": "src/app/features/prompt-tools.ts", "find": "    const r = brings ? addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone) : null;", "replace": "    const r = brings && false ? addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone) : null;" },
     { "feature": "lyrics focus", "file": "src/app/features/prompt-tools.ts", "find": "requestAnimationFrame(() => field(LYRICS_FIELD)?.focus({ preventScroll: true }))", "replace": "void LYRICS_FIELD" },
     { "feature": "write for me", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('promptWrite', arg => {", "replace": "defineAction('promptWrite', arg => { return;" },
     { "feature": "compose", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('composeCaption', () => {", "replace": "defineAction('composeCaption', () => { return;" },

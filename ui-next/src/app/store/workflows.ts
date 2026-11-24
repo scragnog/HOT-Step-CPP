@@ -17,10 +17,10 @@ import {
   applyDraft, draftLoaded, draftStep, draftTitle, dropRevision, dropWorkflow, emptySaved, findRevision, findWorkflow, importRevision, layoutOf, loadRevision, loadStep, loadedWords,
   mergeDrafts, mergeSaved, msg, newestDrafts, openStep, putRevision, putWords, putWorkflow, readDrafts, readSaved, recordStep, renameRevision, renameWorkflow, revNameClash, revisionIndex,
   revisionOf, sameName, savedFile, START_FRESH, storeSkipped, storeUnreadable, switchEngine, unloadedFiles, wfNameClash, whatRevision, whatWorkflow, workflowIndex, workflowModified, workflowOf,
-  draftOf, DRAFT_MAX, type Desk, type Msg, type Open, type RevId, type Saved, type Slot, type StoredDraft,
+  draftOf, DRAFT_MAX, onOf, type Desk, type Msg, type Open, type RevId, type Saved, type Slot, type StoredDraft,
 } from '../../derive.ts';
 import { engineName } from '../../definitions/engines.ts';
-import { BUILT_IN, ix } from '../model/index.ts';
+import { ix } from '../model/index.ts';
 import { defineUndoable } from '../register/undoable.ts';
 import { useDesk, type Entry } from './desk.ts';
 import { readStored, keepAside, tellOnBoot, writeStored } from './stored.ts';
@@ -151,7 +151,7 @@ defineUndoable('workflow', {
 /* ---------------------------------------------------------------- the desk's parts, for the steps below */
 
 const desk = () => useDesk.getState();
-const onSet = (mods: readonly string[], board: readonly string[]) => new Set([...BUILT_IN, ...mods, ...board]);
+const onSet = (mods: readonly string[], board: readonly string[]) => onOf(ix, mods, board);
 /** What the desk becomes, worked out before it is applied: the parts a step sets at once. */
 interface Plan { desk: Desk; book: ReturnType<typeof desk>['book']; mods: string[]; board: string[] }
 const now = (): Plan => { const s = desk(); return { desk: s.desk, book: s.book, mods: s.mods, board: s.board }; };
@@ -163,10 +163,9 @@ function onEngine(p: Plan, e: EngineId): Plan {
   const sw = switchEngine(ix, p.desk, p.book, e), mods = p.mods.filter(m => sw.desk.on.has(m)), board = p.board.filter(b => sw.desk.on.has(b));
   return { desk: { ...sw.desk, on: onSet(mods, board) }, book: sw.book, mods, board };
 }
-const apply = (p: Plan) => useDesk.setState({ desk: p.desk, book: p.book, mods: p.mods, board: p.board });
+const apply = (p: Plan) => desk().applyDesk(p);
 const putOf = (from: Plan, to: Plan) => putWords(ix, from.desk, to.desk, from.mods.join() !== to.mods.join(), from.board.join() !== to.board.join());
-const lastEntry = (): Entry | undefined => desk().undo[desk().undo.length - 1];
-const undoAction = (e: Entry | undefined) => (e ? { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } : undefined);
+const undoAction = (e: Entry | null) => (e ? { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } : undefined);
 const toast = (text: Slot, action?: { label: Slot; run: () => void }) => desk().showToast({ text, ...(action ? { action } : {}) });
 
 /* ---------------------------------------------------------------- opening and loading */
@@ -177,12 +176,12 @@ export function openWorkflow(name: string, o: { tier?: boolean; revert?: boolean
   const f = findWorkflow(useWf.getState().saved, name); if (!f) return;
   const w = f.w, from = now(), keepRev = o.revert && useWf.getState().open.workflow === w.name;
   const to = laid(from, w);
-  desk().deskStep(openStep(w.name, !!o.revert, putOf(from, to)), () => {
+  const e = desk().deskStep(openStep(w.name, !!o.revert, putOf(from, to)), () => {
     apply(o.tier ? { ...to, desk: { ...to.desk, tier: w.tier } } : to);
     const s = useWf.getState();
     useWf.setState({ open: keepRev ? { ...s.open, workflow: w.name } : { workflow: w.name, revision: null, revFor: null }, fold: false });
   });
-  toast(msg(o.revert ? 'wf.reverted' : 'wf.opened', { name: w.name }), undoAction(lastEntry()));
+  toast(msg(o.revert ? 'wf.reverted' : 'wf.opened', { name: w.name }), undoAction(e));
 }
 
 /** Loads a revision: its workflow's layout (not on Revert, which puts back only what a revision holds: C-03), its
@@ -192,11 +191,11 @@ export function loadRev(id: RevId, user: boolean, revert = false): void {
   const w = findWorkflow(st.saved, id.workflow)?.w, keepDesk = revert && st.open.workflow === id.workflow;
   const from = now(), moved = onEngine(w && !keepDesk ? laid(from, w) : from, r.engine);
   const to: Plan = { ...moved, desk: loadRevision(ix, moved.desk, r).desk }, unloaded = unloadedFiles(ix, moved.desk, to.desk);
-  desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {
+  const e = desk().deskStep(loadStep(r.name, revert, putOf(from, to)), () => {
     apply(to);
     useWf.setState({ open: { workflow: id.workflow, revision: r.name, revFor: r.engine }, expanded: [...new Set([...useWf.getState().expanded, id.workflow])], fold: false });
   });
-  toast(loadedWords(ix, id.workflow, r, to.desk, from.desk.engine !== r.engine, unloaded, revert), undoAction(lastEntry()));
+  toast(loadedWords(ix, id.workflow, r, to.desk, from.desk.engine !== r.engine, unloaded, revert), undoAction(e));
 }
 
 /* ---------------------------------------------------------------- saving */
@@ -385,6 +384,6 @@ export function deleteDraft(id: string): void {
 export function loadDraft(id: string): void {
   const d = useWf.getState().drafts.find(x => x.id === id); if (!d) return;
   const from = now(), moved = onEngine(from, d.engine), to: Plan = { ...moved, desk: applyDraft(ix, moved.desk, d) }, t = draftTitle(d);
-  desk().deskStep(draftStep('draftLoad', typeof t === 'string' ? t.slice(0, 24) : t, putOf(from, to)), () => apply(to));
-  toast(draftLoaded(d, from.desk.engine !== d.engine), undoAction(lastEntry()));
+  const e = desk().deskStep(draftStep('draftLoad', typeof t === 'string' ? t.slice(0, 24) : t, putOf(from, to)), () => apply(to));
+  toast(draftLoaded(d, from.desk.engine !== d.engine), undoAction(e));
 }

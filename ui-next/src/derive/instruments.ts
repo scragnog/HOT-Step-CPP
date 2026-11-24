@@ -91,13 +91,19 @@ export interface InstrumentModel {
   blend?: { pct: Slot };
 }
 
-/** What a bespoke part draws on the desk, or undefined for a part this file does not draw. */
+/* the one registry of instruments: what each bespoke part draws and the hands it takes, filled only by defineInstrument
+   (below: this file's own, package 3a's; derive/cartridges.ts, build.ts, recording.ts and score.ts theirs) */
+const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {};
+const ACTS: { [part: string]: Acts } = {};
+
+/** What a bespoke part draws on the desk, or undefined for a part no instrument draws. */
 export function instrumentModel(ix: Index, node: Node, desk: Desk, key: string): InstrumentModel | undefined {
   const f = DRAW[node.part];
   return f ? f(ix, node, desk, key) : undefined;
 }
 
-const DRAW: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {
+/* package 3a's instruments: what each draws, and (HANDS, below) the hands each takes */
+const DRAWN: { [part: string]: (ix: Index, node: Node, desk: Desk, key: string) => InstrumentModel } = {
   keyWheel: (ix, node, desk) => ({ wheel: wheelOf(ix, node, desk) }),
   capChips: (ix, node, desk) => ({ caps: { chips: capOffer(node, desk).map(text => ({ text, on: capHas(textOf(ix, node.param, desk), text) })) } }),
   splitFlap: (ix, node, desk) => ({ flap: flapOf(ix, node, desk) }),
@@ -287,7 +293,9 @@ export function sigmasOf(ix: Index, node: Node, desk: Desk): number[] {
   const k = scopeKeys(node), ts = customTs(ix, desk, k.ts);
   if (ts) return ts;
   const n = clamp(num(ix, desk, k.steps, 12), 1, 300), shOk = !!k.shift && applies(ix, k.shift, desk);
-  const sh = !shOk ? (desk.engine === 'ace' ? 3 : 1) : isAuto(ix, k.shift!, desk) ? 3 : num(ix, desk, k.shift, 3);
+  /* a shift that does not apply, or is on auto, is drawn at its default on the engine (the definition's), else 1 */
+  const sh0 = k.shift && has(ix, k.shift, desk.engine) ? Number(resolve(ix.params.get(k.shift)!.p, desk.engine).default) : 1;
+  const sh = !shOk || isAuto(ix, k.shift!, desk) ? sh0 : num(ix, desk, k.shift, sh0);
   const sc = k.sched && applies(ix, k.sched, desk) ? labelOf(ix, k.sched, desk) ?? 'Linear' : 'Linear';
   const g = (r: ScopeRead, d: number) => num(ix, desk, k[r], d);
   let f: (t: number) => number;
@@ -418,7 +426,7 @@ function seedList(x: ActIn): { key: string; list: SavedSeed[] } | null {
   return key && x.v.state[key] ? { key, list: cleanSeeds(x.v.state[key]!.value) } : null;
 }
 
-const ACTS: { [part: string]: Acts } = {
+const HANDS: { [part: string]: Acts } = {
   keyWheel: {
     /* a key on the wheel, from the value in force */
     walk: x => {
@@ -505,3 +513,4 @@ export function defineInstrument(part: string, draw?: (ix: Index, node: Node, de
   if (draw) { if (DRAW[part]) throw new Error(`the instrument "${part}" is drawn twice`); DRAW[part] = draw; }
   if (acts) ACTS[part] = { ...ACTS[part], ...acts };
 }
+for (const part of new Set([...Object.keys(DRAWN), ...Object.keys(HANDS)])) defineInstrument(part, DRAWN[part], HANDS[part]);

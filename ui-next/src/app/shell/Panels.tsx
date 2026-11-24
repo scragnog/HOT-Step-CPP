@@ -64,12 +64,12 @@ export function ModulesPanel({ open, set }: { open: boolean; set: (v: boolean) =
   const add = (d: Definition, card: HTMLElement) => {
     const s = useDesk.getState(), r = s.add(d.id), name = tileName(d, s.desk);
     /* a Lab module outside Lab offers Lab in the popover by its card (package 8) */
-    if (r === 'lab') { offerLab(d.id, card); return; }
-    if (r !== 'added') return;
+    if (r.did === 'lab') { offerLab(d.id, card); return; }
+    if (r.did !== 'added') return;
     /* adding from a drawer closes it (31-side-panels.js) */
     closeDrawer(false);
     useDesk.getState().say(ui('added', { name }));
-    sayParked(d.id);
+    sayParked(d.id, r.step);
   };
   const keys = (e: KeyboardEvent<HTMLDivElement>, d: Definition) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!e.repeat) add(d, e.currentTarget); return; }

@@ -17,9 +17,9 @@
 // layer translates both ways, by the definitions' labels, so the tools' scenes mean what they meant on the concept.
 
 import { flushSync } from 'react-dom';
-import type { EngineId, Node, Value } from '../../definitions/types.ts';
+import type { EngineId, Value } from '../../definitions/types.ts';
 import { ENGINES } from '../../definitions/engines.ts';
-import { bindPart, cleanValues, has, resolve, valueOf } from '../../derive.ts';
+import { cleanValues, has, resolve, valueOf } from '../../derive.ts';
 import { usePanelStore } from '../store/panels.ts';
 import { BOARD, BUILT_IN, OFFERED, PEDALS as PEDAL_DEFS, UNITS, boardOrder, defOf, ix } from '../model/index.ts';
 import { useDesk, type DeskStore } from '../store/desk.ts';
@@ -119,8 +119,7 @@ function toast(m: string, act?: { label: string; fn: () => void }): void {
 function setVal(key: string, v: unknown): void {
   const s = useDesk.getState(), x = fromConcept(key, v, s.desk.engine), hit = ix.params.get(key);
   if (x === undefined || !hit || !has(ix, key, s.desk.engine)) return;
-  const bound = bindPart(ix, hit.d, { part: 'knob', param: key } as Node, () => useDesk.getState().desk, c => useDesk.getState().commit(c)).params[key];
-  flushSync(() => bound?.set(x));
+  flushSync(() => { useDesk.getState().setValue(key, x as never); });
 }
 
 /** The catalogue as the concept lists it: modules by id (with `only`, `lab`, `source`), pedals, side units. */

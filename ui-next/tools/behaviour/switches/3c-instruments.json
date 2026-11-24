@@ -165,9 +165,9 @@
   },
   {
    "feature": "3c load told",
-   "file": "src/app/features/instruments-3c.ts",
-   "find": "  s.showToast({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });",
-   "replace": "  void ({ text: e.words.label, action: { label: { id: 'ui.undo' }, run: () => useDesk.getState().runUndo(e) } });"
+   "file": "src/app/render/bind.ts",
+   "find": "if (e && ix.states.get(k)?.s.tells?.includes('load')) useDesk",
+   "replace": "if (e && !ix.states.get(k)?.s.tells?.includes('load')) useDesk"
   },
   {
    "feature": "3c file length",
@@ -280,8 +280,8 @@
   {
    "feature": "3c sessions told",
    "file": "src/app/store/build.ts",
-   "find": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, build, recording } } });",
-   "replace": "  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, recording } } });"
+   "find": "  s.told({ sessions: { build, recording } });",
+   "replace": "  s.told({ sessions: { recording } });"
   }
  ]
 }

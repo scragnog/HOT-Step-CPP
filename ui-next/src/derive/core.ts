@@ -153,6 +153,11 @@ export const has = (ix: Index, key: string, e: EngineId): boolean => {
 
 /** Its values are in force: it is built in, or on the desk. */
 export const onDesk = (d: Definition, desk: Desk): boolean => (d.kind === 'module' && !!d.builtIn) || desk.on.has(d.id);
+/** The modules built into the page (the prompt, the lyric sheet, the models): always on the desk, never tiles. */
+export const builtInIds = (ix: Index): string[] => ix.defs.filter(d => d.kind === 'module' && d.builtIn).map(d => d.id);
+/** What is on the desk (`Desk.on`): the built-in modules, the modules in the user's order and the board. The one
+ *  statement of it: the store, a saved desk read back, a workflow laid out and the tools all ask here. */
+export const onOf = (ix: Index, mods: Iterable<string>, board: Iterable<string>): Set<string> => new Set([...builtInIds(ix), ...mods, ...board]);
 /** The same desk with every definition on it: for what is about stored values whatever the desk shows (what an engine
  *  switch puts aside and holds, what a revision saves). */
 export const everythingOn = (ix: Index, desk: Desk): Desk => ({ ...desk, on: new Set(ix.defs.map(d => d.id)) });

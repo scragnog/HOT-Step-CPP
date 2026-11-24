@@ -25,7 +25,7 @@ const tell = () => {
   const s = useDesk.getState(), file = s.desk.state[RECORDING];
   if (typeof file === 'string' && file && recording[file] === undefined) recording = { ...recording, [file]: recordings.length(file) };
   if (s.desk.sessions?.build === build && s.desk.sessions?.recording === recording) return;
-  useDesk.setState({ desk: { ...s.desk, sessions: { ...s.desk.sessions, build, recording } } });
+  s.told({ sessions: { build, recording } });
 };
 told(); tell();
 buildSession.subscribe(() => { told(); tell(); });
