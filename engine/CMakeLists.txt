@@ -816,6 +816,11 @@ link_ggml_backends(bs-roformer-test)
 add_executable(mdx23c-test tools/mdx23c-test.cpp)
 link_ggml_backends(mdx23c-test)
 
+# dettato-drums-test: validate the drum stage against the Python oracle.
+add_executable(dettato-drums-test tools/dettato-drums-test.cpp)
+target_link_libraries(dettato-drums-test PRIVATE yyjson)
+link_ggml_backends(dettato-drums-test)
+
 # ace-midi: MuScriptor audio->MIDI transcription (GGML port, in development —
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
 add_executable(ace-midi tools/ace-midi.cpp)

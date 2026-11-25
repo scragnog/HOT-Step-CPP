@@ -22,6 +22,7 @@
 // Gate: yue2-probe --sheetsage-refined-heads against
 // engine/tools/sheetsage2-refined-oracle.py dumps.
 
+#include "../cpu-gru.h"
 #include "gguf.h"
 #include "ggml.h"
 
@@ -317,33 +318,6 @@ static void ss2r_linear_rows(const SheetSageHeadLinear & l, const float * x, int
     });
 }
 
-// One GRU direction over x [n, in_dim] -> y columns [off, off+H) of a [n, 2H] buffer.
-static void ss2r_gru_dir(const SheetSageHeadGru & g, const float * gx, int64_t n, bool reverse, float * y,
-                         int64_t y_stride, int64_t y_off) {
-    const int H = g.hh.n_in;
-    std::vector<float> h((size_t) H, 0.0f), gh((size_t) 3 * H);
-    for (int64_t s = 0; s < n; s++) {
-        const int64_t t  = reverse ? n - 1 - s : s;
-        const float * gi = gx + t * 3 * H;  // W_ih x + b_ih, precomputed
-        for (int o = 0; o < 3 * H; o++) {
-            const float * wr  = g.hh.w.data() + (size_t) o * H;
-            float         acc = 0.0f;
-            for (int i = 0; i < H; i++) {
-                acc += wr[i] * h[(size_t) i];
-            }
-            gh[(size_t) o] = acc + g.hh.b[(size_t) o];
-        }
-        float * yr = y + t * y_stride + y_off;
-        for (int i = 0; i < H; i++) {
-            const float r  = ss2r_sigmoid(gi[i] + gh[(size_t) i]);
-            const float z  = ss2r_sigmoid(gi[H + i] + gh[(size_t) (H + i)]);
-            const float nn = std::tanh(gi[2 * H + i] + r * gh[(size_t) (2 * H + i)]);
-            h[(size_t) i]  = (1.0f - z) * nn + z * h[(size_t) i];
-            yr[i]          = h[(size_t) i];
-        }
-    }
-}
-
 // Full bidirectional multi-layer GRU on x [n, hidden] -> [n, hidden].
 static void ss2r_bigru(const SheetSageHead & hd, const float * x, int64_t n, std::vector<float> * out) {
     const int H2 = hd.hidden;
@@ -354,8 +328,10 @@ static void ss2r_bigru(const SheetSageHead & hd, const float * x, int64_t n, std
         std::vector<float> gxf((size_t) (n * gf.ih.n_out)), gxb((size_t) (n * gb.ih.n_out));
         ss2r_linear_rows(gf.ih, cur.data(), n, gxf.data());
         ss2r_linear_rows(gb.ih, cur.data(), n, gxb.data());
-        std::thread tb([&] { ss2r_gru_dir(gb, gxb.data(), n, true, next.data(), H2, H2 / 2); });
-        ss2r_gru_dir(gf, gxf.data(), n, false, next.data(), H2, 0);
+        std::thread tb([&] {
+            cpu_gru::dir(gb.hh.n_in, gb.hh.w.data(), gb.hh.b.data(), gxb.data(), n, true, next.data(), H2, H2 / 2);
+        });
+        cpu_gru::dir(gf.hh.n_in, gf.hh.w.data(), gf.hh.b.data(), gxf.data(), n, false, next.data(), H2, 0);
         tb.join();
         cur.swap(next);
     }

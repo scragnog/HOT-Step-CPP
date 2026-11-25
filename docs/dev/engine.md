@@ -133,6 +133,26 @@ The Node server starts `ace-server` with `--models`, `--host` and `--port`, and 
 data folder (`server/src/services/aceEngineProcess.ts`). The app's default port is
 8085; the binary's own default is 8080.
 
+### Dettato drum validation
+
+The native Dettato drum stage in [drums.h](../../engine/src/dettato/drums.h)
+loads the released drum weights and config. It takes mono samples at the
+original source rate and skips sources below 40 kHz. The features are
+computed at 44.1 and 16 kHz. The kit and orchestral models run on the CPU,
+with song-level attention and a per-song router. Drum frame numbers are
+at 50 fps.
+
+Build the standalone dettato-drums-test target and pass a model directory,
+fixture WAV and CPU capture directory from the
+[Dettato reference](../../tools/dettato-reference/README.md).
+
+    dettato-drums-test <model-dir> <fixture.wav> <capture-dir>/cpu [both|fed|audio] [threads]
+
+The default mode checks probabilities from the captured features, then
+repeats the inference from the WAV. Both modes compare the router choice
+and value and match the hits from both branches on key and frame. The
+32 kHz fixture checks the source-rate skip.
+
 ### ace-midi speculative decoding
 
 `ace-midi --draft-model <dir> [--speculative-k 1-4]` ports upstream MuScriptor PR #95.
