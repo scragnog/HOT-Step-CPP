@@ -8,7 +8,10 @@
   "offsets_within_20ms_min": 0.9816643159379408,
   "unmatched_oracle_onset_prob_max": 0.30240464210510254,
   "pitched_velocity_within_2_min": 0.9910233393177738,
-  "same_track_min": 0.7158131682611142,
+  "same_track_of_oracle_min": 0.7070594774874931,
+  "coverage_min": 0.9877709838799333,
+  "grouper_replay_max_abs": 0.44140625,
+  "grouper_replay_same_track_min": 0.7027151403589508,
   "fixtures_failing_name_check": [
    "src-32k",
    "t1-synthpop-vocal",
@@ -133,6 +136,7 @@
    "oracle_notes": 6,
    "other_notes": 6,
    "matched": 6,
+   "coverage": 1.0,
    "f1": 1.0,
    "same_track": 1.0,
    "same_track_of_oracle": 1.0,
@@ -154,6 +158,23 @@
    "other_hits": 0,
    "matched": 0,
    "f1": 1.0
+  },
+  "grouper_replay": {
+   "notes": 10,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.01833072304725647,
+    "emb": 0.00280744768679142,
+    "h": 0.0390625,
+    "win.emb": 0.00279998779296875,
+    "win.probs": 0.018310546875
+   },
+   "notes_grouped_cpu": 6,
+   "notes_grouped_cuda": 6,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "detune-30c": {
@@ -270,6 +291,7 @@
    "oracle_notes": 282,
    "other_notes": 283,
    "matched": 282,
+   "coverage": 1.0,
    "f1": 0.9982300884955753,
    "same_track": 1.0,
    "same_track_of_oracle": 1.0,
@@ -291,6 +313,23 @@
    "other_hits": 0,
    "matched": 0,
    "f1": 1.0
+  },
+  "grouper_replay": {
+   "notes": 287,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.011423051357269287,
+    "emb": 0.0037653185427188873,
+    "h": 0.0751953125,
+    "win.emb": 0.0037841796875,
+    "win.probs": 0.01123046875
+   },
+   "notes_grouped_cpu": 287,
+   "notes_grouped_cuda": 287,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "long-260s": {
@@ -407,6 +446,7 @@
    "oracle_notes": 1649,
    "other_notes": 1650,
    "matched": 1646,
+   "coverage": 0.9981807155852032,
    "f1": 0.9978781448923917,
    "same_track": 0.9975698663426489,
    "same_track_of_oracle": 0.9957550030321407,
@@ -430,6 +470,23 @@
    "f1": 0.9938800489596084,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 1.0
+  },
+  "grouper_replay": {
+   "notes": 1841,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.08133509755134583,
+    "emb": 0.025952845811843872,
+    "h": 0.3623046875,
+    "win.emb": 0.0294189453125,
+    "win.probs": 0.09765625
+   },
+   "notes_grouped_cpu": 1841,
+   "notes_grouped_cuda": 1841,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "silence-10s": {
@@ -543,7 +600,9 @@
    "oracle_notes": 0,
    "other_notes": 0,
    "matched": 0,
+   "coverage": 1.0,
    "same_track": 1.0,
+   "same_track_of_oracle": 1.0,
    "names_ok": true
   },
   "drums": {
@@ -559,6 +618,13 @@
    "other_hits": 0,
    "matched": 0,
    "f1": 1.0
+  },
+  "grouper_replay": {
+   "notes": 0,
+   "gaps": {},
+   "same_track": 1.0,
+   "coverage": 1.0,
+   "names_ok": true
   }
  },
  "src-32k": {
@@ -687,6 +753,7 @@
    "oracle_notes": 517,
    "other_notes": 523,
    "matched": 516,
+   "coverage": 0.9980657640232108,
    "f1": 0.9923076923076923,
    "same_track": 0.7441860465116279,
    "same_track_of_oracle": 0.7427466150870407,
@@ -713,6 +780,28 @@
    "other_hits": 0,
    "matched": 0,
    "f1": 1.0
+  },
+  "grouper_replay": {
+   "notes": 520,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.12039712071418762,
+    "emb": 0.0322587788105011,
+    "h": 0.44140625,
+    "win.emb": 0.037841796875,
+    "win.probs": 0.14208984375
+   },
+   "notes_grouped_cpu": 520,
+   "notes_grouped_cuda": 520,
+   "coverage": 1.0,
+   "same_track": 0.7519230769230769,
+   "big_track_name_mismatches": [
+    {
+     "oracle": "synth_bass",
+     "other": null
+    }
+   ],
+   "names_ok": false
   }
  },
  "t1-synthpop-vocal": {
@@ -829,6 +918,7 @@
    "oracle_notes": 1799,
    "other_notes": 1790,
    "matched": 1777,
+   "coverage": 0.9877709838799333,
    "f1": 0.9902479799387016,
    "same_track": 0.7158131682611142,
    "same_track_of_oracle": 0.7070594774874931,
@@ -861,6 +951,32 @@
    "f1": 0.9962640099626401,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 1.0
+  },
+  "grouper_replay": {
+   "notes": 2173,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.025969862937927246,
+    "emb": 0.008540406823158264,
+    "h": 0.1416015625,
+    "win.emb": 0.008544921875,
+    "win.probs": 0.02587890625
+   },
+   "notes_grouped_cpu": 2173,
+   "notes_grouped_cuda": 2173,
+   "coverage": 1.0,
+   "same_track": 0.7027151403589508,
+   "big_track_name_mismatches": [
+    {
+     "oracle": "electric_guitar",
+     "other": "acoustic_guitar"
+    },
+    {
+     "oracle": "acoustic_guitar",
+     "other": "piano"
+    }
+   ],
+   "names_ok": false
   }
  },
  "t2-funk-drums": {
@@ -977,6 +1093,7 @@
    "oracle_notes": 517,
    "other_notes": 523,
    "matched": 516,
+   "coverage": 0.9980657640232108,
    "f1": 0.9923076923076923,
    "same_track": 0.9961240310077519,
    "same_track_of_oracle": 0.9941972920696325,
@@ -1000,6 +1117,23 @@
    "f1": 0.9940079893475366,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 1.0
+  },
+  "grouper_replay": {
+   "notes": 520,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.03901374340057373,
+    "emb": 0.004113897681236267,
+    "h": 0.053955078125,
+    "win.emb": 0.0045166015625,
+    "win.probs": 0.04345703125
+   },
+   "notes_grouped_cpu": 520,
+   "notes_grouped_cuda": 520,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "t3-solo-piano": {
@@ -1116,6 +1250,7 @@
    "oracle_notes": 286,
    "other_notes": 286,
    "matched": 286,
+   "coverage": 1.0,
    "f1": 1.0,
    "same_track": 1.0,
    "same_track_of_oracle": 1.0,
@@ -1137,6 +1272,23 @@
    "other_hits": 0,
    "matched": 0,
    "f1": 1.0
+  },
+  "grouper_replay": {
+   "notes": 291,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.016934514045715332,
+    "emb": 0.0040364861488342285,
+    "h": 0.10302734375,
+    "win.emb": 0.0040283203125,
+    "win.probs": 0.01953125
+   },
+   "notes_grouped_cpu": 291,
+   "notes_grouped_cuda": 291,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "t4-jazz-trio-sax": {
@@ -1253,6 +1405,7 @@
    "oracle_notes": 803,
    "other_notes": 803,
    "matched": 800,
+   "coverage": 0.9962640099626401,
    "f1": 0.9962640099626401,
    "same_track": 0.9975,
    "same_track_of_oracle": 0.9937733499377335,
@@ -1276,6 +1429,23 @@
    "f1": 0.9985775248933144,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 1.0
+  },
+  "grouper_replay": {
+   "notes": 837,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.10804307460784912,
+    "emb": 0.038099177181720734,
+    "h": 0.38720703125,
+    "win.emb": 0.0380859375,
+    "win.probs": 0.1083984375
+   },
+   "notes_grouped_cpu": 837,
+   "notes_grouped_cuda": 837,
+   "coverage": 1.0,
+   "same_track": 0.997610513739546,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "t5-folk-vocal": {
@@ -1392,6 +1562,7 @@
    "oracle_notes": 557,
    "other_notes": 558,
    "matched": 557,
+   "coverage": 1.0,
    "f1": 0.9991031390134529,
    "same_track": 0.9964093357271095,
    "same_track_of_oracle": 0.9964093357271095,
@@ -1415,6 +1586,23 @@
    "f1": 0.967741935483871,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 0.0
+  },
+  "grouper_replay": {
+   "notes": 710,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.06062549352645874,
+    "emb": 0.013132750988006592,
+    "h": 0.170654296875,
+    "win.emb": 0.01318359375,
+    "win.probs": 0.060546875
+   },
+   "notes_grouped_cpu": 710,
+   "notes_grouped_cuda": 710,
+   "coverage": 1.0,
+   "same_track": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  },
  "t6-orchestral": {
@@ -1531,6 +1719,7 @@
    "oracle_notes": 579,
    "other_notes": 584,
    "matched": 579,
+   "coverage": 1.0,
    "f1": 0.9957007738607051,
    "same_track": 0.9136442141623489,
    "same_track_of_oracle": 0.9136442141623489,
@@ -1559,6 +1748,23 @@
    "f1": 1.0,
    "velocity_within_2": 1.0,
    "max_velocity_diff": 1.0
+  },
+  "grouper_replay": {
+   "notes": 660,
+   "window_layout_equal": true,
+   "gaps": {
+    "probs": 0.01872396469116211,
+    "emb": 0.007440239191055298,
+    "h": 0.1162109375,
+    "win.emb": 0.0074462890625,
+    "win.probs": 0.0185546875
+   },
+   "notes_grouped_cpu": 660,
+   "notes_grouped_cuda": 660,
+   "coverage": 1.0,
+   "same_track": 0.9242424242424242,
+   "big_track_name_mismatches": [],
+   "names_ok": true
   }
  }
 }

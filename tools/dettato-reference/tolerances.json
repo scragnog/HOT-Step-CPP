@@ -4,7 +4,20 @@
   "upstream_spread": "spread.json: upstream's own cpu run against its own cuda (bfloat16) run, same fixtures. A GPU backend of the port may not be worse than this spread on any gate, per fixture; a gate below is the CPU-backend limit and also the GPU limit wherever the spread is inside it.",
   "fed_tensors": {
     "note": "each stage is given its captured input",
-    "cpu": {"max_absolute_error_strictly_less_than": 0.001, "tensors": ["maps.* (six)", "sub.maps.* (six)", "grouper.probs (per-note instrument probabilities)", "grouper.win.probs", "drums.kit", "drums.kit_vel", "drums.drum", "drums.timpani", "drums.vel"]},
+    "cpu": {
+      "max_absolute_error_strictly_less_than": 0.001,
+      "tensors": [
+        "maps.* (six)",
+        "sub.maps.* (six)",
+        "grouper.probs (per-note instrument probabilities)",
+        "grouper.win.probs",
+        "drums.kit",
+        "drums.kit_vel",
+        "drums.drum",
+        "drums.timpani",
+        "drums.vel"
+      ]
+    },
     "non_finite": "any non-finite value fails",
     "added_by_slice_1_not_in_the_plan": {
       "taps_float16": "sub.tap.hidden and sub.tap.stem: |a - b| <= 0.001 + 2^-10 * |reference| elementwise (one float16 rounding step)",
@@ -31,10 +44,21 @@
   },
   "grouper": {
     "host_decode_given_captured_embeddings": "every note in the same track, exactly (grouper.emb, grouper.probs, grouper.win.*, groups in result.json)",
-    "from_audio": {"same_track_after_best_matching_at_least": 0.95, "same_instrument_name_on_tracks_holding_at_least_share_of_notes": 0.10},
-    "gpu": "the spread on the same fixture where lower"
+    "from_audio": {
+      "coverage": "matched notes / the oracle's pitched notes, same pitch, onset within 10 ms",
+      "same_track_after_best_matching_at_least": 0.95,
+      "denominator": "the ORACLE's pitched notes: an unmatched or ungrouped note counts as wrong",
+      "same_instrument_name": "every track holding at least 10% of the oracle's notes keeps its exact name; CPU backend exact, no allowance"
+    },
+    "gpu": {
+      "same_track_and_coverage": "no lower than the spread on the same fixture (spread.json grouping.same_track_of_oracle and grouping.coverage)",
+      "names": "exact, except where spread.json lists the track under grouping.big_track_name_mismatches or grouper_replay.big_track_name_mismatches: for that fixture and track only, the observed upstream name or the track's absence is also allowed",
+      "identical_inputs": "grouper-replay.json: upstream's grouper on CUDA, fed the CPU capture's notes, features and audio. Per-tensor gaps and decode agreement are the grouper's own spread, free of transcriber differences"
+    }
   },
-  "seconds": {"max_absolute_error_strictly_less_than": 0.000001},
+  "seconds": {
+    "max_absolute_error_strictly_less_than": 1e-06
+  },
   "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
   "exceptions": [],
   "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."

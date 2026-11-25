@@ -8,6 +8,7 @@ With cpu and cuda this measures the upstream spread: the gap between upstream's 
 A port is judged with the same metrics, oracle = the cpu capture. Pitched notes are matched one to one by key (pitch, and the
 voice slot for the transcriber's notes); a pair is a match when the onsets differ by at most ONSET_TOL."""
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -92,7 +93,8 @@ def grouping(ra, rb):
     A, B = pitched(ra), pitched(rb)
     out = dict(oracle_notes=len(A), other_notes=len(B))
     if not A or not B:
-        out.update(matched=0, same_track=1.0 if not A and not B else 0.0, names_ok=not A and not B)
+        out.update(matched=0, coverage=1.0 if not A and not B else 0.0, same_track=1.0 if not A and not B else 0.0,
+                   same_track_of_oracle=1.0 if not A and not B else 0.0, names_ok=not A and not B)
         return out
     a_on, b_on = np.array([r[0] for r in A]), np.array([r[0] for r in B])
     a_p, b_p = np.array([r[2] for r in A], np.int64), np.array([r[2] for r in B], np.int64)
@@ -109,7 +111,7 @@ def grouping(ra, rb):
     names_b = {t: rb['tracks'][t]['name'] for t in range(n_tb)}
     bad = [dict(oracle=names_a[t], other=names_b.get(mapping.get(t))) for t in big if names_b.get(mapping.get(t)) != names_a[t]]
     vel = np.abs(np.array([A[i][3] for i in p[:, 0]]) - np.array([B[j][3] for j in p[:, 1]])) if len(p) else np.zeros(0)
-    out.update(matched=len(p), f1=f1(len(p), len(A), len(B)), same_track=same, same_track_of_oracle=float(M[ri, ci].sum()) / len(A),
+    out.update(matched=len(p), coverage=len(p) / len(A), f1=f1(len(p), len(A), len(B)), same_track=same, same_track_of_oracle=float(M[ri, ci].sum()) / len(A),
                big_track_name_mismatches=bad, names_ok=not bad,
                velocity_within_2=float((vel <= 2).mean()) if len(vel) else 1.0, max_velocity_diff=float(vel.max()) if len(vel) else 0.0)
     return out
@@ -165,7 +167,10 @@ def worst(result):
         offsets_within_20ms_min=mn(col(lambda d: d['transcriber_notes'].get('offsets_within_20ms'))),
         unmatched_oracle_onset_prob_max=mx(col(lambda d: d['transcriber_notes']['max_unmatched_oracle_onset_prob'])),
         pitched_velocity_within_2_min=mn(col(lambda d: d['grouping'].get('velocity_within_2'))),
-        same_track_min=mn(col(lambda d: d['grouping'].get('same_track'))),
+        same_track_of_oracle_min=mn(col(lambda d: d['grouping'].get('same_track_of_oracle'))),
+        coverage_min=mn(col(lambda d: d['grouping'].get('coverage'))),
+        grouper_replay_max_abs=mx(col(lambda d: max((v for k, v in d.get('grouper_replay', {}).get('gaps', {}).items()), default=None))),
+        grouper_replay_same_track_min=mn(col(lambda d: d.get('grouper_replay', {}).get('same_track'))),
         fixtures_failing_name_check=[k for k, d in result.items() if not d['grouping']['names_ok']],
         drum_router_diff_max=mx(col(lambda d: d['drums']['router_diff'])),
         drum_hit_f1_min=mn(col(lambda d: d['drums']['f1'] if not any(d['drums']['skipped']) else None)),
@@ -188,9 +193,12 @@ if __name__ == '__main__':
     else:
         result = compare(*a.dirs)
     if a.captures:
+        for k, d in result.items():
+            f = Path(a.captures) / k / 'grouper-replay.json'
+            if f.exists():
+                d['grouper_replay'] = json.loads(f.read_text(encoding='utf-8'))
         result = {'_worst': worst(result), **result}
     if a.out:
         write_json(a.out, result)
     else:
-        import json
         print(json.dumps(result, indent=1))

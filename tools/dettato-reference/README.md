@@ -24,6 +24,7 @@ Weights, upstream clone, venvs, fixture audio and tensor dumps live under
 | `fixtures.py` | Builds the 11 fixture WAVs from songs our own engine rendered |
 | `capture.py` | One fixture, one device: runs upstream, records every stage |
 | `compare.py` | Gate metrics between two captures (spread now, port later) |
+| `replay_grouper.py` | Grouper spread on identical inputs: CUDA grouper fed the CPU capture's notes and features |
 | `verify.py` | Hashes, finite values, shapes, grouping coverage |
 
 ## Reproduce
@@ -48,6 +49,7 @@ $py = "$exp/venv-cpu/Scripts/python.exe"
 & $py fixtures.py --songs <dir with the six engine songs> --out "$exp/fixtures"
 & $py capture.py --upstream "$exp/upstream" --weights "$exp/weights" --audio "$exp/fixtures/t3-solo-piano.wav" --out "$exp/captures/t3-solo-piano/cpu" --device cpu
 & "$exp/venv-cuda/Scripts/python.exe" capture.py --upstream "$exp/upstream" --weights "$exp/weights" --audio "$exp/fixtures/t3-solo-piano.wav" --out "$exp/captures/t3-solo-piano/cuda" --device cuda
+& "$exp/venv-cuda/Scripts/python.exe" replay_grouper.py --upstream "$exp/upstream" --weights "$exp/weights" --captures "$exp/captures"
 & $py compare.py --captures "$exp/captures" --out spread.json
 & $py verify.py --captures "$exp/captures" --weights "$exp/weights" --fixtures "$exp/fixtures"
 ```
