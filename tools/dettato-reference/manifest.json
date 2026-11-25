@@ -1,0 +1,442 @@
+{
+ "upstream": {
+  "repo": "https://github.com/kobimusic/dettato",
+  "version": "2.0.0",
+  "commit": "51ade0f09f2272f4674166026582185d26baaeaf"
+ },
+ "weights": {
+  "dettato": {
+   "revision": "a0d1e354d282c4ed458b83b287065587979b053e",
+   "config.json": {
+    "sha256": "d56621d0485d9372c96a5a49279217bed7848b3a6c0290af44caf9f63facb0ff",
+    "bytes": 915
+   },
+   "model.safetensors": {
+    "sha256": "696d22c5341c6e3df1bdb5670cb7945b65aa36f06811dfa5dfe73dc06cd53be5",
+    "bytes": 61227952
+   }
+  },
+  "dettato-evidence": {
+   "revision": "5633f28ee330a48bc31bdd3f9f98bb1a71206141",
+   "config.json": {
+    "sha256": "5052292c6442556ffc86a849842b227f8a78a31580caa69b63057b2462c769cd",
+    "bytes": 251
+   },
+   "model.safetensors": {
+    "sha256": "25f06767a6ad72a9d409701b11ae500bd54622b3d7ddde8dd51152a148a3833a",
+    "bytes": 19731388
+   }
+  },
+  "dettato-grouper": {
+   "revision": "5a94cea2329f53228d7bcf1fd6a9f8d9778cc75b",
+   "config.json": {
+    "sha256": "025e37426753b3b6b648d905d004bad94d4bce49f81511d7125fc37dd468e667",
+    "bytes": 2229
+   },
+   "model.safetensors": {
+    "sha256": "4d46f18dc59201d4392b5ee31a3e0640ea89268cf1fa7b8b087dcd910193e07c",
+    "bytes": 11603972
+   }
+  },
+  "dettato-drums": {
+   "revision": "97801f2328e32e4c87b12586aa81121f62cacacb",
+   "config.json": {
+    "sha256": "99e1e546a015c9527cde1e58d52e0a6f00ba41f375c685604abd54dd4a0b61e2",
+    "bytes": 1539
+   },
+   "model.safetensors": {
+    "sha256": "fbdf6243f721dc2e445270671a9361104028d331b6b9d4641ce24102cdef9613",
+    "bytes": 20195244
+   }
+  }
+ },
+ "fixtures": {
+  "clip-3s": {
+   "seconds": 3.0,
+   "sample_rate": 48000,
+   "sha256": "0218934608b4671b5cd16ab5658a316f582fa3feb7efe7456495c880c3ebf8b4",
+   "cpu": {
+    "wall_s": 21.22,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 21307717,
+    "tracks": {
+     "piano": 6
+    },
+    "transcribed": 10,
+    "drum_router": 0.6887968629598618,
+    "drum_model": "orchestral",
+    "tuning_cents": 0.71,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 16.22,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 21307752,
+    "tracks": {
+     "piano": 6
+    },
+    "transcribed": 10,
+    "drum_router": 0.6870286166667938,
+    "drum_model": "orchestral",
+    "tuning_cents": 0.71,
+    "retuned": false
+   }
+  },
+  "detune-30c": {
+   "seconds": 88.454,
+   "sample_rate": 48000,
+   "sha256": "0246744a9a0a436b4471229895dca8fa8badf2e4ed5872ea31f07891487de3cb",
+   "cpu": {
+    "wall_s": 125.0,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 644818311,
+    "tracks": {
+     "piano": 282
+    },
+    "transcribed": 287,
+    "drum_router": 0.9999978939692179,
+    "drum_model": "orchestral",
+    "tuning_cents": 31.63,
+    "retuned": true
+   },
+   "cuda": {
+    "wall_s": 13.96,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 644820875,
+    "tracks": {
+     "piano": 283
+    },
+    "transcribed": 288,
+    "drum_router": 0.9999979337056478,
+    "drum_model": "orchestral",
+    "tuning_cents": 31.63,
+    "retuned": true
+   }
+  },
+  "long-260s": {
+   "seconds": 260.0,
+   "sample_rate": 48000,
+   "sha256": "eab22d22d2393fe3dc5fa599f9a6bfe9c4c3e696a12c9c03caec630abd3d8dda",
+   "cpu": {
+    "wall_s": 356.62,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 1848833482,
+    "tracks": {
+     "piano": 762,
+     "acoustic guitar": 473,
+     "electric bass": 252,
+     "tenor sax": 89,
+     "voice": 73,
+     "Drums": 407
+    },
+    "transcribed": 1841,
+    "drum_router": 0.00016441196930827573,
+    "drum_model": "drum-kit",
+    "tuning_cents": 2.69,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 35.75,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 1848839404,
+    "tracks": {
+     "piano": 766,
+     "acoustic guitar": 473,
+     "electric bass": 251,
+     "tenor sax": 88,
+     "voice": 72,
+     "Drums": 410
+    },
+    "transcribed": 1843,
+    "drum_router": 0.0001575689178328806,
+    "drum_model": "drum-kit",
+    "tuning_cents": 2.69,
+    "retuned": false
+   }
+  },
+  "silence-10s": {
+   "seconds": 10.0,
+   "sample_rate": 48000,
+   "sha256": "90ee494bd12323fb5b9c88046ee34e51d9ddc5e4eb8a9471ff937ed84436570b",
+   "cpu": {
+    "wall_s": 28.2,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 70925445,
+    "tracks": {},
+    "transcribed": 0,
+    "drum_router": 0.9505234956741333,
+    "drum_model": "orchestral",
+    "tuning_cents": 0.0,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 10.22,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 70925474,
+    "tracks": {},
+    "transcribed": 0,
+    "drum_router": 0.9532740513483683,
+    "drum_model": "orchestral",
+    "tuning_cents": 0.0,
+    "retuned": false
+   }
+  },
+  "src-32k": {
+   "seconds": 90.0,
+   "sample_rate": 32000,
+   "sha256": "b9110b3ef854b8132206cb9500466d046053092191516a74bc4d5bb059304ec7",
+   "cpu": {
+    "wall_s": 115.59,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 609036457,
+    "tracks": {
+     "synth lead": 299,
+     "synth bass": 126,
+     "organ": 92
+    },
+    "transcribed": 520,
+    "drum_router": null,
+    "drum_model": null,
+    "tuning_cents": 1.59,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 7.39,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 609051778,
+    "tracks": {
+     "synth lead": 427,
+     "organ": 96
+    },
+    "transcribed": 526,
+    "drum_router": null,
+    "drum_model": null,
+    "tuning_cents": 1.59,
+    "retuned": false
+   }
+  },
+  "t1-synthpop-vocal": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "7265f9766b987ac4cbf2e504f00ebdb6442d631b738233a396968bc6985d623e",
+   "cpu": {
+    "wall_s": 198.2,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 644102443,
+    "tracks": {
+     "acoustic guitar": 680,
+     "electric guitar": 483,
+     "electric bass": 423,
+     "synth lead": 143,
+     "voice": 70,
+     "Drums": 801
+    },
+    "transcribed": 2173,
+    "drum_router": 3.6159075837834585e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 0.78,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 14.9,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 644088612,
+    "tracks": {
+     "acoustic guitar": 903,
+     "electric bass": 431,
+     "piano": 262,
+     "synth lead": 124,
+     "voice": 70,
+     "Drums": 805
+    },
+    "transcribed": 2167,
+    "drum_router": 3.6384330390622686e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 0.78,
+    "retuned": false
+   }
+  },
+  "t2-funk-drums": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "b52b8479abb7844439d32a8c1b66cd91245f07fbeb6da45818520c81c2827e06",
+   "cpu": {
+    "wall_s": 195.54,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 640163402,
+    "tracks": {
+     "synth lead": 424,
+     "organ": 93,
+     "Drums": 1502
+    },
+    "transcribed": 520,
+    "drum_router": 5.89308195534007e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 1.59,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 14.72,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 640179060,
+    "tracks": {
+     "synth lead": 429,
+     "organ": 94,
+     "Drums": 1502
+    },
+    "transcribed": 526,
+    "drum_router": 5.904092419465693e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 1.59,
+    "retuned": false
+   }
+  },
+  "t3-solo-piano": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "37c3204d0be166f41704e7bd9013a493d1708d8ebe2f257569965d1af4b4459c",
+   "cpu": {
+    "wall_s": 132.06,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 639019158,
+    "tracks": {
+     "piano": 286
+    },
+    "transcribed": 291,
+    "drum_router": 0.9996055563290914,
+    "drum_model": "orchestral",
+    "tuning_cents": 1.6,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 14.74,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 639019149,
+    "tracks": {
+     "piano": 286
+    },
+    "transcribed": 291,
+    "drum_router": 0.9996087948481241,
+    "drum_model": "orchestral",
+    "tuning_cents": 1.6,
+    "retuned": false
+   }
+  },
+  "t4-jazz-trio-sax": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "fb6859cec0e5dd043eafa1ffa5a4e45e2b247da25c5101ced3fb0a0f08ab5b77",
+   "cpu": {
+    "wall_s": 109.13,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 640553568,
+    "tracks": {
+     "piano": 494,
+     "electric bass": 243,
+     "tenor sax": 66,
+     "Drums": 352
+    },
+    "transcribed": 837,
+    "drum_router": 0.0028186136623844504,
+    "drum_model": "drum-kit",
+    "tuning_cents": 3.93,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 23.34,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 640558674,
+    "tracks": {
+     "piano": 493,
+     "electric bass": 242,
+     "tenor sax": 68,
+     "Drums": 351
+    },
+    "transcribed": 839,
+    "drum_router": 0.002576926587304721,
+    "drum_model": "drum-kit",
+    "tuning_cents": 3.93,
+    "retuned": false
+   }
+  },
+  "t5-folk-vocal": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "6638a07f12818b276e49ef085298249b499e6725e01c7f8874c979220e159532",
+   "cpu": {
+    "wall_s": 109.01,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 640092561,
+    "tracks": {
+     "acoustic guitar": 431,
+     "voice": 72,
+     "string ensemble": 54,
+     "Drums": 15
+    },
+    "transcribed": 710,
+    "drum_router": 4.748134354789121e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 2.18,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 14.31,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 640095044,
+    "tracks": {
+     "acoustic guitar": 431,
+     "voice": 71,
+     "string ensemble": 56,
+     "Drums": 16
+    },
+    "transcribed": 711,
+    "drum_router": 4.666333491816962e-05,
+    "drum_model": "drum-kit",
+    "tuning_cents": 2.18,
+    "retuned": false
+   }
+  },
+  "t6-orchestral": {
+   "seconds": 90.0,
+   "sample_rate": 48000,
+   "sha256": "39d28022fbb6476a5b0dfa7fd2672cd60c18aca53591457a00a748460fb9fcc5",
+   "cpu": {
+    "wall_s": 124.03,
+    "torch": "2.10.0+cpu",
+    "capture_bytes": 639984424,
+    "tracks": {
+     "organ": 144,
+     "string ensemble": 136,
+     "acoustic guitar": 104,
+     "synth brass": 97,
+     "electric bass": 98,
+     "Drums": 61
+    },
+    "transcribed": 660,
+    "drum_router": 0.34655630091826123,
+    "drum_model": "drum-kit",
+    "tuning_cents": 8.88,
+    "retuned": false
+   },
+   "cuda": {
+    "wall_s": 13.89,
+    "torch": "2.10.0+cu128",
+    "capture_bytes": 639997346,
+    "tracks": {
+     "organ": 141,
+     "acoustic guitar": 103,
+     "string ensemble": 98,
+     "synth pad": 97,
+     "electric bass": 98,
+     "flute": 47,
+     "Drums": 61
+    },
+    "transcribed": 665,
+    "drum_router": 0.3262768213947614,
+    "drum_model": "drum-kit",
+    "tuning_cents": 8.88,
+    "retuned": false
+   }
+  }
+ }
+}

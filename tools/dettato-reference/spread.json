@@ -1,0 +1,1564 @@
+{
+ "_worst": {
+  "map_max_abs": 0.02170434594154358,
+  "sub_map_max_abs": 0.0220564603805542,
+  "tap_max_abs": 0.46875,
+  "note_f1_min": 0.9923518164435946,
+  "median_onset_err_ms_max": 0.05003288387683824,
+  "offsets_within_20ms_min": 0.9816643159379408,
+  "unmatched_oracle_onset_prob_max": 0.30240464210510254,
+  "pitched_velocity_within_2_min": 0.9910233393177738,
+  "same_track_min": 0.7158131682611142,
+  "fixtures_failing_name_check": [
+   "src-32k",
+   "t1-synthpop-vocal",
+   "t6-orchestral"
+  ],
+  "drum_router_diff_max": 0.020279479523499844,
+  "drum_hit_f1_min": 0.967741935483871,
+  "drum_velocity_within_2_min": 1.0,
+  "drum_model_differs": []
+ },
+ "clip-3s": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\clip-3s\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\clip-3s\\cuda",
+  "seconds": 3.0,
+  "tuning_cents": [
+   0.710446498918151,
+   0.710446498918151
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.00849062204360962,
+    "mean_abs": 8.691953553352505e-06
+   },
+   "maps.frame": {
+    "max_abs": 0.007261455059051514,
+    "mean_abs": 0.00012378017709124833
+   },
+   "maps.offset": {
+    "max_abs": 0.004258930683135986,
+    "mean_abs": 7.718585038674064e-06
+   },
+   "maps.onset2": {
+    "max_abs": 0.0023891478776931763,
+    "mean_abs": 6.582785658793e-07
+   },
+   "maps.frame2": {
+    "max_abs": 0.0025473833084106445,
+    "mean_abs": 1.025600158754969e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.0005712881684303284,
+    "mean_abs": 5.677255785485613e-07
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.009988009929656982,
+    "mean_abs": 9.858598787104711e-06
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.008823275566101074,
+    "mean_abs": 0.00014821620425209403
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.004711657762527466,
+    "mean_abs": 9.57989595917752e-06
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.002822369337081909,
+    "mean_abs": 6.839279080850247e-07
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.0023317933082580566,
+    "mean_abs": 1.3357143870962318e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.0007349923253059387,
+    "mean_abs": 7.433387168021e-07
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.234375,
+    "mean_abs": 0.004347815643996
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.0501556396484375,
+    "mean_abs": 0.00413345405831933
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.0019011162221431732,
+    "mean_abs": 4.806786364497384e-06
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.005123436450958252,
+    "mean_abs": 0.0008697248413227499
+   },
+   "drums.drum": {
+    "max_abs": 0.00034484826028347015,
+    "mean_abs": 3.3456792607466923e-06
+   },
+   "drums.timpani": {
+    "max_abs": 2.599175786599517e-05,
+    "mean_abs": 1.344697466265643e-06
+   },
+   "drums.vel": {
+    "max_abs": 0.004059731960296631,
+    "mean_abs": 0.0007046366226859391
+   },
+   "drums.router": {
+    "max_abs": 0.0017682313919067383,
+    "mean_abs": 0.0017682313919067383
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 10,
+   "other_notes": 10,
+   "matched": 10,
+   "f1": 1.0,
+   "median_onset_err_ms": 0.004606246948257731,
+   "max_onset_err_ms": 0.1320290565490767,
+   "offsets_within_20ms": 1.0,
+   "max_unmatched_oracle_onset_prob": 0.0
+  },
+  "grouping": {
+   "oracle_notes": 6,
+   "other_notes": 6,
+   "matched": 6,
+   "f1": 1.0,
+   "same_track": 1.0,
+   "same_track_of_oracle": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 0.0
+  },
+  "drums": {
+   "oracle_router": 0.6887968629598618,
+   "other_router": 0.6870286166667938,
+   "router_diff": 0.0017682462930679321,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 0,
+   "other_hits": 0,
+   "matched": 0,
+   "f1": 1.0
+  }
+ },
+ "detune-30c": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\detune-30c\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\detune-30c\\cuda",
+  "seconds": 88.45385416666667,
+  "tuning_cents": [
+   31.62715072908128,
+   31.62715072908128
+  ],
+  "retuned": [
+   true,
+   true
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.011052697896957397,
+    "mean_abs": 1.0491562534298282e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.013013213872909546,
+    "mean_abs": 0.0001362731563858688
+   },
+   "maps.offset": {
+    "max_abs": 0.004613861441612244,
+    "mean_abs": 1.2003489246126264e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.0037400126457214355,
+    "mean_abs": 6.4786036091391e-07
+   },
+   "maps.frame2": {
+    "max_abs": 0.00582045316696167,
+    "mean_abs": 1.584791243658401e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.0026050209999084473,
+    "mean_abs": 1.2760741583406343e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.011199712753295898,
+    "mean_abs": 1.1542235370143317e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.015267372131347656,
+    "mean_abs": 0.00015466046170331538
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.005813226103782654,
+    "mean_abs": 1.38408840939519e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.004020132124423981,
+    "mean_abs": 7.707457143624197e-07
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.005792781710624695,
+    "mean_abs": 1.7081574696931057e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.0031280517578125,
+    "mean_abs": 1.3255393014333094e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.375,
+    "mean_abs": 0.004352663643658161
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.07421875,
+    "mean_abs": 0.004169825464487076
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.006280884146690369,
+    "mean_abs": 5.791357580164913e-06
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.0065520405769348145,
+    "mean_abs": 0.0008763465448282659
+   },
+   "drums.drum": {
+    "max_abs": 0.004617772996425629,
+    "mean_abs": 4.962586217516218e-07
+   },
+   "drums.timpani": {
+    "max_abs": 0.005381951108574867,
+    "mean_abs": 1.3528622730518691e-05
+   },
+   "drums.vel": {
+    "max_abs": 0.005226850509643555,
+    "mean_abs": 0.0006840569549240172
+   },
+   "drums.router": {
+    "max_abs": 0.0,
+    "mean_abs": 0.0
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 287,
+   "other_notes": 288,
+   "matched": 287,
+   "f1": 0.9982608695652174,
+   "median_onset_err_ms": 0.03985136746820217,
+   "max_onset_err_ms": 0.3999760746893344,
+   "offsets_within_20ms": 0.9825783972125436,
+   "max_unmatched_oracle_onset_prob": 0.0
+  },
+  "grouping": {
+   "oracle_notes": 282,
+   "other_notes": 283,
+   "matched": 282,
+   "f1": 0.9982300884955753,
+   "same_track": 1.0,
+   "same_track_of_oracle": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 2.0
+  },
+  "drums": {
+   "oracle_router": 0.9999978939692179,
+   "other_router": 0.9999979337056478,
+   "router_diff": 3.9736429924275285e-08,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 0,
+   "other_hits": 0,
+   "matched": 0,
+   "f1": 1.0
+  }
+ },
+ "long-260s": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\long-260s\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\long-260s\\cuda",
+  "seconds": 260.0,
+  "tuning_cents": [
+   2.686321163434821,
+   2.686321163434821
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.02170434594154358,
+    "mean_abs": 2.221269824076444e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.01447799801826477,
+    "mean_abs": 0.00015484106552321464
+   },
+   "maps.offset": {
+    "max_abs": 0.013856232166290283,
+    "mean_abs": 2.4217362806666642e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.010354757308959961,
+    "mean_abs": 3.8303719520627055e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.01476907730102539,
+    "mean_abs": 4.512204395723529e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.008565247058868408,
+    "mean_abs": 7.659456969122402e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.0220564603805542,
+    "mean_abs": 2.4025679522310384e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.019777894020080566,
+    "mean_abs": 0.0001692548394203186
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.013181954622268677,
+    "mean_abs": 2.660511563590262e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.01036161184310913,
+    "mean_abs": 4.298731255403254e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.016719520092010498,
+    "mean_abs": 4.574679769575596e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.008367300033569336,
+    "mean_abs": 7.722459486103617e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.4375,
+    "mean_abs": 0.0044961660169065
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.140625,
+    "mean_abs": 0.003869083011522889
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.04442682862281799,
+    "mean_abs": 2.2871980036143214e-05
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.008003175258636475,
+    "mean_abs": 0.000908407149836421
+   },
+   "drums.drum": {
+    "max_abs": 0.016530841588974,
+    "mean_abs": 4.425796214491129e-05
+   },
+   "drums.timpani": {
+    "max_abs": 0.00011153828381793573,
+    "mean_abs": 6.561855343534262e-07
+   },
+   "drums.vel": {
+    "max_abs": 0.006174176931381226,
+    "mean_abs": 0.000633839750662446
+   },
+   "drums.router": {
+    "max_abs": 6.843038136139512e-06,
+    "mean_abs": 6.843038136139512e-06
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 1841,
+   "other_notes": 1843,
+   "matched": 1837,
+   "f1": 0.99728555917481,
+   "median_onset_err_ms": 0.04425957799014668,
+   "max_onset_err_ms": 1.5348219871498259,
+   "offsets_within_20ms": 0.9874795862819815,
+   "max_unmatched_oracle_onset_prob": 0.3013453781604767
+  },
+  "grouping": {
+   "oracle_notes": 1649,
+   "other_notes": 1650,
+   "matched": 1646,
+   "f1": 0.9978781448923917,
+   "same_track": 0.9975698663426489,
+   "same_track_of_oracle": 0.9957550030321407,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 0.9963547995139733,
+   "max_velocity_diff": 61.0
+  },
+  "drums": {
+   "oracle_router": 0.00016441196930827573,
+   "other_router": 0.0001575689178328806,
+   "router_diff": 6.843051475395129e-06,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 407,
+   "other_hits": 410,
+   "matched": 406,
+   "f1": 0.9938800489596084,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  }
+ },
+ "silence-10s": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\silence-10s\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\silence-10s\\cuda",
+  "seconds": 10.0,
+  "tuning_cents": [
+   0.0,
+   0.0
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 3.919027221854776e-06,
+    "mean_abs": 3.225725890843023e-07
+   },
+   "maps.frame": {
+    "max_abs": 0.0003912243992090225,
+    "mean_abs": 4.393159179016948e-05
+   },
+   "maps.offset": {
+    "max_abs": 5.008165317121893e-06,
+    "mean_abs": 4.4318386471786653e-07
+   },
+   "maps.onset2": {
+    "max_abs": 2.416920779069187e-07,
+    "mean_abs": 1.5061720759490527e-08
+   },
+   "maps.frame2": {
+    "max_abs": 3.4978322219103575e-05,
+    "mean_abs": 2.7643184239423135e-06
+   },
+   "maps.offset2": {
+    "max_abs": 2.427059371257201e-07,
+    "mean_abs": 1.8404236357127957e-08
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 4.740257281810045e-06,
+    "mean_abs": 4.110616487196239e-07
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.0004927106201648712,
+    "mean_abs": 5.208910079090856e-05
+   },
+   "sub.maps.offset": {
+    "max_abs": 6.513495463877916e-06,
+    "mean_abs": 5.625937546938076e-07
+   },
+   "sub.maps.onset2": {
+    "max_abs": 2.6984525902662426e-07,
+    "mean_abs": 1.8917376110039186e-08
+   },
+   "sub.maps.frame2": {
+    "max_abs": 4.270079080015421e-05,
+    "mean_abs": 3.0342332593136234e-06
+   },
+   "sub.maps.offset2": {
+    "max_abs": 3.261775418650359e-07,
+    "mean_abs": 2.1082337653410832e-08
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.1875,
+    "mean_abs": 0.003996705636382103
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.05859375,
+    "mean_abs": 0.0061788735911250114
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.0010597025975584984,
+    "mean_abs": 1.5457604831681238e-06
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.00549393892288208,
+    "mean_abs": 0.0007734484388493001
+   },
+   "drums.drum": {
+    "max_abs": 0.0003158142790198326,
+    "mean_abs": 4.044010893267114e-06
+   },
+   "drums.timpani": {
+    "max_abs": 1.0006042430177331e-05,
+    "mean_abs": 1.8187384966950049e-06
+   },
+   "drums.vel": {
+    "max_abs": 0.003799349069595337,
+    "mean_abs": 0.0008957567042671144
+   },
+   "drums.router": {
+    "max_abs": 0.002750575542449951,
+    "mean_abs": 0.002750575542449951
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 0,
+   "other_notes": 0,
+   "matched": 0,
+   "f1": 1.0,
+   "max_unmatched_oracle_onset_prob": 0.0
+  },
+  "grouping": {
+   "oracle_notes": 0,
+   "other_notes": 0,
+   "matched": 0,
+   "same_track": 1.0,
+   "names_ok": true
+  },
+  "drums": {
+   "oracle_router": 0.9505234956741333,
+   "other_router": 0.9532740513483683,
+   "router_diff": 0.002750555674234989,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 0,
+   "other_hits": 0,
+   "matched": 0,
+   "f1": 1.0
+  }
+ },
+ "src-32k": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\src-32k\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\src-32k\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   1.5885747523012075,
+   1.5885747523012075
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.01014554500579834,
+    "mean_abs": 3.888108039973304e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.009688317775726318,
+    "mean_abs": 0.00012137164594605565
+   },
+   "maps.offset": {
+    "max_abs": 0.008565276861190796,
+    "mean_abs": 2.589537871244829e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.007748514413833618,
+    "mean_abs": 1.4915349311195314e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.005015462636947632,
+    "mean_abs": 4.3442382775538135e-06
+   },
+   "maps.offset2": {
+    "max_abs": 0.004487171769142151,
+    "mean_abs": 2.057026904367376e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.01101762056350708,
+    "mean_abs": 4.029785850434564e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.010393083095550537,
+    "mean_abs": 0.00013085632235743105
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.008044272661209106,
+    "mean_abs": 2.9715427444898523e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.0063832104206085205,
+    "mean_abs": 1.692961859589559e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.004505813121795654,
+    "mean_abs": 4.887432623945642e-06
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.004587054252624512,
+    "mean_abs": 2.168784931200207e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.21875,
+    "mean_abs": 0.003561388934031129
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.1640625,
+    "mean_abs": 0.0038038906641304493
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   },
+   "drums.kit_vel": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   },
+   "drums.drum": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   },
+   "drums.timpani": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   },
+   "drums.vel": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   },
+   "drums.router": {
+    "shape_mismatch": [
+     null,
+     null
+    ]
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 520,
+   "other_notes": 526,
+   "matched": 519,
+   "f1": 0.9923518164435946,
+   "median_onset_err_ms": 0.035752356048135425,
+   "max_onset_err_ms": 0.2624744176884519,
+   "offsets_within_20ms": 0.9961464354527938,
+   "max_unmatched_oracle_onset_prob": 0.25161901116371155
+  },
+  "grouping": {
+   "oracle_notes": 517,
+   "other_notes": 523,
+   "matched": 516,
+   "f1": 0.9923076923076923,
+   "same_track": 0.7441860465116279,
+   "same_track_of_oracle": 0.7427466150870407,
+   "big_track_name_mismatches": [
+    {
+     "oracle": "synth bass",
+     "other": null
+    }
+   ],
+   "names_ok": false,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  },
+  "drums": {
+   "oracle_router": null,
+   "other_router": null,
+   "router_diff": null,
+   "same_model": true,
+   "skipped": [
+    true,
+    true
+   ],
+   "oracle_hits": 0,
+   "other_hits": 0,
+   "matched": 0,
+   "f1": 1.0
+  }
+ },
+ "t1-synthpop-vocal": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t1-synthpop-vocal\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t1-synthpop-vocal\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   0.7830329101187069,
+   0.7830329101187069
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.014740943908691406,
+    "mean_abs": 3.6378030927153304e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.013971865177154541,
+    "mean_abs": 0.00015086180064827204
+   },
+   "maps.offset": {
+    "max_abs": 0.010038763284683228,
+    "mean_abs": 5.407317803474143e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.013678789138793945,
+    "mean_abs": 2.5395978809683584e-05
+   },
+   "maps.frame2": {
+    "max_abs": 0.010804623365402222,
+    "mean_abs": 9.05461420188658e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.007845431566238403,
+    "mean_abs": 2.799038884404581e-05
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.016500085592269897,
+    "mean_abs": 4.027189061162062e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.013440072536468506,
+    "mean_abs": 0.00016441741900052875
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.010733485221862793,
+    "mean_abs": 5.842804239364341e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.014521598815917969,
+    "mean_abs": 2.752903674263507e-05
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.012509524822235107,
+    "mean_abs": 9.594859147910029e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.008565068244934082,
+    "mean_abs": 2.883333945646882e-05
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.4375,
+    "mean_abs": 0.00442852359265089
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.1328125,
+    "mean_abs": 0.0038383284118026495
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.023199021816253662,
+    "mean_abs": 7.136523345252499e-05
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.007864177227020264,
+    "mean_abs": 0.0009030716028064489
+   },
+   "drums.drum": {
+    "max_abs": 0.013813227415084839,
+    "mean_abs": 6.768338789697737e-05
+   },
+   "drums.timpani": {
+    "max_abs": 1.7139109331765212e-06,
+    "mean_abs": 3.8828645188004884e-08
+   },
+   "drums.vel": {
+    "max_abs": 0.005251437425613403,
+    "mean_abs": 0.0005795029574073851
+   },
+   "drums.router": {
+    "max_abs": 2.2525637177750468e-07,
+    "mean_abs": 2.2525637177750468e-07
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 2173,
+   "other_notes": 2167,
+   "matched": 2164,
+   "f1": 0.9972350230414746,
+   "median_onset_err_ms": 0.03465540706670822,
+   "max_onset_err_ms": 0.42490936816363956,
+   "offsets_within_20ms": 0.9930683918669131,
+   "max_unmatched_oracle_onset_prob": 0.30240464210510254
+  },
+  "grouping": {
+   "oracle_notes": 1799,
+   "other_notes": 1790,
+   "matched": 1777,
+   "f1": 0.9902479799387016,
+   "same_track": 0.7158131682611142,
+   "same_track_of_oracle": 0.7070594774874931,
+   "big_track_name_mismatches": [
+    {
+     "oracle": "acoustic guitar",
+     "other": "piano"
+    },
+    {
+     "oracle": "electric guitar",
+     "other": "acoustic guitar"
+    }
+   ],
+   "names_ok": false,
+   "velocity_within_2": 0.9915588069780529,
+   "max_velocity_diff": 54.0
+  },
+  "drums": {
+   "oracle_router": 3.6159075837834585e-05,
+   "other_router": 3.6384330390622686e-05,
+   "router_diff": 2.2525455278810114e-07,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 801,
+   "other_hits": 805,
+   "matched": 800,
+   "f1": 0.9962640099626401,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  }
+ },
+ "t2-funk-drums": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t2-funk-drums\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t2-funk-drums\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   1.5869071700890784,
+   1.5869071700890784
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.009395390748977661,
+    "mean_abs": 3.791965718846768e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.009435534477233887,
+    "mean_abs": 0.00012319028610363603
+   },
+   "maps.offset": {
+    "max_abs": 0.008131563663482666,
+    "mean_abs": 2.6107041776413098e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.00483269989490509,
+    "mean_abs": 1.5123357570701046e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.0054208338260650635,
+    "mean_abs": 4.299247848393861e-06
+   },
+   "maps.offset2": {
+    "max_abs": 0.00486283004283905,
+    "mean_abs": 1.985100425372366e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.010755568742752075,
+    "mean_abs": 3.996786108473316e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.011223196983337402,
+    "mean_abs": 0.00013271543139126152
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.007652938365936279,
+    "mean_abs": 2.990082975884434e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.0060807764530181885,
+    "mean_abs": 1.7450735185775557e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.006939038634300232,
+    "mean_abs": 4.976225227437681e-06
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.004930853843688965,
+    "mean_abs": 2.131720293618855e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.28125,
+    "mean_abs": 0.0035782470367848873
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.1640625,
+    "mean_abs": 0.0038045875262469053
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.01871335506439209,
+    "mean_abs": 0.00011546508903848007
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.007819563150405884,
+    "mean_abs": 0.0009116010623984039
+   },
+   "drums.drum": {
+    "max_abs": 0.01621977984905243,
+    "mean_abs": 0.00013750739162787795
+   },
+   "drums.timpani": {
+    "max_abs": 2.2634994820691645e-06,
+    "mean_abs": 5.096005040172713e-08
+   },
+   "drums.vel": {
+    "max_abs": 0.005429863929748535,
+    "mean_abs": 0.0006263016257435083
+   },
+   "drums.router": {
+    "max_abs": 1.1010706657543778e-07,
+    "mean_abs": 1.1010706657543778e-07
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 520,
+   "other_notes": 526,
+   "matched": 519,
+   "f1": 0.9923518164435946,
+   "median_onset_err_ms": 0.03891617059537111,
+   "max_onset_err_ms": 0.18260046839913002,
+   "offsets_within_20ms": 0.9942196531791907,
+   "max_unmatched_oracle_onset_prob": 0.2518603801727295
+  },
+  "grouping": {
+   "oracle_notes": 517,
+   "other_notes": 523,
+   "matched": 516,
+   "f1": 0.9923076923076923,
+   "same_track": 0.9961240310077519,
+   "same_track_of_oracle": 0.9941972920696325,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 2.0
+  },
+  "drums": {
+   "oracle_router": 5.89308195534007e-05,
+   "other_router": 5.904092419465693e-05,
+   "router_diff": 1.1010464125622854e-07,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 1502,
+   "other_hits": 1502,
+   "matched": 1493,
+   "f1": 0.9940079893475366,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  }
+ },
+ "t3-solo-piano": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t3-solo-piano\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t3-solo-piano\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   1.6031210278226014,
+   1.6031210278226014
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.02170434594154358,
+    "mean_abs": 1.0175715033255983e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.01162785291671753,
+    "mean_abs": 0.00014853672473691404
+   },
+   "maps.offset": {
+    "max_abs": 0.00718630850315094,
+    "mean_abs": 1.2996232726436574e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.005405306816101074,
+    "mean_abs": 6.703522217321733e-07
+   },
+   "maps.frame2": {
+    "max_abs": 0.006540089845657349,
+    "mean_abs": 1.5694542526034638e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.00447392463684082,
+    "mean_abs": 1.209496303999913e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.0220564603805542,
+    "mean_abs": 1.1192103556822985e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.01343148946762085,
+    "mean_abs": 0.00016467427485622466
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.008447587490081787,
+    "mean_abs": 1.4400094187294599e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.005219101905822754,
+    "mean_abs": 7.043045684440585e-07
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.007729828357696533,
+    "mean_abs": 1.5173358406173065e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.004692733287811279,
+    "mean_abs": 1.212851543641591e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.375,
+    "mean_abs": 0.004400994628667831
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.1015625,
+    "mean_abs": 0.004164561629295349
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.012523740530014038,
+    "mean_abs": 5.666003289661603e-06
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.006740868091583252,
+    "mean_abs": 0.0009475475526414812
+   },
+   "drums.drum": {
+    "max_abs": 0.029003769159317017,
+    "mean_abs": 1.2794673693861114e-06
+   },
+   "drums.timpani": {
+    "max_abs": 0.0009764169808477163,
+    "mean_abs": 1.0190790817432571e-05
+   },
+   "drums.vel": {
+    "max_abs": 0.005008220672607422,
+    "mean_abs": 0.0007179394597187638
+   },
+   "drums.router": {
+    "max_abs": 3.2782554626464844e-06,
+    "mean_abs": 3.2782554626464844e-06
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 291,
+   "other_notes": 291,
+   "matched": 291,
+   "f1": 1.0,
+   "median_onset_err_ms": 0.044539570808410645,
+   "max_onset_err_ms": 0.33421009779033284,
+   "offsets_within_20ms": 0.9862542955326461,
+   "max_unmatched_oracle_onset_prob": 0.0
+  },
+  "grouping": {
+   "oracle_notes": 286,
+   "other_notes": 286,
+   "matched": 286,
+   "f1": 1.0,
+   "same_track": 1.0,
+   "same_track_of_oracle": 1.0,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 2.0
+  },
+  "drums": {
+   "oracle_router": 0.9996055563290914,
+   "other_router": 0.9996087948481241,
+   "router_diff": 3.238519032722209e-06,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 0,
+   "other_hits": 0,
+   "matched": 0,
+   "f1": 1.0
+  }
+ },
+ "t4-jazz-trio-sax": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t4-jazz-trio-sax\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t4-jazz-trio-sax\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   3.9269496798132795,
+   3.9269496798132795
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.01501205563545227,
+    "mean_abs": 3.276488132541999e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.015967518091201782,
+    "mean_abs": 0.000151024098158814
+   },
+   "maps.offset": {
+    "max_abs": 0.014657974243164062,
+    "mean_abs": 3.534910501912236e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.008755624294281006,
+    "mean_abs": 3.356438583068666e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.01552698016166687,
+    "mean_abs": 2.76084629149409e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.009059727191925049,
+    "mean_abs": 6.960311111470219e-06
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.01866784691810608,
+    "mean_abs": 3.46637170878239e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.017687737941741943,
+    "mean_abs": 0.0001665686722844839
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.015090256929397583,
+    "mean_abs": 3.878212010022253e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.008432239294052124,
+    "mean_abs": 3.683932391140843e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.017998814582824707,
+    "mean_abs": 3.0769828299526125e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.010733544826507568,
+    "mean_abs": 7.108095360308653e-06
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.34375,
+    "mean_abs": 0.004263333976268768
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.125,
+    "mean_abs": 0.003762533189728856
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.030654191970825195,
+    "mean_abs": 3.4596898331074044e-05
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.00823017954826355,
+    "mean_abs": 0.0009493492543697357
+   },
+   "drums.drum": {
+    "max_abs": 0.029182910919189453,
+    "mean_abs": 5.296276503941044e-05
+   },
+   "drums.timpani": {
+    "max_abs": 7.369181548710912e-05,
+    "mean_abs": 7.193978035502369e-07
+   },
+   "drums.vel": {
+    "max_abs": 0.0071219801902771,
+    "mean_abs": 0.0006411095382645726
+   },
+   "drums.router": {
+    "max_abs": 0.00024168728850781918,
+    "mean_abs": 0.00024168728850781918
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 837,
+   "other_notes": 839,
+   "matched": 835,
+   "f1": 0.9964200477326969,
+   "median_onset_err_ms": 0.04499912262190264,
+   "max_onset_err_ms": 0.8946108818044252,
+   "offsets_within_20ms": 0.9928143712574851,
+   "max_unmatched_oracle_onset_prob": 0.2522813677787781
+  },
+  "grouping": {
+   "oracle_notes": 803,
+   "other_notes": 803,
+   "matched": 800,
+   "f1": 0.9962640099626401,
+   "same_track": 0.9975,
+   "same_track_of_oracle": 0.9937733499377335,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 0.99875,
+   "max_velocity_diff": 10.0
+  },
+  "drums": {
+   "oracle_router": 0.0028186136623844504,
+   "other_router": 0.002576926587304721,
+   "router_diff": 0.0002416870750797293,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 352,
+   "other_hits": 351,
+   "matched": 351,
+   "f1": 0.9985775248933144,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  }
+ },
+ "t5-folk-vocal": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t5-folk-vocal\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t5-folk-vocal\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   2.1833413596461306,
+   2.1833413596461306
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.011455848813056946,
+    "mean_abs": 2.147375744243618e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.011847138404846191,
+    "mean_abs": 0.0001676033716648817
+   },
+   "maps.offset": {
+    "max_abs": 0.008260905742645264,
+    "mean_abs": 2.1939960788586177e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.008600682020187378,
+    "mean_abs": 7.273500614246586e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.015220969915390015,
+    "mean_abs": 9.127373050432652e-05
+   },
+   "maps.offset2": {
+    "max_abs": 0.008238941431045532,
+    "mean_abs": 1.4155792086967267e-05
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.01612722873687744,
+    "mean_abs": 2.2979791538091376e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.013781100511550903,
+    "mean_abs": 0.00018156872829422355
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.007603496313095093,
+    "mean_abs": 2.389799374213908e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.011737912893295288,
+    "mean_abs": 8.20290188130457e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.018009424209594727,
+    "mean_abs": 9.085499186767265e-05
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.007802724838256836,
+    "mean_abs": 1.3985421901452355e-05
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.40625,
+    "mean_abs": 0.004747516941279173
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.078125,
+    "mean_abs": 0.0038730499800294638
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.0263691246509552,
+    "mean_abs": 3.055126217077486e-05
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.007636010646820068,
+    "mean_abs": 0.001004593214020133
+   },
+   "drums.drum": {
+    "max_abs": 0.011057615280151367,
+    "mean_abs": 4.9832306103780866e-05
+   },
+   "drums.timpani": {
+    "max_abs": 2.438433511997573e-06,
+    "mean_abs": 4.745653114923698e-08
+   },
+   "drums.vel": {
+    "max_abs": 0.006529033184051514,
+    "mean_abs": 0.0007598955417051911
+   },
+   "drums.router": {
+    "max_abs": 8.180068107321858e-07,
+    "mean_abs": 8.180068107321858e-07
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 710,
+   "other_notes": 711,
+   "matched": 709,
+   "f1": 0.9978888106966924,
+   "median_onset_err_ms": 0.04164278507445829,
+   "max_onset_err_ms": 1.320109367370037,
+   "offsets_within_20ms": 0.9816643159379408,
+   "max_unmatched_oracle_onset_prob": 0.30134472250938416
+  },
+  "grouping": {
+   "oracle_notes": 557,
+   "other_notes": 558,
+   "matched": 557,
+   "f1": 0.9991031390134529,
+   "same_track": 0.9964093357271095,
+   "same_track_of_oracle": 0.9964093357271095,
+   "big_track_name_mismatches": [],
+   "names_ok": true,
+   "velocity_within_2": 0.9910233393177738,
+   "max_velocity_diff": 44.0
+  },
+  "drums": {
+   "oracle_router": 4.748134354789121e-05,
+   "other_router": 4.666333491816962e-05,
+   "router_diff": 8.180086297215894e-07,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 15,
+   "other_hits": 16,
+   "matched": 15,
+   "f1": 0.967741935483871,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 0.0
+  }
+ },
+ "t6-orchestral": {
+  "oracle": "..\\..\\_experiments\\dettato-reference\\captures\\t6-orchestral\\cpu",
+  "other": "..\\..\\_experiments\\dettato-reference\\captures\\t6-orchestral\\cuda",
+  "seconds": 90.0,
+  "tuning_cents": [
+   8.88329450356348,
+   8.88329450356348
+  ],
+  "retuned": [
+   false,
+   false
+  ],
+  "maps": {
+   "maps.onset": {
+    "max_abs": 0.012499317526817322,
+    "mean_abs": 3.607181497500278e-05
+   },
+   "maps.frame": {
+    "max_abs": 0.016071349382400513,
+    "mean_abs": 0.00022414265549741685
+   },
+   "maps.offset": {
+    "max_abs": 0.0070040225982666016,
+    "mean_abs": 3.166050009895116e-05
+   },
+   "maps.onset2": {
+    "max_abs": 0.008102640509605408,
+    "mean_abs": 7.948815436975565e-06
+   },
+   "maps.frame2": {
+    "max_abs": 0.011534422636032104,
+    "mean_abs": 0.00010637675586622208
+   },
+   "maps.offset2": {
+    "max_abs": 0.008728504180908203,
+    "mean_abs": 1.6907490135054104e-05
+   }
+  },
+  "sub_maps": {
+   "sub.maps.onset": {
+    "max_abs": 0.012182533740997314,
+    "mean_abs": 3.859590651700273e-05
+   },
+   "sub.maps.frame": {
+    "max_abs": 0.016079187393188477,
+    "mean_abs": 0.00024839112302288413
+   },
+   "sub.maps.offset": {
+    "max_abs": 0.00795641541481018,
+    "mean_abs": 3.4434906410751864e-05
+   },
+   "sub.maps.onset2": {
+    "max_abs": 0.009154528379440308,
+    "mean_abs": 8.512196473020595e-06
+   },
+   "sub.maps.frame2": {
+    "max_abs": 0.01267099380493164,
+    "mean_abs": 0.00010915545135503635
+   },
+   "sub.maps.offset2": {
+    "max_abs": 0.009786337614059448,
+    "mean_abs": 1.670452911639586e-05
+   }
+  },
+  "taps": {
+   "sub.tap.hidden": {
+    "max_abs": 0.46875,
+    "mean_abs": 0.004217811394482851
+   },
+   "sub.tap.stem": {
+    "max_abs": 0.109375,
+    "mean_abs": 0.0036069457419216633
+   }
+  },
+  "drum_probs": {
+   "drums.kit": {
+    "max_abs": 0.019984006881713867,
+    "mean_abs": 1.8108215954271145e-05
+   },
+   "drums.kit_vel": {
+    "max_abs": 0.006604194641113281,
+    "mean_abs": 0.000888681155629456
+   },
+   "drums.drum": {
+    "max_abs": 0.036558568477630615,
+    "mean_abs": 4.065639222972095e-05
+   },
+   "drums.timpani": {
+    "max_abs": 0.011635705828666687,
+    "mean_abs": 4.918043123325333e-05
+   },
+   "drums.vel": {
+    "max_abs": 0.005985617637634277,
+    "mean_abs": 0.0006650906288996339
+   },
+   "drums.router": {
+    "max_abs": 0.020279496908187866,
+    "mean_abs": 0.020279496908187866
+   }
+  },
+  "transcriber_notes": {
+   "oracle_notes": 660,
+   "other_notes": 665,
+   "matched": 660,
+   "f1": 0.9962264150943396,
+   "median_onset_err_ms": 0.05003288387683824,
+   "max_onset_err_ms": 4.5427951216687745,
+   "offsets_within_20ms": 0.9893939393939394,
+   "max_unmatched_oracle_onset_prob": 0.0
+  },
+  "grouping": {
+   "oracle_notes": 579,
+   "other_notes": 584,
+   "matched": 579,
+   "f1": 0.9957007738607051,
+   "same_track": 0.9136442141623489,
+   "same_track_of_oracle": 0.9136442141623489,
+   "big_track_name_mismatches": [
+    {
+     "oracle": "synth brass",
+     "other": "synth pad"
+    }
+   ],
+   "names_ok": false,
+   "velocity_within_2": 0.9913644214162349,
+   "max_velocity_diff": 40.0
+  },
+  "drums": {
+   "oracle_router": 0.34655630091826123,
+   "other_router": 0.3262768213947614,
+   "router_diff": 0.020279479523499844,
+   "same_model": true,
+   "skipped": [
+    false,
+    false
+   ],
+   "oracle_hits": 61,
+   "other_hits": 61,
+   "matched": 61,
+   "f1": 1.0,
+   "velocity_within_2": 1.0,
+   "max_velocity_diff": 1.0
+  }
+ }
+}

@@ -1,0 +1,41 @@
+{
+  "declared_before_port": true,
+  "reference": "dettato 2.0.0 at 51ade0f09f2272f4674166026582185d26baaeaf, --device cpu, float32, deterministic algorithms, four intra-op threads, one inter-op thread, repairer bypassed",
+  "upstream_spread": "spread.json: upstream's own cpu run against its own cuda (bfloat16) run, same fixtures. A GPU backend of the port may not be worse than this spread on any gate, per fixture; a gate below is the CPU-backend limit and also the GPU limit wherever the spread is inside it.",
+  "fed_tensors": {
+    "note": "each stage is given its captured input",
+    "cpu": {"max_absolute_error_strictly_less_than": 0.001, "tensors": ["maps.* (six)", "sub.maps.* (six)", "grouper.probs (per-note instrument probabilities)", "grouper.win.probs", "drums.kit", "drums.kit_vel", "drums.drum", "drums.timpani", "drums.vel"]},
+    "non_finite": "any non-finite value fails",
+    "added_by_slice_1_not_in_the_plan": {
+      "taps_float16": "sub.tap.hidden and sub.tap.stem: |a - b| <= 0.001 + 2^-10 * |reference| elementwise (one float16 rounding step)",
+      "grouper_int8_features": "grouper.feat codes within +-1 of the reference, grouper.fsc scales within one float16 step, grouper.meta max abs error < 0.001",
+      "grouper_embeddings": "grouper.emb and grouper.win.emb max abs error < 0.001 (unit vectors)",
+      "drum_router": "within 0.02"
+    }
+  },
+  "notes_from_audio": {
+    "match": "one to one on pitch and voice slot, onset within 10 ms (half a 20 ms frame)",
+    "f1_at_least": 0.99,
+    "median_onset_error_ms_at_most": 1.0,
+    "offsets_within_20_ms_at_least": 0.99,
+    "velocity_within": 2,
+    "unmatched_oracle_onset_probability_must_stay_at_or_below": 0.35,
+    "gpu": "the stricter of this and the spread on the same fixture"
+  },
+  "drums": {
+    "same_router_choice_on_every_fixture": true,
+    "router_value_within": 0.02,
+    "hits": "same key and exact 20 ms frame, F1 at least 0.99, velocity within 2",
+    "orchestral_branch": "validate mode decodes both branches; captures hold drum_branches for both (result.json)",
+    "skipped_source": "a source under 40 kHz skips the drum model and writes no drum track"
+  },
+  "grouper": {
+    "host_decode_given_captured_embeddings": "every note in the same track, exactly (grouper.emb, grouper.probs, grouper.win.*, groups in result.json)",
+    "from_audio": {"same_track_after_best_matching_at_least": 0.95, "same_instrument_name_on_tracks_holding_at_least_share_of_notes": 0.10},
+    "gpu": "the spread on the same fixture where lower"
+  },
+  "seconds": {"max_absolute_error_strictly_less_than": 0.000001},
+  "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
+  "exceptions": [],
+  "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."
+}
