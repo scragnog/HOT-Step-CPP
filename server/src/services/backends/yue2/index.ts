@@ -1265,6 +1265,9 @@ function jointPickerFiles(jointRuns: Yue2AitkRunRecord[]): JointPickerFile[] {
         started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
         typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
         run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
+      // A frozen planner's AR logs no loss of its own: the checkpoint's mean
+      // is the decoder's (or, at the freeze step, the pre-restore planner's).
+      const frozenAr = (kind: Yue2LmAdapterKind) => kind === 'ar' && (ckpt.frozen === true || ckpt.decoderOnly === true);
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const key = JSON.stringify([kind, runName, final, ckpt, yue2AitkWeightStamp(abs), run.jobId, run.datasetSlug, run.datasetId, tags.get(run.datasetId), run.options]);
@@ -1274,7 +1277,7 @@ function jointPickerFiles(jointRuns: Yue2AitkRunRecord[]): JointPickerFile[] {
           const rank = fileMeta?.rank;
           const steps = fileMeta?.steps ?? ckpt.step;
           return {
-            label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, trigger ? `"${trigger}"` : '']
+            label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, frozenAr(kind) ? 'planner frozen' : '', trigger ? `"${trigger}"` : '']
               .filter(Boolean).join(' · '),
             kind,
             runName,
@@ -1286,7 +1289,7 @@ function jointPickerFiles(jointRuns: Yue2AitkRunRecord[]): JointPickerFile[] {
             bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
             dataset: run.datasetSlug || run.datasetId || undefined,
             final,
-            loss: ckpt.loss,
+            loss: frozenAr(kind) ? undefined : ckpt.loss,
             styleTemplate: fileMeta?.styleTemplate,
             captionDropout: fileMeta?.captionDropout,
             home: yue2AdapterHome(fileMeta?.baseSha),

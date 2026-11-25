@@ -10,7 +10,10 @@
 #include "yue2-aitk-train-state.h"
 #include "yue2-aitk-resume.h"
 
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -55,6 +58,33 @@ inline bool read(const std::filesystem::path & path, const Yue2AitkTrainState & 
         copy[k].second = std::move(record.state.parameters[k]);
     }
     *out = std::move(copy);
+    return true;
+}
+
+// A safetensors file's tensor bytes (all after its header), empty when it
+// cannot be read. Little-endian hosts only, as everywhere else here.
+inline std::string tensor_bytes(const std::filesystem::path & path) {
+    std::ifstream in(path, std::ios::binary); uint64_t n = 0;
+    if (!in.read(reinterpret_cast<char *>(&n), sizeof n) || !in.seekg(std::streamoff(sizeof n + n))) return {};
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+// A frozen planner's AR file, written again at every later checkpoint (GH
+// #346): `fresh` becomes a hard link to `same` (the previous frozen
+// checkpoint's AR) when their tensors are byte-identical, so the run stores
+// it once and every folder still holds a complete pair; deleting a folder
+// removes only its own link. Only the header differs: the linked file keeps
+// the earlier checkpoint's `steps`. False (and `fresh` as written) when the
+// tensors differ or linking fails.
+inline bool link_same_tensors(const std::filesystem::path & same, const std::filesystem::path & fresh) {
+    if (same.empty()) return false;
+    const std::string held = tensor_bytes(same);
+    if (held.empty() || held != tensor_bytes(fresh)) return false;
+    auto link = fresh; link += ".link";
+    std::error_code ec;
+    std::filesystem::create_hard_link(same, link, ec);
+    if (!ec) std::filesystem::rename(link, fresh, ec);
+    if (ec) { std::error_code rm; std::filesystem::remove(link, rm); return false; }
     return true;
 }
 

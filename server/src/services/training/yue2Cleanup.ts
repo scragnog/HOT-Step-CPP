@@ -23,13 +23,23 @@ export interface Yue2CleanupPlan {
 }
 export interface Yue2CleanupChoice { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean }
 
-export function dirBytes(p: string): number {
+/** Bytes under `p`. With `seen`, a hard-linked file (a frozen planner's AR,
+ *  a best-planner copy: yue2-aitk-planner-best.h) counts once across every
+ *  call sharing the set, and not at all when the set already holds it. */
+export function dirBytes(p: string, seen?: Set<string>): number {
   let total = 0;
   try {
     for (const e of fs.readdirSync(p, { withFileTypes: true })) {
       const f = path.join(p, e.name);
-      if (e.isDirectory()) total += dirBytes(f);
-      else if (e.isFile()) { try { total += fs.statSync(f).size; } catch { /* vanished */ } }
+      if (e.isDirectory()) total += dirBytes(f, seen);
+      else if (e.isFile()) {
+        try {
+          const st = fs.statSync(f, { bigint: true });
+          const id = `${st.dev}:${st.ino}`;
+          if (seen && st.nlink > 1n) { if (seen.has(id)) continue; seen.add(id); }
+          total += Number(st.size);
+        } catch { /* vanished */ }
+      }
     }
   } catch { /* missing */ }
   return total;
@@ -53,10 +63,12 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
   const otherRuns = runs.filter(r => r.jobId !== runId && r.status !== 'running' && !yue2RunFinished(r.output));
   const previews = listYue2JointPreviews(run.output).filter(p => p.step !== step);
   const previewBytes = previews.reduce((s, p) => s + (p.file ? fileBytes(path.join(run.output, 'previews', p.file)) : 0), 0);
+  // Files the kept rung links (its frozen AR) are not freed by deleting the others.
+  const linked = new Set<string>(); dirBytes(keep.dir, linked);
   return {
     run: runId, step, keep: keep.dir,
     caches: { count: caches.length, bytes: caches.reduce((s, c) => s + c.bytes, 0), detail: caches.map(c => c.name) },
-    otherCheckpoints: { count: others.length, bytes: others.reduce((s, c) => s + dirBytes(c.dir), 0) },
+    otherCheckpoints: { count: others.length, bytes: others.reduce((s, c) => s + dirBytes(c.dir, linked), 0) },
     otherRuns: { count: otherRuns.length, bytes: otherRuns.reduce((s, r) => s + dirBytes(r.output), 0), detail: otherRuns.map(r => path.basename(r.output)) },
     resume: { count: keep.optimizerPath ? 1 : 0, bytes: fileBytes(keep.optimizerPath) },
     otherPreviews: { count: previews.length, bytes: previewBytes },

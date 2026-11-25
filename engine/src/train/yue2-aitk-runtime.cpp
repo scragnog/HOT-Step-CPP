@@ -1067,6 +1067,12 @@ static int run_impl(Config config, std::string * error) {
         // never changed or removed, so the checkpoint resumes the same way
         // every time.
         std::filesystem::path best_file; int best_file_step = -1;
+        // The last frozen checkpoint's AR file: later frozen checkpoints link
+        // it instead of storing the same planner again. On a frozen resume,
+        // the record's own (the server gives each segment its own folder).
+        std::filesystem::path frozen_ar;
+        if (planner_frozen_at >= 0 && resume_binding.planner_frozen_at >= 0)
+            frozen_ar = std::filesystem::u8path(config.resume).parent_path() / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", completed));
         int planner_restored_from = planner_frozen_at >= 0 ? resume_binding.planner_restored_from : -1;
         if (planner_frozen_at < 0 && gate.best_step >= 0) {
             const bool at_best = resume_binding.planner_frozen_at < 0 ? gate.best_step == completed : resume_binding.planner_restored_from == gate.best_step;
@@ -1299,7 +1305,13 @@ static int run_impl(Config config, std::string * error) {
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
                 config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from, gate, frozen_reason, planner_restored_from);
             if (metadata.empty()) return false;
-            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", step))).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
+            const auto ar_file = std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", step));
+            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / ar_file).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
+            // ponytail: the AR is still written, compared and then replaced by
+            // the link; skip the write if checkpoint time ever matters.
+            if (planner_frozen_at >= 0 && !frozen_ar.empty() && !yue2_aitk_planner_best::link_same_tensors(frozen_ar, temp_dir / ar_file))
+                std::fprintf(stderr, "[yue2-aitk] note: step %d keeps its own AR file (not linked to %s)
+", step, frozen_ar.u8string().c_str());
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
                 const auto named = state.named_tensors();
@@ -1339,6 +1351,7 @@ static int run_impl(Config config, std::string * error) {
             if (!save_ec) {
                 last_saved=step; event("checkpoint", step);
                 if (best_copy) { best_file = final_dir / yue2_aitk_planner_best::kFile; best_file_step = gate.best_step; }
+                if (planner_frozen_at >= 0) frozen_ar = final_dir / ar_file;
             }
             return !save_ec;
         };

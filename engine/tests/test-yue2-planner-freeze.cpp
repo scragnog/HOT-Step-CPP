@@ -20,6 +20,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <string>
 #include <vector>
@@ -127,7 +128,33 @@ static bool one(ggml_backend_t backend, const char * adapter, const char * optim
     return true;
 }
 
+// The frozen AR link (GH #346): same tensors under a different header link,
+// different tensors keep their own file, and the link outlives the source.
+static bool ar_link() {
+    namespace pb = yue2_aitk_planner_best;
+    const auto dir = std::filesystem::temp_directory_path() / "yue2-frozen-ar-link";
+    std::error_code ec; std::filesystem::remove_all(dir, ec); std::filesystem::create_directories(dir);
+    auto put = [](const std::filesystem::path & p, const std::string & header, const std::string & data) {
+        const uint64_t n = header.size();
+        std::ofstream(p, std::ios::binary).write(reinterpret_cast<const char *>(&n), sizeof n).write(header.data(), n).write(data.data(), data.size());
+    };
+    const auto a = dir / "a", b = dir / "b", c = dir / "c";
+    put(a, "{\"steps\":\"90\"}", std::string("", 4));
+    put(b, "{\"steps\":\"100\"}", std::string("", 4));
+    put(c, "{\"steps\":\"110\"}", std::string("", 4));
+    CHECK(pb::link_same_tensors(a, b) && std::filesystem::hard_link_count(b) == 2);
+    CHECK(!pb::link_same_tensors(a, c) && std::filesystem::hard_link_count(c) == 1);
+    CHECK(!pb::link_same_tensors({}, c) && !pb::link_same_tensors(dir / "missing", c));
+    CHECK(!std::filesystem::exists(dir / "b.link") && !std::filesystem::exists(dir / "c.link"));
+    std::filesystem::remove(a);
+    CHECK(pb::tensor_bytes(b) == std::string("", 4));
+    std::filesystem::remove_all(dir, ec);
+    std::puts("PASS frozen AR link");
+    return true;
+}
+
 int main() {
+    if (!ar_link()) return 1;
     ggml_backend_load_all();
     ggml_backend_t cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
     if (!cpu) { std::fprintf(stderr, "no CPU backend\n"); return 1; }
