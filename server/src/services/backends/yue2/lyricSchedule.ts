@@ -48,7 +48,7 @@ const codepoints = (text: string) => Array.from(text).length;
 export function buildYue2LyricSchedule(abc: string, lyrics: string, options: Yue2LyricScheduleOptions):
   { wire: Yue2LyricScheduleWire; untimed: string[] } {
   if (lyrics.includes('\r')) throw new Error('lyric schedule needs \\n line endings in the lyrics');
-  if (!/^Q:/m.test(abc)) throw new Error('lyric schedule needs a score tempo (Q:); free-tempo covers have no clock');
+  if (!/^[ \t]*Q:/m.test(abc)) throw new Error('lyric schedule needs a score tempo (Q:); free-tempo covers have no clock');
   const bars = scoreBarClock(abc);
   const onsets = scoreVocalNoteOnsets(abc, bars);
   const sections = scoreSections(abc);

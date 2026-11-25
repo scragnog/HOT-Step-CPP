@@ -44,8 +44,15 @@ export function scoreBarClock(abc: string): ScoreClockBar[] {
     if (line.startsWith('V:')) { inVocal = isScoreVocalVoice(line, vocalIds); continue; }
     if (/^[A-Za-z]:/.test(line) || !inVocal) continue;
     if (!meterWholeNotes || !bpm || !beatWholeNotes) throw new Error('Vocal score lacks an active M: meter or Q: tempo.');
-    for (const segment of scoreBarSegments(line)) {
-      for (let i = 0; i < barsIn(segment); i++) {
+    for (const part of line.split(/(\[M:\s*[^\]]+\])/)) {
+      const inlineMeter = /^\[M:\s*(\d+)\s*\/\s*(\d+)\s*\]$/.exec(part);
+      if (inlineMeter) {
+        if (!Number(inlineMeter[1]) || !Number(inlineMeter[2])) throw new Error('Unsupported score M: meter.');
+        meter = `${Number(inlineMeter[1])}/${Number(inlineMeter[2])}`;
+        meterWholeNotes = Number(inlineMeter[1]) / Number(inlineMeter[2]);
+        continue;
+      }
+      for (const segment of scoreBarSegments(part)) for (let i = 0; i < barsIn(segment); i++) {
         const duration = meterWholeNotes / beatWholeNotes * 60 / bpm;
         bars.push({ start: seconds, end: seconds + duration, wholeStart: wholeNotes,
           wholeEnd: wholeNotes + meterWholeNotes, meter, bpm, beatWholeNotes });
@@ -65,7 +72,7 @@ export function scoreSecondsAtWhole(bars: ScoreClockBar[], position: number): nu
 
 /** First sounding Vocal event in each score bar, using ABC note/rest durations. */
 export function scoreVocalNoteOnsets(abc: string, bars: ScoreClockBar[]): Array<number | null> {
-  const tune = abcjs.parseOnly(abc)[0];
+  const tune = abcjs.parseOnly(abc.split('\n').filter(line => line.trim()).join('\n'))[0];
   if (!tune) throw new Error('ABC parser returned no tune.');
   const onsets: Array<number | null> = Array(bars.length).fill(null);
   let barIndex = 0;

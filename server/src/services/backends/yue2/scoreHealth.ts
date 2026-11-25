@@ -209,7 +209,8 @@ export function isScoreVocalVoice(line: string, vocalIds: ReadonlySet<string>): 
 }
 
 export function scoreBarSegments(line: string): string[] {
-  return line.split('|').filter(segment => segment.trim());
+  return line.replace(/\[[A-Za-z]:[^\]]*\]/g, '').split('|')
+    .filter(segment => segment.trim() && !/^[\s:\[\]]+$/.test(segment));
 }
 
 /** A cover needs at least one audible melody bar. Unvoiced ABC is a single
