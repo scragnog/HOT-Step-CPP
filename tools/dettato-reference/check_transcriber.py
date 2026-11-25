@@ -15,7 +15,7 @@ and <oracle root>/<fixture>/cpu the matching oracle capture. Gates (tolerances.j
   seconds       |a - b| < 1e-6
   non-finite    fails
 --gpu: each gate is the looser of the CPU gate and upstream's own CPU/CUDA spread on that fixture (spread.json).
-A missing fixture or a missing fed tap fails. Exit 1 when any gate fails."""
+A missing fixture, a result.json "input" other than "fed" or "audio", or a missing fed tap fails. Exit 1 when any gate fails."""
 import argparse
 import json
 import sys
@@ -60,7 +60,12 @@ for name in fixtures:
     (A, ra), (B, rb) = load_capture(ref_dir), load_capture(port_dir)
     sp = spread.get(fx_dir.name, {})
     rows, ok = [], True
-    fed = rb.get('input') == 'fed'
+    if rb.get('input') not in ('fed', 'audio'):
+        print(f"FAIL {name} ({a.run}): result.json input is {rb.get('input')!r}, not 'fed' or 'audio'")
+        report[name] = dict(passed=False, bad_input=rb.get('input'))
+        failed = True
+        continue
+    fed = rb['input'] == 'fed'
 
     def gate(name, value, limit, good, tensor=False):
         global ok
