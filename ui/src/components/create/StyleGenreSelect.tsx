@@ -23,7 +23,7 @@ export const StyleGenreSelect: React.FC<Props> = ({ caption, onCaptionChange }) 
   const add = (genre: string) => {
     const has = caption.split(',').some(s => s.trim().toLowerCase() === genre.toLowerCase());
     if (has) return;
-    const base = caption.replace(/[\s,]+$/, '');
+    const base = caption.replace(/[\s,.;]+$/, '');
     onCaptionChange(base ? `${base}, ${genre}` : genre);
   };
 
