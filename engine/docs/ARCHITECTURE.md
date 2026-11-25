@@ -433,8 +433,8 @@ are reported, not ignored.
 | `infer_method`, `scheduler`, `guidance_mode`, `plugin_params` | `""`, `""`, `""`, `{}` | Lua plugins for the flow stage. Empty keeps the native Euler path and plain CFG. `guidance_mode: "apg"` uses native APG |
 | `flow_shift` | 1.0 | Above 0 up to 20. Only used with a scheduler plugin |
 | `apg_norm_threshold` | 2.5 | 0 to 100 |
-| `lm_temperature`, `lm_top_k`, `lm_top_p` | 1.0, 0, 0.0 | Planner sampling. `lm_top_k` 0 uses the checkpoint's value |
-| `lm_rep_penalty`, `lm_rep_window`, `lm_rep_mode`, `lm_dry_base`, `lm_dry_min_len` | 1.0, 320, `"dry"`, 1.75, 15 | Planner repetition penalty, in 25 fps frames |
+| `lm_temperature`, `lm_top_k`, `lm_top_p` | 1.0, 0, 0.0 | Planner sampling. `lm_top_k` 0 uses the checkpoint's value. In the AR cache key when any is off its default |
+| `lm_rep_penalty`, `lm_rep_window`, `lm_rep_mode`, `lm_dry_base`, `lm_dry_min_len` | 1.0, 320, `"dry"`, 1.75, 15 | Planner repetition penalty, in 25 fps frames. In the AR cache key when the penalty is on |
 | `takes` | 1 | Songs from one planner pass, 1 to 8, clamped to the checkpoint's row budget. Take t uses `seed + t`; fetch with `GET /mm3/take` |
 | `lm_kv_q8` | false | Store the planner's KV cache as Q8_0: about half the VRAM, about 7% slower per step at 300 s, and a different (equally valid) plan from the same seed. `MM3_LM_KV_TYPE` overrides it. In the AR cache key when on. `/mm3/lm-plan` takes it too. `/mm3/synth` also turns it on by itself when stage 1 would not fit (the VRAM fit, `mm3-vram-fit.h`): Q8_0 first, then with `stop_after_first_eos` fewer candidates per round, down to 1; no fit fails the job before loading. GET `/mm3/job` reports `lm_kv_type`, `fit_takes` (candidates per round as run, 0 while queued) and `vram_note` when the fit changed either. CUDA builds only; `MM3_VRAM_BUDGET_GB` replaces the measured budget |
 | `require_eos`, `stop_after_first_eos`, `eos_rounds`, `min_frames` | false, false, 4, 0 | Natural-ending controls. `eos_rounds` is 1 to 16; `min_frames` drops plans shorter than that |
