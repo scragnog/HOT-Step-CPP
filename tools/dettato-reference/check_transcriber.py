@@ -7,7 +7,7 @@ Every fixture in manifest.json must have <port root>/<fixture>/<run>, a capture 
   ace-midi --dettato-model <weights>/dettato (--dettato-fed <oracle capture> | --transcribe <wav>) --dettato-capture <dir>
 and <oracle root>/<fixture>/cpu the matching oracle capture. Gates (tolerances.json):
   fed tensors   maps.* and sub.maps.* max abs < 1e-3; both sub.tap.* present and |a - b| <= 1e-3 + k 2^-10 |a|
-                elementwise (k = 2, tolerances.json exceptions; --tap-steps sets k). Only for a fed capture
+                elementwise (k = 2 as declared; --tap-steps sets k). Only for a fed capture
                 (result.json "input": "fed"): a capture from audio went through the port's own resampler and
                 tuning, so its tensors are reported, not gated
   notes         F1 >= 0.99, median onset error <= 1 ms, offsets within 20 ms >= 99%, unmatched oracle onset prob <= 0.35,
