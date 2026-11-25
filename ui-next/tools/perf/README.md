@@ -37,6 +37,7 @@ Playwright is found as the other tools find it (`npm install`, or `PLAYWRIGHT_MO
 | `profile.cjs`, `load-profile.cjs` | where an action's (or the load's) time goes, by source line, with the page's counters and React's renders, on the instrumented build: `npx vite build --mode file --config tools/perf/vite.instr.mjs`, then `PERF_BUILD=tools/perf/results/instr` |
 | `solve-bench.ts` | the desk's layout solver on the recorded desks (`node tools/perf/solve-bench.ts`) |
 | `make-desks.cjs` | writes `desks/*.json`, the saved desks the others open (from the test build) |
+| `tier.cjs` | the tier change on each engine's full desk, every pair of tiers both ways: click to the motion's first frame, longest frame, main thread, frames dropped in the motion, settled, the counters; `--again` the return to a tier the desk was laid out at, `--split` where the time goes by source group (`PERF_PROD=1` instrumented test build) |
 | `../motion/cost.mjs` | what each motion costs the main thread (package 9's) |
 
 ## The guards

@@ -60,6 +60,7 @@ ui-next/
       render/              Face.tsx (the generic renderer), Tile.tsx, bind.ts (a node's model and its actions),
                            useModel.ts (a view's subscription, redrawn only when its model changes), reads.ts (what a
                            model read, and what a change of the store touches)
+                           tileTier.ts (the tier each tile is drawn at, and what its models read there)
       tally.ts             the page's counters of its costly steps, for the performance guards (test build only)
       register/            the registration points: keys.ts, slots.ts and Slot.tsx, actions.ts, undoable.ts, services.ts
       features/            what the page does that is not a part: each file registers keys, slot fills, named actions,
@@ -283,6 +284,25 @@ time a word needs one: a face that arrives later lays the whole document out aga
 follows are looked for in what was added (`features/motion-blocks.ts`); the tiles and pedals that leave are put in their
 layers before any is measured (`features/motion.ts`).
 
+**A tier change draws what is in view first** (`desk/stage.ts`). On a full desk the change drew every tile at the new
+tier, laid the desk out and measured it twice (once in the desk's layout effect, again mid-motion for what the parts'
+own effects changed), and the View Transition captured every part, before anything moved: 95 to 230 ms from the click
+to the motion's first frame, one frame of up to 220 ms. Now the desk is measured once, after the parts' effects
+(`desk/layout.ts deferPack`), without a class set on the desk to measure it (`.bento.measuring` restyled the whole
+desk through its :has rules; the rule's two declarations are written on the children instead), and the parts' boxes are
+read before any is named. And when the desk has been laid out at the new tier before (what it was there is taken as
+that tier is left: `deskLeaving`, each tile's item, look and what its models read, `render/tileTier.ts`), the change
+draws only what will be in view: a tile out of view before and after the change, whose content there cannot have
+changed since (nothing its models read differs), is held at the tier it was drawn at (or drawn as its shell, a tile the
+change brings), stands in the layout as what was kept of it, lays nothing out (`content-visibility: hidden` for the
+moment) and is not named for the View Transition, which no one would see; once the motion has started the held tiles
+are drawn at the new tier one a frame, nearest first, each checked against what was kept (one not the height it was
+kept at is measured and the desk laid out again, as any change of content is). A tile's models are asked at the tile's
+tier (`useModel` sees the desk at it), so a held tile asks nothing again. On every ACE-Step module, pedal and side unit
+at 1920x1080, a return to a tier now shows its first frame in 60 to 110 ms and settles in about 400 (the motion is 280);
+a first visit to a tier, or one after a module was added or removed, draws everything (95 to 180 ms). The tools:
+`tools/perf/tier.cjs` (every pair of tiers both ways on each engine's full desk; `--again` the return).
+
 PERF-TABLE
 
 **The guards.** `tools/behaviour/scenarios/39-perf.mjs` (in the acceptance: `acceptance/perf.json`) does the actions
@@ -293,6 +313,10 @@ the tiles measured for a removal (1), a move by key and a drag (0), the desk mea
 and for a tier change (2), the layouts solved
 for a move by key (one a place), the times the shell is drawn for a removal or an Undo (0). `switches/perf.json` switches each fix off in turn and each makes a guard fail (8 of 8). The
 measurements themselves are `tools/perf` (`npm run perf`, tools/perf/README.md).
+The tier change's guards are `scenarios/40-tier.mjs` (`acceptance/tier.json`): a return to a tier on the full desk holds
+the tiles out of view (at least 3 at Studio), asks at most 110 models and measures at most 7 tiles before the motion (a
+first change asks 133 and measures 10), draws every held tile and leaves the desk exactly as a first change draws it;
+a first change measures the desk once and never sets a class on it. `switches/tier.json`: 5 of 5 caught.
 
 The review's earlier measurement of a pedal knob's drag (`perf.js`: every ACE-Step module, all pedals and units at Lab,
 StableStep's Refine dragged through 60 pointer moves; CDP metrics, two runs each), for the record:
@@ -319,6 +343,9 @@ rings as still outlines).
   the page as it will stay; the tile being read keeps its place (focus, else the pointer, else the bars' edge, Q-14).
   A new part of the page that should take part is one line in `PARTS`. `instant` changes the tier without it, for a
   caller that acts in the new tier at once (Lab's offer).
+  When the desk has been laid out at the new tier before, the change is staged (`desk/stage.ts`, above, "Rendering"):
+  the tiles out of view are held and not named, the parts in view move exactly as in the full change
+  (`tools/motion/frames.mjs tier-studio-to-lab-again` against `tier-studio-to-lab`: 0 px on every part both name).
 - **The desk's own transition** (`features/motion.ts`): the store tells it, before the page is drawn again, that the
   modules, the board, the engine or the tier change; where every tile and pedal stands is taken then, and once the desk
   has been laid out (`desk/layout.ts onPacked`, after the commit) arrivals scale in, exits fade where they stood (the
@@ -830,6 +857,13 @@ PF-1. **Every web font is loaded as the page opens** (`features/fonts.ts`), each
 PF-2. **A workflow's name cut short leads its row's tooltip once the list is painted** (F-05), and again when the
     list's rows change, not while the list is drawn (which made the browser lay the page out in the middle of drawing).
 
+The tier change (above, "Rendering" and "Motion"):
+
+TC-1. **A return to a tier draws what is in view first**: the tiles out of view before and after the change are held at
+    the tier they were drawn at, take no part in the View Transition, and are drawn at the new tier one a frame once
+    the motion has started (on a full desk all within about 120 ms of its start). What is in view moves as before; a
+    window scrolled within that moment shows a held tile's frame without its content.
+
 ## Adding from the how-to, on a copy
 
 Re-measured in the consolidation round (review r3, RA-03) on a scratch copy of the merged branch, following
@@ -918,6 +952,7 @@ feature on; the verdict for each switch is the one the whole acceptance would gi
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
 | Quick's fold (after the consolidation round) | `derive/fold.ts`, `desk/Fold.tsx`, `store/fold.ts`, `features/fold.ts`, `kit/session.ts` (the kept-state registration point), `testing/standins.ts`, `testing/compat/fold.ts`, `tools/test-fold.ts`, its acceptance, switches, states | `keptFlag('desk.fold')`, `keptFlag('prompt.songInfo')` | `derive/models.ts deskModel` (`open`, `fold`), `desk/Desk.tsx` (draws the button, passes `open`), `features/dnd.tsx` and `model/index.ts` (one line each), `parts/PromptBox.tsx` (Song info kept), `switches/4-fields.json` (its Song info switch's text) |
 | The performance pass (after package 9 and the fold) | `render/reads.ts`, `tally.ts`, `features/fonts.ts`, `testing/compat/perf.ts`, `tools/perf/`, `scenarios/39-perf.mjs`, `acceptance/perf.json`, `switches/perf.json` | none new | `render/useModel.ts`, `desk/layout.ts`, `desk/pack.ts`, `store/desk.ts`; and, each the smallest change: `App.tsx`, `desk/Desk.tsx` (the focus request and the ring as leaves), `workflows/useWfModel.ts`, `workflows/List.tsx`, `store/generate.ts`, `features/dnd.tsx`, `features/motion.ts`, `features/motion-blocks.ts`, `kit/motion.ts`, `i18n/index.ts`, `testing/compat/fields.ts` (the gesture through `gestureNow()`), `switches/7-workflows.json` (one find) |
+| The tier change (after the performance pass) | `desk/stage.ts`, `render/tileTier.ts`, `tools/perf/tier.cjs`, `scenarios/40-tier.mjs`, `acceptance/tier.json`, `switches/tier.json`, the motion `tier-studio-to-lab-again` | none new | `shell/tier.ts` (staging, naming, the change's counters), `desk/layout.ts` (kept per tier, deferPack, stand-ins), `render/useModel.ts` and `render/Tile.tsx` (a tile's tier), `board/cables.ts` (a board not drawn is not snapped), `tools/motion/motions.mjs`, `tools/perf/vite.instr.mjs` (PERF_PROD) |
 | 11. Concept notes and the engine log | `features/notes.tsx`, `features/notes-open.ts`, `features/logs.tsx`, `features/logs-dock.ts`, `features/overlay-exit.ts`, `features/modal-keys.ts`, `services/logs.ts`, `store/notes-logs.ts`, `src/derive/logs.ts`, `i18n/words/notes.ts`, `tools/test-notes-logs.ts`, its acceptance, switches, states | `fill('overlays')`, `defineService('logs')`, `layerOpen` (the notes), `onKey({ id: 'logs-escape', order: 90 })`, `onKey({ id: 'modal-waits', order: 6 })` (F-08) | none; two lines in others' files: `features/layers.ts` (a toast joins a modal layer's Tab cycle, F-18), `shell/placeToast.ts` (the toast stands on the docked log); at the coordinator's request, unique ids in drawings: `shell/engines.ts` and `thumbs/index.ts` (a place per drawing), their callers `shell/TopBar.tsx`, `workflows/List.tsx`, `workflows/Drafts.tsx`, `features/picker.tsx`, `features/dnd.tsx` (one argument each) |
 
 No file is edited by two packages, with three planned exceptions: `src/definitions/parts.ts`, where a package that
