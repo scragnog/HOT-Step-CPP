@@ -16,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { config } from '../../config.js';
+import { config, LOGS_DIR } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
@@ -33,7 +33,8 @@ import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
 import { describeOwner, isMine, owner, ownerAlive, type Owner } from '../instance.js';
 import type { HeartmulaStatusResponse } from '../../contracts/heartmulaTraining.js';
-import { mm3CodesDir } from './mm3Train.js';
+import { readMm3Run, resolveMm3RunDir, type Mm3RunSummary } from './mm3Runs.js';
+import { applyMm3Preset, MM3_LM_DEFAULTS, mm3CodesDir } from './mm3Train.js';
 
 export type Yue2BatchStage = 'prepare' | 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type BatchFamily = 'yue2' | 'heartmula' | 'mm3';
@@ -51,7 +52,7 @@ export interface Yue2BatchStageResult {
    *  stage continues from that run's last optimizer checkpoint instead of
    *  starting over. */
   resumeJobId?: string;
-  /** HeartMuLa's immutable run identity, retained across job retries. */
+  /** HeartMuLa or MM3 run identity, retained across job retries. */
   runId?: string;
 }
 
@@ -393,12 +394,40 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
-/** The shared MM3 recipe minus `trigger`, which belongs to each dataset: without it the train route
- *  uses the dataset's own custom tag. A batch that carried it trained every album on the first album's
- *  trigger (HOTSTEP-1092), so it is dropped here, where every batch passes, whatever the client sent. */
-export function mm3BatchTrainBody(recipe: Record<string, unknown>): Record<string, unknown> {
-  const { trigger: _trigger, ...shared } = recipe;
+type Mm3BatchRun = Pick<Mm3RunSummary, 'runName' | 'configuredSteps' | 'lastStep'> & {
+  resume?: Pick<NonNullable<Mm3RunSummary['resume']>, 'step'>;
+};
+
+/** Use the interrupted run's resolved cap and let the resume route replay its recipe. */
+export function mm3BatchTrainBody(recipe: Record<string, unknown>, run?: Mm3BatchRun): Record<string, unknown> | null {
+  if (run) {
+    const steps = Number(recipe.steps ?? undefined);
+    const cap = run.configuredSteps || (Number.isFinite(steps)
+      ? Math.max(1, Math.min(100000, Math.trunc(steps)))
+      : applyMm3Preset(MM3_LM_DEFAULTS, recipe.preset).steps);
+    if (run.lastStep >= cap) return null;
+    if (run.resume) return { runName: run.runName, steps: cap, preview: recipe.preview,
+      ...(recipe.launder === true ? { launder: true } : {}) };
+  }
+  // The fresh train route resolves each dataset's own tag (HOTSTEP-1092).
+  const { trigger: _trigger, runName: _runName, ...shared } = recipe;
   return shared;
+}
+
+/** Older snapshots only saved the job ID. Recover its output directory from
+ *  that job's command line so an unrelated run on the same dataset cannot win. */
+function mm3BatchRunName(jobId: string): string | undefined {
+  const job = queue.getJob(jobId);
+  const outDir = job?.kind === 'mm3-train-lm' ? (job.opts as { outDir?: string } | undefined)?.outDir : undefined;
+  if (outDir) return path.basename(outDir);
+  if (!/^[\da-f-]{36}$/i.test(jobId) || !fs.existsSync(LOGS_DIR)) return undefined;
+  for (const session of fs.readdirSync(LOGS_DIR, { withFileTypes: true })) {
+    if (!session.isDirectory()) continue;
+    const log = path.join(LOGS_DIR, session.name, 'training', `mm3-train-lm_${jobId}.log`);
+    if (!fs.existsSync(log)) continue;
+    const output = fs.readFileSync(log, 'utf8').match(/ \| > \$ [^\r\n]+? mm3-lm-train --jsonl [^\r\n]+? --out (.+?) --rank /)?.[1];
+    if (output) return path.basename(output);
+  }
 }
 
 /** True when every manifest row has its `<id>.codes` file (the trainer silently skips a row without one).
@@ -577,7 +606,15 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     // is pinned, not re-recommended per dataset.
     if (stage === 'codes') return mm3CodesComplete(ds.datasetJsonPath, path.join(mm3CodesDir(ds.slug, launder), 'codes')) ? null : { launder };
     if (stage !== 'train') throw new Error(`Unsupported MM3 batch stage: ${stage}`);
-    return mm3BatchTrainBody(state.recipe);
+    const runName = result.runId ?? (result.resumeJobId ? mm3BatchRunName(result.resumeJobId) : undefined);
+    const dir = runName ? resolveMm3RunDir(runName) : null;
+    const found = dir ? readMm3Run(dir) : null;
+    const run = found?.datasetId === ds.id ? found : undefined;
+    const body = mm3BatchTrainBody(state.recipe, run);
+    if (body?.runName && run?.resume) {
+      console.log(`[Training] mm3 batch ${state.id}: resuming ${item.name} from step ${run.resume.step} of run ${run.runName}`);
+    }
+    return body;
   }
   if (stage === 'train' && result.resumeJobId) {
     const resumed = resumeTrainingBody(state, item, result.resumeJobId);
@@ -696,7 +733,9 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
 
   let response: Response;
   try {
-    const route = FAMILY_ROUTE[state.family ?? 'yue2']?.[result.stage] ?? STAGE_PATH[result.stage];
+    const route = state.family === 'mm3' && result.stage === 'train' && typeof body.runName === 'string'
+      ? 'mm3-resume-lm'
+      : FAMILY_ROUTE[state.family ?? 'yue2']?.[result.stage] ?? STAGE_PATH[result.stage];
     response = await fetch(`${self()}/api/training/datasets/${encodeURIComponent(item.datasetId)}/${route}`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   } catch (err: any) { finishStage(state, result, 'failed', err?.message || String(err)); return; }
@@ -704,9 +743,10 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
 
   let jobId = '', skipped = '';
   try {
-    const payload = await response.json() as { jobId?: unknown; skipped?: unknown; run?: unknown };
+    const payload = await response.json() as { jobId?: unknown; skipped?: unknown; run?: unknown; runName?: unknown };
     if (typeof payload?.jobId === 'string') jobId = payload.jobId;
     if (state.family === 'heartmula' && typeof payload?.run === 'string') result.runId = payload.run;
+    if (state.family === 'mm3' && result.stage === 'train' && typeof payload?.runName === 'string') result.runId = payload.runName;
     if (typeof payload?.skipped === 'string') skipped = payload.skipped;
   } catch { /* handled below */ }
   if (!jobId && skipped) { finishStage(state, result, 'done', null); return; }

@@ -797,6 +797,14 @@ crop together, keeping the original track exclusion threshold. The run's
 `hotstep-run.json` records the effective options and the reason, which also
 appears in the training log. Resume replays the recorded window.
 
+An MM3 batch records each album's training run name in its snapshot. On resume,
+it checks that run's progress, skips training at the step cap, and calls
+`mm3-resume-lm` at the saved optimizer step when state is available. Older
+snapshots can recover the run name from the interrupted job's trainer log.
+The resume route resolves the current dataset's cache using the code variant
+recorded by the run. For older runs with no variant on record, the request may
+set `launder: true`. A laundered run requires the laundered cache.
+
 MM3 runs need no index: a run is its folder, attributed by `hotstep-run.json`. The worker
 offers `GET /api/training/worker/mm3-mirror` (`workerMm3MirrorManifest`: runs of datasets
 whose `sourceDir` is under `worker-datasets/`, with `live` while a job for the dataset or

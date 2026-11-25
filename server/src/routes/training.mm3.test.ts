@@ -12,6 +12,7 @@ test('MM3 status and training use an installed BF16 base without Q8_0', async t 
   const { initDb, closeDb } = await import('../db/database.js');
   const { insertDataset } = await import('../services/training/datasetsRepo.js');
   const { mm3CodesDir } = await import('../services/training/mm3Train.js');
+  const { writeMm3RunManifest } = await import('../services/training/mm3Runs.js');
   const queue = await import('../services/training/labelingQueue.js');
   const { default: training } = await import('./training.js');
 
@@ -101,4 +102,37 @@ test('MM3 status and training use an installed BF16 base without Q8_0', async t 
   const opts = queue.getJob(withQ8Body.jobId)?.opts as { basePrecision: string; preview: { everySteps: number } };
   assert.equal(opts.basePrecision, 'bf16');
   assert.equal(opts.preview.everySteps, 100);
+
+  await t.test('resume keeps the run’s laundered codes and requires that cache', async () => {
+    const laundered = path.join(mm3CodesDir('fixture', true), 'codes');
+    const code = path.join(laundered, 'track.codes');
+    fs.mkdirSync(laundered, { recursive: true });
+    fs.writeFileSync(code, 'fixture');
+    const train = await start({ basePrecision: 'bf16', launder: true });
+    const trained = await train.json() as { jobId: string; runName: string; outDir: string };
+    assert.equal(train.status, 200, JSON.stringify(trained));
+    const resolved = queue.getJob(trained.jobId)?.opts as Parameters<typeof writeMm3RunManifest>[0];
+    assert.equal(resolved.codesDir, laundered);
+    writeMm3RunManifest(resolved, { datasetId: 'fixture', datasetSlug: 'fixture', datasetName: 'Fixture' });
+    const state = path.join(trained.outDir, 'resume-state.bin');
+    fs.writeFileSync(state, 'fixture');
+    fs.writeFileSync(path.join(trained.outDir, 'resume-state.json'), JSON.stringify({ step: 4 }));
+    const resume = () => fetch(`${datasetUrl}/mm3-resume-lm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runName: trained.runName, launder: false, steps: 8 }),
+    });
+
+    fs.unlinkSync(code);
+    const missing = await resume();
+    assert.equal(missing.status, 400);
+    assert.match(await missing.text(), /No laundered codes for this dataset/);
+    fs.writeFileSync(code, 'fixture');
+    const resumed = await resume();
+    const resumedBody = await resumed.json() as { jobId: string; from: number };
+    assert.equal(resumed.status, 200, JSON.stringify(resumedBody));
+    assert.equal(resumedBody.from, 4);
+    const resumedOpts = queue.getJob(resumedBody.jobId)?.opts as typeof resolved;
+    assert.equal(resumedOpts.codesDir, laundered);
+    assert.equal(resumedOpts.resumeFrom, state);
+  });
 });

@@ -62,3 +62,21 @@ test('an MM3 batch never sends the first dataset trigger to every run', () => {
   assert.deepEqual(mm3BatchTrainBody(recipe), { steps: 900, preview: { seconds: 40 } });
   assert.equal(recipe.trigger, 'first_album');   // the stored batch recipe is left alone
 });
+
+test('MM3 batch training resumes a saved optimizer state, falls back to fresh training, or skips at the cap', () => {
+  const recipe = { steps: 30, trigger: 'first_album', preview: { seconds: 40 } };
+  const run = {
+    runName: 'interrupted-run',
+    configuredSteps: 30,
+    lastStep: 15,
+    resume: { step: 10 },
+  };
+
+  assert.deepEqual(mm3BatchTrainBody(recipe, run), {
+    runName: 'interrupted-run', steps: 30, preview: { seconds: 40 },
+  });
+  assert.deepEqual(mm3BatchTrainBody(recipe, { ...run, resume: undefined }), {
+    steps: 30, preview: { seconds: 40 },
+  });
+  assert.equal(mm3BatchTrainBody(recipe, { ...run, lastStep: 30, resume: undefined }), null);
+});

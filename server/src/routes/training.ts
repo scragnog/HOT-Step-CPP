@@ -2595,6 +2595,13 @@ router.get('/mm3-rung-scores/export', (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
+function mm3TrainCodesError(codesInner: string, launder: boolean): string | null {
+  if (fs.existsSync(codesInner) && fs.readdirSync(codesInner).some(f => f.endsWith('.codes'))) return null;
+  return launder
+    ? 'No laundered codes for this dataset — run the codes export with laundering enabled first'
+    : 'No RVQ codes for this dataset — run the codes export first';
+}
+
 /** POST /datasets/:id/mm3-train-lm */
 router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) => {
   try {
@@ -2622,14 +2629,10 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
     // caches are separate dirs, so an absent flag trains on exactly the codes
     // it always has.
     const trainLaunder = (req.body || {}).launder === true;
-    const codesDir = mm3CodesDir(ds.slug, trainLaunder);
-    const codesInner = path.join(codesDir, 'codes');
-    const nCodes = fs.existsSync(codesInner)
-      ? fs.readdirSync(codesInner).filter(f => f.endsWith('.codes')).length : 0;
-    if (nCodes === 0) {
-      res.status(400).json({ error: trainLaunder
-        ? 'No laundered codes for this dataset — run the codes export with laundering enabled first'
-        : 'No RVQ codes for this dataset — run the codes export first' });
+    const codesInner = path.join(mm3CodesDir(ds.slug, trainLaunder), 'codes');
+    const codesError = mm3TrainCodesError(codesInner, trainLaunder);
+    if (codesError) {
+      res.status(400).json({ error: codesError });
       return;
     }
 
@@ -3116,7 +3119,7 @@ router.get('/lyrics-sets/:id/mm3-adapters', (req: Request, res: Response) => {
 /** POST /datasets/:id/mm3-resume-lm
  *
  *  Body: { runName, addSteps? | steps?, saveEvery?, stopMode?, targetLoss?,
- *          targetLossMetric?, targetLossEpochs?, preview? }
+ *          targetLossMetric?, targetLossEpochs?, preview?, launder? }
  *
  *  Everything else comes from the run's own manifest, deliberately. A resume
  *  that quietly re-derived rank, optimizer or the held-out split from today's
@@ -3162,11 +3165,21 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
     // manifest: a dataset re-scanned since has a new manifest path, and
     // pointing at the old one would train on a stale song list. A changed song
     // COUNT is refused by the engine outright, which is the check that matters.
+    const launderedDir = mm3CodesDir(ds.slug, true);
+    const trainLaunder = 'launder' in base && typeof base.launder === 'boolean' ? base.launder
+      : base.codesDir ? base.codesDir.split(/[\\/]/).at(-2) === path.basename(launderedDir)
+      : b.launder === true;
+    const codesDir = path.join(trainLaunder ? launderedDir : mm3CodesDir(ds.slug), 'codes');
+    const codesError = trainLaunder ? mm3TrainCodesError(codesDir, true) : null;
+    if (codesError) {
+      res.status(400).json({ error: codesError });
+      return;
+    }
     const opts = {
       ...base,
       manifest:    ds.datasetJsonPath,
       captionsDir: ds.sourceDir,
-      codesDir:    path.join(mm3CodesDir(ds.slug), 'codes'),
+      codesDir,
       outDir:      dir,
       datasetName: ds.name || ds.slug,
     };
