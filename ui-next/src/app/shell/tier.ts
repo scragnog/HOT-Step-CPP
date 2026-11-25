@@ -24,6 +24,8 @@ import { useDesk } from '../store/desk.ts';
 import { deskFold } from '../store/fold.ts';
 import { mtime, reduced } from '../kit/motion.ts';
 import { deferPack, flushPack } from '../desk/layout.ts';
+import { drawHeld, drawInView, hold, leaving, planStage, settle, type Stage } from '../desk/stage.ts';
+import { heldTiles } from '../render/tileTier.ts';
 
 const ANCHORS = '#bento > .tile[data-m], .lyr-card';
 const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
@@ -32,17 +34,24 @@ let lastPointer: [number, number] | null = null;
 addEventListener('pointermove', e => { lastPointer = [e.clientX, e.clientY]; }, { passive: true, capture: true });
 document.documentElement.addEventListener('pointerleave', () => { lastPointer = null; }, { passive: true });
 /** The place the user is reading, taken before the change: the tile focus is in, else the one under the pointer, else
- *  the one nearest under the bars; the function puts it back where it was on screen (nothing at the top of the page:
- *  there is nothing to keep). */
-function deskAnchor(): () => void {
-  if (scrollY < 1) return () => {};
+ *  the one nearest under the bars; `put` puts it back where it was on screen (nothing at the top of the page: there is
+ *  nothing to keep), and `reader` says which tile it is and where its top stands now. */
+function deskAnchor(): { put: () => void; reader: { key: string; top: number } | null } {
+  const none = { put: () => {}, reader: null };
+  if (scrollY < 1) return none;
   const line = Math.max(document.querySelector('.top')?.getBoundingClientRect().bottom ?? 0, document.querySelector('.deskbar')?.getBoundingClientRect().bottom ?? 0);
   const under = lastPointer ? document.elementFromPoint(...lastPointer)?.closest(ANCHORS) ?? null : null;
   let el: Element | null = document.activeElement?.closest?.(ANCHORS) ?? under, best = Infinity;
   if (!el) document.querySelectorAll(ANCHORS).forEach(t => { const r = t.getBoundingClientRect(); if (!r.height || r.bottom <= line + 8 || r.top >= innerHeight) return; const d = Math.abs(r.top - line); if (d < best) { best = d; el = t; } });
-  if (!el) return () => {};
-  const k = anchorKey(el), top = (el as Element).getBoundingClientRect().top;
-  return () => { const n = document.querySelector(k); if (!n) return; const d = n.getBoundingClientRect().top - top; if (Math.abs(d) > 0.5) scrollTo(scrollX, scrollY + d); };
+  if (!el) return none;
+  const k = anchorKey(el), top = (el as Element).getBoundingClientRect().top, id = (el as HTMLElement).dataset.m;
+  return { put: () => { const n = document.querySelector(k); if (!n) return; const d = n.getBoundingClientRect().top - top; if (Math.abs(d) > 0.5) scrollTo(scrollX, scrollY + d); }, reader: id ? { key: id, top } : null };
+}
+
+/** Whether a tile stands within a third of the window of the view (a tile that leaves out of view is not named). */
+function inView(id: string): boolean {
+  const r = document.querySelector(`#bento > .tile[data-m="${id}"]`)?.getBoundingClientRect(), m = innerHeight / 3;
+  return !!r && r.bottom > -m && r.top < innerHeight + m;
 }
 
 type VT = { finished: Promise<void>; ready: Promise<void>; updateCallbackDone: Promise<void> };
@@ -50,8 +59,10 @@ const doc = document as Document & { startViewTransition?: (f: () => void) => VT
 /** View Transitions with their classes: the tier change is choreographed only where both are there. */
 const VT_OK = !!doc.startViewTransition && !!window.CSS?.supports?.('view-transition-class: a');
 
-/* the tiles only one of the two tiers shows, and whether the old state is being named */
-let only = new Set<string>(), naming: 'old' | 'new' = 'old';
+/* the tiles only one of the two tiers shows, whether the old state is being named, and the tiles left unnamed (out of
+   view: a staged change holds them, or they leave where no one sees them) */
+let only = new Set<string>(), naming: 'old' | 'new' = 'old', unnamed = new Set<string>();
+const tileIdOf = (el: Element) => el.closest<HTMLElement>('#bento > .tile[data-m]')?.dataset.m ?? '';
 const frame = (el: HTMLElement) => 'frame' + (el.dataset.m === LEAD?.id ? ' keep' : '') + (el.classList.contains('source') ? ' source' : '') + (only.has(el.dataset.m!) ? (naming === 'old' ? ' gone' : ' fresh') : '');
 const m = (el: Element) => (el as HTMLElement).dataset.m ?? '';
 const tileOf = (el: Element) => m(el.closest('.tile')!);
@@ -82,7 +93,7 @@ const PARTS: [string, (el: HTMLElement) => string, string | ((el: HTMLElement) =
  *  the page restyled again, once a part. */
 function nameForMorph(on: boolean): void {
   const used = new Set<string>();
-  const parts = PARTS.flatMap(([sel, name, cls]) => [...document.querySelectorAll<HTMLElement>(sel)].map(el => ({ el, name, cls, drawn: on && el.getClientRects().length > 0 })));
+  const parts = PARTS.flatMap(([sel, name, cls]) => [...document.querySelectorAll<HTMLElement>(sel)].map(el => ({ el, name, cls, drawn: on && !unnamed.has(tileIdOf(el)) && el.getClientRects().length > 0 })));
   for (const { el, name, cls, drawn } of parts) {
     const n = drawn ? name(el) : '';
     if (!n || used.has(n)) { el.style.removeProperty('view-transition-name'); el.style.removeProperty('view-transition-class'); continue; }
@@ -90,7 +101,7 @@ function nameForMorph(on: boolean): void {
   }
 }
 
-let seq = 0;
+let seq = 0, flying = 0;
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
 const ringFor = () => (reduced() ? 1200 : mtime('--t-slow') * 4);
 
@@ -101,10 +112,12 @@ const ringFor = () => (reduced() ? 1200 : mtime('--t-slow') * 4);
 export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; reveal?: boolean; instant?: boolean } = {}): void {
   const s = useDesk.getState();
   if (s.desk.tier === t) { if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true }); return; }
-  const was = new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles), keep = deskAnchor();
+  leaving();
+  const was = new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles), anchor = deskAnchor(), keep = anchor.put;
   /* drawn and laid out now, so the anchor is put back before the page is painted; the desk is laid out once, after the
-     parts' own effects have run */
-  const go = () => { deferPack(() => flushSync(() => useDesk.getState().setTier(t))); flushPack(); keep(); };
+     parts' own effects have run. A staged change holds the tiles out of view (desk/stage.ts) */
+  const draw = (st: Stage | null) => { if (!st) settle(); deferPack(() => flushSync(() => { if (st) hold(st); useDesk.getState().setTier(t); })); };
+  const go = (st: Stage | null = null) => { draw(st); flushPack(); keep(); };
   const after = () => {
     if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
     if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods, deskFold.get()).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }
@@ -114,8 +127,13 @@ export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; 
     const me = ++seq, root = document.documentElement;
     const now = new Set([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(m)), next = new Set(deskModel(ix, { ...s.desk, tier: t }, s.mods, deskFold.get()).tiles);
     only = new Set([...now, ...next].filter(x => now.has(x) !== next.has(x))); naming = 'old';
+    /* staged only when no other change is still to be drawn, and nothing is to be rung in the tiles */
+    const st = !flying && !o.ring && !o.reveal ? planStage(t, anchor.reader) : null;
+    unnamed = new Set(st ? [...st.holds.keys(), ...[...only].filter(id => now.has(id) && !inView(id))] : []);
     nameForMorph(true); root.classList.add('tier-morph');
-    const vt = doc.startViewTransition!(() => { go(); naming = 'new'; nameForMorph(true); after(); });
+    flying++;
+    const vt = doc.startViewTransition!(() => { flying--; go(st); if (st) drawInView(); unnamed = new Set(heldTiles()); naming = 'new'; nameForMorph(true); after(); });
+    vt.ready.then(drawHeld, drawHeld);
     /* a change started while another runs skips the first (Q-21): only the last one clears up */
     const clear = () => { if (me !== seq) return; nameForMorph(false); root.classList.remove('tier-morph'); };
     vt.finished.then(clear, clear); vt.ready.catch(() => {}); vt.updateCallbackDone.catch(() => {});

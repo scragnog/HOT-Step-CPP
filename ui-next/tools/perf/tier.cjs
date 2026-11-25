@@ -9,7 +9,8 @@
 //   models  the views' models asked again and found changed, and the tiles measured (the test layer's counters).
 // Medians of `--runs` (3). The browser is warmed up first (one change per engine, unmeasured), as perf.cjs does.
 //
-//   node tools/perf/tier.cjs [--engines ace,mm3,yue] [--pairs quick-studio,studio-quick,...] [--runs 3] [--json out]
+//   node tools/perf/tier.cjs [--engines ace,mm3,yue] [--pairs quick-studio,studio-quick,...] [--runs 3] [--json out] [--again]
+//   --again: the new tier visited before (there and back first), as a user going back and forth does
 //   node tools/perf/tier.cjs --split [...]   where the time goes, by source file, on a source-mapped build of the test
 //        page (npx vite build --mode test --config tools/perf/vite.instr.mjs, PERF_PROD=1 keeps React's production build)
 //   PERF_BUILD=<folder holding dist-test/> to measure another build.
@@ -17,7 +18,7 @@ const fs = require('fs'), path = require('path');
 const { launch, BUILD, url } = require('./lib.cjs');
 
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > 0 ? process.argv[i + 1] : d; };
-const RUNS = +arg('runs', 3), SPLIT = process.argv.includes('--split');
+const RUNS = +arg('runs', 3), SPLIT = process.argv.includes('--split'), AGAIN = process.argv.includes('--again');
 const ENGINES = arg('engines', 'ace,mm3,yue').split(',');
 const PAIRS = arg('pairs', 'quick-studio,studio-quick,studio-lab,lab-studio,quick-lab,lab-quick').split(',').map(p => p.split('-'));
 const PAGE = SPLIT ? 'file:///' + path.join(BUILD, 'tools/perf/results/instr/dist-test/index.html').split(path.sep).join('/') : url('dist-test');
@@ -105,6 +106,8 @@ async function measure(browser, engine, from, to) {
   try {
     await page.goto(PAGE); await page.waitForSelector('#go'); await sleep(900);
     await page.evaluate(scene(engine, from)); await sleep(1200);
+    /* --again: the new tier has been visited before (there and back, unmeasured), as when a user goes back and forth */
+    if (AGAIN) for (const k of [to, from]) { await page.click(`#tiers [data-tier="${k}"]`); await sleep(900); }
     const b = await page.evaluate(to => { const r = document.querySelector(`#tiers [data-tier="${to}"]`).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, to);
     await page.mouse.move(b.x, b.y); await sleep(300);
     const cdp = await ctx.newCDPSession(page); await cdp.send('Performance.enable', { timeDomain: 'threadTicks' });

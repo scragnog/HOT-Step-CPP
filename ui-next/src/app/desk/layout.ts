@@ -14,7 +14,7 @@
 // removal, a move or a drag measures nothing.
 
 import { easing, mtime, reduced, booted } from '../kit/motion.ts';
-import { deskPlace, deskSettle, deskSolve, deskSolveAt, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan } from './pack.ts';
+import { deskPlace, deskSettle, deskSolve, deskSolveAt, PACK_GAP, PACK_ROW, PACK_STRETCH, type Layout, type PackItem, type Plan, type Rect } from './pack.ts';
 import { BOARD, LEAD } from '../model/index.ts';
 import { tally } from '../tally.ts';
 
@@ -22,6 +22,10 @@ interface Measured { cols: number; tiles: HTMLElement[]; items: PackItem[] }
 let packMake = '', packFresh = 0;
 const state = new WeakMap<HTMLElement, { sig: string; plan: Plan[] } | null>();
 let meas: Measured | null = null;
+/* where each child was last placed (its key's rectangle in the layout) */
+const placedAt = new Map<string, Rect>();
+/* while a tier change is staged: what each tile it holds needs at the new tier, by key (stage.ts) */
+let staged: Map<string, PackItem> | null = null;
 const packedFns: (() => void)[] = [];
 /** Runs fn after the desk (or the board) has been laid out, once the drawing that set it off is complete. */
 export const onPacked = (fn: () => void): void => { packedFns.push(fn); };
@@ -38,6 +42,10 @@ export function holdScroll(fn: () => void): void {
 }
 
 const packKey = (t: HTMLElement) => t.dataset.m || t.dataset.gm || (t.classList.contains('desk-empty') ? '_empty' : t.className);
+/** The tier the desk is drawn at (the centre column's class), and a tile's kept measurement's key at it: what a tile
+ *  needs is kept for each tier it has been drawn at. */
+const tierOf = (g: HTMLElement) => /\bt-(\w+)/.exec(g.closest('.centre')?.className ?? '')?.[1] ?? '';
+const keptKey = (t: HTMLElement, tier: string) => `${packKey(t)}|${tier}`;
 
 /* ---------------------------------------------------------------- what is kept of each tile's measurement */
 
@@ -93,10 +101,14 @@ let fontGen = 0;
  *  what one needs can hang on where the others stand (a board's rows are balanced to the pixel, and the desk's columns
  *  share out their fractions of a pixel by what is placed in them), so a tile is only ever measured as the concept
  *  measures it, with every tile cleared at once. */
-function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>): void {
+function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>, stand: [HTMLElement, number[]][] = []): void {
   tally('measure'); tally('measure.tiles', need.length);
-  const rows = (h: number) => Math.max(1, Math.ceil((h + PACK_GAP) / PACK_ROW));
+  const tier = tierOf(g), rows = (h: number) => Math.max(1, Math.ceil((h + PACK_GAP) / PACK_ROW));
   need.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; t.classList.remove('stretched', 'widened', 'narrowed'); wrote.delete(t); });
+  /* a tile a staged tier change holds stands in at the widths it takes at the new tier, its content not laid out
+     (stage.ts): the others are placed in the flow exactly as when every tile is measured */
+  const span = (j: number) => stand.forEach(([t, ws]) => { t.style.gridColumn = 'span ' + (ws[j] ?? ws[0]); });
+  stand.forEach(([t]) => { t.style.gridRow = ''; wrote.delete(t); }); span(0);
   const end = measuring(g);
   const nat = need.map(t => { const cs = getComputedStyle(t), e = cs.gridColumnEnd, sp = [cs.gridColumnStart, e].find(v => /^span/.test(v)); return e === '-1' ? cols : sp ? Math.min(cols, parseInt(sp.slice(5)) || 1) : 1; });
   const ws = need.map((t, i) => widths(t, nat[i]!));
@@ -107,11 +119,13 @@ function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (
     if (!set.length) break;
     tally('measure.layouts');
     need.forEach((t, i) => { const o = ws[i]![j]; if (o) { t.style.gridColumn = 'span ' + o; t.classList.toggle('narrowed', o < nat[i]!); t.classList.toggle('widened', o > nat[i]!); } });
+    span(j);
     need.forEach((t, i) => { if (ws[i]![j]) hs[i]![j] = rows(t.offsetHeight); });
     set.forEach(t => { t.style.gridColumn = ''; t.classList.remove('narrowed', 'widened'); });
+    span(0);
   }
   end();
-  need.forEach((t, i) => { ks.set(packKey(t), { el: t, look: lookOf(t), geo, nat: nat[i]!, hs: new Map(ws[i]!.map((w, j) => [w, hs[i]![j]!])) }); stale.delete(t); });
+  need.forEach((t, i) => { ks.set(keptKey(t, tier), { el: t, look: lookOf(t), geo, nat: nat[i]!, hs: new Map(ws[i]!.map((w, j) => [w, hs[i]![j]!])) }); stale.delete(t); });
 }
 
 /** Stands the desk's children as the concept's `.bento.measuring > *` does (each at its own height, its row end free)
@@ -143,26 +157,30 @@ function widthsOf(t: HTMLElement, w: number, cols: number, first: HTMLElement | 
 /* the desk's columns, read when its width or its tier is new: the resolved grid-template-columns counts the columns
    the tiles' places add too, so they are read with every tile's place cleared (the concept reads them so), and kept
    while the width and the tier stay */
-const grids = new WeakMap<HTMLElement, { at: string; cols: number }>();
+const grids = new WeakMap<HTMLElement, Map<string, number>>();
+const atOf = (g: HTMLElement, width: number) => `${width}|${g.closest('.centre')?.className ?? ''}`;
 const tilesOf = (g: HTMLElement) => [...g.children].filter((t): t is HTMLElement => t instanceof HTMLElement && !t.classList.contains('moving'));
 
 /** What every tile needs, measuring only those whose measurement cannot be kept, handed to `place`; while tiles stand
  *  somewhere else for a moment (the columns read, tiles measured) until `place` has put them back, the page's height and
  *  scroll are held. */
 function measure(g: HTMLElement, width: number, place: (m: Measured) => void): void {
-  const tiles = tilesOf(g), at = `${width}|${g.closest('.centre')?.className ?? ''}`, ks = kept.get(g) ?? new Map<string, Kept>();
-  kept.set(g, ks); watchContent(g);
-  let cols = grids.get(g)?.at === at ? grids.get(g)!.cols : 0;
+  const tiles = tilesOf(g), at = atOf(g, width), ks = kept.get(g) ?? new Map<string, Kept>(), tier = tierOf(g), seen = grids.get(g) ?? new Map<string, number>();
+  kept.set(g, ks); grids.set(g, seen); watchContent(g);
+  let cols = seen.get(at) ?? 0;
   const widths = (t: HTMLElement, nat: number) => widthsOf(t, nat, cols, tiles[0]);
+  /* the tiles a staged tier change holds: what each needs at the new tier is what was kept of it there */
+  const standIn = (t: HTMLElement) => staged?.get(packKey(t)), held = tiles.filter(t => standIn(t));
   /* a preview (a moved tile's copy) is the tile it copies: its measurement is the tile's (the drag measures nothing) */
   const usable = (t: HTMLElement, k: Kept | undefined, geo: string): k is Kept => !!k && k.geo === geo && k.look === lookOf(t) && !stale.has(t) && !stale.has(k.el)
     && (k.el === t || (t.classList.contains('ghost') && k.el.classList.contains('moving') && k.el.dataset.mo === t.dataset.gm));
-  const needOf = (geo: string) => tiles.filter(t => { const k = ks.get(packKey(t)); return !usable(t, k, geo) || widths(t, k.nat).some(w => !k.hs.has(w)); });
+  const needOf = (geo: string) => tiles.filter(t => { if (standIn(t)) return false; const k = ks.get(keptKey(t, tier)); return !usable(t, k, geo) || widths(t, k.nat).some(w => !k.hs.has(w)); });
   let need = cols ? needOf(`${cols}|${width}|${fontGen}`) : tiles;
   const items = (): Measured => ({
     cols, tiles,
     items: tiles.map((t, i) => {
-      const k = ks.get(packKey(t))!, ws = widths(t, k.nat);
+      const s = standIn(t); if (s) return s;
+      const k = ks.get(keptKey(t, tier))!, ws = widths(t, k.nat);
       return {
         key: packKey(t), opts: ws.map(w => ({ w, h: k.hs.get(w)! })),
         reach: t.dataset.stretch ? Math.round(+t.dataset.stretch / PACK_ROW) : PACK_STRETCH,
@@ -175,8 +193,8 @@ function measure(g: HTMLElement, width: number, place: (m: Measured) => void): v
   holdScroll(() => {
     g.style.minHeight = g.offsetHeight + 'px';
     try {
-      if (!cols) { tiles.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; wrote.delete(t); }); cols = getComputedStyle(g).gridTemplateColumns.split(' ').length; grids.set(g, { at, cols }); need = needOf(`${cols}|${width}|${fontGen}`); }
-      if (need.length) measureAll(g, tiles, cols, widths, `${cols}|${width}|${fontGen}`, ks);
+      if (!cols) { tiles.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; wrote.delete(t); }); cols = getComputedStyle(g).gridTemplateColumns.split(' ').length; seen.set(at, cols); need = needOf(`${cols}|${width}|${fontGen}`); }
+      if (need.length) measureAll(g, tiles.filter(t => !standIn(t)), cols, widths, `${cols}|${width}|${fontGen}`, ks, held.map(t => [t, standIn(t)!.opts.map(o => o.w)]));
       place(items());
     } finally { g.style.minHeight = ''; }
   });
@@ -232,6 +250,7 @@ function placeAll(g: HTMLElement, m: Measured, width: number, keep: boolean): vo
   if (keep && was && was.sig === sig) res = { ...deskSettle(m.cols, m.items, deskPlace(m.cols, m.items, was.plan)), plan: was.plan };
   else res = solve(m.cols, m.items);
   state.set(g, { sig, plan: res.plan }); meas = m;
+  res.out.forEach(p => { const it = m.items[p.i]; if (it) placedAt.set(it.key, p); });
   m.tiles.forEach((t, i) => {
     const p = res.out.find(r => r.i === i); if (!p) return; const w0 = m.items[i]!.opts[0]!.w;
     const col = `${p.c + 1} / span ${p.w}`, row = `${p.y + 1} / span ${p.h}`, st = p.h > p.h0, wi = p.w > w0, na = p.w < w0;
@@ -311,4 +330,58 @@ export function deskSlots(g: HTMLElement, key: string, item: PackItem): { k: num
     out.push({ k: k - lead, x: gr.left + scrollX + p.c * (colW + PACK_GAP), y: gr.top + scrollY + p.y * PACK_ROW, w: p.w * colW + (p.w - 1) * PACK_GAP, h: p.h * PACK_ROW - PACK_GAP });
   }
   return out;
+}
+
+/* ---------------------------------------------------------------- a tier change staged by what is in view (stage.ts) */
+
+/** The desk as it stood at a tier, taken as that tier is left: what the layout had of each child (its item and look,
+ *  and whether that still held), the columns, and where the desk and its columns stood on the page. Enough to lay the
+ *  desk out at that tier again without drawing what will be out of view. */
+export interface DeskAt { at: string; cols: number; geo: string; items: PackItem[]; looks: string[]; ok: boolean[]; box: { left: number; top: number; colW: number } }
+
+/** The desk as it is now, about to be left for another tier (null: no layout of it is kept). */
+export function deskLeaving(): DeskAt | null {
+  const g = document.getElementById('bento'), m = meas, ks = g && kept.get(g);
+  if (!g || !m || !ks || staged || !g.offsetParent || m.tiles.length !== m.items.length) return null;
+  const width = g.clientWidth, at = atOf(g, width), tier = tierOf(g), geo = `${m.cols}|${width}|${fontGen}`;
+  if (grids.get(g)?.get(at) !== m.cols) return null;
+  watchContent(g);
+  const ok = m.tiles.map(t => { const k = ks.get(keptKey(t, tier)); return t.parentElement === g && !stale.has(t) && !!k && k.el === t && k.geo === geo && k.look === lookOf(t); });
+  const r = g.getBoundingClientRect();
+  return { at, cols: m.cols, geo, items: m.items, looks: m.tiles.map(lookOf), ok, box: { left: r.left + scrollX, top: r.top + scrollY, colW: (width - (m.cols - 1) * PACK_GAP) / m.cols } };
+}
+
+/** Where each child of a desk taken by deskLeaving would stand, in page pixels, by key (null: its columns or its fonts
+ *  are not what they were). */
+export function deskPlaces(d: DeskAt): Map<string, { x: number; y: number; w: number; h: number }> | null {
+  const g = document.getElementById('bento');
+  if (!g || grids.get(g)?.get(d.at) !== d.cols || !d.geo.endsWith(`|${fontGen}`)) return null;
+  const { left, top, colW } = d.box, out = new Map<string, { x: number; y: number; w: number; h: number }>();
+  for (const p of solve(d.cols, d.items).out) out.set(d.items[p.i]!.key, { x: left + p.c * (colW + PACK_GAP), y: top + p.y * PACK_ROW, w: p.w * colW + (p.w - 1) * PACK_GAP, h: p.h * PACK_ROW - PACK_GAP });
+  return out;
+}
+
+/** Lays the desk out with the tiles `items` names standing in for themselves (stage.ts holds them): what each needs at
+ *  the new tier is its item, and nothing of it is measured. null: none stands in. */
+export function stagePack(items: Map<string, PackItem> | null): void { staged = items; }
+
+/** A held tile is drawn now: what was kept of it at this tier is its measurement again, if it looks as it did then; if
+ *  it is not the height its place was given for, it is measured afresh and the desk laid out again (as a content
+ *  change). `look`: its look when the tier was left. */
+export function adoptStaged(t: HTMLElement, look: string): void {
+  const g = t.parentElement, key = packKey(t), item = staged?.get(key);
+  t.style.removeProperty('content-visibility');
+  if (!g || !item) return;
+  staged!.delete(key);
+  const ks = kept.get(g), width = g.clientWidth, cols = grids.get(g)?.get(atOf(g, width));
+  watchContent(g); placed.add(t);
+  if (ks && cols && lookOf(t) === look) { ks.set(keptKey(t, tierOf(g)), { el: t, look, geo: `${cols}|${width}|${fontGen}`, nat: item.opts[0]!.w, hs: new Map(item.opts.map(o => [o.w, o.h])) }); stale.delete(t); }
+  const p = placedAt.get(key), rows = Math.max(1, Math.ceil((t.offsetHeight + PACK_GAP) / PACK_ROW));
+  if (stale.has(t) || !p || rows !== (t.classList.contains('stretched') ? p.h : p.h0)) { stale.add(t); packSoon(() => packMake, true); }
+}
+
+/** The staging is over: no tile stands in, none is hidden. */
+export function endStage(): void {
+  staged = null;
+  document.querySelectorAll<HTMLElement>('#bento > .tile').forEach(t => { if (t.style.getPropertyValue('content-visibility')) t.style.removeProperty('content-visibility'); });
 }

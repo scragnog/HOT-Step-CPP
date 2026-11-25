@@ -10,7 +10,8 @@ import { packed } from '../desk/layout.ts';
 const PED_STEP = 32, JACKY = 36, PLUGW = 10, CABR = 10;
 
 export function snapPedals(board: HTMLElement | null, lab: boolean): void {
-  const pd = board?.querySelector<HTMLElement>('[data-pedals]'); if (!pd) return;
+  /* a board not drawn (its tile held out of view by a staged tier change) is snapped once it is */
+  const pd = board?.querySelector<HTMLElement>('[data-pedals]'); if (!pd || !board!.checkVisibility()) return;
   const ps = [...pd.querySelectorAll<HTMLElement>(':scope > .pedal')];
   ps.forEach(p => { p.style.minHeight = ''; }); balanceRows(pd, ps); packed(); if (!lab) return;
   const hs = ps.map(p => p.offsetHeight); ps.forEach((p, i) => { p.style.minHeight = Math.ceil(hs[i]! / PED_STEP) * PED_STEP + 'px'; });
@@ -59,7 +60,7 @@ export function followCables(board: () => HTMLElement | null, ms: number): void 
   if (!follow) follow = requestAnimationFrame(function step() { fixCables(board()); follow = performance.now() < until ? requestAnimationFrame(step) : 0; if (!follow) window.setTimeout(() => fixCables(board()), 40); });
 }
 export function fixCables(board: HTMLElement | null): void {
-  const pd = board?.querySelector<HTMLElement>('[data-pedals]'), svg = board?.querySelector<SVGSVGElement>('.cables'); if (!pd || !svg) return;
+  const pd = board?.querySelector<HTMLElement>('[data-pedals]'), svg = board?.querySelector<SVGSVGElement>('.cables'); if (!pd || !svg || !board!.checkVisibility()) return;
   const sr = svg.getBoundingClientRect(), W = sr.width; if (!W) return;
   const ps = [...pd.querySelectorAll<HTMLElement>(':scope > .pedal')].map(p => { const r = p.getBoundingClientRect(); return { id: p.dataset.pid!, l: r.left - sr.left, r: r.right - sr.left, t: r.top - sr.top, b: r.bottom - sr.top }; });
   const jb = parseFloat(getComputedStyle(board!).getPropertyValue('--jb')) || 0;
