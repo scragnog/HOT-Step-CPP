@@ -582,11 +582,13 @@ ace-midi --dettato-model <dir> --dettato-fed <oracle capture> --dettato-capture 
 The stages follow upstream's pipeline: the transcriber, then the evidence repairer, then
 the grouper on the 16 kHz audio, and the drum model on the source audio.
 Audio is read at its own
-rate, averaged to mono and resampled to 16 kHz with soxr's HQ filter, fitted per ratio
-(2:1, 3:1 and 3:2 to 1e-8, 6:1 to 6e-7; 44.1 kHz and other ratios are about 6e-5 off soxr's
-taps). Upstream's tuning estimate runs on that; a recording at least 10 cents off A440
-with strength 0.12 or more is resampled onto A440 first, and every note time is mapped
-back. The network sees 8 s windows every 2 s. Each window's harmonic log-frequency front
+rate, averaged to mono and resampled to 16 kHz with libsoxr's HQ setting, as upstream does
+through python-soxr: `engine/vendor/soxr` holds libsoxr 0.1.3-14-ga66f3ee (LGPL-2.1), the
+build python-soxr 1.0.0 bundles, compiled with its options. On the reference fixtures the
+16 kHz input is byte-identical to upstream's. The grouping of a song can hang on single
+rounding steps of that input, so nothing less than the same resampler holds the gates. Upstream's tuning estimate runs on that; a recording at least 10 cents off A440
+with strength 0.12 or more is resampled onto A440 first, by the same soxr call, and every
+note time is mapped back. The network sees 8 s windows every 2 s. Each window's harmonic log-frequency front
 end (two STFTs, 2048 and 512 points) is computed on the host, then two GGML graphs run:
 the stem (three convolutions as im2col plus a matmul) and the trunk (15 lane blocks,
 axial attention across pitch and time, three bidirectional GRUs, two refine blocks and
@@ -637,18 +639,16 @@ Measured 2026-11-25 against the eleven `tools/dettato-reference` fixtures, CPU a
 
 - Transcriber, fed and from the WAV: every oracle note matched (F1 1.0), median onset
   error under 0.001 ms, every offset within 20 ms. Fed maps are within 8.8e-6 of the
-  oracle, maps from the 48 kHz WAVs within 5.8e-5. The float16 taps differ by at most two float16
+  oracle, maps from the WAV within 6.8e-6. The float16 taps differ by at most two float16
   steps, on about one element in a million. Vulkan on the 5090 is within 3e-3 on the maps,
   inside upstream's own CPU/CUDA spread.
 - Grouper note features: bit-identical to the oracle's. Network in exact-PCEN mode: window
   probabilities within 8e-5 of upstream's exact-PCEN run, and every note in the same
   track.
-- From the WAV with the repairer off, against the oracle on CUDA: ten fixtures keep 98.6
-  to 100% of notes in the same track, every large track keeps its name. t1 keeps 80.7%
-  (upstream's own CPU/CUDA spread there is 70.7%), the share any FFT but MKL's gives in
-  PCEN. On the CPU backend two of t1's large tracks change name: its taps differ from the
-  oracle's in 61 int8 codes by one step, and upstream's own grouper changes the same two
-  names when fed those taps. Drums: the same model on every fixture, every hit matched.
+- From the WAV with the repairer off, against the oracle on CUDA: ten fixtures keep 98.5
+  to 100% of notes in the same track, and every large track keeps its name. t1 keeps
+  80.7% (upstream's own CPU/CUDA spread there is 70.7%), the share any FFT but MKL's gives
+  in PCEN. Drums: the same model on every fixture, every hit matched.
 - With the repairer on, against upstream's full pipeline on the jazz trio: 61 notes
   dropped and 3 inserted, as upstream, every note in the same track.
 

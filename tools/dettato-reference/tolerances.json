@@ -65,7 +65,7 @@
         "fed_exact_pcen": "probs max abs 7.9e-05 (src-32k), emb 1.7e-05; window tensors within one float16 step; every note in the same track on all 10 fixtures with notes; CUDA and CPU backends give the same numbers",
         "vulkan_before_the_cpu_fallback": "probs 3.0e-03, t1 78% in the same track: Vulkan matmuls ignore the strict-F32 hint, so the grouper's graphs run on the CPU unless the compute backend is CUDA",
         "float32_pcen_fed_vs_oracle": "same track 0.793 (t1), 0.992 (t2), 0.985 (src-32k), 1.0 elsewhere; big-track names kept on every fixture",
-        "from_audio_repairer_off_vs_oracle": "after the resampler fix (48 kHz sources resampled with soxr's own 3:1 support): maps from the WAV within 1.3e-05 of the oracle on 48 kHz fixtures (5.8e-05 on detune-30c), was 6.9e-04; same track of the oracle's notes on CUDA: 1.0 (clip-3s, silence-10s, detune-30c, t3, t4, t5, t6, long-260s), 0.9865 (t2, src-32k), 0.8066 (t1, spread 0.707); big-track names kept on every fixture on CUDA. CPU backend, t1: 0.7104 and two big-track names changed (acoustic guitar -> piano, electric guitar -> acoustic guitar); drums: same model everywhere, hit F1 1.0",
+        "from_audio_repairer_off_vs_oracle": "16 kHz input (x16, and x16_retuned on detune-30c) byte-identical to the oracle's on all 11 fixtures (libsoxr 0.1.3-14-ga66f3ee from vendor/soxr, as python-soxr 1.0.0); maps from the WAV within 6.8e-06. CUDA: same track of the oracle's notes 1.0 (clip-3s, silence-10s, detune-30c, t3, t4, t5, t6, long-260s), 0.9923 (t2), 0.9845 (src-32k), 0.8071 (t1, spread 0.707, the PCEN FFT share); every big track keeps its name; drums: same model everywhere, hit F1 1.0",
         "from_audio_repairer_on_vs_cpu_repair": "t4: 61 dropped, 3 inserted (as upstream), pitched F1 1.0, same track 1.0, names kept; clip-3s exact"
       }
     }
@@ -98,21 +98,6 @@
     }
   },
   "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
-  "exceptions": [
-    {
-      "gate": "grouper.from_audio.same_instrument_name, CPU backend, t1-synthpop-vocal",
-      "status": "proposed by the slice 4b author (HOTSTEP-1367), open to challenge in review",
-      "allowance": "the GPU rule: for t1 only, the names spread.json lists under grouping.big_track_name_mismatches or grouper_replay.big_track_name_mismatches",
-      "measured": "CPU backend: the port changes acoustic guitar -> piano and electric guitar -> acoustic guitar; CUDA: names kept",
-      "why": "t1's names hang on single int8 rounding steps of the taps. The port's CPU taps differ from the oracle's in 61 of 2,398,992 int8 codes, each by one step (inside the declared +-1 gather gate; meta within 6.1e-05). Upstream's own grouper (MKL PCEN, the oracle's audio and meta) fed just those taps changes the same two names; fed the port's CUDA taps (72 codes one step off) it keeps them. Which codes land one step off follows from float16 rounding of the transcriber's taps, which the transcriber gate allows at two float16 steps"
-    },
-    {
-      "gate": "grouper.from_audio.same_track_after_best_matching_at_least 0.95, CPU backend, t1-synthpop-vocal",
-      "status": "proposed by the slice 4b author (HOTSTEP-1367), open to challenge in review",
-      "allowance": "the GPU rule for t1: no lower than spread.json's grouping.same_track_of_oracle (0.707)",
-      "measured": "0.8066 on CUDA, 0.7104 on the CPU",
-      "why": "the PCEN filter's float32 FFT (README, Grouper reference): upstream with any FFT but MKL's keeps 0.79 on t1 fed the oracle's own features; with MKL's PCEN the port's CUDA features reproduce the oracle's tracks exactly. The CPU's lower share is the name change above"
-    }
-  ],
+  "exceptions": [],
   "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."
 }

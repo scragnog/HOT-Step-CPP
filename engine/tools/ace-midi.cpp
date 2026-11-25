@@ -41,6 +41,7 @@
 #include "dettato/grouper.h"
 #include "dettato/repairer.h"
 #include "dettato/transcriber.h"
+#include "soxr.h"
 #include "yyjson.h"
 
 // ---------------------------------------------------------------------------
@@ -2867,6 +2868,37 @@ struct DettatoCapture {
     }
 };
 
+// soxr.resample(x, in_rate, out_rate, quality="HQ") as python-soxr 1.0.0 runs it (csoxr_divide_proc): libsoxr from
+// vendor/soxr, float32 in and out, the input in chunks of max(1000, 48000 * in / out) samples, then a flush.
+static std::vector<float> dettato_soxr(const std::vector<float> & x, double in_rate, double out_rate) {
+    if (in_rate == out_rate) return x;
+    soxr_error_t              err = nullptr;
+    const soxr_io_spec_t      io  = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
+    const soxr_quality_spec_t q   = soxr_quality_spec(SOXR_HQ, 0);
+    soxr_t                    s   = soxr_create(in_rate, out_rate, 1, &err, &io, &q, nullptr);
+    if (err) {
+        fprintf(stderr, "[dettato] soxr: %s\n", err);
+        exit(1);
+    }
+    const size_t       ilen = x.size(), olen = (size_t) (ilen * out_rate / in_rate + 1);
+    const size_t       div  = (size_t) std::max(1000., 48000 * in_rate / out_rate);
+    std::vector<float> y(olen, 0.0f);
+    size_t             pos = 0, done = 0;
+    for (size_t i = 0; i < ilen && !err; i += div) {
+        err = soxr_process(s, &x[i], std::min(div, ilen - i), nullptr, &y[pos], olen - pos, &done);
+        pos += done;
+    }
+    if (!err) err = soxr_process(s, nullptr, 0, nullptr, &y[pos], olen - pos, &done);
+    pos += done;
+    soxr_delete(s);
+    if (err) {
+        fprintf(stderr, "[dettato] soxr: %s\n", err);
+        exit(1);
+    }
+    y.resize(pos);
+    return y;
+}
+
 struct DettatoTrack {
     std::string                                   name;     // upstream's instrument name, spaces for underscores
     int                                           program;  // upstream's General MIDI program
@@ -2915,9 +2947,9 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
         mono    = load_audio_mono(audio_path, &sr);
         seconds = (double) mono.size() / sr;
         if (!beat_model.empty() && !run_beats(beat_model, mono, sr, &tr)) return 1;
-        x16 = to_16k(mono, sr);
+        x16 = dettato_soxr(mono, sr, SR);
         tu  = estimate_tuning(x16);
-        y   = tu.shift_cents != 0 ? retune_resample(x16, tu.ratio) : x16;
+        y   = tu.shift_cents != 0 ? dettato_soxr(x16, SR, SR / tu.ratio) : x16;
     }
     fprintf(stderr, "[dettato] tuning %+.2f cents (strength %.3f)%s\n", tu.estimate_cents, tu.strength,
             tu.shift_cents != 0 ? ", retuned" : "");

@@ -838,9 +838,26 @@ link_ggml_backends(dettato-grouper-test)
 
 # ace-midi: MuScriptor audio->MIDI transcription (GGML port, in development —
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
+# libsoxr 0.1.3-14-ga66f3ee (LGPL-2.1, vendor/soxr): the resampler upstream dettato reads its 16 kHz audio through
+# (python-soxr 1.0.0), built with python-soxr's options; HQ only needs the float32 engines (soxr-config.h).
+set(SOXR_SRC soxr data-io dbesi0 filter fft4g64 cr cr32 fft4g32 cr32s pffft32s util32s)
+list(TRANSFORM SOXR_SRC PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/vendor/soxr/src/)
+list(TRANSFORM SOXR_SRC APPEND .c)
+add_library(soxr STATIC ${SOXR_SRC})
+target_include_directories(soxr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/soxr/src PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/soxr)
+target_compile_definitions(soxr PRIVATE SOXR_LIB $<$<C_COMPILER_ID:MSVC>:_USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS>)
+set_target_properties(soxr PROPERTIES C_STANDARD 99 C_EXTENSIONS ON)
+if(MSVC)
+    target_compile_options(soxr PRIVATE /W0)
+else()
+    target_compile_options(soxr PRIVATE -w)
+    target_link_libraries(soxr PRIVATE m)
+endif()
+
 add_executable(ace-midi tools/ace-midi.cpp)
 link_ggml_backends(ace-midi)
 target_include_directories(ace-midi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/pocketfft)  # dettato grouper's PCEN
+target_link_libraries(ace-midi PRIVATE soxr)  # dettato's 16 kHz input
 # --abc-out renders through SheetSage2's notation headers, whose event code uses yyjson
 target_link_libraries(ace-midi PRIVATE yyjson)
 

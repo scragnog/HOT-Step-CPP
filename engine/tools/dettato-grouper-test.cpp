@@ -203,9 +203,22 @@ int main(int argc, char ** argv) {
                 }
                 return d;
             };
+            // every value on both sides finite, before any threshold (a NaN never wins a comparison)
+            size_t nonfinite = 0;
+            auto   fin32 = [&](const std::vector<float> & v) { for (float x : v) nonfinite += !std::isfinite(x); };
+            auto   fin16 = [&](const std::vector<ggml_fp16_t> & v) { for (ggml_fp16_t x : v) nonfinite += !std::isfinite(ggml_fp16_to_fp32(x)); };
+            for (const char * n : { "grouper.probs.bin", "grouper.emb.bin", "grouper.win.t0.bin" }) fin32(read_binary<float>(rd / n));
+            for (const char * n : { "grouper.h.bin", "grouper.win.probs.bin", "grouper.win.emb.bin" }) fin16(read_binary<ggml_fp16_t>(rd / n));
+            fin32(p.probs);
+            fin32(p.emb);
+            fin16(p.h);
+            fin16(p.win_probs);
+            fin16(p.win_emb);
+            for (double t : p.win_t0) nonfinite += !std::isfinite(t);
             const auto wc = read_binary<int64_t>(rd / "grouper.win.count.bin");
-            bool layout = wc.size() == p.win_count.size();
-            for (size_t i = 0; layout && i < wc.size(); i++) layout = wc[i] == p.win_count[i];
+            const auto wt = read_binary<float>(rd / "grouper.win.t0.bin");
+            bool layout = wc.size() == p.win_count.size() && wt.size() == p.win_t0.size();
+            for (size_t i = 0; layout && i < wc.size(); i++) layout = wc[i] == p.win_count[i] && wt[i] == (float) p.win_t0[i];
             const double gp = gap32("grouper.probs.bin", p.probs), ge = gap32("grouper.emb.bin", p.emb), gh = gap16("grouper.h.bin", p.h);
             const double gwp = gap16("grouper.win.probs.bin", p.win_probs), gwe = gap16("grouper.win.emb.bin", p.win_emb);
             const auto groups = dettato::decode(gr::to_decode(gm, p, fo.n), [&] {
@@ -226,8 +239,9 @@ int main(int argc, char ** argv) {
                         gm.ms_front, gm.ms_lanes, gm.ms_notes, p.win_count.size(), gp, ge, gh, gwp, gwe, groups.size(), a.same, a.coverage,
                         a.names ? "same" : "differ");
             gm.ms_front = gm.ms_lanes = gm.ms_notes = 0;
+            ok = gate(mode == 0 ? "fed: every value finite, port and cpu-exact" : "float32: every value finite, port and oracle", nonfinite == 0) && ok;
             if (mode == 0) {
-                ok = gate("fed: same window layout", layout) && ok;
+                ok = gate("fed: same window layout and starts", layout) && ok;
                 ok = gate("fed: probs and win.probs max abs < 1e-3", gp < 1e-3 && gwp < 1e-3) && ok;
                 ok = gate("fed: emb and win.emb max abs < 1e-3", ge < 1e-3 && gwe < 1e-3) && ok;
                 ok = gate("decode: every note in the same track", a.same == 1.0 && a.coverage == 1.0) && ok;
