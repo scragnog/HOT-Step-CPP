@@ -43,11 +43,18 @@ export function leaving(): void {
 
 /** What a change to `t` can leave undrawn for a moment (null: everything is drawn now): the tiles out of view before and
  *  after it (`reader`: the tile whose place on screen is kept, and its top now), whose layout at `t` was kept and whose
- *  content there cannot have changed. */
+ *  content there cannot have changed. The desk must stand on the same engine, fold and window as when it was left at
+ *  `t`; its modules may have changed since (one added, removed or moved). */
 export function planStage(t: Tier, reader: { key: string; top: number } | null): Stage | null {
-  const L = left.get(t), s = useDesk.getState();
-  if (!L || L.make !== makeOf(s, t)) return null;
-  const places = deskPlaces(L.at); if (!places) return null;
+  const L = left.get(t), s = useDesk.getState(), was = L?.make.split('|'), will = makeOf(s, t).split('|');
+  if (!L || !was || [1, 3, 4].some(i => was[i] !== will[i])) return null;
+  /* where everything will stand: the tiles in the order they now take, each as it was laid out at `t` (one not laid
+     out there yet as it is here: it is drawn and measured in the change), what stands before and after them as then */
+  const ids = deskModel(ix, { ...s.desk, tier: t }, s.mods, deskFold.get()).tiles, here = left.get(s.desk.tier)?.at.items ?? [];
+  const first = L.at.items.findIndex(it => it.tile), last = L.at.items.findLastIndex(it => it.tile);
+  const guess = ids.map(id => L.at.items.find(it => it.key === id) ?? here.find(it => it.key === id));
+  if (first < 0 || guess.some(it => !it)) return null;
+  const places = deskPlaces(L.at, [...L.at.items.slice(0, first), ...guess as PackItem[], ...L.at.items.slice(last + 1)]); if (!places) return null;
   /* what is in view is told from where the desk stood when it was left: within a margin, for what stands above it */
   const d = changes(L.s, s), margin = 120, at = reader && places.get(reader.key);
   /* the page scrolls so that the reader's tile keeps its place on screen */
@@ -56,7 +63,7 @@ export function planStage(t: Tier, reader: { key: string; top: number } | null):
   const holds = new Map<string, Hold>(), items = new Map<string, PackItem>(), lk = new Map<string, string>();
   L.at.items.forEach((it, i) => {
     const r = L.reads.get(it.key), p = places.get(it.key);
-    if (!it.tile || !L.at.ok[i] || !r || !p || [...r].some(x => d.has(x))) return;
+    if (!it.tile || !L.at.ok[i] || !r || !p || !ids.includes(it.key) || [...r].some(x => d.has(x))) return;
     const el = tileEl(it.key), now = el?.getBoundingClientRect();
     if (seen(top(p.y), p.h) || (now && seen(now.top, now.height))) return;
     holds.set(it.key, el ? s.desk.tier : 'later'); items.set(it.key, it); lk.set(it.key, L.at.looks[i]!);

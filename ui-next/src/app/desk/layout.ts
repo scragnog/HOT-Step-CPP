@@ -351,13 +351,13 @@ export function deskLeaving(): DeskAt | null {
   return { at, cols: m.cols, geo, items: m.items, looks: m.tiles.map(lookOf), ok, box: { left: r.left + scrollX, top: r.top + scrollY, colW: (width - (m.cols - 1) * PACK_GAP) / m.cols } };
 }
 
-/** Where each child of a desk taken by deskLeaving would stand, in page pixels, by key (null: its columns or its fonts
- *  are not what they were). */
-export function deskPlaces(d: DeskAt): Map<string, { x: number; y: number; w: number; h: number }> | null {
+/** Where each child of a desk taken by deskLeaving would stand (or each of `items`, laid out on it), in page pixels, by
+ *  key (null: its columns or its fonts are not what they were). */
+export function deskPlaces(d: DeskAt, items = d.items): Map<string, { x: number; y: number; w: number; h: number }> | null {
   const g = document.getElementById('bento');
   if (!g || grids.get(g)?.get(d.at) !== d.cols || !d.geo.endsWith(`|${fontGen}`)) return null;
   const { left, top, colW } = d.box, out = new Map<string, { x: number; y: number; w: number; h: number }>();
-  for (const p of solve(d.cols, d.items).out) out.set(d.items[p.i]!.key, { x: left + p.c * (colW + PACK_GAP), y: top + p.y * PACK_ROW, w: p.w * colW + (p.w - 1) * PACK_GAP, h: p.h * PACK_ROW - PACK_GAP });
+  for (const p of solve(d.cols, items).out) out.set(items[p.i]!.key, { x: left + p.c * (colW + PACK_GAP), y: top + p.y * PACK_ROW, w: p.w * colW + (p.w - 1) * PACK_GAP, h: p.h * PACK_ROW - PACK_GAP });
   return out;
 }
 
