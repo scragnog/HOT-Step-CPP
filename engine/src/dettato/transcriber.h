@@ -121,10 +121,17 @@ struct Loader {
     const float * get(const std::string & name, std::vector<int64_t> shape) {
         used.insert(name);
         const STEntry * e = st_find(st, name.c_str());
-        bool good = e && e->dtype == "F32" && e->n_dims == (int) shape.size();
-        for (size_t i = 0; good && i < shape.size(); i++) good = e->shape[i] == shape[i];
+        bool    good = e && e->dtype == "F32" && e->n_dims == (int) shape.size();
+        int64_t n    = 1;
+        for (size_t i = 0; good && i < shape.size(); i++) {
+            good = e->shape[i] == shape[i];
+            n *= shape[i];
+        }
+        // the byte extent must hold exactly the shape and lie inside the mapping (a truncated file must not crash)
+        good = good && e->data_start <= e->data_end && e->data_end - e->data_start == (size_t) n * sizeof(float) &&
+               e->data_end <= st.file_size - st.data_offset;
         if (!good) {
-            fprintf(stderr, "[dettato] %s: missing or not F32 of the expected shape\n", name.c_str());
+            fprintf(stderr, "[dettato] %s: missing, not F32 of the expected shape, or outside the file\n", name.c_str());
             ok = false;
             static std::vector<float> zero(1 << 20);
             return zero.data();

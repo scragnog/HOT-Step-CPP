@@ -60,6 +60,14 @@
     "max_absolute_error_strictly_less_than": 1e-06
   },
   "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
-  "exceptions": [],
+  "exceptions": [
+    {
+      "gate": "fed_tensors.added_by_slice_1_not_in_the_plan.taps_float16",
+      "bound": "|a - b| <= 0.001 + 2 * 2^-10 * |reference| elementwise (two float16 rounding steps)",
+      "measured": "transcriber port (ace-midi --dettato-fed, 16f8b4e6), all 11 fixtures, CPU and CUDA: at most 2 float16 steps, on up to 1.4e-6 of elements; maps within 8.8e-6 on the same runs",
+      "cause": "float32 differences of about 1e-7 flip one of upstream's three float16 roundings (product, sum, divide)",
+      "recorded": "slice 2, proposed by the author, supported by Reviewer (HOTSTEP-1364)"
+    }
+  ],
   "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."
 }
