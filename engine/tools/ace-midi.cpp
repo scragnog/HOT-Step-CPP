@@ -2989,6 +2989,8 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     if (capture) {
         cap = std::make_unique<DettatoCapture>(o.capture);
         cap->transcriber(r);
+        cap->put("x16", x16.data(), x16.size() * 4, { (int64_t) x16.size() }, "<f4", "float32");
+        if (tu.shift_cents != 0) cap->put("x16_retuned", y.data(), y.size() * 4, { (int64_t) y.size() }, "<f4", "float32");
         res = head_json("audio");
     }
 
