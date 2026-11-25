@@ -248,6 +248,11 @@ struct Yue2Request {
 
     Yue2VaeVariant vae_variant = YUE2_VAE_STANDARD;
 
+    // VAE decode tile cap in latent frames, set by the server from the
+    // spawn-time --vae-chunk (the VAE Chunk Size setting), not from JSON.
+    // 0 = no cap. Only ever lowers the tile core below its own 512 (#350).
+    int vae_chunk = 0;
+
     // Validator-only (docs/plans/yue2/06-engine-port-plan.md §7): absent from
     // any user-facing UI. "fixture" requires noise_fixture_path to hold a raw
     // little-endian FP32 buffer of exactly total_frames*latent_dim values,

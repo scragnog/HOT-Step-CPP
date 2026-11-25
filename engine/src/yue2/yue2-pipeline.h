@@ -1610,7 +1610,13 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
     // decode takes the same time at either size and the F32 activation peak
     // drops by ~1.5 GB. Halo unchanged. Tiled-vs-untiled was already
     // "mathematically equivalent, bitwise unpromised" (yue2-vae-graph.h).
-    const int64_t core = std::min<int64_t>((int64_t) m.vae_cfg.decode_core_frames, 512);
+    // The VAE Chunk Size setting (req.vae_chunk) can lower it further: a
+    // 512-frame tile's ~3.2 GB compute buffer kills the engine on some Vulkan
+    // drivers (#350). The default 1024 leaves 512 in force.
+    int64_t core = std::min<int64_t>((int64_t) m.vae_cfg.decode_core_frames, 512);
+    if (req.vae_chunk > 0) {
+        core = std::min<int64_t>(core, req.vae_chunk);
+    }
     const int64_t halo = (int64_t) m.vae_cfg.decode_halo_frames;
     const int64_t n_tiles = core > 0 ? (total_frames + core - 1) / core : 1;
 

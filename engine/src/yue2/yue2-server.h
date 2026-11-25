@@ -965,6 +965,7 @@ static void yue2_handle_synth(const httplib::Request & req, httplib::Response & 
         yue2_json_error(res, 400, err);
         return;
     }
+    preq.vae_chunk = g_synth_params.vae_chunk;  // VAE Chunk Size setting (#350)
     // The job's own model pick (#204): lm_adapter and lm_type with exactly the
     // select-model rules, applied by the work thread when the job starts.
     if (yyjson_doc * d = yyjson_read(req.body.data(), req.body.size(), 0)) {

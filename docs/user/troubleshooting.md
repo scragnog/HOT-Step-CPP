@@ -261,7 +261,8 @@ Once a model has loaded, `http://localhost:3001/api/health` reports the same dev
 - Garbled output with the 1.7B language model. That model produces corrupted output on the
   Vulkan build. Use the 4B LM.
 - Crashes during VAE decode. Lower **VAE chunk size** to 512 or 256, as described under
-  [Out of VRAM](#out-of-vram).
+  [Out of VRAM](#out-of-vram). An Intel Arc card needed 128. YuE2 reads the same setting;
+  its decode chunk is never larger than 512, so only values below 512 change it.
 - On Linux, the Vulkan build needs `libvulkan1` and a Vulkan 1.1 driver.
 
 ## A generation stalls or times out
