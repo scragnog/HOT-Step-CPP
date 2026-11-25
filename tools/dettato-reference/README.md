@@ -25,6 +25,7 @@ Weights, upstream clone, venvs, fixture audio and tensor dumps live under
 | `capture.py` | One fixture, one device: runs upstream, records every stage |
 | `compare.py` | Gate metrics between two captures (spread now, port later) |
 | `replay_grouper.py` | Grouper spread on identical inputs: CUDA grouper fed the CPU capture's notes and features |
+| `replay_repairer.py` | Repairer spread on identical inputs: CUDA repairer fed a `cpu-repair` capture's notes and evidence |
 | `verify.py` | Hashes, finite values, shapes, grouping coverage |
 
 ## Reproduce
@@ -91,8 +92,15 @@ input notes), `repair.pk` / `repair.on_r` / `repair.off_r` with
 has `window_ran` false), `result.repair.insertions` (every proposal) and
 `result.repair.output` (the repaired notes). The grouper and drums run on the
 repaired notes, so these captures also hold the full pipeline's final tracks.
-They are outside the spread and the gates in `tolerances.json`; slice 6 sets
-its own gates from them. The trio song: 837 transcribed, 61 dropped, 3 inserted.
+They are outside the spread and the other gates in `tolerances.json`. The
+repairer's own gates are in its `repairer` block, checked by the engine's
+`dettato-repairer-test`. The trio song: 837 transcribed, 61 dropped, 3 inserted.
+
+`cuda-repair` holds the same two fixtures run on CUDA. The repairer has no
+autocast upstream, so it runs in float32 there. `replay_repairer.py` feeds the
+CPU capture's notes and evidence to the CUDA repairer and writes
+`repairer-replay.json`. On the trio song, P(keep) differs by at most 7e-7 and
+one onset moves one 5 ms bin.
 
 ## Limits
 

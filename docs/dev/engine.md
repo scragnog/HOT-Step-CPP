@@ -153,6 +153,27 @@ repeats the inference from the WAV. Both modes compare the router choice
 and value and match the hits from both branches on key and frame. The
 32 kHz fixture checks the source-rate skip.
 
+### Dettato repairer validation
+
+The evidence repairer in [repairer.h](../../engine/src/dettato/repairer.h)
+edits the transcriber's notes. It drops the notes it judges wrong, moves
+onsets and ends, and adds notes the transcriber missed. Its input is the
+all-window maps and the all-window `hidden` tap. The evidence rows and
+the decode run on the host. The network runs on the ggml CPU backend on
+every platform: it is faster there than on a GPU, and Vulkan's matmuls
+miss the reference by about 1e-3.
+
+Build the standalone dettato-repairer-test target. Pass it the weights
+directory (with `dettato/` and `dettato-evidence/`) and a `cpu-repair`
+capture from the [Dettato reference](../../tools/dettato-reference/README.md).
+
+    dettato-repairer-test <weights-dir> <capture-dir>/cpu-repair
+
+It checks the decoded notes, the sorted input notes and the evidence rows.
+It then checks the network on the captured evidence and the repaired notes,
+from the captured evidence and from the port's own. The gates are under
+`repairer` in `tolerances.json`.
+
 ### ace-midi speculative decoding
 
 `ace-midi --draft-model <dir> [--speculative-k 1-4]` ports upstream MuScriptor PR #95.

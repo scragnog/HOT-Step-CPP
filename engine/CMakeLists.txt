@@ -825,6 +825,11 @@ add_executable(dettato-drums-test tools/dettato-drums-test.cpp)
 target_link_libraries(dettato-drums-test PRIVATE yyjson)
 link_ggml_backends(dettato-drums-test)
 
+# dettato-repairer-test: validate the evidence repairer against the Python oracle's repairer captures.
+add_executable(dettato-repairer-test tools/dettato-repairer-test.cpp)
+target_link_libraries(dettato-repairer-test PRIVATE yyjson)
+link_ggml_backends(dettato-repairer-test)
+
 # ace-midi: MuScriptor audio->MIDI transcription (GGML port, in development —
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
 add_executable(ace-midi tools/ace-midi.cpp)

@@ -59,6 +59,30 @@
   "seconds": {
     "max_absolute_error_strictly_less_than": 1e-06
   },
+  "repairer": {
+    "note": "Slice 6 (evidence repairer), set from the two repairer captures (capture.py --repairer: clip-3s and t4-jazz-trio-sax, cpu-repair) and from upstream's own repairer on CUDA fed the same inputs (replay_repairer.py, <fixture>/repairer-replay.json). Checked by the engine's dettato-repairer-test. The port runs this stage on the ggml CPU backend on every platform, so one gate set covers every backend.",
+    "decode": "notes decoded from the captured all-window maps equal result.repair.input_notes exactly (onset, offset, pitch, voice slot, confidence)",
+    "input_notes": "the sorted repairer notes equal repair.k.* exactly (pitch, velocity, onset, end)",
+    "evidence": {
+      "map_numbers_max_absolute_error_strictly_less_than": 0.001,
+      "hidden_codes": "int8 codes within +-1 of repair.ev, at most 0.1% of them off",
+      "non_finite": "any non-finite value fails"
+    },
+    "fed": {
+      "note": "the network and its decode given the captured evidence rows",
+      "same_windows_ran": true,
+      "p_keep_max_absolute_error_strictly_less_than": 0.001,
+      "insertion_score_max_absolute_error_strictly_less_than": 0.001,
+      "onsets_and_ends_in_the_same_5_ms_bin_at_least": 0.99,
+      "insertion_placements_the_same_at_least": 0.99
+    },
+    "notes": "repaired notes against result.repair.output, from the captured evidence and from the port's own: one to one on pitch, onset within 10 ms; F1 >= 0.99, median onset error <= 1 ms, offsets within 20 ms >= 99% (the transcriber's notes_from_audio gates; the output carries no voice slot)",
+    "measured": {
+      "port_cpu": "P(keep) max abs 5.96e-07 (trio) and 1.79e-07 (clip); insertion scores 6.11e-07 and 2.24e-07; evidence bit-exact (0 of 616032 codes off); 1 of 837 onsets and ends one 5 ms bin away; repaired notes 778 of 779 rows identical, F1 1.0",
+      "upstream_cpu_vs_cuda_identical_inputs": "P(keep) max abs 6.56e-07 (trio) and 1.19e-07 (clip); insertion scores 7.15e-07 and 3.13e-07; 1 of 837 onsets and ends one bin away; trio output not row-identical",
+      "port_on_vulkan_before_the_cpu_pin": "P(keep) 1.26e-03, insertion scores 1.37e-03, 13 onsets or ends moved: Vulkan matmuls do not take the strict-F32 hint; the reason the stage is pinned to the CPU"
+    }
+  },
   "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
   "exceptions": [],
   "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."
