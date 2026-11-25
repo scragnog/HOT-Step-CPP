@@ -33,6 +33,7 @@ import {
   getHfToken, setHfToken, looksLikeGatedError, aceMidiExe,
   modelDir, isModelDownloaded, getModelStates,
   MUSCRIPTOR_MODELS, type MuscriptorModel, partialMidiFromEvents,
+  DETTATO_MODEL, DETTATO_PARTS, type MidiModel, isMidiModel, dettatoRoot, dettatoMissing,
   BEAT_MODEL, readGrid, alignToAudio, exportArgs, speculativeArgs, type MidiExportOptions,
 } from '../services/muscriptor.js';
 import { modelDownloadService } from '../services/modelDownloadService.js';
@@ -79,7 +80,9 @@ interface MidiJob {
   sourceAudioUrl: string;
   sourceFileName: string;
   songId?: string;
-  model: MuscriptorModel;
+  model: MidiModel;
+  /** dettato only: run the evidence repairer (on unless the request says false) */
+  repair: boolean;
   /** speculative decoding with the small model as draft (large only) */
   speculative: boolean;
   // live event stream (JSONL objects from ace-midi, replayed to SSE clients)
@@ -160,7 +163,8 @@ async function runTranscription(job: MidiJob): Promise<void> {
   try {
     const exe = aceMidiExe();
     if (!exe) throw new Error('ace-midi engine binary not found — rebuild the engine or reinstall');
-    if (!isModelDownloaded(job.model)) throw new Error(`Model '${job.model}' is not downloaded`);
+    const missing = job.model === DETTATO_MODEL ? dettatoMissing(job.repair) : isModelDownloaded(job.model) ? [] : [job.model];
+    if (missing.length) throw new Error(`Model '${missing.join("', '")}' is not downloaded`);
     const srcPath = resolveAudioPath(job.sourceAudioUrl);
     if (!fs.existsSync(srcPath)) throw new Error(`Source audio not found: ${srcPath}`);
 
@@ -173,13 +177,15 @@ async function runTranscription(job: MidiJob): Promise<void> {
     const beatArgs = isModelDownloaded(BEAT_MODEL)
       ? ['--beat-model', modelDir(BEAT_MODEL), '--beats-out', beatsPath(job.id)]
       : [];
+    const modelArgs = job.model === DETTATO_MODEL
+      ? ['--dettato-model', dettatoRoot(), ...(job.repair ? [] : ['--dettato-no-repair'])]
+      : ['--model', modelDir(job.model), ...speculativeArgs(job.model, job.speculative, isModelDownloaded('small'))];
     const child = spawn(exe, [
-      '--model', modelDir(job.model),
+      ...modelArgs,
       '--transcribe', enginePath,
       '--out', midPath(job.id),
       '--jsonl',
       ...beatArgs,
-      ...speculativeArgs(job.model, job.speculative, isModelDownloaded('small')),
     ], { windowsHide: true });
     job.child = child;
 
@@ -346,11 +352,22 @@ router.post('/hf-token', (req: Request, res: Response) => {
   }
 });
 
-/** POST /models/:size/download — begin downloading gated weights (or the beat model) */
+/** POST /models/:size/download — begin downloading gated weights (or the beat model).
+ *  'dettato' starts all four of its folders. */
 router.post('/models/:size/download', (req: Request, res: Response) => {
-  const size = req.params.size as MuscriptorModel | typeof BEAT_MODEL;
-  if (size !== BEAT_MODEL && !MUSCRIPTOR_MODELS.includes(size)) {
+  const size = req.params.size as MuscriptorModel | typeof BEAT_MODEL | typeof DETTATO_MODEL;
+  if (size !== BEAT_MODEL && size !== DETTATO_MODEL && !MUSCRIPTOR_MODELS.includes(size)) {
     res.status(400).json({ error: `Unknown model '${size}'` });
+    return;
+  }
+  if (size === DETTATO_MODEL) {
+    const missing = DETTATO_PARTS.filter(p => !isModelDownloaded(p));
+    if (!missing.length) { res.status(409).json({ error: 'Already downloaded' }); return; }
+    // A part already downloading is not an error: the others still start.
+    const failed = missing.map(p => modelDownloadService.startMuscriptorDownload(p))
+      .find(s => !s.started && s.error !== 'Download already in progress');
+    if (failed) { res.status(409).json({ error: failed.error }); return; }
+    res.json({ ok: true });
     return;
   }
   const r = modelDownloadService.startMuscriptorDownload(size);
@@ -363,18 +380,20 @@ router.post('/models/:size/download', (req: Request, res: Response) => {
 
 /** POST /transcribe — queue a transcription job */
 router.post('/transcribe', (req: Request, res: Response) => {
-  const { sourceAudioUrl, sourceFileName, songId, model, speculative } = req.body || {};
+  const { sourceAudioUrl, sourceFileName, songId, model, speculative, repair } = req.body || {};
   if (!sourceAudioUrl || typeof sourceAudioUrl !== 'string') {
     res.status(400).json({ error: 'sourceAudioUrl is required' });
     return;
   }
-  const m: MuscriptorModel = MUSCRIPTOR_MODELS.includes(model) ? model : 'small';
+  const m: MidiModel = isMidiModel(model) ? model : 'small';
+  const useRepair = repair !== false;
   if (!aceMidiExe()) {
     res.status(503).json({ error: 'ace-midi engine binary not found' });
     return;
   }
-  if (!isModelDownloaded(m)) {
-    res.status(409).json({ error: `Model '${m}' is not downloaded — download it first` });
+  const missing = m === DETTATO_MODEL ? dettatoMissing(useRepair) : isModelDownloaded(m) ? [] : [m];
+  if (missing.length) {
+    res.status(409).json({ error: `Model '${missing.join("', '")}' is not downloaded — download it first` });
     return;
   }
 
@@ -385,6 +404,7 @@ router.post('/transcribe', (req: Request, res: Response) => {
     sourceFileName: sourceFileName || path.basename(sourceAudioUrl),
     songId: songId || undefined,
     model: m,
+    repair: useRepair,
     speculative: speculative !== false,
     events: [],
     chunksDone: 0,
@@ -658,11 +678,11 @@ router.delete('/:jobId', (req: Request, res: Response) => {
 export default router;
 
 /** Cover Prepare reuses MIDI Studio's lane, cancellation and Beat This! export. */
-export async function transcribeCoverMidi(url: string, signal: AbortSignal) {
+export async function transcribeCoverMidi(url: string, signal: AbortSignal, source: 'muscriptor' | 'dettato' = 'muscriptor') {
   if (signal.aborted) throw new Error('Cancelled');
-  const model = coverMidiModel(yue2CoverService.readiness('muscriptor'));
+  const model = coverMidiModel(yue2CoverService.readiness(source));
   const job: MidiJob = { id: randomUUID(), status: 'queued', sourceAudioUrl: url,
-    sourceFileName: path.basename(url), model, speculative: true, events: [], chunksDone: 0,
+    sourceFileName: path.basename(url), model, repair: true, speculative: true, events: [], chunksDone: 0,
     chunksTotal: 0, noteCount: 0, createdAt: Date.now(), listeners: new Set() };
   jobs.set(job.id, job);
   const cancel = () => { job.status = 'cancelled'; job.child?.kill(); };
@@ -672,8 +692,8 @@ export async function transcribeCoverMidi(url: string, signal: AbortSignal) {
     if (signal.aborted) throw new Error('Cancelled');
     if (job.status !== 'done') throw new Error(job.error || `Transcription ${job.status}`);
     const result = await exportMidiAbc(jobDir(job.id), {}, undefined, false, signal);
-    const sheet = tryAbcCoverLeadSheet(result.abc, 'muscriptor');
+    const sheet = tryAbcCoverLeadSheet(result.abc, source);
     if (sheet) sheet.timing.grid = { identity: job.id, data: JSON.parse(fs.readFileSync(beatsPath(job.id), 'utf8')) };
-    return { abc: result.abc, scoreSource: 'muscriptor' as const, leadSheet: sheet };
+    return { abc: result.abc, scoreSource: source, leadSheet: sheet };
   } finally { signal.removeEventListener('abort', cancel); }
 }

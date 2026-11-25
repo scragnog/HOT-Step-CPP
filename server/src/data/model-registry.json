@@ -529,6 +529,19 @@
         "muscriptor-small",
         "muscriptor-beat-this"
       ]
+    },
+    {
+      "id": "midi-dettato",
+      "family": "shared",
+      "name": "MIDI Transcription (dettato)",
+      "description": "dettato for MIDI Studio and Cover Studio (about 195 MB): the transcriber, grouper, drums and repairer, plus Beat This! for tempo and bars. Not gated, no token needed. Code and weights Apache 2.0 by KobiMusic; part of the grouper and drum training data is non-commercial research only.",
+      "fileIds": [
+        "dettato-transcriber",
+        "dettato-evidence",
+        "dettato-grouper",
+        "dettato-drums",
+        "muscriptor-beat-this"
+      ]
     }
   ],
   "files": [
@@ -10618,6 +10631,116 @@
         {
           "filename": "config.json",
           "required": true
+        }
+      ]
+    },
+    {
+      "id": "dettato-transcriber",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/dettato",
+      "muscriptorModel": "dettato",
+      "repoPath": "dettato/model.safetensors",
+      "displayName": "dettato Transcriber",
+      "quant": "",
+      "sizeBytes": 61227952,
+      "repo": "scragnog/dettato",
+      "description": "Note transcriber for MIDI Studio and Cover Studio (61 MB). By KobiMusic (github.com/kobimusic/dettato, Apache 2.0), unmodified copy hosted by this project. Not gated.",
+      "tags": [
+        "recommended"
+      ],
+      "sha256": "696d22c5341c6e3df1bdb5670cb7945b65aa36f06811dfa5dfe73dc06cd53be5",
+      "companions": [
+        {
+          "filename": "config.json",
+          "repoPath": "dettato/config.json",
+          "required": true
+        },
+        {
+          "filename": "NOTICE",
+          "repoPath": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "dettato-evidence",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/dettato-evidence",
+      "muscriptorModel": "dettato-evidence",
+      "repoPath": "dettato-evidence/model.safetensors",
+      "displayName": "dettato Evidence Repairer",
+      "quant": "",
+      "sizeBytes": 19731388,
+      "repo": "scragnog/dettato",
+      "description": "Repairer that removes stray notes and tightens note times, on by default (20 MB). By KobiMusic (github.com/kobimusic/dettato, Apache 2.0), unmodified copy hosted by this project. Not gated.",
+      "tags": [],
+      "sha256": "25f06767a6ad72a9d409701b11ae500bd54622b3d7ddde8dd51152a148a3833a",
+      "companions": [
+        {
+          "filename": "config.json",
+          "repoPath": "dettato-evidence/config.json",
+          "required": true
+        },
+        {
+          "filename": "NOTICE",
+          "repoPath": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "dettato-grouper",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/dettato-grouper",
+      "muscriptorModel": "dettato-grouper",
+      "repoPath": "dettato-grouper/model.safetensors",
+      "displayName": "dettato Grouper",
+      "quant": "",
+      "sizeBytes": 11603972,
+      "repo": "scragnog/dettato",
+      "description": "Splits notes into instrument tracks (12 MB). By KobiMusic (github.com/kobimusic/dettato, Apache 2.0), unmodified copy hosted by this project. Part of its training data (MUSDB18, IRMAS) is licensed for non-commercial research only: check whether that matters for your use. Not gated.",
+      "tags": [],
+      "sha256": "4d46f18dc59201d4392b5ee31a3e0640ea89268cf1fa7b8b087dcd910193e07c",
+      "companions": [
+        {
+          "filename": "config.json",
+          "repoPath": "dettato-grouper/config.json",
+          "required": true
+        },
+        {
+          "filename": "NOTICE",
+          "repoPath": "NOTICE"
+        }
+      ]
+    },
+    {
+      "id": "dettato-drums",
+      "filename": "model.safetensors",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "muscriptor/dettato-drums",
+      "muscriptorModel": "dettato-drums",
+      "repoPath": "dettato-drums/model.safetensors",
+      "displayName": "dettato Drums",
+      "quant": "",
+      "sizeBytes": 20195244,
+      "repo": "scragnog/dettato",
+      "description": "Drum hit transcriber (20 MB). By KobiMusic (github.com/kobimusic/dettato, Apache 2.0), unmodified copy hosted by this project. Part of its training data (MUSDB18, IRMAS) is licensed for non-commercial research only: check whether that matters for your use. Not gated.",
+      "tags": [],
+      "sha256": "fbdf6243f721dc2e445270671a9361104028d331b6b9d4641ce24102cdef9613",
+      "companions": [
+        {
+          "filename": "config.json",
+          "repoPath": "dettato-drums/config.json",
+          "required": true
+        },
+        {
+          "filename": "NOTICE",
+          "repoPath": "NOTICE"
         }
       ]
     }

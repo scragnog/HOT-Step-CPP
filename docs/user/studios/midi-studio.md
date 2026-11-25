@@ -5,8 +5,8 @@ upload a WAV, MP3 or FLAC, and the native transcription engine writes a `.mid` w
 separate parts for drums, bass, guitar, keys, and the rest of the mix. Reach
 for it when you want the notes behind a track, not just the audio, for
 example to see what a bassline is doing or to pull a MIDI file into a DAW.
-MuScriptor also feeds the shared lead-sheet source picker in
-[Cover Studio](cover-studio.md) for YuE2 and HeartMuLa, where its chords are shown
+MuScriptor and dettato also feed the shared lead-sheet source picker in
+[Cover Studio](cover-studio.md) for YuE2 and HeartMuLa, where their chords are shown
 as estimates.
 
 ![MIDI Studio](../../images/studio-midi-studio.webp)
@@ -19,7 +19,12 @@ runs on its own engine binary (`ace-midi`), separate from music generation.
 
 Before the first transcription:
 
-- **Model weights.** The transcription model (MuScriptor, by Kyutai and
+- **dettato (no token needed).** dettato, by KobiMusic, is the other model choice: far
+  faster than MuScriptor, it splits the song into instrument tracks and adds a drum
+  track. Its four small models (about 112 MB) are not gated, so there is no Hugging Face
+  account or token to set up: pick dettato under Transcription model and click
+  "Download weights". It is also in Model Manager > Shared > MIDI Transcription.
+- **MuScriptor weights.** The MuScriptor transcription model (MuScriptor, by Kyutai and
   Mirelo) is gated on Hugging Face. You need a free Hugging Face account,
   accept the model's access conditions on its page, then create and save a
   read token in MIDI Studio. Weights then download in-app per model size.
@@ -65,8 +70,9 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 |---|---|
 | Choose from Library | Search your [library](library.md) and pick a track with audio as the transcription source. |
 | Upload from PC | Upload a local `.wav`, `.mp3` or `.flac` as the source (same as dragging a file onto the panel). FLAC is converted to WAV before transcription. |
-| Transcription model | `small` (103M, fastest, runs on CPU), `medium` (307M, balanced, GPU recommended), or `large` (1.4B, best quality, GPU required). |
-| Download weights | Downloads the selected model's gated weights and its `config.json` from Hugging Face using your saved token. Shows live progress; needs a saved token first. It is the same download as Model Manager > Shared > MIDI Transcription, so starting it in one place shows progress in both. |
+| Transcription model | `small` (103M, fastest, runs on CPU), `medium` (307M, balanced, GPU recommended), `large` (1.4B, best quality, GPU required), or `dettato` (28M, very fast, instrument tracks and drums). |
+| Evidence repairer | Shown when dettato is selected; on by default. dettato's second pass removes stray notes, tightens note times and keeps instrument tracks cleaner. Turn it off for the transcriber's notes as they are. It needs the repairer's model (part of the dettato download). |
+| Download weights | Downloads the selected model's weights and its `config.json` from Hugging Face. MuScriptor's are gated and use your saved token; dettato's four models download together and need none. Shows live progress; needs a saved token first. It is the same download as Model Manager > Shared > MIDI Transcription, so starting it in one place shows progress in both. |
 | Transcribe to MIDI | Queues a transcription job for the selected source and model. Disabled until a source is picked and that model's weights are downloaded. |
 | Transcriptions list | Every job, newest first: queued/transcribing status with chunk progress, or a done/failed result. Jobs persist to disk and survive an app restart. |
 | Preview piano roll (chevron) | Expands the finished job into the piano-roll player. A failed job that kept a partial `.mid` has it too. |
@@ -96,8 +102,20 @@ The lead sheet is only as good as the transcription's vocal line. On a dense mix
 Transcription is one-way: audio in, a `.mid` file out. There is no path from
 a transcribed (or any other) MIDI file back into music generation.
 
-The model weights are CC BY-NC 4.0 (non-commercial), and MIDI files you
-create here inherit that restriction.
+The MuScriptor weights are CC BY-NC 4.0 (non-commercial), and MIDI files you
+create with them inherit that restriction.
+
+dettato (code and weights Apache 2.0, by KobiMusic) carries a different caveat: part
+of the data its grouper and drum models were trained on (MUSDB18 and IRMAS) is licensed
+for non-commercial research only, and the authors tell users to check whether that
+matters for their use. In dettato MIDI, a pitched note's velocity is how sure the model
+was of the note, not how hard it was played; only drum hits carry a learned velocity.
+Transcription runs on the GPU when the engine has one (CUDA is tested; Vulkan runs on
+NVIDIA cards). AMD has not been tested on real hardware. The grouper runs on the CPU
+when the backend is not CUDA. Drums add about 40 seconds on the CPU for a 4-minute song;
+the progress bar follows the seconds of audio done. A source recorded below 40 kHz
+skips the drums. dettato shows no notes until the whole song is done, so the piano roll
+fills at the end instead of live.
 
 Mute and solo in the preview only silence the synthesized MIDI playback; the
 original audio track is unaffected and keeps playing under the crossfade.

@@ -156,6 +156,20 @@ test('MuScriptor readiness requires the selected model, beat model and executabl
   } finally { f.close(); }
 });
 
+test('dettato readiness needs all four folders, the beat model and the executable', () => {
+  const installed = new Set(['dettato', 'dettato-evidence', 'dettato-grouper', 'beat-this']);
+  let executable: string | null = 'ace-midi';
+  const f = fixture(true, false, { modelChoice: () => null, installed: model => installed.has(model), executable: () => executable });
+  try {
+    assert.equal(f.service.readiness('dettato').ready, false);
+    assert.match(f.service.readiness('dettato').message!, /dettato \(dettato-drums\).*Model Manager/);
+    installed.add('dettato-drums');
+    assert.deepEqual(f.service.readiness('dettato'), { source: 'dettato', ready: true, model: 'dettato', refined: false, message: null });
+    executable = null;
+    assert.match(f.service.readiness('dettato').message!, /ace-midi/);
+  } finally { f.close(); }
+});
+
 test('YourMT3 and ChordNet readiness follows the missing-file message', () => {
   let message: string | null = 'YourMT3+/ChordNet is not installed: missing chordnet-F32.gguf (ChordNet).';
   const f = fixture(false, false, undefined, () => message);

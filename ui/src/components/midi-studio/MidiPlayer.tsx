@@ -122,7 +122,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
             }
           } else if (ev.type === 'progress') {
             setChunks({ done: ev.completed, total: ev.total });
-            setFrontier(ev.completed * 5.0);
+            // dettato reports audio seconds; MuScriptor's chunks are 5 s each
+            setFrontier(typeof ev.seconds === 'number' ? ev.seconds : ev.completed * 5.0);
           } else if (ev.type === 'status') {
             void queryManager.invalidate(client, midiJobsOptions().queryKey);
             void queryManager.invalidate(client, midiNotesOptions(jobId).queryKey);

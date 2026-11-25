@@ -67,7 +67,7 @@ async function settle(jobId: string, until = ['completed', 'failed', 'cancelled'
 }
 
 test('the catalogue lists all four models under Shared with a required config', () => {
-  const entries = catalogue.files.filter((f: any) => f.muscriptorModel);
+  const entries = catalogue.files.filter((f: any) => f.muscriptorModel && !f.muscriptorModel.startsWith('dettato'));
   assert.deepEqual(entries.map((f: any) => f.muscriptorModel).sort(), ['beat-this', 'large', 'medium', 'small']);
   for (const e of entries) {
     assert.equal(e.family, 'shared');
@@ -80,6 +80,26 @@ test('the catalogue lists all four models under Shared with a required config', 
   assert.match(entries.find((f: any) => f.id === 'muscriptor-large').sha256, /^[a-f0-9]{64}$/, 'HF exposes the LFS hash even for gated weights');
   assert.match(entries.find((f: any) => f.id === 'muscriptor-beat-this').sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(catalogue.packs.find((p: any) => p.id === 'midi-transcription').fileIds, ['muscriptor-small', 'muscriptor-beat-this']);
+});
+
+test('dettato lists four unmodified upstream folders, each with a required config and the NOTICE', () => {
+  const entries = catalogue.files.filter((f: any) => f.muscriptorModel?.startsWith('dettato'));
+  assert.deepEqual(entries.map((f: any) => f.muscriptorModel).sort(), ['dettato', 'dettato-drums', 'dettato-evidence', 'dettato-grouper']);
+  for (const e of entries) {
+    assert.equal(e.role, 'muscriptor');
+    assert.equal(e.filename, 'model.safetensors');
+    assert.equal(e.repoPath, `${e.muscriptorModel}/model.safetensors`);
+    assert.equal(e.subdir, `muscriptor/${e.muscriptorModel}`);
+    assert.match(e.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(!e.tags.includes('gated'));
+    assert.match(e.description, /KobiMusic/);
+    assert.deepEqual(e.companions, [
+      { filename: 'config.json', repoPath: `${e.muscriptorModel}/config.json`, required: true },
+      { filename: 'NOTICE', repoPath: 'NOTICE' },
+    ]);
+  }
+  for (const id of ['dettato-grouper', 'dettato-drums']) assert.match(entries.find((f: any) => f.id === id).description, /MUSDB18, IRMAS/);
+  assert.equal(catalogue.packs.find((p: any) => p.id === 'midi-dettato').fileIds.length, 5);
 });
 
 test('two variants share one filename and only the installed one reads as installed', () => {

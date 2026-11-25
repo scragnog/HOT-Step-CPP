@@ -24,7 +24,7 @@ import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
   HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL,
-  type MuscriptorModel,
+  type MuscriptorModel, type MidiModel,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
 import { MidiExportPanel } from './MidiExportPanel';
@@ -34,10 +34,11 @@ import { useUpload } from '@/queries/writes';
 import { formatClock, formatDecimal } from '@/utils/format/format';
 import { errorMessage } from '@/utils/format/errorMessage';
 
-const MODEL_INFO: Array<{ id: MuscriptorModel; params: string }> = [
+const MODEL_INFO: Array<{ id: MidiModel; params: string }> = [
   { id: 'small', params: '103M' },
   { id: 'medium', params: '307M' },
   { id: 'large', params: '1.4B' },
+  { id: 'dettato', params: '28M' },
 ];
 
 export const MidiStudio: React.FC = () => {
@@ -69,8 +70,9 @@ export const MidiStudio: React.FC = () => {
   const [sourceAudioUrl, setSourceAudioUrl] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [sourceSongId, setSourceSongId] = useState<string | undefined>(undefined);
-  const [model, setModel] = useState<MuscriptorModel>(() =>
-    (localStorage.getItem('hs-midi-model') as MuscriptorModel) || 'small');
+  const [model, setModel] = useState<MidiModel>(() =>
+    (localStorage.getItem('hs-midi-model') as MidiModel) || 'small');
+  const [repair, setRepair] = useState(() => localStorage.getItem('hs-midi-repair') !== '0');
   const [speculative, setSpeculative] = useState(() => localStorage.getItem('hs-midi-speculative') !== '0');
 
   // ── Jobs ──
@@ -120,7 +122,11 @@ export const MidiStudio: React.FC = () => {
     if (file) handleFileUpload(file);
   }, [handleFileUpload]);
 
-  const handleModelChange = (m: MuscriptorModel) => {
+  const handleRepairChange = (v: boolean) => {
+    setRepair(v);
+    try { localStorage.setItem('hs-midi-repair', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  const handleModelChange = (m: MidiModel) => {
     setModel(m);
     try { localStorage.setItem('hs-midi-model', m); } catch { /* ignore */ }
   };
@@ -132,13 +138,13 @@ export const MidiStudio: React.FC = () => {
   // All three model-download buttons share this mutation: the inline
   // submitError line is the sole notifier (startModelDownload is silent).
   const downloadMut = useMutation({
-    mutationFn: (m: MuscriptorModel | typeof BEAT_MODEL) => startModelDownload(m),
+    mutationFn: (m: MidiModel | typeof BEAT_MODEL) => startModelDownload(m),
     onSuccess: () => refreshStatus(),
     onError: err => setSubmitError(errorMessage(err)),
   });
 
   const transcribeMut = useMutation({
-    mutationFn: () => submitTranscription({ sourceAudioUrl, sourceFileName: sourceName, songId: sourceSongId, model, speculative }),
+    mutationFn: () => submitTranscription({ sourceAudioUrl, sourceFileName: sourceName, songId: sourceSongId, model, speculative, repair }),
     onSuccess: () => refreshJobs(),
     onError: err => setSubmitError(errorMessage(err)),
   });
@@ -432,6 +438,14 @@ export const MidiStudio: React.FC = () => {
               )}
             </div>
 
+            {/* dettato's repairer: on by default, can be skipped for the raw transcriber notes */}
+            {model === 'dettato' && (
+              <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
+                <Toggle size="sm" accent="purple" checked={repair} onChange={handleRepairChange}
+                  label={t('midiStudio.repair')} info={t('midiStudio.repairInfo')} />
+              </div>
+            )}
+
             {/* Speculative decoding: only the large model gains from it */}
             {model === 'large' && (
               <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
@@ -476,7 +490,7 @@ export const MidiStudio: React.FC = () => {
                 <Piano size={16} /> {t('midiStudio.transcribe')}
               </button>
             )}
-            {modelState && !modelState.downloaded && !modelState.downloading && !status?.hfTokenSet && (
+            {modelState && !modelState.downloaded && !modelState.downloading && !status?.hfTokenSet && model !== 'dettato' && (
               <span className="text-xs text-amber-600 dark:text-amber-400">{t('midiStudio.needTokenHint')}</span>
             )}
             {modelState?.downloaded && !sourceAudioUrl && (
@@ -532,7 +546,7 @@ export const MidiStudio: React.FC = () => {
                       {job.status === 'failed' && (
                         <>
                           <div className="mt-0.5 text-[11px] text-red-500 dark:text-red-400 truncate">{job.error || t('midiStudio.statusFailed')}</div>
-                          {job.gated && (
+                          {job.gated && job.model !== 'dettato' && (
                             <div className="mt-1 text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
                               <AlertTriangle size={11} className="mt-0.5 flex-shrink-0" />
                               <span>

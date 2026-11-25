@@ -11,7 +11,7 @@ test('the shared picker displays every stored source, including unavailable nati
     const html = renderToStaticMarkup(createElement(LeadSheetSourcePicker, {
       value: source, disabled: false, onChange: () => {},
     }));
-    assert.ok(html.includes(['SheetSage2', 'SheetSage2-Refined', 'MuScriptor', 'YourMT3+ / ChordNet'][index]));
+    assert.ok(html.includes(['SheetSage2', 'SheetSage2-Refined', 'MuScriptor', 'dettato', 'YourMT3+ / ChordNet'][index]));
     assert.ok(html.includes('Lead-sheet source'));
     assert.ok(!html.includes('<select'));
     assert.ok(!html.includes('disabled=""'), 'readiness does not disable a source choice');

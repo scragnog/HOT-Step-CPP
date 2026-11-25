@@ -619,6 +619,15 @@ regroup notes. Metal is unmeasured, so it also takes the CPU. The drum model
 at 40 kHz or more and adds a drum track when it finds hits. Tracks come out largest first,
 with the drums last.
 
+MIDI Studio and Cover Studio run it through `routes/midiStudio.ts`: `--dettato-model` takes the
+shared `<models>/muscriptor` root, so the four registry entries (`muscriptorModel` ids
+`dettato`, `dettato-evidence`, `dettato-grouper`, `dettato-drums`) install beside MuScriptor's
+folders and one `POST /models/dettato/download` fetches all four. The weights are our unmodified
+mirror at `scragnog/dettato` (Hugging Face), with upstream's `NOTICE`. `--jsonl` progress lines carry
+`seconds` (audio done) beside `completed`/`total`; MIDI Studio's live frontier uses it when present
+and falls back to MuScriptor's 5 s chunks. Model card: [dettato-model-card.md](dettato-model-card.md).
+Only CUDA and the CPU were measured; Vulkan runs on NVIDIA cards, and AMD is untested on real hardware.
+
 The MIDI holds one track per instrument and the drums on the drum channel. Programs are
 upstream's General MIDI programs, except the string ensemble: dettato writes 44, which
 becomes 48 (`string_ensemble`). With `--jsonl`, `note_start` lines carry `"instrument"`

@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { aceMidiExe, exportArgs, MUSCRIPTOR_MODELS, type MuscriptorModel, type MidiExportOptions } from './muscriptor.js';
+import { aceMidiExe, exportArgs, MUSCRIPTOR_MODELS, DETTATO_MODEL, type MidiModel, type MidiExportOptions } from './muscriptor.js';
 
 /** Consume readiness's resolved choice instead of choosing a second model. */
-export function coverMidiModel(readiness: { ready: boolean; model: string | null; message: string | null }): MuscriptorModel {
-  const model = MUSCRIPTOR_MODELS.find(model => `muscriptor-${model}` === readiness.model);
-  if (!readiness.ready || !model) throw new Error(readiness.message || 'MuScriptor and Beat This! must be installed');
+export function coverMidiModel(readiness: { ready: boolean; model: string | null; message: string | null }): MidiModel {
+  const model = readiness.model === DETTATO_MODEL ? DETTATO_MODEL
+    : MUSCRIPTOR_MODELS.find(model => `muscriptor-${model}` === readiness.model);
+  if (!readiness.ready || !model) throw new Error(readiness.message || 'The MIDI transcription model and Beat This! must be installed');
   return model;
 }
 

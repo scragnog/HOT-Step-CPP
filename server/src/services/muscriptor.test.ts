@@ -29,6 +29,16 @@ test('partialMidiFromEvents keeps completed notes and drops the open one', () =>
   assert.equal(parsed.notes.find(n => n.pitch === 36)!.channel, 9);
 });
 
+test('partialMidiFromEvents writes the event velocity, 100 without one', () => {
+  const mid = partialMidiFromEvents([
+    { type: 'note_start', index: 0, pitch: 60, time: 0, instrument: 'voice', velocity: 37 },
+    { type: 'note_end', index: 0, time: 1 },
+    { type: 'note_start', index: 1, pitch: 62, time: 2, instrument: 'voice' },
+    { type: 'note_end', index: 1, time: 3 },
+  ])!;
+  assert.deepEqual(parseMidiFile(mid).notes.map(n => n.velocity), [37, 100]);
+});
+
 test('partialMidiFromEvents is null when no note completed', () => {
   assert.equal(partialMidiFromEvents([{ type: 'note_start', index: 0, pitch: 60, time: 0, instrument: 'voice' }]), null);
 });

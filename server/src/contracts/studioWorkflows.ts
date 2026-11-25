@@ -57,9 +57,9 @@ export interface InstaRenderResult { request: Record<string, unknown>; audioInte
 /** Every Cover step after `cover-open` references its draft document by
  *  id + revision; a stale revision is a 409 naming the current one. */
 export const coverDraftRefSchema = z.object({ documentId: z.string().uuid(), revision: z.number().int().min(1) });
-export const leadSheetSourceSchema = z.enum(['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet']);
+export const leadSheetSourceSchema = z.enum(['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'dettato', 'yourmt3-chordnet']);
 export type CoverLeadSheetSource = z.infer<typeof leadSheetSourceSchema>;
-export const coverScoreSourceSchema = z.enum(['dataset', 'musicxml', 'sheetsage2', 'muscriptor', 'yourmt3-chordnet']);
+export const coverScoreSourceSchema = z.enum(['dataset', 'musicxml', 'sheetsage2', 'muscriptor', 'dettato', 'yourmt3-chordnet']);
 /** `cover-source` changes the transcriber or audio at a pinned draft revision.
  * A changed choice or audio clears ABC, approval and timing together. Use this
  * kind rather than copying those fields into a generic document update.

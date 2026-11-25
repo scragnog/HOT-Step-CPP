@@ -5,7 +5,7 @@ import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { LEAD_SHEET_SOURCES } from './leadSheetSource';
 
-const LABELS = ['SheetSage2', 'SheetSage2-Refined', 'MuScriptor', 'YourMT3+ / ChordNet'];
+const LABELS = ['SheetSage2', 'SheetSage2-Refined', 'MuScriptor', 'dettato', 'YourMT3+ / ChordNet'];
 
 export const LeadSheetSourcePicker: React.FC<{
   value?: CoverLeadSheetSource; disabled: boolean; onChange: (value: CoverLeadSheetSource) => void;
@@ -13,7 +13,7 @@ export const LeadSheetSourcePicker: React.FC<{
   const { t } = useTranslation();
   return <div className="space-y-1">
     <ParamLabel label={t('cover.leadSheetSource', 'Lead-sheet source')}
-      info={t('cover.leadSheetSourceInfo', 'Choose how the recording becomes a melody and chord score. A new draft starts with the Models default. Changing a saved source clears its score approval. MuScriptor chords are estimates.')} />
+      info={t('cover.leadSheetSourceInfo', 'Choose how the recording becomes a melody and chord score. A new draft starts with the Models default. Changing a saved source clears its score approval. MuScriptor and dettato chords are estimates.')} />
     <StyledSelect accent="cyan" value={value ?? ''} disabled={disabled}
       options={[...(!value ? [{ value: '', label: t('cover.leadSheetDefault', 'Models default') }] : []),
         ...LEAD_SHEET_SOURCES.map((source, i) => ({ value: source, label: LABELS[i] }))]}

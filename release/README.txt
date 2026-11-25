@@ -53,4 +53,16 @@ Models require additional disk space and internet for the first download.
 Linux ROCm builds require compatible system ROCm libraries.
 If macOS blocks the unsigned app: xattr -cr /path/to/extracted-app/
 
+THIRD-PARTY SOFTWARE
+Licence texts and notices are in server/data/licenses/ (inside the app folder).
+- SoX Resampler Library (libsoxr 0.1.3), LGPL-2.1: statically linked into the
+  ace-midi engine (MIDI Studio, dettato). HOT-Step is MIT, which lets you modify
+  it and reverse-engineer it for debugging your changes. Complete source of the
+  libsoxr used (engine/vendor/soxr, unmodified apart from soxr-config.h) and of
+  the rest of the app, with the build files to relink ace-midi, is in
+  https://github.com/scragnog/HOT-Step-CPP at the tag named in this release's
+  notes. Licence: server/data/licenses/libsoxr-COPYING.LGPL.
+- dettato by KobiMusic (Apache-2.0), the engine port and its model weights:
+  server/data/licenses/dettato-LICENSE and dettato-NOTICE.
+
 Documentation and support: https://github.com/scragnog/HOT-Step-CPP

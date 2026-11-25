@@ -26,9 +26,18 @@ export type MuscriptorModel = typeof MUSCRIPTOR_MODELS[number];
 /** Beat This! (CPJKU, MIT, not gated): beats and downbeats that give the
  *  MIDI its tempo, time signature and bar lines (ace-midi --beat-model). */
 export const BEAT_MODEL = 'beat-this';
-export type DownloadableModel = MuscriptorModel | typeof BEAT_MODEL;
+/** dettato (KobiMusic, Apache-2.0, not gated): four weight folders under the same root, named as upstream's
+ *  repos are. ace-midi --dettato-model takes the root, so all four sit side by side. The repairer is optional
+ *  at run time (the Repair setting). */
+export const DETTATO_PARTS = ['dettato', 'dettato-evidence', 'dettato-grouper', 'dettato-drums'] as const;
+export type DettatoPart = typeof DETTATO_PARTS[number];
+export const DETTATO_MODEL = 'dettato';
+/** What MIDI Studio can transcribe with. */
+export type MidiModel = MuscriptorModel | typeof DETTATO_MODEL;
+export const isMidiModel = (m: unknown): m is MidiModel => m === DETTATO_MODEL || (MUSCRIPTOR_MODELS as readonly unknown[]).includes(m);
+export type DownloadableModel = MuscriptorModel | typeof BEAT_MODEL | DettatoPart;
 
-export const HF_MODEL_REPOS: Record<DownloadableModel, string> = {
+export const HF_MODEL_REPOS: Record<MuscriptorModel | typeof BEAT_MODEL, string> = {
   small: 'MuScriptor/muscriptor-small',
   medium: 'MuScriptor/muscriptor-medium',
   large: 'MuScriptor/muscriptor-large',
@@ -97,6 +106,17 @@ export function isModelDownloaded(m: DownloadableModel): boolean {
   return resolveModelDir(MODEL_ROOTS, m).complete;
 }
 
+/** The folder holding dettato's four model folders (--dettato-model). */
+export const dettatoRoot = (): string => path.dirname(modelDir(DETTATO_MODEL));
+
+/** The folders a dettato run reads: the repairer's only when it is on. */
+export const dettatoParts = (repair: boolean): DettatoPart[] => DETTATO_PARTS.filter(p => repair || p !== 'dettato-evidence');
+
+export const isDettatoReady = (repair = true): boolean => dettatoParts(repair).every(isModelDownloaded);
+
+/** Weights every dettato run needs, then the repairer's, by Model Manager id. */
+export const dettatoMissing = (repair = true): string[] => dettatoParts(repair).filter(p => !isModelDownloaded(p));
+
 export interface ModelDownloadState {
   downloading: boolean;
   receivedBytes: number;
@@ -111,7 +131,7 @@ export type ModelDownloadLookup = (m: DownloadableModel) => ModelDownloadState |
 
 export function getModelStates(lookup: ModelDownloadLookup): Record<string, ModelDownloadState & { downloaded: boolean; sizeBytes: number }> {
   const out: Record<string, any> = {};
-  for (const m of [...MUSCRIPTOR_MODELS, BEAT_MODEL] as DownloadableModel[]) {
+  for (const m of [...MUSCRIPTOR_MODELS, BEAT_MODEL, ...DETTATO_PARTS] as DownloadableModel[]) {
     const dl = lookup(m);
     let sizeBytes = 0;
     const downloaded = isModelDownloaded(m);
@@ -128,6 +148,17 @@ export function getModelStates(lookup: ModelDownloadLookup): Record<string, Mode
       gated: dl?.gated,
     };
   }
+  // dettato is one choice in MIDI Studio but four downloads: its row sums them.
+  const parts = DETTATO_PARTS.map(p => out[p]);
+  out[DETTATO_MODEL] = {
+    downloaded: parts.every(s => s.downloaded),
+    sizeBytes: parts.reduce((n, s) => n + s.sizeBytes, 0),
+    downloading: parts.some(s => s.downloading),
+    receivedBytes: parts.reduce((n, s) => n + s.receivedBytes, 0),
+    totalBytes: parts.reduce((n, s) => n + s.totalBytes, 0),
+    error: parts.find(s => s.error)?.error,
+    gated: undefined,
+  };
   return out;
 }
 
@@ -237,15 +268,15 @@ function varLen(n: number): number[] {
 }
 
 /**
- * Build a type-0 SMF (480 tpb, 120 bpm, velocity 100) from ace-midi's JSONL
+ * Build a type-0 SMF (480 tpb, 120 bpm, velocity 100, or the event's own) from ace-midi's JSONL
  * note events, so a run that dies before writing out.mid still leaves the
  * notes it decoded. Notes still open at the cut are dropped. Null when no
  * note completed. Notes are fixed up as the engine's writer does
  * (validate_notes_fix, trim_overlapping in engine/tools/ace-midi.cpp).
  */
 export function partialMidiFromEvents(events: any[]): Buffer | null {
-  const open = new Map<number, { pitch: number; time: number; instrument: string }>();
-  const notes: { pitch: number; on: number; off: number; instrument: string }[] = [];
+  const open = new Map<number, { pitch: number; time: number; instrument: string; velocity?: number }>();
+  const notes: { pitch: number; on: number; off: number; instrument: string; velocity: number }[] = [];
   for (const ev of events) {
     if (ev?.type === 'note_start') open.set(ev.index, ev);
     else if (ev?.type === 'note_end' && open.has(ev.index)) {
@@ -253,7 +284,8 @@ export function partialMidiFromEvents(events: any[]): Buffer | null {
       open.delete(ev.index);
       // A too-short note gets the engine's 0.01 s minimum, so its off never sorts before its on.
       const off = ev.time - s.time < 0.01 ? s.time + 0.01 : ev.time;
-      notes.push({ pitch: s.pitch, on: s.time, off, instrument: s.instrument });
+      notes.push({ pitch: s.pitch, on: s.time, off, instrument: s.instrument,
+        velocity: Number.isInteger(s.velocity) ? Math.min(127, Math.max(1, s.velocity!)) : 100 });
     }
   }
   // A note of the same pitch and instrument ends where the next one starts.
@@ -289,7 +321,7 @@ export function partialMidiFromEvents(events: any[]): Buffer | null {
   const evs: { tick: number; status: number; pitch: number; vel: number }[] = [];
   for (const n of kept) {
     const ch = chanFor(n.instrument);
-    evs.push({ tick: tick(n.on), status: 0x90 | ch, pitch: n.pitch, vel: 100 });
+    evs.push({ tick: tick(n.on), status: 0x90 | ch, pitch: n.pitch, vel: n.velocity });
     evs.push({ tick: tick(n.off), status: 0x80 | ch, pitch: n.pitch, vel: 0 });
   }
   // Offs before ons at the same tick, so a repeated pitch is not cut short.

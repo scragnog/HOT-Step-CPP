@@ -29,9 +29,9 @@ import { hasSoundingScore } from './backends/yue2/scoreHealth.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 import { cachedMp3 } from './audioConvert.js';
 import { nativeMissingMessage } from './leadSheetNative.js';
-import { aceMidiExe, BEAT_MODEL, isModelDownloaded, MUSCRIPTOR_MODELS, type MuscriptorModel } from './muscriptor.js';
+import { aceMidiExe, BEAT_MODEL, DETTATO_MODEL, DETTATO_PARTS, isModelDownloaded, MUSCRIPTOR_MODELS, type MuscriptorModel } from './muscriptor.js';
 
-export const LEAD_SHEET_SOURCES = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet'] as const;
+export const LEAD_SHEET_SOURCES = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'dettato', 'yourmt3-chordnet'] as const;
 export type LeadSheetSource = typeof LEAD_SHEET_SOURCES[number];
 export const YOURMT3_CHORDNET_MODEL_IDS = ['yourmt3-plus', 'chordnet'] as const;
 
@@ -106,6 +106,15 @@ export function createYue2CoverService(deps = {
     if (source === 'yourmt3-chordnet') {
       const message = nativeMissing();
       return { source, ready: !message, model: message ? null : YOURMT3_CHORDNET_MODEL_IDS.join('+'), refined: false, message };
+    }
+    if (source === 'dettato') {
+      // Cover Prepare runs dettato with the repairer on, so all four folders are needed.
+      const missing = DETTATO_PARTS.filter(part => !midi.installed(part)).map(part => `dettato (${part})`);
+      if (!midi.installed(BEAT_MODEL)) missing.push('Beat This! (muscriptor-beat-this)');
+      const executable = midi.executable();
+      return { source, ready: missing.length === 0 && !!executable, model: missing.length ? null : DETTATO_MODEL, refined: false,
+        message: missing.length ? `Download ${missing.join(' and ')} in Model Manager.${executable ? '' : ' The ace-midi executable is also missing.'}`
+          : executable ? null : 'The ace-midi executable is missing. Install a build that includes MIDI Studio.' };
     }
     if (source === 'muscriptor') {
       const chosen = midi.modelChoice() ?? MUSCRIPTOR_MODELS.find(model => midi.installed(model)) ?? 'small';

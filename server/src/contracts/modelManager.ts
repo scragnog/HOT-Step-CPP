@@ -27,10 +27,11 @@ export interface RegistryCompanion {
   required?: boolean;
 }
 
-/** MIDI Studio models (#228): the four weights folders under
- *  <models>/muscriptor. An entry with this set is located, installed and
+/** MIDI Studio models (#228): the weights folders under
+ *  <models>/muscriptor: MuScriptor's three sizes, Beat This!, and dettato's four models. An entry with this set is located, installed and
  *  deleted through services/muscriptorPaths.ts, not by filename. */
-export type MuscriptorModelId = 'small' | 'medium' | 'large' | 'beat-this';
+export type MuscriptorModelId = 'small' | 'medium' | 'large' | 'beat-this'
+  | 'dettato' | 'dettato-evidence' | 'dettato-grouper' | 'dettato-drums';
 
 /** One catalogue entry, before installed-status enrichment. */
 export interface RegistryFileEntry {

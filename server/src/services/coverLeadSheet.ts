@@ -15,7 +15,7 @@ export function abcCoverLeadSheet(abc: string, source: CoverLeadSheetSource,
   scoreSource: CoverLeadSheetResult['scoreSource'] = source === 'sheetsage2-refined' ? 'sheetsage2' : source): CoverLeadSheetResult {
   const events = coverScoreEvents(abc);
   return { abc, scoreSource, leadSheetSource: source,
-    chordQuality: scoreSource === 'muscriptor' ? 'estimated' : scoreSource === 'dataset' || scoreSource === 'musicxml' ? 'provided' : 'transcribed',
+    chordQuality: scoreSource === 'muscriptor' || scoreSource === 'dettato' ? 'estimated' : scoreSource === 'dataset' || scoreSource === 'musicxml' ? 'provided' : 'transcribed',
     timing: { conversionVersion: 1, path: 'abc', bpm: events.bpm,
       rawEvents: { melody: events.melody, chords: events.chords, drums: events.drums } } };
 }

@@ -146,6 +146,8 @@ Questions rather than bugs go to the [Discord](https://discord.gg/ezVtmg9GKX).
 - **[JK-AceStep-Nodes](https://github.com/jeankassio/JK-AceStep-Nodes)**: the Audio Quality Evaluator metrics by Jean Kassio (MIT License).
 - **[Stability AI](https://stability.ai)**: Stable Audio 3 (diffusion transformer, SAME-L autoencoder and T5Gemma text encoder), powering HOT-Step's fourth backend, its Stable Audio 3 training and the StableStep refiner through our native GGML conversions, distributed under the [Stability AI Community License](https://stability.ai/community-license-agreement). *Powered by Stability AI.*
 - **[MuScriptor](https://github.com/muscriptor/muscriptor)**: multi-instrument music transcription model by Kyutai and Mirelo (Simon Rouard, Michael Krause, Axel Roebel, Carl-Johann Simon-Gabriel, Alexandre Défossez, [arXiv:2607.08168](https://arxiv.org/abs/2607.08168)), powering MIDI Studio through our native GGML port (code MIT, model weights CC BY-NC 4.0).
+- **[dettato](https://github.com/kobimusic/dettato)**: instrument-aware audio-to-MIDI model by [KobiMusic](https://huggingface.co/kobimusic) (Apache 2.0), offered in MIDI Studio and Cover Studio through our native GGML port. The model weights are mirrored unmodified at [scragnog/dettato](https://huggingface.co/scragnog/dettato); part of the grouper and drum training data (MUSDB18, IRMAS) is non-commercial research only. See the [model card](docs/dev/dettato-model-card.md).
+- **[SoX Resampler Library](https://sourceforge.net/projects/soxr/)**: libsoxr 0.1.3 by Rob Sykes (LGPL-2.1), statically linked into the ace-midi engine; its source is vendored in engine/vendor/soxr.
 
 ## License
 

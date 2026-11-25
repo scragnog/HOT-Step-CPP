@@ -560,7 +560,7 @@ class ModelDownloadService extends EventEmitter {
     const dirs = [r.shared, r.legacy].map(root => path.join(root, variant));
     let removed = false;
     for (const dir of dirs) {
-      for (const name of MODEL_FILES) {
+      for (const name of [...MODEL_FILES, 'NOTICE']) {
         for (const suffix of ['', '.part', '.sha256']) {
           try { fs.unlinkSync(path.join(dir, name + suffix)); if (!suffix) removed = true; } catch { /* not there */ }
         }

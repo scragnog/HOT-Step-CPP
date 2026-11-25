@@ -2126,6 +2126,10 @@ jobs:
             echo "" >> release-notes.md
           fi
           echo "SHA256 checksums are attached to each file." >> release-notes.md
+          # LGPL-2.1 section 6(d): the ace-midi engine statically links libsoxr, so each release
+          # points at the complete source (including engine/vendor/soxr) at its tag.
+          echo "" >> release-notes.md
+          echo "Third-party notices: each archive carries them in server/data/licenses/. The complete source of this release, including the vendored libsoxr (LGPL-2.1) that ace-midi links statically, is at https://github.com/scragnog/HOT-Step-CPP/tree/${TAG}." >> release-notes.md
 
           echo "=== Generated release notes ==="
           cat release-notes.md

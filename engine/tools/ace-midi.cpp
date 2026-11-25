@@ -1015,6 +1015,7 @@ struct MidiNote {
     int    program;   // DRUM_PROGRAM for drums
     double onset, offset;
     int    pitch;
+    int    velocity = 100;  // MuScriptor never sets one; dettato's are its own
 };
 
 static void sort_notes_vec(std::vector<MidiNote> & notes) {
@@ -1081,6 +1082,7 @@ struct MidiEvent {  // one channel/meta message at an absolute tick
     int    program;   // track key
     int    velocity;  // 1 = on, 0 = off (pre-writer semantics)
     int    pitch;
+    int    vel = 100; // MIDI velocity of an on event
 };
 
 // events sorted like sort_note_events: (time, is_drum, program, velocity, pitch)
@@ -1102,7 +1104,7 @@ struct MidiTiming {
     double                           offset_s      = 0;  // where the recording's 0 s plays
 };
 
-// Serialize notes to a type-1 SMF (480 tpb, velocity 100), matching
+// Serialize notes to a type-1 SMF (480 tpb, each note's velocity, 100 unless it has one), matching
 // note_event2midi: per-program named tracks, channels 0-8,10-15 by first
 // appearance (overflow shares 15), drums on 9 with synthetic offs.
 // Without timing: seconds at 120 bpm, drum offs +0.01 s, tempo only in the
@@ -1112,7 +1114,6 @@ struct MidiTiming {
 static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTiming * tm = nullptr) {
     const int    TPB = 480;
     const int    TEMPO = 500000;
-    const int    VEL = 100;
     const double drum_len = tm ? 1.0 / 32 : 0.01;
     const std::vector<std::pair<int, int>> tempo = tm ? tm->tempo : std::vector<std::pair<int, int>>{ { 0, TEMPO } };
 
@@ -1124,7 +1125,7 @@ static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTi
     // note2note_event + drum offsets (writer adds them at time + drum_len)
     std::vector<MidiEvent> evs;
     for (auto & n : notes) {
-        evs.push_back({ n.onset, n.is_drum, n.is_drum ? DRUM_PROGRAM : n.program, 1, n.pitch });
+        evs.push_back({ n.onset, n.is_drum, n.is_drum ? DRUM_PROGRAM : n.program, 1, n.pitch, n.velocity });
         if (!n.is_drum) evs.push_back({ n.offset, false, n.program, 0, n.pitch });
     }
     sort_midi_events(evs);
@@ -1206,7 +1207,7 @@ static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTi
         put_varlen(t.bytes, (uint32_t) (delta < 0 ? 0 : delta));
         t.bytes.push_back((uint8_t) ((e.velocity > 0 ? 0x90 : 0x80) | t.channel));
         t.bytes.push_back((uint8_t) e.pitch);
-        t.bytes.push_back((uint8_t) (e.velocity > 0 ? VEL : 0));
+        t.bytes.push_back((uint8_t) (e.velocity > 0 ? std::min(127, std::max(1, e.vel)) : 0));
     }
     for (auto & t : tracks) {
         while (tm && t.tempo_i < tempo.size()) put_tempo(t.bytes, t.last_tick, tempo[t.tempo_i++]);
@@ -1952,6 +1953,7 @@ static int run_export(const std::string & events_path, const std::string & beats
             n.program = program_for(inst, &n.is_drum);
             n.pitch   = (int) field(line, "pitch", nullptr);
             n.onset = n.offset = field(line, "time", nullptr);
+            if (const int v = (int) field(line, "velocity", nullptr); v > 0) n.velocity = v;
             open.push_back({ index, n });
         } else if (type == "note_end") {
             for (size_t i = 0; i < open.size(); i++) {
@@ -2976,7 +2978,8 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     const int      n_win = (int) layout((long long) y.size()).starts.size(), total = n_win + (fed ? 0 : 3);
     auto progress = [&](int completed) {
         if (jsonl) {
-            printf("{\"type\":\"progress\",\"completed\":%d,\"total\":%d}\n", completed, total);
+            // seconds: how far through the audio the run is (the UI cannot infer it from window counts)
+            printf("{\"type\":\"progress\",\"completed\":%d,\"total\":%d,\"seconds\":%.2f}\n", completed, total, seconds * completed / total);
             fflush(stdout);
         }
     };
@@ -3161,7 +3164,7 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     std::vector<MidiNote> mid_notes;
     for (size_t i = 0; i < evs.size(); i++) {
         const Ev & e = evs[i];
-        mid_notes.push_back({ e.drum, e.program, e.on, e.off, e.pitch });
+        mid_notes.push_back({ e.drum, e.program, e.on, e.off, e.pitch, e.velocity });
         if (jsonl) {
             printf("{\"type\":\"note_start\",\"index\":%zu,\"pitch\":%d,\"time\":%.6f,\"instrument\":\"%s\",\"velocity\":%d}\n", i, e.pitch,
                    e.on, instrument_name(e.program).c_str(), e.velocity);

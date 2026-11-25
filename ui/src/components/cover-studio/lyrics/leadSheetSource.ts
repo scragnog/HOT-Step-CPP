@@ -1,7 +1,7 @@
 import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../../../server/src/contracts/studioWorkflows';
 import type { CoverDraftResult } from '@/services/coverWorkflowApi';
 
-export const LEAD_SHEET_SOURCES: CoverLeadSheetSource[] = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet'];
+export const LEAD_SHEET_SOURCES: CoverLeadSheetSource[] = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'dettato', 'yourmt3-chordnet'];
 
 export function readLeadSheetSource(value: unknown): CoverLeadSheetSource | undefined {
   return LEAD_SHEET_SOURCES.includes(value as CoverLeadSheetSource) ? value as CoverLeadSheetSource : undefined;

@@ -11,6 +11,8 @@ const P = '/midi-studio';
 // ── Types ────────────────────────────────────────────────────────────────
 
 export type MuscriptorModel = 'small' | 'medium' | 'large';
+/** What MIDI Studio can transcribe with: a MuScriptor size, or dettato (four folders, one download). */
+export type MidiModel = MuscriptorModel | 'dettato';
 
 export interface ModelState {
   downloaded: boolean;
@@ -29,7 +31,7 @@ export interface MidiStudioStatus {
   /** ace-midi engine binary present next to ace-server */
   engineAvailable: boolean;
   hfTokenSet: boolean;
-  models: Record<MuscriptorModel | typeof BEAT_MODEL, ModelState>;
+  models: Record<MidiModel | typeof BEAT_MODEL, ModelState>;
 }
 
 export interface MidiJobProgress {
@@ -49,7 +51,7 @@ export interface MidiJobSummary {
   /** URL of the original audio (for synced playback in the player) */
   sourceAudioUrl?: string;
   songId?: string;
-  model: MuscriptorModel;
+  model: MidiModel;
   noteCount: number;
   durationSec: number;
   createdAt: string;
@@ -134,9 +136,11 @@ export interface TranscribeParams {
   sourceAudioUrl: string;
   sourceFileName: string;
   songId?: string;
-  model: MuscriptorModel;
+  model: MidiModel;
   /** speculative decoding (large only; the server defaults it on) */
   speculative?: boolean;
+  /** dettato only: run the evidence repairer (the server defaults it on) */
+  repair?: boolean;
 }
 
 // ── API Functions ────────────────────────────────────────────────────────
@@ -154,7 +158,7 @@ export async function saveHfToken(token: string): Promise<void> {
 
 /** Begin downloading a model's gated weights. Poll getMidiStatus() for progress.
  *  Silent: MidiStudio renders failures itself (its inline error line). */
-export async function startModelDownload(model: MuscriptorModel | typeof BEAT_MODEL): Promise<void> {
+export async function startModelDownload(model: MidiModel | typeof BEAT_MODEL): Promise<void> {
   await apiClient.post(`${P}/models/${model}/download`, undefined, { silent: true });
 }
 

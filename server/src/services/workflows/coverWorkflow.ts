@@ -255,9 +255,9 @@ async function defaultTranscribe(url: string, label: string, user: string, signa
     if (message) throw new WorkflowError(400, message);
     return (await import('../leadSheetNative.js')).transcribeNativeLeadSheet(url, signal);
   }
-  if (source === 'muscriptor') {
+  if (source === 'muscriptor' || source === 'dettato') {
     const { transcribeCoverMidi } = await import('../../routes/midiStudio.js');
-    return transcribeCoverMidi(url, signal);
+    return transcribeCoverMidi(url, signal, source);
   }
   const started = await yue2CoverService.start({ sourceAudioUrl: url, sourceLabel: label.slice(0, 120), force, transcriber: source }, user);
   if (signal.aborted) {
