@@ -3,6 +3,8 @@ import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { Toggle } from '@/components/shared/controls/Toggle';
 import { EditableSlider } from '@/components/shared/controls/EditableSlider';
+import { StyleGenreSelect } from '@/components/create/StyleGenreSelect';
+import { StylePresetSelect } from '@/components/create/StylePresetSelect';
 import { transposeKey } from '@/components/cover-studio/source/coverStudioUtils';
 import type { Yue2SourceTrack } from '@/utils/lyrics/yue2CaptionSource';
 import type { Artist, AlbumPreset } from '@/services/lireekApi';
@@ -155,9 +157,15 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         ...p.captionTracks.map(track => ({ value: `track:${track.name}`, label: `Track: ${track.name}` })),
       ]} />
   </div>;
-  const captionEl = <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
-    placeholder="Style caption: genre, instruments, mood and vocal style" aria-label="YuE2 style caption"
-    className="block w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />;
+  const captionEl = <div className="space-y-1.5">
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <StylePresetSelect caption={p.caption} onCaptionChange={p.onCaptionChange} />
+      <StyleGenreSelect caption={p.caption} onCaptionChange={p.onCaptionChange} />
+    </div>
+    <textarea value={p.caption} onChange={e => p.onCaptionChange(e.target.value)}
+      placeholder="Style caption: genre, instruments, mood and vocal style" aria-label="YuE2 style caption"
+      className="block w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white" />
+  </div>;
   const instrumentalEl = <div className="flex items-center justify-between">
     <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
     <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
