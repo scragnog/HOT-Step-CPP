@@ -58,8 +58,8 @@ export function formatRelativeDay(value: RawDate, now = new Date()): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** "3:42:07 PM" — a log line or a moment inside a run, where seconds matter. */
+/** "15:42:07" — a log line or a moment inside a run, where seconds matter. */
 export function formatTimeOfDay(value: RawDate, fallback = ''): string {
   const d = toDisplayDate(value);
-  return d ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : fallback;
+  return d ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }) : fallback;
 }
