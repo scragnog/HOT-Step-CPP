@@ -584,6 +584,22 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
     // differ only here can end on different codes — a shared slot would hand
     // one of them the other's answer.
     add_i("min_frames", req.gen.min_frames > 0 ? req.gen.min_frames : 0);
+    // The semantic sampler knobs pick every draw. Same test as
+    // MM3SamplerKnobs::any_active(), so keys at reference sampling stand; the
+    // rep window/mode/DRY dials only act when the penalty is on.
+    {
+        const MM3GenRequest & g   = req.gen;
+        const bool            rep = g.lm_rep_penalty > 1.0f;
+        if (g.lm_temperature != 1.0f || g.lm_top_k > 0 || (g.lm_top_p > 0.0f && g.lm_top_p < 1.0f) || rep) {
+            add_s("smp", std::to_string(g.lm_temperature) + "," + std::to_string(g.lm_top_k) + "," +
+                             std::to_string(g.lm_top_p));
+        }
+        if (rep) {
+            add_s("rep", std::to_string(g.lm_rep_penalty) + "," + std::to_string(g.lm_rep_window) + "," +
+                             g.lm_rep_mode + "," + std::to_string(g.lm_dry_base) + "," +
+                             std::to_string(g.lm_dry_min_len));
+        }
+    }
 
     // Plank replay pins the codes, which pins the hiddens with them.
     if (!req.forced_semantic.empty()) {
