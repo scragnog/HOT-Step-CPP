@@ -1,0 +1,10 @@
+{
+ "about": "The tier change on a full desk (desk/stage.ts, shell/tier.ts, desk/layout.ts, render/useModel.ts): each of its fixes switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); each must make a guard of acceptance/tier.json fail (tools/behaviour/switches.mjs --package '^tier$'). A switch here brings a cost back without changing what the page shows at rest, so only the guards can catch it.",
+ "switches": [
+  { "feature": "tier: a return to a tier draws only what is in view", "file": "src/app/shell/tier.ts", "find": "planStage(t, anchor.reader)", "replace": "null" },
+  { "feature": "tier: a tile's models do not depend on the desk's tier", "file": "src/app/render/useModel.ts", "find": "(k === 'tier' ? tier : d[k])", "replace": "(k === 'tier' ? (d[k], tier) : d[k])" },
+  { "feature": "tier: the held tiles are drawn once the motion has started", "file": "src/app/shell/tier.ts", "find": "vt.ready.then(drawHeld, drawHeld);", "replace": "vt.ready.then(() => {}, () => {});" },
+  { "feature": "tier: the desk is laid out once a change, after the parts' effects", "file": "src/app/desk/layout.ts", "find": "if (deferring) { deferred = make; return; }", "replace": "if (deferring && false) { deferred = make; return; }" },
+  { "feature": "tier: the desk is measured without a class on it", "file": "src/app/desk/layout.ts", "find": "  const end = measuring(g);", "replace": "  g.classList.add('measuring'); const end = () => g.classList.remove('measuring');" }
+ ]
+}

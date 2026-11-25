@@ -1,0 +1,13 @@
+{
+  "about": "The tier change on a full desk (desk/stage.ts, shell/tier.ts, desk/layout.ts): guards that fail if its costs come back, each a tier change clicked as a user does on every ACE-Step module, pedal and side unit, with what the page counted in the change's own drawing (the test layer's tier.sync.* and stage.* counters) held to a limit. scenarios/40-tier.mjs; they hold on the rebuild only (the concept counts nothing).",
+  "scenarios": [
+    {
+      "id": "40-tier/a-return-to-a-tier-draws-only-what-is-in-view",
+      "why": "A change back to a tier the desk was laid out at holds the tiles out of view (the Pedalboard among them), draws, lays out and measures only those in view before the motion starts (at Studio 95 models asked and 7 tiles measured, where a first change asks 133 and measures 10), draws every held tile once the motion has started, and leaves the desk exactly as a first change to that tier draws it."
+    },
+    {
+      "id": "40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole",
+      "why": "A first change to a tier measures the desk once, after the parts' own effects have run (it was measured in the desk's layout effect, then again mid-motion), and never sets a class on the desk to measure it (the class restyled all 2,206 elements of the full desk through its :has rules, 14 ms each way)."
+    }
+  ]
+}

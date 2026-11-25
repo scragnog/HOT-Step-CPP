@@ -26,6 +26,7 @@ import { mtime, reduced } from '../kit/motion.ts';
 import { deferPack, flushPack } from '../desk/layout.ts';
 import { drawHeld, drawInView, hold, leaving, planStage, settle, type Stage } from '../desk/stage.ts';
 import { heldTiles } from '../render/tileTier.ts';
+import { TALLY, tally } from '../tally.ts';
 
 const ANCHORS = '#bento > .tile[data-m], .lyr-card';
 const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
@@ -102,6 +103,11 @@ function nameForMorph(on: boolean): void {
 }
 
 let seq = 0, flying = 0;
+/* what the change's own drawing (the View Transition's update, before anything moves) counted: the views' models asked,
+   and the tiles measured (the test layer's counters, tools/behaviour/scenarios/40-tier.mjs; nothing in other builds) */
+const SYNC = ['model', 'model.changed', 'measure.tiles'];
+const counts = () => SYNC.map(k => TALLY[k] ?? 0);
+const counted = (was: number[]) => SYNC.forEach((k, i) => tally('tier.sync.' + k, (TALLY[k] ?? 0) - was[i]!));
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
 const ringFor = () => (reduced() ? 1200 : mtime('--t-slow') * 4);
 
@@ -132,7 +138,11 @@ export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; 
     unnamed = new Set(st ? [...st.holds.keys(), ...[...only].filter(id => now.has(id) && !inView(id))] : []);
     nameForMorph(true); root.classList.add('tier-morph');
     flying++;
-    const vt = doc.startViewTransition!(() => { flying--; go(st); if (st) drawInView(); unnamed = new Set(heldTiles()); naming = 'new'; nameForMorph(true); after(); });
+    const vt = doc.startViewTransition!(() => {
+      flying--; const was = counts();
+      go(st); if (st) drawInView(); unnamed = new Set(heldTiles()); naming = 'new'; nameForMorph(true); after();
+      counted(was);
+    });
     vt.ready.then(drawHeld, drawHeld);
     /* a change started while another runs skips the first (Q-21): only the last one clears up */
     const clear = () => { if (me !== seq) return; nameForMorph(false); root.classList.remove('tier-morph'); };

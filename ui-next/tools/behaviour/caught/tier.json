@@ -1,0 +1,10 @@
+{
+ "about": "The scenarios that caught each switch of switches/tier.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "tier: a return to a tier draws only what is in view": ["40-tier/a-return-to-a-tier-draws-only-what-is-in-view"],
+  "tier: a tile's models do not depend on the desk's tier": ["40-tier/a-return-to-a-tier-draws-only-what-is-in-view"],
+  "tier: the held tiles are drawn once the motion has started": ["40-tier/a-return-to-a-tier-draws-only-what-is-in-view"],
+  "tier: the desk is laid out once a change, after the parts' effects": ["40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole"],
+  "tier: the desk is measured without a class on it": ["40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole"]
+ }
+}

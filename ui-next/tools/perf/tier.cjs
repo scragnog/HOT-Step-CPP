@@ -4,8 +4,9 @@
 //           Transition's first frame; without one, the frame that paints the new tier);
 //   longest the longest frame (rAF to rAF) from the click on;
 //   main    the main thread's busy time over the second (CDP Performance), and its script, style and layout parts;
-//   dropped frames longer than 25 ms during the motion (the click to its --t-move, 280 ms, after the first frame);
-//   settled the click to the end of the motion and of the last long frame (> 25 ms) after it;
+//   dropped frames longer than 25 ms during the motion (from its first frame to --t-move, 280 ms, after it), and in
+//           the motion, the longest frame then;
+//   settled the click to the end of the motion, of the last long frame (> 25 ms) and of a staged change's drawing;
 //   models  the views' models asked again and found changed, and the tiles measured (the test layer's counters).
 // Medians of `--runs` (3). The browser is warmed up first (one change per engine, unmeasured), as perf.cjs does.
 //
@@ -31,8 +32,9 @@ const MODS = arg('mods') ? arg('mods').split(',') : null, PEDS = arg('pedals') ?
 
 /* in the page, before its scripts: the frames, the click's time, the View Transition's moments, the tier's commit */
 const PROBE = `(() => {
-  const T = window.__tier = { frames: [], down: 0, vt: null, shown: 0, on: false };
-  const tick = ts => { if (T.on) T.frames.push(ts); requestAnimationFrame(tick); }; requestAnimationFrame(tick);
+  const T = window.__tier = { frames: [], down: 0, vt: null, shown: 0, on: false, base: {}, drawn: 0 };
+  /* the frames, and when a staged change has drawn every tile it held (the test layer's counters) */
+  const tick = ts => { if (T.on) { T.frames.push(ts); const c = window.__TALLY || {}, h = (c['stage.held'] || 0) - (T.base['stage.held'] || 0), d = (c['stage.drawn'] || 0) - (T.base['stage.drawn'] || 0); if (h && d >= h && !T.drawn) T.drawn = performance.now(); } requestAnimationFrame(tick); }; requestAnimationFrame(tick);
   addEventListener('pointerdown', e => { if (T.on && !T.down) T.down = e.timeStamp; }, true);
   const o = Document.prototype.startViewTransition;
   if (o) Document.prototype.startViewTransition = function (cb) {
@@ -113,7 +115,7 @@ async function measure(browser, engine, from, to) {
     const cdp = await ctx.newCDPSession(page); await cdp.send('Performance.enable', { timeDomain: 'threadTicks' });
     const metric = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
     if (SPLIT) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 100 }); await cdp.send('Profiler.start'); }
-    await page.evaluate(() => { window.__t0 = { ...(window.__TALLY || {}) }; window.__tier.on = true; });
+    await page.evaluate(() => { window.__t0 = { ...(window.__TALLY || {}) }; window.__tier.base = window.__t0; window.__tier.on = true; });
     const m0 = await metric();
     await page.mouse.down(); await page.mouse.up();
     await sleep(1000);
@@ -133,9 +135,10 @@ async function measure(browser, engine, from, to) {
       first: firstEnd ? r1(firstEnd - T.down) : null,
       longest: r1(Math.max(0, ...gaps.map(g => g[1]))),
       main: ms('TaskDuration'), script: ms('ScriptDuration'), style: ms('RecalcStyleDuration'), layout: ms('LayoutDuration'),
-      dropped: gaps.filter(([t, d]) => d > 25 && t + d > (firstEnd ?? T.down) - 1 && t < moveEnd).length,
+      dropped: gaps.filter(([t, d]) => d > 25 && t >= (firstEnd ?? T.down) - 1 && t < moveEnd).length,
+      inMotion: r1(Math.max(0, ...gaps.filter(([t]) => t >= (firstEnd ?? T.down) - 1 && t < moveEnd).map(g => g[1]))),
       longFrames: longs.length,
-      settled: r1(Math.max(vt?.finished ?? 0, ...longs.map(([t, d]) => t + d)) - T.down),
+      settled: r1(Math.max(vt?.finished ?? 0, T.drawn, ...longs.map(([t, d]) => t + d)) - T.down),
       update: vt ? r1(vt.cb1 - vt.cb0) : null,
       models: T.tally['model'] ?? null, changed: T.tally['model.changed'] ?? null, measured: T.tally['measure.tiles'] ?? 0,
       tally: T.tally,
@@ -150,13 +153,13 @@ async function measure(browser, engine, from, to) {
   const browser = await launch(), out = { page: PAGE, at: new Date().toISOString(), runs: RUNS, rows: [] };
   try {
     for (const e of ENGINES) await measure(browser, e, 'studio', 'lab').catch(() => {});
-    console.log(`${PAGE}\n${'engine'.padEnd(5)} ${'change'.padEnd(15)} first longest main (script style layout) dropped settled update | models asked, changed, tiles measured`);
+    console.log(`${PAGE}\n${'engine'.padEnd(5)} ${'change'.padEnd(15)} first longest main (script style layout) dropped in-motion settled update | models asked, changed, tiles measured`);
     for (const e of ENGINES) for (const [from, to] of PAIRS) {
       const rs = []; for (let i = 0; i < RUNS; i++) rs.push(await measure(browser, e, from, to));
       const keys = Object.keys(rs[0]).filter(k => k !== 'errs' && k !== 'split'), r = Object.fromEntries(keys.map(k => [k, med(rs.map(x => x[k]))]));
       if (SPLIT) { const gs = [...new Set(rs.flatMap(x => Object.keys(x.split)))]; r.split = Object.fromEntries(gs.map(g => [g, med(rs.map(x => x.split[g] ?? 0))]).sort((a, b) => b[1] - a[1])); }
       out.rows.push({ engine: e, from, to, ...r, errs: rs.flatMap(x => x.errs).slice(0, 2) });
-      console.log(`${e.padEnd(5)} ${(from + ' > ' + to).padEnd(15)} ${String(r.first).padStart(5)} ${String(r.longest).padStart(7)} ${String(r.main).padStart(5)} (${r.script} ${r.style} ${r.layout}) ${String(r.dropped).padStart(3)} ${String(r.settled).padStart(7)} ${String(r.update).padStart(6)} | ${r.models}, ${r.changed}, ${r.measured}${rs[0].errs.length ? ' ERR ' + rs[0].errs[0] : ''}`);
+      console.log(`${e.padEnd(5)} ${(from + ' > ' + to).padEnd(15)} ${String(r.first).padStart(5)} ${String(r.longest).padStart(7)} ${String(r.main).padStart(5)} (${r.script} ${r.style} ${r.layout}) ${String(r.dropped).padStart(3)} ${String(r.inMotion).padStart(5)} ${String(r.settled).padStart(7)} ${String(r.update).padStart(6)} | ${r.models}, ${r.changed}, ${r.measured}${rs[0].errs.length ? ' ERR ' + rs[0].errs[0] : ''}`);
       if (r.split) console.log('      ' + Object.entries(r.split).map(([k, v]) => `${k} ${v}`).join(', '));
     }
   } finally { await browser.close(); }
