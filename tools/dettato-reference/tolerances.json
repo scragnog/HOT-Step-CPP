@@ -54,6 +54,20 @@
       "same_track_and_coverage": "no lower than the spread on the same fixture (spread.json grouping.same_track_of_oracle and grouping.coverage)",
       "names": "exact, except where spread.json lists the track under grouping.big_track_name_mismatches or grouper_replay.big_track_name_mismatches: for that fixture and track only, the observed upstream name or the track's absence is also allowed",
       "identical_inputs": "grouper-replay.json: upstream's grouper on CUDA, fed the CPU capture's notes, features and audio. Per-tensor gaps and decode agreement are the grouper's own spread, free of transcriber differences"
+    },
+    "port": {
+      "note": "Slice 4b. The port's PCEN runs through a float32 FFT (pocketfft) like upstream's; no FFT reproduces upstream's MKL rounding noise, which sets PCEN where a channel sits far below its peak (README, Grouper reference). The network is therefore gated in exact-PCEN mode against exact_grouper.py's cpu-exact/ run, checked by the engine's dettato-grouper-test",
+      "gather": "grouper.meta max abs < 1e-3, grouper.feat codes within +-1, grouper.fsc within one float16 step (fed_tensors above), from the captured sub-run maps and taps at the oracle's notes",
+      "fed_exact_pcen": "grouper.probs, grouper.win.probs, grouper.emb, grouper.win.emb max abs < 1e-3 against cpu-exact/, same window layout; the host decode of that prediction puts every note in the same track as cpu-exact/'s groups, with the same instruments",
+      "from_audio": "unchanged (from_audio above, scored by compare.py against cpu/), subject to the exception below",
+      "measured": {
+        "gather": "bit-identical on every fixture (meta max abs 0, 0 int8 codes off, 0 scales off)",
+        "fed_exact_pcen": "probs max abs 7.9e-05 (src-32k), emb 1.7e-05; window tensors within one float16 step; every note in the same track on all 10 fixtures with notes; CUDA and CPU backends give the same numbers",
+        "vulkan_before_the_cpu_fallback": "probs 3.0e-03, t1 78% in the same track: Vulkan matmuls ignore the strict-F32 hint, so the grouper's graphs run on the CPU unless the compute backend is CUDA",
+        "float32_pcen_fed_vs_oracle": "same track 0.793 (t1), 0.992 (t2), 0.985 (src-32k), 1.0 elsewhere; big-track names kept on every fixture",
+        "from_audio_repairer_off_vs_oracle": "same track of the oracle's notes: 1.0 (clip-3s, silence-10s, detune-30c, t3, t5, long-260s), 0.9975 (t4), 0.9961 (t2), 0.9865 (src-32k), 0.943 (t6, spread 0.914), 0.7115 (t1, spread 0.707); big-track names kept except t1, which changes acoustic guitar -> piano and electric guitar -> acoustic guitar, the two changes upstream's own CUDA run makes (spread.json lists both); CPU and CUDA backends give the same tracks; drums: same model everywhere, hit F1 1.0",
+        "from_audio_repairer_on_vs_cpu_repair": "t4: 61 dropped, 3 inserted (as upstream), pitched F1 0.9987, same track 0.9906, names kept; clip-3s exact"
+      }
     }
   },
   "seconds": {
@@ -84,6 +98,14 @@
     }
   },
   "unchanged": "MuScriptor --validate-midi stays byte-identical; engine hand-offs carry the engine-smoke receipt",
-  "exceptions": [],
+  "exceptions": [
+    {
+      "gate": "grouper.from_audio.same_instrument_name, CPU backend, t1-synthpop-vocal",
+      "status": "proposed by the slice 4b author (HOTSTEP-1367), open to challenge in review",
+      "allowance": "the GPU rule: for t1 only, the names spread.json lists under grouping.big_track_name_mismatches or grouper_replay.big_track_name_mismatches",
+      "measured": "the port changes the same two t1 track names on the CPU and on CUDA (acoustic guitar -> piano, electric guitar -> acoustic guitar), with 71.15% of the oracle's notes in the same track",
+      "why": "t1's oracle grouping holds only under MKL's float32 FFT rounding inside PCEN. Upstream itself, fed the oracle's own features, keeps 79% of t1's notes in the same track with numpy's float32 FFT, with MKL at length 8192 or with an exact filter, and 70% on CUDA. The port reproduces upstream's CUDA tracks on t1 note for note in four of five tracks"
+    }
+  ],
   "exception_policy": "No looser tolerance preapproved. Report a failing stage and the measured error before proposing an exception."
 }

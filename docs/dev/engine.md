@@ -174,6 +174,34 @@ It then checks the network on the captured evidence and the repaired notes,
 from the captured evidence and from the port's own. The gates are under
 `repairer` in `tolerances.json`.
 
+### Dettato grouper validation
+
+The grouper in [grouper.h](../../engine/src/dettato/grouper.h) puts every
+note in an instrument track. It reads 12 numbers per note from the
+transcriber's every-4 s sub-run maps and three 368-number taps quantised to
+int8. Its own front end runs on 25.5 s of audio for each 24 s window. The
+host decode is [grouper-decode.h](../../engine/src/dettato/grouper-decode.h).
+
+Its PCEN filter runs through a float32 FFT, as upstream's does. Where a
+channel's power sits far below its peak, the result is that FFT's rounding
+noise, and the network was trained on it. No FFT reproduces upstream's noise
+(MKL's, on the CPU), so grouping that depends on it differs between any two
+FFTs, upstream's own CPU and CUDA runs included. The network is checked in an
+exact-PCEN mode instead, against
+`tools/dettato-reference/exact_grouper.py`, which runs upstream with the same
+exact filter.
+
+Build the standalone dettato-grouper-test target. Pass it the weights
+directory (with `dettato/` and `dettato-grouper/`) and a fixture folder that
+holds `cpu/` and `cpu-exact/`.
+
+    dettato-grouper-test <weights-dir> <fixture-dir>
+
+It checks the note features against the capture, then the network
+(probabilities and embeddings within 1e-3) and the decode (every note in the
+same track) against `cpu-exact/`. The float32 mode is reported against the
+oracle, not gated.
+
 ### ace-midi speculative decoding
 
 `ace-midi --draft-model <dir> [--speculative-k 1-4]` ports upstream MuScriptor PR #95.
@@ -535,22 +563,25 @@ idle dev-stack models resident, two runs: model load 0.4 s; features 0.3 s; pre-
 under 1 ms; BPM 1.0 s; ChordNet 10.1 to 10.3 s (CPU); Beat This! and ABC 0.6 s. That
 totals 28.4 to 28.9 s, against the 300 s Prepare budget.
 
-### ace-midi dettato transcriber
+### ace-midi dettato
 
-`ace-midi --dettato-model <dir>` is a native port of the transcriber stage of
+`ace-midi --dettato-model <dir>` is a native port of
 [dettato](https://github.com/kobimusic/dettato) 2.0.0 by KobiMusic (Apache-2.0, code and
-weights). `<dir>` holds upstream's `config.json` and `model.safetensors`, loaded
-unmodified. For now it writes one track of notes; the grouper (instrument tracks), the
-drum model and the evidence repairer are separate stages still to come. The code is in
-`engine/src/dettato/` (`transcriber-host.h`, `transcriber.h`); upstream's `NOTICE` and
-the licence are beside it.
+weights). `<dir>` holds upstream's four model folders as published, `dettato`,
+`dettato-evidence`, `dettato-grouper` and `dettato-drums`, each with its `config.json` and
+`model.safetensors`, loaded unmodified. It writes instrument-named tracks and a drum
+track. The code is in `engine/src/dettato/`; upstream's `NOTICE` and the licence are
+beside it.
 
 ```
 ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--jsonl] [--device cpu]
+         [--dettato-no-repair]
 ace-midi --dettato-model <dir> --dettato-fed <oracle capture> --dettato-capture <dir>
 ```
 
-The pipeline follows upstream with the repairer bypassed. Audio is read at its own
+The stages follow upstream's pipeline: the transcriber, then the evidence repairer, then
+the grouper on the 16 kHz audio, and the drum model on the source audio.
+Audio is read at its own
 rate, averaged to mono and resampled to 16 kHz (ChordNet's soxr-HQ resampler, exact for
 2:1). Upstream's tuning estimate runs on that; a recording at least 10 cents off A440
 with strength 0.12 or more is resampled onto A440 first, and every note time is mapped
@@ -568,31 +599,68 @@ centre tap. Each GRU runs as an unrolled graph over the 200 trunk steps with bot
 directions in one matmul per step (a block-diagonal `W_hh`); the outputs are written
 with `set_rows`. Every matmul carries `GGML_HINT_STRICT_F32`.
 
-With `--jsonl`, `note_start` lines carry `"velocity"`, upstream's pitched velocity
-`int(clip(20 + 107 * conf, 1, 127))` where `conf` is the onset probability. Every note is
-at least 30 ms long, as upstream's pipeline makes it before grouping. The MIDI itself
-still uses velocity 100. The tempo, grid, `--export` and ABC options work as for
-MuScriptor.
+The evidence repairer ([Dettato repairer validation](#dettato-repairer-validation)) then
+drops the notes it judges wrong, moves onsets and ends and adds missed notes, reading the
+all-window maps and `hidden` tap. It is on by default, as upstream ships it;
+`--dettato-no-repair` passes the transcriber's notes straight on, which is the pipeline the
+reference captures used. Every note is then at least 30 ms long.
 
-`--dettato-capture <dir>` writes the six maps, the every-4 s sub-run maps, the float16
-`hidden` and `stem` taps the grouper reads and both note lists in the layout of
-`tools/dettato-reference` captures. `--dettato-fed <capture>` runs on that capture's 16 kHz
-input and tuning instead of decoding audio. `--dettato-hidden` also keeps the all-window
-`hidden` tap the repairer reads. `tools/dettato-reference/check_transcriber.py` scores a
-port capture against the CPU oracle with `compare.py`'s metrics.
+The grouper ([Dettato grouper validation](#dettato-grouper-validation)) reads the every-4 s
+sub-run's maps and its `hidden` and `stem` taps at each note. It runs its network over
+24 s windows every 12 s and decodes tracks, each named by one of 73 instruments.
+Same-pitch notes within 30 ms in one track become one note, and the velocity is
+upstream's `int(clip(20 + 107 * conf, 1, 127))`. Its graphs run on CUDA when that is the
+compute backend and on the CPU otherwise: Vulkan's matmuls ignore the strict-F32 hint and
+regroup notes. Metal is unmeasured, so it also takes the CPU. The drum model
+([Dettato drum validation](#dettato-drum-validation)) runs on the CPU for sources recorded
+at 40 kHz or more and adds a drum track when it finds hits. Tracks come out largest first,
+with the drums last.
 
-Measured 2026-11-25 against the eleven `tools/dettato-reference` fixtures, CPU and CUDA,
-fed and from the WAV: every oracle note matched (F1 1.0), median onset error under
-0.001 ms, every offset within 20 ms. Fed maps are within 8.8e-6 of the oracle, maps from
-the WAV within 6.9e-4. The float16 taps differ by at most two float16 steps, on about one
-element in a million. Vulkan on the 5090 is within 3e-3 on the maps, inside upstream's
-own CPU/CUDA spread.
+The MIDI holds one track per instrument and the drums on the drum channel. Programs are
+upstream's General MIDI programs, except the string ensemble: dettato writes 44, which
+becomes 48 (`string_ensemble`). With `--jsonl`, `note_start` lines carry `"instrument"`
+(our instrument names, `program_<n>` for a program without one, `drums`) and `"velocity"`,
+in onset order. Progress counts the transcriber's windows plus one step each for the
+repairer, the grouper and the drums. The MIDI itself still uses velocity 100. The tempo,
+grid, `--export` and ABC options work as for MuScriptor.
 
-On the RTX 5090 with nothing else on the card, a 90 s song takes 3.5 s from loaded
-weights: front end 0.12 s, stem 0.47 s, trunk 2.9 s. The GRUs are 10 to 12% of that,
-measured with `--dettato-skip-gru` (profiling only: the GRUs become identities). The CPU
-backend takes about 2 minutes. `--dettato-batch` (windows per trunk graph, default 8)
-barely moves the time; the trunk is compute-bound, not launch-bound.
+`--dettato-capture <dir>` writes, in the layout of `tools/dettato-reference` captures, the
+six maps, the every-4 s sub-run maps, the float16 `hidden` and `stem` taps, both note
+lists, the grouper's note features and predictions, the groups, the tracks and the drum
+router. `compare.py` scores such a capture against the oracle. `--dettato-fed <capture>`
+runs only the transcriber, on that capture's 16 kHz input and tuning, and `--dettato-hidden`
+also keeps the all-window `hidden` tap there.
+`tools/dettato-reference/check_transcriber.py` scores those captures.
+
+Measured 2026-11-25 against the eleven `tools/dettato-reference` fixtures, CPU and CUDA:
+
+- Transcriber, fed and from the WAV: every oracle note matched (F1 1.0), median onset
+  error under 0.001 ms, every offset within 20 ms. Fed maps are within 8.8e-6 of the
+  oracle, maps from the WAV within 6.9e-4. The float16 taps differ by at most two float16
+  steps, on about one element in a million. Vulkan on the 5090 is within 3e-3 on the maps,
+  inside upstream's own CPU/CUDA spread.
+- Grouper note features: bit-identical to the oracle's. Network in exact-PCEN mode: window
+  probabilities within 8e-5 of upstream's exact-PCEN run, and every note in the same
+  track.
+- From the WAV with the repairer off, against the oracle: nine fixtures keep 98.5 to 100%
+  of notes in the same track with every large track's name. t6 keeps 94.3% (upstream's
+  own CPU/CUDA spread there is 91.4%). t1 keeps 71.2% (spread 70.7%), and two of its
+  large tracks change name, the same two upstream's CUDA run changes. CPU and CUDA give
+  the same tracks. Drums: the same model on every fixture, every hit matched.
+- With the repairer on, against upstream's full pipeline on the jazz trio: 61 notes
+  dropped and 3 inserted, as upstream, pitched-note F1 0.999, 99.1% in the same track.
+
+On the RTX 5090 with nothing else on the card, a 90 s song takes about 21 s. The
+transcriber takes 4.2 s (front end 0.1 s, stem 0.47 s, trunk 3.0 s), the repairer 0.3 s,
+the grouper 0.5 s, and the drums, on the CPU, 15 s. Threads barely help the drums: 18 s
+on 4 threads, 16 s on 32. A 610 s song takes 142 s, 103 s of it drums, and needs 11.7 GB
+of host memory while the three float16 taps are alive (about 10 MB per second of audio).
+Upstream keeps the same three buffers. After the grouper's gather they are freed, and
+the drums then add about 1.1 GB. With `--dettato-skip-gru` (profiling only: the GRUs
+become identities) the transcriber's GRUs measure 10 to 12% of its time. The CPU backend
+takes about 2 minutes for the transcriber and 2.2 s for the grouper. `--dettato-batch`
+(windows per trunk graph, default 8) barely moves the time; the trunk is compute-bound,
+not launch-bound.
 
 ## HeartMuLa
 

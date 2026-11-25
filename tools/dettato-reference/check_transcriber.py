@@ -4,7 +4,7 @@ Usage: python check_transcriber.py --captures <oracle root> --port <port root> -
        [--tap-steps k] [--spread spread.json] [--json out.json]
 
 Every fixture in manifest.json must have <port root>/<fixture>/<run>, a capture written by
-  ace-midi --dettato-model <weights>/dettato (--dettato-fed <oracle capture> | --transcribe <wav>) --dettato-capture <dir>
+  ace-midi --dettato-model <weights> (--dettato-fed <oracle capture> | --transcribe <wav>) --dettato-capture <dir>
 and <oracle root>/<fixture>/cpu the matching oracle capture. Gates (tolerances.json):
   fed tensors   maps.* and sub.maps.* max abs < 1e-3; both sub.tap.* present and |a - b| <= 1e-3 + k 2^-10 |a|
                 elementwise (k = 2 as declared; --tap-steps sets k). Only for a fed capture

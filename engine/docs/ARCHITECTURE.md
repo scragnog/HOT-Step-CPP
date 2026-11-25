@@ -1238,23 +1238,27 @@ model or capture, non-finite logits, or a failed parity row; 2 a YourMT3 mode wi
 
 ## ace-midi dettato reference
 
-The dettato transcriber, one track of notes for now. It loads no MuScriptor model. Pipeline,
-precision and timings: [ace-midi dettato transcriber](../../docs/dev/engine.md#ace-midi-dettato-transcriber).
+dettato: instrument-named tracks and a drum track. It loads no MuScriptor model. Pipeline,
+precision and timings: [ace-midi dettato](../../docs/dev/engine.md#ace-midi-dettato).
 
 ```
 Usage: ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--jsonl] [--device cpu]
-                [--beat-model <dir> ...]
+                [--dettato-no-repair] [--beat-model <dir> ...]
        ace-midi --dettato-model <dir> --dettato-fed <capture dir> --dettato-capture <dir>
 
-  --dettato-model <dir>       upstream's config.json and model.safetensors (kobimusic/dettato)
+  --dettato-model <dir>       the folder holding upstream's dettato, dettato-evidence,
+                              dettato-grouper and dettato-drums folders (kobimusic/dettato*)
   --transcribe <audio>        WAV or MP3 at any rate; writes --out (default out.mid)
-  --jsonl                     progress lines per trunk batch, then note_start (with "velocity")
-                              and note_end lines and a done line on stdout
-  --dettato-capture <dir>     also write maps, sub-run maps, float16 taps and both note lists
-                              in tools/dettato-reference's capture layout
-  --dettato-fed <capture>     run on an oracle capture's x16 (or x16_retuned) and tuning
-                              instead of --transcribe; writes no MIDI
-  --dettato-hidden            keep the all-window hidden tap (repair.hidden in the capture)
+  --dettato-no-repair         skip the evidence repairer (on by default)
+  --jsonl                     progress lines (transcriber batches, then the repairer, grouper
+                              and drums), then note_start (with "instrument" and "velocity")
+                              and note_end lines in onset order and a done line on stdout
+  --dettato-capture <dir>     also write maps, sub-run maps, float16 taps, both note lists,
+                              the grouper's features, predictions and groups, the tracks and
+                              the drum router in tools/dettato-reference's capture layout
+  --dettato-fed <capture>     the transcriber only, on an oracle capture's x16 (or
+                              x16_retuned) and tuning instead of --transcribe; writes no MIDI
+  --dettato-hidden            fed: keep the all-window hidden tap (repair.hidden in the capture)
   --dettato-batch <n>         windows per trunk graph (default 8)
   --dettato-stem-batch <n>    windows per stem graph (default 1, about 0.5 GB each)
   --dettato-skip-gru          profiling only: the GRUs become identities, output is wrong

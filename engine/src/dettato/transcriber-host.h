@@ -99,18 +99,19 @@ static Front make_front() {
     return F;
 }
 
-// Log band energies of one window, centred frames with zero padding (torch.stft center, pad_mode constant),
-// frames 0..T10-1. out[b * T10 + t] for the n_out bands.
-static void log_bands(const float * x, int n_fft, const std::vector<float> & win, const std::vector<Band> & fb, float * out) {
+// Log band energies of one window of n samples, centred frames with zero padding (torch.stft center, pad_mode
+// constant), frames 0..T-1. out[b * T + t] for the n_out bands; lin (optional) gets the band energies themselves.
+static void log_bands(const float * x, int n_fft, const std::vector<float> & win, const std::vector<Band> & fb, float * out,
+                      int n = WIN, int T = T10, float * lin = nullptr) {
     chordnet::Fft                     fft(n_fft);
     std::vector<std::complex<double>> z(n_fft);
     std::vector<double>               p0(n_fft / 2 + 1), p1(n_fft / 2 + 1);
     const int                         half = n_fft / 2, nb = (int) fb.size();
-    for (int t = 0; t < T10; t += 2) {  // two real frames per complex FFT
+    for (int t = 0; t < T; t += 2) {  // two real frames per complex FFT
         for (int j = 0; j < n_fft; j++) {
             const int s0 = t * HOP - half + j, s1 = s0 + HOP;
-            const double a = (s0 >= 0 && s0 < WIN) ? (double) (x[s0] * win[j]) : 0.0;
-            const double b = (s1 >= 0 && s1 < WIN && t + 1 < T10) ? (double) (x[s1] * win[j]) : 0.0;
+            const double a = (s0 >= 0 && s0 < n) ? (double) (x[s0] * win[j]) : 0.0;
+            const double b = (s1 >= 0 && s1 < n && t + 1 < T) ? (double) (x[s1] * win[j]) : 0.0;
             z[j] = { a, b };
         }
         fft.run(z.data());
@@ -127,25 +128,30 @@ static void log_bands(const float * x, int n_fft, const std::vector<float> & win
                 e0 += B.w[k] * p0[B.lo + k];
                 e1 += B.w[k] * p1[B.lo + k];
             }
-            out[(size_t) i * T10 + t] = (float) std::log(e0 + LOG_EPS);
-            if (t + 1 < T10) out[(size_t) i * T10 + t + 1] = (float) std::log(e1 + LOG_EPS);
+            out[(size_t) i * T + t] = (float) std::log(e0 + LOG_EPS);
+            if (t + 1 < T) out[(size_t) i * T + t + 1] = (float) std::log(e1 + LOG_EPS);
+            if (lin) {
+                lin[(size_t) i * T + t] = (float) e0;
+                if (t + 1 < T) lin[(size_t) i * T + t + 1] = (float) e1;
+            }
         }
     }
 }
 
-// HCQT of one 8 s window -> [N_CH][T10][N_BINS] (WHCN, bins fastest), as torch's (C, T, F).
-static void hcqt(const Front & F, const float * x, float * out) {
+// HCQT of one window (8 s for the transcriber) -> [N_CH][T][N_BINS] (WHCN, bins fastest), as torch's (C, T, F).
+// lin (optional): the long window's band energies [F.fb.size()][T], the grouper's linear power P.
+static void hcqt(const Front & F, const float * x, float * out, int n = WIN, int T = T10, float * lin = nullptr) {
     const int          n_long = (int) F.fb.size();
-    std::vector<float> lf((size_t) n_long * T10), lx((size_t) N_BINS * T10);
-    log_bands(x, N_FFT, F.win, F.fb, lf.data());
-    log_bands(x, N_FFT_X, F.win_x, F.fb_x, lx.data());
+    std::vector<float> lf((size_t) n_long * T), lx((size_t) N_BINS * T);
+    log_bands(x, N_FFT, F.win, F.fb, lf.data(), n, T, lin);
+    log_bands(x, N_FFT_X, F.win_x, F.fb_x, lx.data(), n, T);
     for (int c = 0; c < N_CH; c++) {
-        float * o = out + (size_t) c * T10 * N_BINS;
+        float * o = out + (size_t) c * T * N_BINS;
         for (int b = 0; b < N_BINS; b++) {
             const int a   = c < N_HARM ? F.shifts[c] - F.lo + b : b;
             const bool in = c == N_HARM || a < n_long;  // the pad branch is never taken with this config
-            const float * src = c < N_HARM ? &lf[(size_t) a * T10] : &lx[(size_t) b * T10];
-            for (int t = 0; t < T10; t++) o[(size_t) t * N_BINS + b] = in ? src[t] : (float) std::log(LOG_EPS);
+            const float * src = c < N_HARM ? &lf[(size_t) a * T] : &lx[(size_t) b * T];
+            for (int t = 0; t < T; t++) o[(size_t) t * N_BINS + b] = in ? src[t] : (float) std::log(LOG_EPS);
         }
     }
 }

@@ -7,7 +7,7 @@ scripts are developer tools, not an application runtime.
 
 The reference run is `--device cpu`: float32, deterministic algorithms, four
 intra-op threads, one inter-op thread, with the evidence repairer replaced by a
-stub that returns the transcriber's own notes (the repairer is not ported). A
+stub that returns the transcriber's own notes (the port's `--dettato-no-repair`). A
 second run of the same fixtures on CUDA, where upstream uses bfloat16 autocast,
 gives the **upstream spread**, the gap a GPU backend of the port is allowed.
 Repeating a CPU capture gives identical tensor hashes (checked on `clip-3s`).
@@ -26,6 +26,7 @@ Weights, upstream clone, venvs, fixture audio and tensor dumps live under
 | `compare.py` | Gate metrics between two captures (spread now, port later) |
 | `replay_grouper.py` | Grouper spread on identical inputs: CUDA grouper fed the CPU capture's notes and features |
 | `replay_repairer.py` | Repairer spread on identical inputs: CUDA repairer fed a `cpu-repair` capture's notes and evidence |
+| `exact_grouper.py` | Upstream's CPU grouper with PCEN in float64, fed the CPU capture's features: the reference for the port's grouper network (`cpu-exact/`) |
 | `verify.py` | Hashes, finite values, shapes, grouping coverage |
 
 ## Reproduce
@@ -53,6 +54,7 @@ $py = "$exp/venv-cpu/Scripts/python.exe"
 & "$exp/venv-cuda/Scripts/python.exe" replay_grouper.py --upstream "$exp/upstream" --weights "$exp/weights" --captures "$exp/captures"
 & $py compare.py --captures "$exp/captures" --out spread.json
 & $py verify.py --captures "$exp/captures" --weights "$exp/weights" --fixtures "$exp/fixtures"
+& $py exact_grouper.py --upstream "$exp/upstream" --weights "$exp/weights" --captures "$exp/captures"
 ```
 
 ## Fixtures
@@ -101,6 +103,24 @@ autocast upstream, so it runs in float32 there. `replay_repairer.py` feeds the
 CPU capture's notes and evidence to the CUDA repairer and writes
 `repairer-replay.json`. On the trio song, P(keep) differs by at most 7e-7 and
 one onset moves one 5 ms bin.
+
+## Grouper reference
+
+The grouper's PCEN smooths every channel with a 200-tap filter through a float32 FFT.
+Wherever the power sits far below the row's peak, its output is that FFT's rounding noise,
+and on the CPU the FFT is MKL's. Fed the CPU capture's own features, upstream with any
+other FFT regroups notes. With numpy's float32 pocketfft, MKL at length 8192 or an exact
+filter, t1 keeps 79% of notes in the same track. t2 keeps 99%, 74% or 73%. The window
+probabilities move by up to 0.1 to 0.5. Upstream's own CUDA run on identical inputs
+(`grouper-replay.json`) keeps 70% on t1.
+
+So the oracle's exact grouping cannot be a target. `exact_grouper.py` runs upstream with
+the filter in float64 (FFT error around 1e-12) and writes `<fixture>/cpu-exact/`, a run
+the port reproduces deterministically in its exact-PCEN mode
+(`dettato-grouper-test`). `<fixture>/grouper-exact.json` records how far that run sits
+from the oracle. The port ships with a float32 FFT filter, as upstream does: numpy's
+float32 FFT sits 2 to 4 times closer to the oracle's probabilities on average than the
+exact filter, because the network was trained on that noise.
 
 ## Limits
 

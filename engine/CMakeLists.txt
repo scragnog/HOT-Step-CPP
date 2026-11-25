@@ -830,10 +830,17 @@ add_executable(dettato-repairer-test tools/dettato-repairer-test.cpp)
 target_link_libraries(dettato-repairer-test PRIVATE yyjson)
 link_ggml_backends(dettato-repairer-test)
 
+# dettato-grouper-test: validate the grouper (features, network, decode) against the oracle and its exact-PCEN reference.
+add_executable(dettato-grouper-test tools/dettato-grouper-test.cpp)
+target_include_directories(dettato-grouper-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/pocketfft)
+target_link_libraries(dettato-grouper-test PRIVATE yyjson)
+link_ggml_backends(dettato-grouper-test)
+
 # ace-midi: MuScriptor audio->MIDI transcription (GGML port, in development —
 # docs/plans/muscriptor-cpp-port.md). Standalone tool, no acestep-core needed.
 add_executable(ace-midi tools/ace-midi.cpp)
 link_ggml_backends(ace-midi)
+target_include_directories(ace-midi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/vendor/pocketfft)  # dettato grouper's PCEN
 # --abc-out renders through SheetSage2's notation headers, whose event code uses yyjson
 target_link_libraries(ace-midi PRIVATE yyjson)
 
