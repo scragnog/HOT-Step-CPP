@@ -21,6 +21,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -35,6 +37,7 @@
 #include "train/yue2-aitk-sha256.h"
 #include "chordnet/tempo.h"
 #include "yourmt3/inference.h"
+#include "dettato/transcriber.h"
 #include "yyjson.h"
 
 // ---------------------------------------------------------------------------
@@ -2772,6 +2775,203 @@ static int run_lead_sheet(const std::string & mt3_model, const std::string & cho
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// dettato transcriber (kobimusic/dettato 2.0.0, Apache-2.0): --dettato-model.
+// One track of notes with velocities for now; the grouper and the drums come
+// later. Engine code and notices: src/dettato/.
+// ---------------------------------------------------------------------------
+
+struct DettatoOpts {
+    std::string model, capture, fed;  // capture: write a port capture there; fed: run on an oracle capture's 16 kHz input
+    bool        all_hidden = false;   // keep the all-window hidden tap (the repairer's input)
+    bool        skip_gru   = false;   // profiling only
+    int         batch = 8, stem_batch = 1;
+};
+
+static constexpr double DETTATO_MIN_END_S = 0.03;  // pipeline.MIN_END_S
+
+static void dettato_notes_json(std::string & j, const char * key, const std::vector<dettato::transcriber::Note> & v) {
+    char b[64];
+    j += std::string("\"") + key + "\":{";
+    const char * fields[5] = { "onset", "offset", "pitch", "conf", "slot" };
+    for (int f = 0; f < 5; f++) {
+        j += std::string(f ? "," : "") + "\"" + fields[f] + "\":[";
+        for (size_t i = 0; i < v.size(); i++) {
+            if (f == 0) snprintf(b, sizeof(b), "%.17g", v[i].onset);
+            else if (f == 1) snprintf(b, sizeof(b), "%.17g", v[i].offset);
+            else if (f == 2) snprintf(b, sizeof(b), "%d", v[i].pitch);
+            else if (f == 3) snprintf(b, sizeof(b), "%.9g", (double) v[i].conf);
+            else snprintf(b, sizeof(b), "%d", v[i].slot);
+            j += std::string(i ? "," : "") + b;
+        }
+        j += "]";
+    }
+    j += "}";
+}
+
+// A capture in the oracle's layout (tools/dettato-reference): tensors.json + raw tensors, result.json.
+static bool dettato_write_capture(const std::string & dir, const dettato::transcriber::RunResult & r, double seconds,
+                                  const dettato::transcriber::Tuning & tu, const std::vector<dettato::transcriber::Note> & notes,
+                                  const std::vector<dettato::transcriber::Note> & sub_notes, const std::string & timing,
+                                  bool fed) {
+    using namespace dettato::transcriber;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    std::string tj = "{";
+    auto put = [&](const std::string & name, const void * data, size_t bytes, std::vector<int64_t> shape, const char * dtype,
+                   const char * src) {
+        if (!write_file(dir + "/" + name + ".bin", data, bytes)) return false;
+        std::string sh;
+        for (size_t i = 0; i < shape.size(); i++) sh += (i ? "," : "") + std::to_string(shape[i]);
+        tj += std::string(tj.size() > 1 ? "," : "") + "\"" + name + "\":{\"file\":\"" + name + ".bin\",\"shape\":[" + sh +
+              "],\"dtype\":\"" + dtype + "\",\"source_dtype\":\"" + src + "\",\"bytes\":" + std::to_string(bytes) + "}";
+        return true;
+    };
+    bool ok = true;
+    for (int h = 0; h < N_HEADS_OUT; h++) {
+        ok &= put(std::string("maps.") + HEAD_NAMES[h], r.all.P[h].data(), r.all.P[h].size() * 4, { r.T, N_KEYS }, "<f4", "float32");
+        ok &= put(std::string("sub.maps.") + HEAD_NAMES[h], r.sub.P[h].data(), r.sub.P[h].size() * 4, { r.T, N_KEYS }, "<f4", "float32");
+    }
+    if (r.sub.want_hidden) ok &= put("sub.tap.hidden", r.sub.hidden.data(), r.sub.hidden.size() * 2, { r.T, N_KEYS, C }, "<f2", "float16");
+    if (r.sub.want_stem) ok &= put("sub.tap.stem", r.sub.stem.data(), r.sub.stem.size() * 2, { r.T, N_KEYS, C }, "<f2", "float16");
+    if (r.all.want_hidden) ok &= put("repair.hidden", r.all.hidden.data(), r.all.hidden.size() * 2, { r.T, N_KEYS, C }, "<f2", "float16");
+    tj += "}\n";
+    ok &= write_file(dir + "/tensors.json", tj.data(), tj.size());
+    char b[512];
+    snprintf(b, sizeof(b),
+             "{\"port\":\"ace-midi --dettato-model\",\"input\":\"%s\",\"seconds\":%.17g,\"windows\":%d,\"tuning\":{\"estimate_cents\":%.17g,"
+             "\"strength\":%.17g,\"shift_cents\":%.17g,\"ratio\":%.17g},",
+             fed ? "fed" : "audio", seconds, r.n_windows, tu.estimate_cents, tu.strength, tu.shift_cents, tu.ratio);
+    std::string j = b;
+    dettato_notes_json(j, "transcriber_notes", notes);
+    j += ",";
+    dettato_notes_json(j, "sub_notes", sub_notes);
+    j += ",\"timing\":" + timing + "}\n";
+    ok &= write_file(dir + "/result.json", j.data(), j.size());
+    return ok;
+}
+
+// soxr's output length round(n * out / in), filled by ChordNet's soxr-HQ resampler.
+static std::vector<float> dettato_to_16k(const std::vector<float> & mono, int sr) {
+    using dettato::transcriber::SR;
+    if (sr == SR) return mono;
+    std::vector<float> y = chordnet::resample(mono, sr, SR, false);
+    const long long    g = std::gcd((long long) sr, (long long) SR), L = SR / g, M = sr / g, n = (long long) mono.size();
+    y.resize((size_t) ((2 * n * L + M) / (2 * M)));
+    return y;
+}
+
+static int run_dettato(const DettatoOpts & o, const std::string & audio_path, const std::string & out_path, bool jsonl,
+                       const std::string & beat_model, const GridExport & opts, const std::string & beats_out, const AbcOpts & ao) {
+    using namespace dettato::transcriber;
+    const double t0 = now_ms();
+    // ---- input: 16 kHz mono, its tuning, the retuned audio the network hears
+    std::vector<float> mono, x16, y;
+    int                sr      = SR;
+    double             seconds = 0;
+    Tuning             tu;
+    BeatTrack          tr;
+    if (!o.fed.empty()) {
+        yyjson_doc * res = yyjson_read_file((o.fed + "/result.json").c_str(), 0, nullptr, nullptr);
+        yyjson_doc * tns = yyjson_read_file((o.fed + "/tensors.json").c_str(), 0, nullptr, nullptr);
+        if (!res || !tns) {
+            fprintf(stderr, "[dettato] %s: no result.json or tensors.json\n", o.fed.c_str());
+            yyjson_doc_free(res);
+            yyjson_doc_free(tns);
+            return 1;
+        }
+        yyjson_val * rr = yyjson_doc_get_root(res), * tn = yyjson_obj_get(rr, "tuning");
+        seconds           = yyjson_get_num(yyjson_obj_get(rr, "seconds"));
+        tu.estimate_cents = yyjson_get_num(yyjson_obj_get(tn, "estimate_cents"));
+        tu.strength       = yyjson_get_num(yyjson_obj_get(tn, "strength"));
+        tu.shift_cents    = yyjson_get_num(yyjson_obj_get(tn, "shift_cents"));
+        tu.ratio          = yyjson_get_num(yyjson_obj_get(tn, "ratio"));
+        std::string missing;
+        x16 = capture_tensor(o.fed, yyjson_doc_get_root(tns), "x16", &missing);
+        y   = tu.shift_cents != 0 ? capture_tensor(o.fed, yyjson_doc_get_root(tns), "x16_retuned", &missing) : x16;
+        yyjson_doc_free(res);
+        yyjson_doc_free(tns);
+        if (!missing.empty() || y.empty()) {
+            fprintf(stderr, "[dettato] %s: unreadable capture input:%s\n", o.fed.c_str(), missing.c_str());
+            return 1;
+        }
+        fprintf(stderr, "[dettato] fed: %s, %zu samples at 16 kHz, tuning from the capture\n", o.fed.c_str(), y.size());
+    } else {
+        mono    = load_audio_mono(audio_path, &sr);
+        seconds = (double) mono.size() / sr;
+        if (!beat_model.empty() && !run_beats(beat_model, mono, sr, &tr)) return 1;
+        x16 = dettato_to_16k(mono, sr);
+        tu  = estimate_tuning(x16);
+        y   = tu.shift_cents != 0 ? retune_resample(x16, tu.ratio) : x16;
+    }
+    fprintf(stderr, "[dettato] tuning %+.2f cents (strength %.3f)%s\n", tu.estimate_cents, tu.strength,
+            tu.shift_cents != 0 ? ", retuned" : "");
+    const double t1 = now_ms();
+
+    // ---- the network
+    Model m;
+    m.trunk_batch = o.batch;
+    m.stem_batch  = o.stem_batch;
+    m.skip_gru    = o.skip_gru;
+    if (!load_model(m, o.model)) {
+        free_model(m);
+        return 1;
+    }
+    const double t2      = now_ms();
+    const bool   capture = !o.capture.empty();
+    RunResult    r;
+    if (jsonl) {
+        printf("{\"type\":\"progress\",\"completed\":0,\"total\":%d}\n", (int) layout((long long) y.size()).starts.size());
+        fflush(stdout);
+    }
+    run(m, y, o.all_hidden, capture, r, [&](int done, int total) {
+        if (jsonl) {
+            printf("{\"type\":\"progress\",\"completed\":%d,\"total\":%d}\n", done, total);
+            fflush(stdout);
+        }
+    });
+    const double            t3    = now_ms();
+    const std::vector<Note> notes = decode_notes(r.all.P, r.T, m.th);
+    const double            t4    = now_ms();
+    char                    tim[512];
+    snprintf(tim, sizeof(tim),
+             "{\"backend\":\"%s\",\"input_ms\":%.1f,\"load_ms\":%.1f,\"run_ms\":%.1f,\"hcqt_ms\":%.1f,\"stem_ms\":%.1f,"
+             "\"trunk_ms\":%.1f,\"accum_ms\":%.1f,\"decode_ms\":%.1f,\"batch\":%d,\"stem_batch\":%d,\"skip_gru\":%s}",
+             ggml_backend_name(m.bp.backend), t1 - t0, t2 - t1, t3 - t2, m.ms_hcqt, m.ms_stem, m.ms_trunk, m.ms_accum, t4 - t3,
+             m.trunk_batch, m.stem_batch, m.skip_gru ? "true" : "false");
+    fprintf(stderr, "[dettato] %d windows, %zu notes, %.1f s audio: %s\n", r.n_windows, notes.size(), seconds, tim);
+    int rc = 0;
+    if (capture) {
+        const std::vector<Note> sub_notes = decode_notes(r.sub.P, r.T, m.th);
+        if (!dettato_write_capture(o.capture, r, seconds, tu, notes, sub_notes, tim, !o.fed.empty())) rc = 1;
+        else fprintf(stderr, "[dettato] capture written to %s\n", o.capture.c_str());
+    }
+    free_model(m);
+    if (rc || !o.fed.empty()) return rc;
+
+    // ---- one track: notes on the source's time axis, at least 30 ms long, velocity from the onset confidence
+    std::vector<MidiNote> mid_notes;
+    int                   idx = 0;
+    for (const Note & n : notes) {
+        const double on = n.onset * tu.ratio, off = std::max(n.offset, n.onset + DETTATO_MIN_END_S) * tu.ratio;
+        mid_notes.push_back({ false, 0, on, off, n.pitch });
+        if (jsonl) {
+            printf("{\"type\":\"note_start\",\"index\":%d,\"pitch\":%d,\"time\":%.6f,\"instrument\":\"%s\",\"velocity\":%d}\n", idx,
+                   n.pitch, on, instrument_name(0).c_str(), velocity(n.conf));
+            printf("{\"type\":\"note_end\",\"index\":%d,\"time\":%.6f}\n", idx, off);
+        }
+        idx++;
+    }
+    std::vector<uint8_t> mid = beat_model.empty() ? write_midi(mid_notes) : grid_midi(mid_notes, tr, seconds, opts, beats_out, ao);
+    if (!write_file(out_path, mid.data(), mid.size())) return 1;
+    if (jsonl) {
+        printf("{\"type\":\"done\",\"notes\":%zu,\"midi_bytes\":%zu}\n", mid_notes.size(), mid.size());
+        fflush(stdout);
+    }
+    fprintf(stderr, "[ace-midi] wrote %s (%zu notes, %zu bytes)\n", out_path.c_str(), mid_notes.size(), mid.size());
+    return 0;
+}
+
 /** Release everything load_model() allocated, in reverse order.
  *
  *  Order matters: the scheduler references both backends, and each buffer is
@@ -2809,6 +3009,7 @@ int main(int argc, char ** argv) {
     std::string chord_model, chord_vocab, chord_audio, chord_validate;
     std::string mt3_model, mt3_validate, mt3_audio, mt3_dump, lead_audio;
     bool        abc_chordnet = false;
+    DettatoOpts dettato;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--self-test-grid")) return grid_self_test();
         else if (!strcmp(argv[i], "--beat-model") && i + 1 < argc) beat_model = argv[++i];
@@ -2853,6 +3054,13 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--yourmt3-dump") && i + 1 < argc) mt3_dump = argv[++i];
         else if (!strcmp(argv[i], "--lead-sheet") && i + 1 < argc) lead_audio = argv[++i];
         else if (!strcmp(argv[i], "--abc-chordnet")) abc_chordnet = true;
+        else if (!strcmp(argv[i], "--dettato-model") && i + 1 < argc) dettato.model = argv[++i];
+        else if (!strcmp(argv[i], "--dettato-capture") && i + 1 < argc) dettato.capture = argv[++i];
+        else if (!strcmp(argv[i], "--dettato-fed") && i + 1 < argc) dettato.fed = argv[++i];
+        else if (!strcmp(argv[i], "--dettato-hidden")) dettato.all_hidden = true;
+        else if (!strcmp(argv[i], "--dettato-skip-gru")) dettato.skip_gru = true;
+        else if (!strcmp(argv[i], "--dettato-batch") && i + 1 < argc) dettato.batch = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--dettato-stem-batch") && i + 1 < argc) dettato.stem_batch = atoi(argv[++i]);
     }
     {
         const double l2 = opts.beat_scale > 0 ? log2(opts.beat_scale) : 0.5;
@@ -2904,6 +3112,14 @@ int main(int argc, char ** argv) {
     if (!chord_audio.empty()) {
         if (out_path == "out.mid") out_path = "chords.json";
         return run_chords(chord_model, chord_vocab, chord_audio, out_path);
+    }
+    if (!dettato.model.empty()) {
+        if (audio_path.empty() == dettato.fed.empty() || dettato.batch < 1 || dettato.stem_batch < 1) {
+            fprintf(stderr, "[ace-midi] --dettato-model needs --transcribe <audio> or --dettato-fed <capture dir>\n");
+            return 2;
+        }
+        ggml_time_init();
+        return run_dettato(dettato, audio_path, out_path, jsonl, beat_model, opts, beats_out, abc);
     }
     if (!export_events.empty()) {
         if (beats_in.empty()) {
@@ -2960,7 +3176,15 @@ int main(int argc, char ** argv) {
                 "           [--out lead-sheet.json] [--device cpu] [--beat-model <dir> --abc-out <score.abc> [--abc-chordnet]]\n"
                 "                              YourMT3+ notes, program-100 vocal, drums, ChordNet chords and\n"
                 "                              upstream's BPM in raw seconds; the ABC takes program 100 as Vocal,\n"
-                "                              and --abc-chordnet puts ChordNet's labels in place of the estimate\n");
+                "                              and --abc-chordnet puts ChordNet's labels in place of the estimate\n"
+                "  ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--jsonl] [--device cpu]\n"
+                "           [--beat-model <dir> ...]  dettato transcriber, one track (--jsonl note_start lines\n"
+                "                              carry velocity); <dir> holds upstream's config.json and model.safetensors\n"
+                "    --dettato-capture <dir>   also write a capture in tools/dettato-reference's layout\n"
+                "    --dettato-fed <capture>   run on an oracle capture's 16 kHz input and tuning instead\n"
+                "    --dettato-hidden          keep the all-window hidden tap (the repairer's input)\n"
+                "    --dettato-batch <n>       windows per trunk graph (default 8); --dettato-stem-batch <n> (default 1)\n"
+                "    --dettato-skip-gru        profiling only: the GRUs become identities (wrong output)\n");
         return 2;
     }
 

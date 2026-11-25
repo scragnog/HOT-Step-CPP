@@ -514,6 +514,65 @@ idle dev-stack models resident, two runs: model load 0.4 s; features 0.3 s; pre-
 under 1 ms; BPM 1.0 s; ChordNet 10.1 to 10.3 s (CPU); Beat This! and ABC 0.6 s. That
 totals 28.4 to 28.9 s, against the 300 s Prepare budget.
 
+### ace-midi dettato transcriber
+
+`ace-midi --dettato-model <dir>` is a native port of the transcriber stage of
+[dettato](https://github.com/kobimusic/dettato) 2.0.0 by KobiMusic (Apache-2.0, code and
+weights). `<dir>` holds upstream's `config.json` and `model.safetensors`, loaded
+unmodified. For now it writes one track of notes; the grouper (instrument tracks), the
+drum model and the evidence repairer are separate stages still to come. The code is in
+`engine/src/dettato/` (`transcriber-host.h`, `transcriber.h`); upstream's `NOTICE` and
+the licence are beside it.
+
+```
+ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--jsonl] [--device cpu]
+ace-midi --dettato-model <dir> --dettato-fed <oracle capture> --dettato-capture <dir>
+```
+
+The pipeline follows upstream with the repairer bypassed. Audio is read at its own
+rate, averaged to mono and resampled to 16 kHz (ChordNet's soxr-HQ resampler, exact for
+2:1). Upstream's tuning estimate runs on that; a recording at least 10 cents off A440
+with strength 0.12 or more is resampled onto A440 first, and every note time is mapped
+back. The network sees 8 s windows every 2 s. Each window's harmonic log-frequency front
+end (two STFTs, 2048 and 512 points) is computed on the host, then two GGML graphs run:
+the stem (three convolutions as im2col plus a matmul) and the trunk (15 lane blocks,
+axial attention across pitch and time, three bidirectional GRUs, two refine blocks and
+the six heads). The window outputs are Hann-weighted and averaged per 20 ms frame in
+upstream's order and precision, and the peak-picking decode gives two voices per key.
+
+At load, BatchNorm folds into the neighbouring convolution except `stem.inorm` and
+`up_norm`, which sit before zero-padded convolutions and stay as a scale and shift.
+PitchMix is a 63-tap depthwise convolution along pitch with the residual folded into the
+centre tap. Each GRU runs as an unrolled graph over the 200 trunk steps with both
+directions in one matmul per step (a block-diagonal `W_hh`); the outputs are written
+with `set_rows`. Every matmul carries `GGML_HINT_STRICT_F32`.
+
+With `--jsonl`, `note_start` lines carry `"velocity"`, upstream's pitched velocity
+`int(clip(20 + 107 * conf, 1, 127))` where `conf` is the onset probability. Every note is
+at least 30 ms long, as upstream's pipeline makes it before grouping. The MIDI itself
+still uses velocity 100. The tempo, grid, `--export` and ABC options work as for
+MuScriptor.
+
+`--dettato-capture <dir>` writes the six maps, the every-4 s sub-run maps, the float16
+`hidden` and `stem` taps the grouper reads and both note lists in the layout of
+`tools/dettato-reference` captures. `--dettato-fed <capture>` runs on that capture's 16 kHz
+input and tuning instead of decoding audio. `--dettato-hidden` also keeps the all-window
+`hidden` tap the repairer reads. `tools/dettato-reference/check_transcriber.py` scores a
+port capture against the CPU oracle with `compare.py`'s metrics.
+
+Measured 2026-11-25 against the eleven `tools/dettato-reference` fixtures, CPU and CUDA,
+fed and from the WAV: every oracle note matched (F1 1.0), median onset error under
+0.001 ms, every offset within 20 ms. Fed maps are within 8.8e-6 of the oracle, maps from
+the WAV within 6.9e-4. The float16 taps differ by at most two float16 steps, on about one
+element in a million. Vulkan on the 5090 is within 3e-3 on the maps, inside upstream's
+own CPU/CUDA spread.
+
+On the RTX 5090 with nothing else on the card, a 90 s song takes 3.5 s from loaded
+weights: front end 0.12 s, stem 0.47 s, trunk 2.9 s. The GRUs are 10 to 12% of that,
+measured with `--dettato-skip-gru` (profiling only: the GRUs become identities). The CPU
+backend takes about 2 minutes. `--dettato-batch` (windows per trunk graph, default 8)
+barely moves the time; the trunk is compute-bound, not launch-bound.
+
 ## HeartMuLa
 
 `heartmula/pipeline.h` runs tags and lyrics through the global language model and

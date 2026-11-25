@@ -1236,6 +1236,35 @@ a lead sheet whose BPM or vocal is rejected: the JSON states why); 1 unreadable 
 model or capture, non-finite logits, or a failed parity row; 2 a YourMT3 mode without
 `--yourmt3-model`, or `--lead-sheet` without its models.
 
+## ace-midi dettato reference
+
+The dettato transcriber, one track of notes for now. It loads no MuScriptor model. Pipeline,
+precision and timings: [ace-midi dettato transcriber](../../docs/dev/engine.md#ace-midi-dettato-transcriber).
+
+```
+Usage: ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--jsonl] [--device cpu]
+                [--beat-model <dir> ...]
+       ace-midi --dettato-model <dir> --dettato-fed <capture dir> --dettato-capture <dir>
+
+  --dettato-model <dir>       upstream's config.json and model.safetensors (kobimusic/dettato)
+  --transcribe <audio>        WAV or MP3 at any rate; writes --out (default out.mid)
+  --jsonl                     progress lines per trunk batch, then note_start (with "velocity")
+                              and note_end lines and a done line on stdout
+  --dettato-capture <dir>     also write maps, sub-run maps, float16 taps and both note lists
+                              in tools/dettato-reference's capture layout
+  --dettato-fed <capture>     run on an oracle capture's x16 (or x16_retuned) and tuning
+                              instead of --transcribe; writes no MIDI
+  --dettato-hidden            keep the all-window hidden tap (repair.hidden in the capture)
+  --dettato-batch <n>         windows per trunk graph (default 8)
+  --dettato-stem-batch <n>    windows per stem graph (default 1, about 0.5 GB each)
+  --dettato-skip-gru          profiling only: the GRUs become identities, output is wrong
+  --beat-model, --beats-out, the tempo options and --abc-out apply as for --transcribe
+  --device auto|cpu|<name>    backend (default auto = best available)
+```
+
+Exit codes: 0 success; 1 unreadable audio, weights, configuration or capture, or a
+failed write; 2 `--dettato-model` without exactly one of `--transcribe` and `--dettato-fed`.
+
 ## quantize reference
 
 GGUF requantizer for ACE-Step, MiniMax-Music3 and YuE2 files. It reads a BF16 or
