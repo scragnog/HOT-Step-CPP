@@ -1310,8 +1310,7 @@ static int run_impl(Config config, std::string * error) {
             // ponytail: the AR is still written, compared and then replaced by
             // the link; skip the write if checkpoint time ever matters.
             if (planner_frozen_at >= 0 && !frozen_ar.empty() && !yue2_aitk_planner_best::link_same_tensors(frozen_ar, temp_dir / ar_file))
-                std::fprintf(stderr, "[yue2-aitk] note: step %d keeps its own AR file (not linked to %s)
-", step, frozen_ar.u8string().c_str());
+                std::fprintf(stderr, "[yue2-aitk] note: step %d keeps its own AR file (not linked to %s)\n", step, frozen_ar.u8string().c_str());
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
                 const auto named = state.named_tensors();
