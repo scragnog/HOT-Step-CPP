@@ -286,8 +286,8 @@ layers before any is measured (`features/motion.ts`).
 
 **A tier change draws what is in view first** (`desk/stage.ts`). On a full desk the change drew every tile at the new
 tier, laid the desk out and measured it twice (once in the desk's layout effect, again mid-motion for what the parts'
-own effects changed), and the View Transition captured every part, before anything moved: 95 to 230 ms from the click
-to the motion's first frame, one frame of up to 220 ms. Now the desk is measured once, after the parts' effects
+own effects changed), and the View Transition captured every part, before anything moved: 93 to 210 ms from the click
+to the motion's first frame, one frame of up to 200 ms. Now the desk is measured once, after the parts' effects
 (`desk/layout.ts deferPack`), without a class set on the desk to measure it (`.bento.measuring` restyled the whole
 desk through its :has rules; the rule's two declarations are written on the children instead), and the parts' boxes are
 read before any is named. And when the desk has been laid out at the new tier before (what it was there is taken as
@@ -300,7 +300,7 @@ are drawn at the new tier one a frame, nearest first, each checked against what 
 kept at is measured and the desk laid out again, as any change of content is). A tile's models are asked at the tile's
 tier (`useModel` sees the desk at it), so a held tile asks nothing again. On every ACE-Step module, pedal and side unit
 at 1920x1080, a return to a tier now shows its first frame in 60 to 110 ms and settles in about 400 (the motion is 280);
-a first visit to a tier, or one after a module was added or removed, draws everything (95 to 180 ms). The tools:
+a first visit to a tier, or one after a module was added or removed, draws everything (94 to 193 ms). The tools:
 `tools/perf/tier.cjs` (every pair of tiers both ways on each engine's full desk; `--again` the return).
 
 PERF-TABLE
