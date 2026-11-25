@@ -1097,6 +1097,9 @@ static int run_impl(Config config, std::string * error) {
             if (dora && !state.refresh_dora(model, error)) return false;
             ggml_backend_synchronize(backend.value);
             planner_restored_from = gate.best_step;
+            // The best step's own checkpoint (this segment's, when it saved
+            // one) holds the same planner: the frozen checkpoints link it.
+            frozen_ar = std::filesystem::u8path(config.output) / ("checkpoint-step" + std::to_string(gate.best_step)) / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", gate.best_step));
             std::fprintf(stderr, "[yue2-aitk] planner restored to its best held-out reading (step %d) before the freeze at step %d\n", gate.best_step, completed);
             return true;
         };
@@ -1309,7 +1312,8 @@ static int run_impl(Config config, std::string * error) {
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / ar_file).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
             // ponytail: the AR is still written, compared and then replaced by
             // the link; skip the write if checkpoint time ever matters.
-            if (planner_frozen_at >= 0 && !frozen_ar.empty() && !yue2_aitk_planner_best::link_same_tensors(frozen_ar, temp_dir / ar_file))
+            std::error_code ar_ec;
+            if (planner_frozen_at >= 0 && std::filesystem::exists(frozen_ar, ar_ec) && !yue2_aitk_planner_best::link_same_tensors(frozen_ar, temp_dir / ar_file))
                 std::fprintf(stderr, "[yue2-aitk] note: step %d keeps its own AR file (not linked to %s)\n", step, frozen_ar.u8string().c_str());
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
