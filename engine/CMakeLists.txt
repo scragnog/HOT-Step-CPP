@@ -534,6 +534,10 @@ link_ggml_backends(quantize)
 add_executable(neural-codec tools/neural-codec.cpp)
 link_ggml_backends(neural-codec)
 
+add_executable(dettato-grouper-decode-test tools/dettato-grouper-decode-test.cpp)
+target_include_directories(dettato-grouper-decode-test PRIVATE src)
+target_link_libraries(dettato-grouper-decode-test PRIVATE yyjson)
+
 # sa3-ggml-test: parity tests for the StableStep GGML SA3 modules vs goldens
 add_executable(sa3-ggml-test tools/sa3-ggml-test.cpp)
 target_link_libraries(sa3-ggml-test PRIVATE yyjson)
