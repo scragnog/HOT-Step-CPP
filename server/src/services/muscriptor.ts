@@ -149,8 +149,16 @@ export function getModelStates(lookup: ModelDownloadLookup): Record<string, Mode
       gated: dl?.gated,
     };
   }
-  // dettato is one choice in MIDI Studio but four downloads: its row sums them.
+  return withDettatoTotal(out);
+}
+
+type StateRow = ModelDownloadState & { downloaded: boolean; sizeBytes: number };
+/** dettato is one choice in MIDI Studio but four downloads, so 'dettato' becomes their total. Each part keeps
+ *  its own row (the transcriber's moves to 'dettato-transcriber'), so a client that needs only some parts,
+ *  like the repairer being off, can still read them one by one. */
+export function withDettatoTotal(out: Record<string, StateRow>): Record<string, StateRow> {
   const parts = DETTATO_PARTS.map(p => out[p]);
+  out['dettato-transcriber'] = out[DETTATO_MODEL];
   out[DETTATO_MODEL] = {
     downloaded: parts.every(s => s.downloaded),
     sizeBytes: parts.reduce((n, s) => n + s.sizeBytes, 0),

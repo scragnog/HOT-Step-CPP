@@ -16,6 +16,10 @@ export type MidiModel = MuscriptorModel | 'dettato';
 /** dettato's four weight folders; its repairer is needed only while the Evidence repairer switch is on. */
 export const DETTATO_PARTS = ['dettato', 'dettato-evidence', 'dettato-grouper', 'dettato-drums'] as const;
 export type DettatoPart = typeof DETTATO_PARTS[number];
+/** The status key holding each part's own state. 'dettato' itself is the total of all four. */
+export const DETTATO_PART_STATUS_KEY: Record<DettatoPart, string> = {
+  dettato: 'dettato-transcriber', 'dettato-evidence': 'dettato-evidence', 'dettato-grouper': 'dettato-grouper', 'dettato-drums': 'dettato-drums',
+};
 
 export interface ModelState {
   downloaded: boolean;
@@ -30,11 +34,16 @@ export interface ModelState {
 /** Beat This! weights: tempo, time signature and bar lines for the MIDI */
 export const BEAT_MODEL = 'beat-this';
 
+/** dettato can transcribe when the folders this run reads are there: the repairer's only while its switch is on. */
+export function dettatoReady(models: Record<string, { downloaded: boolean } | undefined> | undefined, repair: boolean): boolean {
+  return DETTATO_PARTS.every(p => (!repair && p === 'dettato-evidence') || !!models?.[DETTATO_PART_STATUS_KEY[p]]?.downloaded);
+}
+
 export interface MidiStudioStatus {
   /** ace-midi engine binary present next to ace-server */
   engineAvailable: boolean;
   hfTokenSet: boolean;
-  models: Record<MidiModel | DettatoPart | typeof BEAT_MODEL, ModelState>;
+  models: Record<string, ModelState>;
 }
 
 export interface MidiJobProgress {

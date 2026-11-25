@@ -23,7 +23,7 @@ import type { Song } from '@/types';
 import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
-  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, DETTATO_PARTS,
+  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, dettatoReady,
   type MuscriptorModel, type MidiModel,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
@@ -179,7 +179,7 @@ export const MidiStudio: React.FC = () => {
   const modelState = status?.models?.[model];
   // dettato is ready when the folders this run reads are there: the repairer's only while its switch is on.
   const modelReady = model === 'dettato'
-    ? DETTATO_PARTS.every(p => (!repair && p === 'dettato-evidence') || !!status?.models?.[p]?.downloaded)
+    ? dettatoReady(status?.models, repair)
     : !!modelState?.downloaded;
   const beatState = status?.models?.[BEAT_MODEL];
   // The transcribe in flight is a duplicate-job guard: the job list only shows

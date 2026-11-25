@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { partialMidiFromEvents, readGrid, alignToAudio, exportArgs, speculativeArgs, modelDir } from './muscriptor.js';
+import { withDettatoTotal, partialMidiFromEvents, readGrid, alignToAudio, exportArgs, speculativeArgs, modelDir } from './muscriptor.js';
 import { parseMidiFile } from './midiParser.js';
 
 test('speculativeArgs drafts with small only for large, when on and small is downloaded', () => {
@@ -9,6 +9,15 @@ test('speculativeArgs drafts with small only for large, when on and small is dow
   assert.deepEqual(speculativeArgs('large', true, false), []);
   assert.deepEqual(speculativeArgs('medium', true, true), []);
   assert.deepEqual(speculativeArgs('small', true, true), []);
+});
+
+test('dettato total keeps every part readable on its own (three folders, repairer missing)', () => {
+  const row = (downloaded: boolean) => ({ downloaded, sizeBytes: downloaded ? 10 : 0, downloading: false, receivedBytes: 0, totalBytes: 0 });
+  const out = withDettatoTotal({ dettato: row(true), 'dettato-evidence': row(false), 'dettato-grouper': row(true), 'dettato-drums': row(true) });
+  assert.equal(out.dettato.downloaded, false, 'the total needs all four');
+  assert.equal(out.dettato.sizeBytes, 30);
+  assert.equal(out['dettato-transcriber'].downloaded, true, 'the transcriber has its own row');
+  assert.equal(out['dettato-evidence'].downloaded, false);
 });
 
 test('partialMidiFromEvents keeps completed notes and drops the open one', () => {
