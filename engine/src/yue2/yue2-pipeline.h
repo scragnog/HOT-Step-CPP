@@ -1364,6 +1364,9 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
     const bool    plugins = !(req.nar_solver.empty() && req.nar_scheduler.empty());
     const bool    cuda    = strncmp(ggml_backend_name(yue2_nar_backend(m)), "CUDA", 4) == 0;
     const int     group   = (m.convrot || plugins || cuda) ? 1 : n_var;  // variations per graph
+    // The shared graph drew one CADS noise for all its variations; keep that
+    // draw when CUDA splits the graph, so seeded CADS renders don't change.
+    const bool    one_cads = !(m.convrot || plugins);
     const int     B       = (int) songs.size();
 
     // Whole-song noise per (song, variation), drawn once and sliced per chunk.
@@ -1487,7 +1490,8 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                 }
                 chunk.plan_w_cosine = pc != req.plugin_params.end() && pc->second == "cosine";
                 chunk.cads_seed     = (uint64_t) yue2_chunk_solver_seed(
-                    (songs[(size_t) cp.song].noise_seed + (uint64_t) j0) ^ 0xCAD5CAD5CAD5CAD5ull, (uint64_t) cp.a);
+                    (songs[(size_t) cp.song].noise_seed + (uint64_t) (one_cads ? 0 : j0)) ^ 0xCAD5CAD5CAD5CAD5ull,
+                    (uint64_t) cp.a);
             }
             std::vector<float> noise_slice;
             noise_slice.reserve((size_t) (M * chunk_len * LD));
