@@ -48,7 +48,11 @@ for d in sorted(Path(a.captures).glob('*/*')):
     frames = {T[f'maps.{h}'].shape[0] for h in heads} | {T[f'sub.maps.{h}'].shape[0] for h in heads}
     check(len(frames) == 1, f'{tag}: map lengths differ {frames}')
     check(r['upstream_commit'] == '51ade0f09f2272f4674166026582185d26baaeaf', f'{tag}: commit')
-    check(r['repairer'] == 'bypassed', f'{tag}: repairer')
+    check(r['repairer'] == ('on' if d.name.endswith('-repair') else 'bypassed'), f'{tag}: repairer')
+    if r['repairer'] == 'on':
+        n = len(r['repair']['input_notes']['onset'])
+        check(T['repair.ev'].shape == (n, 769) and T['repair.hidden'].shape[1:] == (88, 368), f'{tag}: repair shapes')
+        check(len(r['repair']['output']['onset']) == r['info']['notes']['transcribed'] - r['info']['notes']['dropped'] + r['info']['notes']['inserted'], f'{tag}: repair counts')
     if 'grouper.meta' in T:
         n = T['grouper.meta'].shape[0]
         check(T['grouper.feat'].shape[0] == n == T['grouper.fsc'].shape[0], f'{tag}: grouper rows')

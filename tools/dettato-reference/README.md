@@ -77,10 +77,23 @@ upstream's rounding, which is part of the function.
 - Drums: `x44`, `drums.features` (float16), router, kit and orchestral
   probabilities, the hits, and the decode of both branches (`drum_branches`).
 
+## Repairer run
+
+`capture.py --repairer` runs the real evidence repairer instead of the stub.
+Two captures exist, `clip-3s/cpu-repair` and `t4-jazz-trio-sax/cpu-repair`
+(CPU, fp32). They add: `repair.hidden` (the all-window `hidden` tap, float16
+T x 88 x 368), `repair.ev` (N x 769 evidence rows, aligned with the
+transcriber's notes in `result.repair.input_notes`), `repair.k.*` (the sorted
+input notes), `repair.pk` / `repair.on_r` / `repair.off_r` with
+`repair.window_ran` (the model's edits; a window that passes through unchanged
+has `window_ran` false), `result.repair.insertions` (every proposal) and
+`result.repair.output` (the repaired notes). The grouper and drums run on the
+repaired notes, so these captures also hold the full pipeline's final tracks.
+They are outside the spread and the gates in `tolerances.json`; slice 6 sets
+its own gates from them. The trio song: 837 transcribed, 61 dropped, 3 inserted.
+
 ## Limits
 
-- The all-window `hidden` tap the repairer reads is not captured; the repairer
-  is out of scope.
 - Upstream's grouper leaves a note in no track when the decode has too little
   to work with (`clip-3s`: 4 of 10 notes). The port has to do the same.
 - The CUDA runs are one run each. CUDA is not bitwise repeatable, so the spread

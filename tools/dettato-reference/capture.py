@@ -3,6 +3,7 @@
 Usage: python capture.py --upstream <clone> --weights <dir> --audio <wav> --out <dir> --device cpu|cuda
 The real pipeline (Dettato.transcribe) runs unchanged, with two differences:
   * the evidence repairer is replaced by a stub that returns the transcriber's own decoded notes (its weights are never used);
+    with --repairer the real repairer runs instead and its inputs and outputs are recorded (repair.* tensors, result.repair);
   * observation wrappers record what the stages exchange. They return their results untouched.
 cpu = reference (fp32, deterministic algorithms, 4 intra-op threads, 1 inter-op thread); cuda = upstream as shipped (bf16 autocast)."""
 import argparse
@@ -18,6 +19,7 @@ ap.add_argument('--weights', required=True)
 ap.add_argument('--audio', required=True)
 ap.add_argument('--out', required=True)
 ap.add_argument('--device', choices=('cpu', 'cuda'), required=True)
+ap.add_argument('--repairer', action='store_true', help='run the real evidence repairer and capture its inputs and outputs')
 a = ap.parse_args()
 torch = common.load_upstream(a.upstream, a.weights, a.device)
 
@@ -124,10 +126,50 @@ class Bypass:
         return notes, dict(notes), {'transcribed': int(len(n['onset'])), 'dropped': 0, 'inserted': 0}
 
 
+def repair_spies(rp):
+    """Record the evidence repairer: the all-window hidden tap, the transcriber notes and their evidence rows, the sorted
+    input notes with the model's edits, and the repaired notes."""
+    from dettato.evidence import repair as rmod
+    real_efr = rmod.evidence_from_run
+
+    def efr(transcriber, maps, H):
+        res, ev = real_efr(transcriber, maps, H)
+        dump.put('repair.hidden', H)                        # float16 (T, 88, 368), averaged over every window
+        dump.put('repair.ev', ev)                           # (N, 769) float32, row-aligned with the transcriber's notes
+        rec['repair_input_notes'] = notes_json(res)
+        return res, ev
+
+    rmod.evidence_from_run = efr
+
+    def after_edits(args, kw, out):
+        k = args[0]
+        pk, on_r, off_r, ins = out
+        for f in k.dtype.names:
+            dump.put(f'repair.k.{f}', k[f])                 # the sorted input notes (inst, pitch, vel, on, off)
+        keep = ~np.isnan(pk)                                # NaN = the note's window passed through unchanged
+        dump.put('repair.window_ran', keep)
+        dump.put('repair.pk', np.where(keep, pk, 0.0))
+        dump.put('repair.on_r', np.where(keep, on_r, 0.0))
+        dump.put('repair.off_r', np.where(keep, off_r, 0.0))
+        rec['repair_insertions'] = [list(x) for x in ins]   # (onset, end, pitch, score), all proposals
+
+    def after_apply(args, kw, out):
+        rec['repair_output'] = {f: np.asarray(v).tolist() for f, v in out.items()}
+
+    spy(rp, 'edits', after_edits)
+    spy(rp, 'apply', after_apply)
+    return rp
+
+
 tr = Transcriber.from_pretrained(a.device)
 gr = Grouper.from_pretrained(a.device)
 dr = DrumTranscriber.from_pretrained(a.device)
-model = Dettato(tr, Bypass(), gr, dr, a.device)
+if a.repairer:
+    from dettato.evidence import EvidenceRepairer
+    rep = repair_spies(EvidenceRepairer.from_pretrained(a.device))
+else:
+    rep = Bypass()
+model = Dettato(tr, rep, gr, dr, a.device)
 
 spy(tr, 'run', after_run)
 spy(gr, 'features_from_run', after_features)
@@ -159,7 +201,9 @@ if 'drum_probs' in rec:
 
 result = dict(
     audio=a.audio, device=a.device, upstream_commit=common.UPSTREAM_COMMIT, torch=torch.__version__,
-    repairer='bypassed', wall_s=round(wall, 2), seconds=res.seconds,
+    repairer='on' if a.repairer else 'bypassed', wall_s=round(wall, 2), seconds=res.seconds,
+    repair=dict(input_notes=rec.get('repair_input_notes'), insertions=rec.get('repair_insertions'), output=rec.get('repair_output'),
+                keep_th=getattr(rep, 'keep_th', None), insert_th=getattr(rep, 'insert_th', None)) if a.repairer else None,
     tuning=rec['tuning'], transcriber_notes=rec['notes'], sub_notes=rec['sub_notes'],
     groups=rec.get('groups', []), decode_params=rec.get('decode_params'), grouper_window_s=rec.get('grouper_window_s'),
     drum_router=rec['drum_probs']['router'] if 'drum_probs' in rec else None,
