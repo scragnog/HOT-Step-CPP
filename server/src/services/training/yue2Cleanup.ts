@@ -23,25 +23,43 @@ export interface Yue2CleanupPlan {
 }
 export interface Yue2CleanupChoice { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean }
 
-/** Bytes under `p`. With `seen`, a hard-linked file (a frozen planner's AR,
- *  a best-planner copy: yue2-aitk-planner-best.h) counts once across every
- *  call sharing the set, and not at all when the set already holds it. */
-export function dirBytes(p: string, seen?: Set<string>): number {
+export function dirBytes(p: string): number {
   let total = 0;
   try {
     for (const e of fs.readdirSync(p, { withFileTypes: true })) {
       const f = path.join(p, e.name);
-      if (e.isDirectory()) total += dirBytes(f, seen);
-      else if (e.isFile()) {
-        try {
-          const st = fs.statSync(f, { bigint: true });
-          const id = `${st.dev}:${st.ino}`;
-          if (seen && st.nlink > 1n) { if (seen.has(id)) continue; seen.add(id); }
-          total += Number(st.size);
-        } catch { /* vanished */ }
-      }
+      if (e.isDirectory()) total += dirBytes(f);
+      else if (e.isFile()) { try { total += fs.statSync(f).size; } catch { /* vanished */ } }
     }
   } catch { /* missing */ }
+  return total;
+}
+
+/** Bytes that deleting every folder in `dirs` frees. A hard-linked file (a
+ *  frozen planner's AR, a best-planner copy: yue2-aitk-planner-best.h) is
+ *  freed only by its last link, so it counts once, and only when all of its
+ *  links are inside `dirs`. */
+export function freedBytes(dirs: string[]): number {
+  const links = new Map<string, { size: number; nlink: bigint; seen: bigint }>();
+  let total = 0;
+  const walk = (p: string): void => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(p, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const f = path.join(p, e.name);
+      if (e.isDirectory()) { walk(f); continue; }
+      if (!e.isFile()) continue;
+      try {
+        const st = fs.statSync(f, { bigint: true });
+        if (st.nlink <= 1n) { total += Number(st.size); continue; }
+        const id = `${st.dev}:${st.ino}`;
+        const hit = links.get(id) ?? { size: Number(st.size), nlink: st.nlink, seen: 0n };
+        hit.seen += 1n; links.set(id, hit);
+      } catch { /* vanished */ }
+    }
+  };
+  for (const d of new Set(dirs.map(d => path.resolve(d)))) walk(d);
+  for (const hit of links.values()) if (hit.seen >= hit.nlink) total += hit.size;
   return total;
 }
 const fileBytes = (p?: string) => { try { return p ? fs.statSync(p).size : 0; } catch { return 0; } };
@@ -63,13 +81,11 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
   const otherRuns = runs.filter(r => r.jobId !== runId && r.status !== 'running' && !yue2RunFinished(r.output));
   const previews = listYue2JointPreviews(run.output).filter(p => p.step !== step);
   const previewBytes = previews.reduce((s, p) => s + (p.file ? fileBytes(path.join(run.output, 'previews', p.file)) : 0), 0);
-  // Files the kept rung links (its frozen AR) are not freed by deleting the others.
-  const linked = new Set<string>(); dirBytes(keep.dir, linked);
   return {
     run: runId, step, keep: keep.dir,
     caches: { count: caches.length, bytes: caches.reduce((s, c) => s + c.bytes, 0), detail: caches.map(c => c.name) },
-    otherCheckpoints: { count: others.length, bytes: others.reduce((s, c) => s + dirBytes(c.dir, linked), 0) },
-    otherRuns: { count: otherRuns.length, bytes: otherRuns.reduce((s, r) => s + dirBytes(r.output), 0), detail: otherRuns.map(r => path.basename(r.output)) },
+    otherCheckpoints: { count: others.length, bytes: freedBytes(others.map(c => c.dir)) },
+    otherRuns: { count: otherRuns.length, bytes: freedBytes(otherRuns.map(r => r.output)), detail: otherRuns.map(r => path.basename(r.output)) },
     resume: { count: keep.optimizerPath ? 1 : 0, bytes: fileBytes(keep.optimizerPath) },
     otherPreviews: { count: previews.length, bytes: previewBytes },
   };

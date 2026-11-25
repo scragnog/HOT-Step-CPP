@@ -138,14 +138,16 @@ static bool ar_link() {
         const uint64_t n = header.size();
         std::ofstream(p, std::ios::binary).write(reinterpret_cast<const char *>(&n), sizeof n).write(header.data(), n).write(data.data(), data.size());
     };
-    const auto a = dir / "a", b = dir / "b", c = dir / "c";
-    put(a, "{\"steps\":\"90\"}", std::string("\x01\x02\x03\x04", 4));
+    const auto a = dir / "a", b = dir / "b", c = dir / "c", d = dir / "d";
+    put(a, "{\"steps\":\"90\"}  ", std::string("\x01\x02\x03\x04", 4));
     put(b, "{\"steps\":\"100\"}", std::string("\x01\x02\x03\x04", 4));
     put(c, "{\"steps\":\"110\"}", std::string("\x01\x02\x03\x05", 4));
-    CHECK(pb::link_same_tensors(a, b) && std::filesystem::hard_link_count(b) == 2);
+    put(d, "{\"steps\":\"120\",\"style_norms\":\"new\"}", std::string("\x01\x02\x03\x04", 4));
+    CHECK(pb::link_same_tensors(a, b) && std::filesystem::hard_link_count(b) == 2);  // steps and padding differ only
     CHECK(!pb::link_same_tensors(a, c) && std::filesystem::hard_link_count(c) == 1);
+    CHECK(!pb::link_same_tensors(a, d) && std::filesystem::hard_link_count(d) == 1);  // new metadata keeps its own file
     CHECK(!pb::link_same_tensors({}, c) && !pb::link_same_tensors(dir / "missing", c));
-    CHECK(!std::filesystem::exists(dir / "b.link") && !std::filesystem::exists(dir / "c.link"));
+    CHECK(!std::filesystem::exists(dir / "b.link") && !std::filesystem::exists(dir / "c.link") && !std::filesystem::exists(dir / "d.link"));
     std::filesystem::remove(a);
     CHECK(pb::tensor_bytes(b) == std::string("\x01\x02\x03\x04", 4));
     std::filesystem::remove_all(dir, ec);

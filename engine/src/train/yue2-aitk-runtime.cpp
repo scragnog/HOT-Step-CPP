@@ -1296,6 +1296,11 @@ static int run_impl(Config config, std::string * error) {
                 jsonl << meters.str(); jsonl.flush();
                 std::cout << meters.str() << std::flush;
                 if (planner_frozen_at >= 0) recon_history.push_back(recon);
+            } else {
+                // No drift meters: still record the freeze, so the ladder and
+                // the adapter list can tell a frozen checkpoint's AR (GH #346).
+                std::ofstream(temp_dir / "meters.json", std::ios::binary) << "{\"stage\":\"meters\",\"step\":" << step
+                    << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
             }
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
