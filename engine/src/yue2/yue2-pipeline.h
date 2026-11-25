@@ -1349,8 +1349,12 @@ static bool yue2_seal_chunks(Yue2Model & m, std::vector<Yue2SongState> & songs, 
 
 // ── Stage 3: NAR (32-step midpoint solve per sealed chunk) ──────────────────
 //
-// The M noise variations of a song solve in one graph (doc 30 #6) unless the
-// ConvRot LM or a Lua solver is in use, which take one variation at a time.
+// The M noise variations of a song solve in one graph (doc 30 #6) except on
+// CUDA, or when the ConvRot LM or a Lua solver is in use: those take one
+// variation at a time. On CUDA one variation already fills the GPU, and the
+// shared graph repeats the AR-prefix K/V M times per layer, so one graph per
+// variation was faster at 2,750 and 5,000 frames on a 4090 and a 5090 (8-15%
+// on the 4090, HOTSTEP-151). Metal and Vulkan stay grouped until measured.
 // Latents come back [song][variation][frames*64].
 static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vector<Yue2SongState> & songs,
                                 Yue2ArKvCache & nar_cache, const std::vector<Yue2ChunkPlan> & plan, int n_var,
@@ -1358,7 +1362,8 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                                 std::vector<std::vector<std::vector<float>>> * latents_out, std::string * err) {
     const int64_t LD      = (int64_t) m.lm_cfg.latent_dim;
     const bool    plugins = !(req.nar_solver.empty() && req.nar_scheduler.empty());
-    const int     group   = (m.convrot || plugins) ? 1 : n_var;  // variations per graph
+    const bool    cuda    = strncmp(ggml_backend_name(yue2_nar_backend(m)), "CUDA", 4) == 0;
+    const int     group   = (m.convrot || plugins || cuda) ? 1 : n_var;  // variations per graph
     const int     B       = (int) songs.size();
 
     // Whole-song noise per (song, variation), drawn once and sliced per chunk.
