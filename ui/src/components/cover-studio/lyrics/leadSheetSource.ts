@@ -12,8 +12,10 @@ export function selectedLeadSheetSource(stored: unknown, readinessDefault?: Cove
   return readLeadSheetSource(stored) ?? readinessDefault;
 }
 
-export function leadSheetReadinessPath(source?: CoverLeadSheetSource) {
-  return `/yue2-cover/readiness${source ? `?source=${encodeURIComponent(source)}` : ''}`;
+/** `repair=0` is dettato's repairer switched off, which drops its folder from the readiness check. */
+export function leadSheetReadinessPath(source?: CoverLeadSheetSource, dettatoRepair = true) {
+  const query = [source ? `source=${encodeURIComponent(source)}` : '', dettatoRepair ? '' : 'repair=0'].filter(Boolean).join('&');
+  return `/yue2-cover/readiness${query ? `?${query}` : ''}`;
 }
 
 /** Source mutations clear the score; incomplete transcriptions still supply editable ABC. */

@@ -29,7 +29,7 @@ const RECORDED: Record<string, string[]> = {
   'cover|n,null,': ['cover-studio-bpmOverride', 'cover-studio-selectedArtistId',
     'cover-studio-selectedYue2ArtistId', 'cover-studio-selectedYue2LyricsSetId'],
   'cover|b,': ['cover-studio-coverInstrumental', 'cover-studio-datasetAnalysis', 'cover-studio-noFsq',
-    'cover-studio-advancedMode', 'cover-studio-keepChords', 'cover-studio-buildMode'],
+    'cover-studio-advancedMode', 'cover-studio-keepChords', 'cover-studio-dettatoRepair', 'cover-studio-buildMode'],
   'cover|a,': ['cover-studio-scoreSections', 'cover-studio-scoreCuts'],
   'cover|s,null,': ['cover-studio-keyOverride', 'cover-studio-lyricsSource', 'cover-studio-sheetScoreSource', 'cover-studio-chordQuality'],
   '-|': ['cover-studio-nope', 'hs-unknown', 'hs-yue2CaptionSource:ds:a:b', 'lireek-playQueue'],

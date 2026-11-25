@@ -170,6 +170,15 @@ test('dettato readiness needs all four folders, the beat model and the executabl
   } finally { f.close(); }
 });
 
+test('dettato readiness skips the repairer folder while the repairer is off', () => {
+  const installed = new Set(['dettato', 'dettato-grouper', 'dettato-drums', 'beat-this']);
+  const f = fixture(true, false, { modelChoice: () => null, installed: model => installed.has(model), executable: () => 'ace-midi' });
+  try {
+    assert.equal(f.service.readiness('dettato').ready, false);
+    assert.equal(f.service.readiness('dettato', false).ready, true);
+  } finally { f.close(); }
+});
+
 test('YourMT3 and ChordNet readiness follows the missing-file message', () => {
   let message: string | null = 'YourMT3+/ChordNet is not installed: missing chordnet-F32.gguf (ChordNet).';
   const f = fixture(false, false, undefined, () => message);

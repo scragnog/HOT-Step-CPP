@@ -23,7 +23,7 @@ import type { Song } from '@/types';
 import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
-  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL,
+  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, DETTATO_PARTS,
   type MuscriptorModel, type MidiModel,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
@@ -177,10 +177,14 @@ export const MidiStudio: React.FC = () => {
 
   const engineMissing = !!status && !status.engineAvailable;
   const modelState = status?.models?.[model];
+  // dettato is ready when the folders this run reads are there: the repairer's only while its switch is on.
+  const modelReady = model === 'dettato'
+    ? DETTATO_PARTS.every(p => (!repair && p === 'dettato-evidence') || !!status?.models?.[p]?.downloaded)
+    : !!modelState?.downloaded;
   const beatState = status?.models?.[BEAT_MODEL];
   // The transcribe in flight is a duplicate-job guard: the job list only shows
   // it after the status refresh, so the mutation's own pending covers the gap.
-  const canTranscribe = !!status?.engineAvailable && !!modelState?.downloaded && !!sourceAudioUrl && !isUploading && !transcribeMut.isPending;
+  const canTranscribe = !!status?.engineAvailable && modelReady && !!sourceAudioUrl && !isUploading && !transcribeMut.isPending;
 
   const fmtGB = (b: number) => `${formatDecimal((b / 1e9), 2)} GB`;
 
@@ -461,7 +465,7 @@ export const MidiStudio: React.FC = () => {
           {/* Primary action morphs with the selected model's state:
               download weights -> downloading progress -> transcribe. */}
           <div className="mt-4 flex items-center gap-3 flex-wrap">
-            {modelState && !modelState.downloaded ? (
+            {modelState && !modelReady ? (
               <button
                 onClick={() => { if (modelState.downloading) return; setSubmitError(''); downloadMut.mutate(model); }}
                 disabled={modelState.downloading || engineMissing}
@@ -490,10 +494,10 @@ export const MidiStudio: React.FC = () => {
                 <Piano size={16} /> {t('midiStudio.transcribe')}
               </button>
             )}
-            {modelState && !modelState.downloaded && !modelState.downloading && !status?.hfTokenSet && model !== 'dettato' && (
+            {modelState && !modelReady && !modelState.downloading && !status?.hfTokenSet && model !== 'dettato' && (
               <span className="text-xs text-amber-600 dark:text-amber-400">{t('midiStudio.needTokenHint')}</span>
             )}
-            {modelState?.downloaded && !sourceAudioUrl && (
+            {modelReady && !sourceAudioUrl && (
               <span className="text-xs text-zinc-400 dark:text-zinc-500">{t('midiStudio.pickTrackHint')}</span>
             )}
             {submitError && <span className="text-xs text-red-500 dark:text-red-400">{submitError}</span>}
@@ -526,7 +530,9 @@ export const MidiStudio: React.FC = () => {
                             <Loader2 size={11} className="animate-spin flex-shrink-0" />
                             {job.status === 'queued'
                               ? t('midiStudio.statusQueued')
-                              : t('midiStudio.statusTranscribing', { done: job.chunksDone || 0, total: job.chunksTotal || 0, notes: job.noteCount })}
+                              : job.phase === 'drums' ? t('midiStudio.statusDrums')
+              : job.phase === 'group' ? t('midiStudio.statusGrouping')
+              : t('midiStudio.statusTranscribing', { done: job.chunksDone || 0, total: job.chunksTotal || 0, notes: job.noteCount })}
                           </span>
                           {job.status === 'transcribing' && (
                             <span className="block h-1 mt-1 rounded bg-zinc-200 dark:bg-white/10 overflow-hidden">

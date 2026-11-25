@@ -51,7 +51,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
   const [duration, setDuration] = useState(0);
   const [curTime, setCurTime] = useState(0);
   const [frontier, setFrontier] = useState<number | null>(live ? 0 : null);
-  const [chunks, setChunks] = useState<{ done: number; total: number } | null>(null);
+  const [chunks, setChunks] = useState<{ done: number; total: number; phase?: string } | null>(null);
   const [liveDone, setLiveDone] = useState(!live);
   const [families, setFamilies] = useState<string[]>([]);
   const [muted, setMuted] = useState<Set<string>>(new Set());
@@ -121,7 +121,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
               batch.push({ pitch: st.pitch, start: st.time, duration: Math.max(0.03, ev.time - st.time), family: st.instrument });
             }
           } else if (ev.type === 'progress') {
-            setChunks({ done: ev.completed, total: ev.total });
+            setChunks({ done: ev.completed, total: ev.total, phase: ev.phase });
             // dettato reports audio seconds; MuScriptor's chunks are 5 s each
             setFrontier(typeof ev.seconds === 'number' ? ev.seconds : ev.completed * 5.0);
           } else if (ev.type === 'status') {
@@ -338,7 +338,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
         {live && !liveDone && chunks && (
           <span className="flex items-center gap-1.5 text-[11px] text-purple-500 dark:text-purple-400">
             <Radio size={11} className="animate-pulse" />
-            {t('midiStudio.player.liveChunk', { done: chunks.done, total: chunks.total })}
+            {chunks.phase === 'drums' ? t('midiStudio.statusDrums') : chunks.phase === 'group' ? t('midiStudio.statusGrouping')
+              : t('midiStudio.player.liveChunk', { done: chunks.done, total: chunks.total })}
           </span>
         )}
         <span className="text-[11px] text-zinc-400 dark:text-zinc-500">

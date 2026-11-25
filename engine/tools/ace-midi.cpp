@@ -2975,16 +2975,20 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     const DecodeTh th = m.th;
     const double   t2 = now_ms();
     RunResult      r;
-    const int      n_win = (int) layout((long long) y.size()).starts.size(), total = n_win + (fed ? 0 : 3);
-    auto progress = [&](int completed) {
+    const Layout   lay   = layout((long long) y.size());
+    const int      n_win = (int) lay.starts.size(), total = n_win + (fed ? 0 : 3);
+    // seconds: the audio the windows have covered so far (the whole song once every window is done);
+    // phase: what runs next. completed n_win+2 is the drum pass, the slowest stage after the windows.
+    auto progress = [&](int completed, const char * phase) {
         if (jsonl) {
-            // seconds: how far through the audio the run is (the UI cannot infer it from window counts)
-            printf("{\"type\":\"progress\",\"completed\":%d,\"total\":%d,\"seconds\":%.2f}\n", completed, total, seconds * completed / total);
+            const double covered = completed <= 0 ? 0.0 : completed > n_win ? seconds
+                                 : std::min(seconds, (double) (lay.starts[completed - 1] + WIN - PAD) / SR);
+            printf("{\"type\":\"progress\",\"completed\":%d,\"total\":%d,\"seconds\":%.2f,\"phase\":\"%s\"}\n", completed, total, covered, phase);
             fflush(stdout);
         }
     };
-    progress(0);
-    run(m, y, fed ? o.all_hidden : o.repair || o.all_hidden, fed ? capture : true, r, [&](int d, int) { progress(d); });
+    progress(0, "transcribe");
+    run(m, y, fed ? o.all_hidden : o.repair || o.all_hidden, fed ? capture : true, r, [&](int d, int) { progress(d, d < n_win ? "transcribe" : "repair"); });
     const double            t3    = now_ms();
     const std::vector<Note> notes = decode_notes(r.all.P, r.T, th);
     const double            t4    = now_ms();
@@ -3050,7 +3054,7 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     }
     if (!capture) std::vector<ggml_fp16_t>().swap(r.all.hidden);
     const double t5 = now_ms();
-    progress(n_win + 1);
+    progress(n_win + 1, "group");
 
     // ---- the grouper: notes -> instrument tracks (times back on the source axis)
     std::vector<DettatoTrack> tracks;
@@ -3094,7 +3098,7 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     int grouped = 0;
     for (auto & t : tracks) grouped += (int) t.notes.size();
     const double t6 = now_ms();
-    progress(n_win + 2);
+    progress(n_win + 2, "drums");
 
     // ---- drums, on the source audio (sources under 40 kHz skip the model)
     std::string drum_info, drum_model;
@@ -3125,7 +3129,7 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
     timing += b;
     fprintf(stderr, "[dettato] %zu notes -> %s%d dropped, %d inserted -> %d grouped in %zu tracks: %s\n", notes.size(),
             o.repair ? "" : "(repairer off) ", n_dropped, n_inserted, grouped, tracks.size(), timing.c_str());
-    progress(n_win + 3);
+    progress(n_win + 3, "done");
 
     int rc = 0;
     if (cap) {

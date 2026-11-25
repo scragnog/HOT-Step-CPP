@@ -34,6 +34,7 @@ const input: CoverRenderInput = {
 
 function setup(opts: { leadSheetDefault?: () => import('../../contracts/studioWorkflows.js').CoverLeadSheetSource;
   transcribe?: (signal: AbortSignal, source?: string) => Promise<{ abc: string; scoreSource?: string }>;
+  onRepair?: (repair?: boolean) => void;
   audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean>;
   datasetAnalysis?: () => { bpm: number; key: string; scale: string } | null;
   analyze?: () => Promise<{ bpm: number | null; key: string; scale: string } | null> } = {}) {
@@ -63,7 +64,7 @@ function setup(opts: { leadSheetDefault?: () => import('../../contracts/studioWo
     metadata: async () => ({ artist: '', title: '', album: '', duration: null }),
     datasetAnalysis: opts.datasetAnalysis || (() => null),
     analyze: opts.analyze || (async () => ({ bpm: 100, key: 'C', scale: 'minor' })),
-    transcribe: async (_url, _label, _user, signal, _force, source) => opts.transcribe?.(signal, source) || { abc: 'X:1\nQ:1/4=120\nK:C\nC|' },
+    transcribe: async (_url, _label, _user, signal, _force, source, repair) => { opts.onRepair?.(repair); return opts.transcribe?.(signal, source) || { abc: 'X:1\nQ:1/4=120\nK:C\nC|' }; },
     capability: opts.capability || (async backend => backend === 'ace' || backend === 'yue2'),
     caption: async () => ({ text: 'Resolved style' }),
   })) jobs.register(kind);
@@ -262,6 +263,22 @@ test('score tempo correction and key use the existing ABC transforms', () => {
   assert.deepEqual(coverScoreDetails('X:1\nQ:1/4=120\nK:Am\nC|', 0.5), { bpm: 60, key: 'A Minor' });
   assert.deepEqual(coverScoreDetails('X:1\nQ:1/4=120\nK:C\nC|', 2), { bpm: 240, key: 'C Major' });
   assert.throws(() => coverScoreDetails('X:1\nK:C\nC|', 1), /tempo/);
+});
+
+test('dettato repairer switch: new drafts run it, an explicit off is kept on the draft', async () => {
+  const seen: Array<boolean | undefined> = [];
+  const s = setup({ onRepair: r => seen.push(r) });
+  const open = s.submit('cover-open', 'repair-open', { assetId: '22222222-2222-4222-8222-222222222222', leadSheetSource: 'dettato' });
+  await s.jobs.settled();
+  const opened = s.jobs.get(open.job.id).result as { documentId: string; revision: number };
+  assert.equal(s.documents.get(opened.documentId, 'owner').data.dettatoRepair, undefined, 'a draft without the field reads as on');
+  s.submit('cover-transcribe', 'repair-off', { ...opened, force: false, dettatoRepair: false });
+  await s.jobs.settled();
+  assert.equal(s.documents.get(opened.documentId, 'owner').data.dettatoRepair, false);
+  const next = { documentId: opened.documentId, revision: s.documents.get(opened.documentId, 'owner').revision };
+  s.submit('cover-transcribe', 'repair-kept', { ...next, force: true });
+  await s.jobs.settled();
+  assert.deepEqual(seen, [false, false], 'the draft keeps the choice when a later request omits it');
 });
 
 test('headless asset open, idempotency, stale transcript and replay', async () => {

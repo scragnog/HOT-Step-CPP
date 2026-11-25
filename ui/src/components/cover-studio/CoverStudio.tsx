@@ -186,6 +186,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetScoreSource, setSheetScoreSource] = useState<string | null>(() => restore('sheetScoreSource', null));
   const [chordQuality, setChordQuality] = useState<CoverLeadSheetResult['chordQuality'] | null>(() => restore('chordQuality', null));
   const [leadSheetSource, setLeadSheetSource] = useState<CoverLeadSheetSource | undefined>(() => readLeadSheetSource(restore('leadSheetSource', null)));
+  // dettato's evidence repairer: on unless switched off; a saved draft without the field is on.
+  const [dettatoRepair, setDettatoRepair] = useState<boolean>(() => restore<boolean>('dettatoRepair', true) !== false);
   const [sourceChanging, setSourceChanging] = useState(false);
   const sourceChangeRef = useRef(false);
   const sourceHydratedRef = useRef('');
@@ -279,7 +281,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [coverLyricSchedule, setCoverLyricSchedule] = useState<'off' | 'bias' | 'mask'>(() => restore('coverLyricSchedule', 'off'));
   const [captionMode, setCaptionMode] = useState(() => restore('captionMode', 'custom'));
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
-  const readinessQuery = useQuery({ ...snapshotOptions<Yue2CoverReadiness>('cover', leadSheetReadinessPath(leadSheetSource)), enabled: leadSheetMode && !!token });
+  const readinessQuery = useQuery({ ...snapshotOptions<Yue2CoverReadiness>('cover', leadSheetReadinessPath(leadSheetSource, dettatoRepair)), enabled: leadSheetMode && !!token });
   const readiness = readinessQuery.data ?? null;
   const selectedSource = selectedLeadSheetSource(leadSheetSource, readiness?.source);
   const coverDocumentQuery = useQuery({ ...documentOptions(coverDraftId), enabled: leadSheetMode && !!token && !!coverDraftId });
@@ -288,6 +290,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (document?.id !== coverDraftId || sourceHydratedRef.current === coverDraftId) return;
     sourceHydratedRef.current = coverDraftId;
     setLeadSheetSource(readLeadSheetSource(document.data.leadSheetSource));
+    setDettatoRepair(document.data.dettatoRepair !== false);
   }, [coverDocumentQuery.data, coverDraftId]);
   const [sheetJob, setSheetJob] = useState<Yue2CoverJob | null>(null);
   const [sheetJobId, setSheetJobId] = useState('');
@@ -446,6 +449,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('coverDraftId', coverDraftId); }, [coverDraftId]);
   useEffect(() => { persist('coverDraftRevision', coverDraftRevision); }, [coverDraftRevision]);
   useEffect(() => { persist('leadSheetSource', leadSheetSource ?? null); }, [leadSheetSource]);
+  useEffect(() => { persist('dettatoRepair', dettatoRepair); }, [dettatoRepair]);
   useEffect(() => { persist('sheetScoreSource', sheetScoreSource); }, [sheetScoreSource]);
   useEffect(() => { persist('chordQuality', chordQuality); }, [chordQuality]);
   useEffect(() => { persist('sourceSongId', sourceSongId); }, [sourceSongId]);
@@ -502,7 +506,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('approvedSheet', approvedSheet); }, [approvedSheet]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
-  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-mm3Cover': mm3Cover, 'cover-studio-leadSheetSource': leadSheetSource, 'cover-studio-sheetScoreSource': sheetScoreSource, 'cover-studio-chordQuality': chordQuality, 'cover-studio-heartmulaTags': heartmulaTags, 'cover-studio-heartmulaSeed': heartmulaSeed, 'cover-studio-sa3Transform': sa3Transform, 'cover-studio-sa3Seed': sa3Seed, 'cover-studio-sa3Adapter': sa3Adapter, 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
+  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-mm3Cover': mm3Cover, 'cover-studio-leadSheetSource': leadSheetSource, 'cover-studio-dettatoRepair': dettatoRepair, 'cover-studio-sheetScoreSource': sheetScoreSource, 'cover-studio-chordQuality': chordQuality, 'cover-studio-heartmulaTags': heartmulaTags, 'cover-studio-heartmulaSeed': heartmulaSeed, 'cover-studio-sa3Transform': sa3Transform, 'cover-studio-sa3Seed': sa3Seed, 'cover-studio-sa3Adapter': sa3Adapter, 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
     'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-instrumentalMode': instrumentalMode, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
@@ -513,6 +517,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setCoverDraftId(''); setCoverDraftRevision(0);
     const restoredSource = readLeadSheetSource(f['cover-studio-leadSheetSource']);
     setLeadSheetSource(restoredSource);
+    setDettatoRepair(f['cover-studio-dettatoRepair'] !== false);
     setSheetScoreSource((f['cover-studio-sheetScoreSource'] as string) ?? null);
     setChordQuality((f['cover-studio-chordQuality'] as CoverLeadSheetResult['chordQuality']) ?? null);
     setSa3Transform(typeof f['cover-studio-sa3Transform'] === 'number' ? Math.max(0.1, Math.min(0.9, f['cover-studio-sa3Transform'])) : 0.3);
@@ -1117,7 +1122,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSheetError(''); setSheetPreparing(true);
     try {
       if (coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
-        const { job } = await coverWorkflowApi.transcribe(coverDraftId, coverDraftRevision, !!sheetAbc);
+        const { job } = await coverWorkflowApi.transcribe(coverDraftId, coverDraftRevision, !!sheetAbc, dettatoRepair);
         workflowId = job.id;
         coverWorkflowJobRef.current = job.id;
         const done = await waitForCoverJob(job.id, () =>
@@ -1154,7 +1159,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       sourceHydratedRef.current = draft.documentId;
       setCoverDraftId(draft.documentId); setCoverDraftRevision(draft.revision);
       setLeadSheetSource(draft.leadSheetSource);
-      const { job } = await coverWorkflowApi.transcribe(draft.documentId, draft.revision, !!sheetAbc);
+      const { job } = await coverWorkflowApi.transcribe(draft.documentId, draft.revision, !!sheetAbc, dettatoRepair);
       workflowId = job.id; coverWorkflowJobRef.current = workflowId;
       const done = await waitForCoverJob(workflowId, () => sourceKeyRef.current !== key || sheetRequestRef.current !== request);
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
@@ -1824,6 +1829,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         {leadSheetMode && <div className="border-r border-zinc-200 dark:border-white/5 p-4 space-y-3 overflow-y-auto">
           <LeadSheetSourcePicker value={selectedSource} disabled={sourceChanging || sheetPreparing || isUploading || isAnalyzing || bgCaptionPending || captionMut.isPending || (!!coverDraftId && coverDocumentQuery.isPending)}
             onChange={value => void changeLeadSheetSource(value)} />
+          {selectedSource === 'dettato' && <Toggle size="sm" accent="cyan" checked={dettatoRepair} onChange={setDettatoRepair}
+            disabled={sheetPreparing || sourceChanging} label={t('cover.dettatoRepair', 'Evidence repairer')}
+            info={t('cover.dettatoRepairInfo', 'The second dettato pass drops stray notes and tightens note times. On by default; applies to the next transcription. Turn it off to use the notes from the first pass as they are.')} />}
           {readinessQuery.isError && <QueryError error={readinessQuery.error} onRetry={() => void readinessQuery.refetch()} />}
           <div className="flex gap-2" role="group" aria-label={t('cover.sourceMode.label')}>
             <button type="button" onClick={() => selectSourceMode('audio')} aria-pressed={sourceMode === 'audio'}

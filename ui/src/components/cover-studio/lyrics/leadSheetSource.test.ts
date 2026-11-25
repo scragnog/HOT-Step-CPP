@@ -18,6 +18,12 @@ test('the shared picker displays every stored source, including unavailable nati
   }
 });
 
+test('readiness asks without the repairer only when its switch is off', () => {
+  assert.equal(leadSheetReadinessPath('dettato'), '/yue2-cover/readiness?source=dettato');
+  assert.equal(leadSheetReadinessPath('dettato', false), '/yue2-cover/readiness?source=dettato&repair=0');
+  assert.equal(leadSheetReadinessPath(undefined, false), '/yue2-cover/readiness?repair=0');
+});
+
 test('only an unset draft follows the Models default; saved choices survive default changes', () => {
   assert.equal(selectedLeadSheetSource(undefined, 'sheetsage2-refined'), 'sheetsage2-refined');
   assert.equal(selectedLeadSheetSource(undefined, 'sheetsage2'), 'sheetsage2');

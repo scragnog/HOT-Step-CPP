@@ -2353,6 +2353,8 @@
     "midiStudio.model_medium": "Balanced, GPU recommended",
     "midiStudio.model_large": "Best quality, GPU required",
     "midiStudio.model_dettato": "Very fast, instrument tracks and drums, no token needed",
+    "midiStudio.statusDrums": "Transcribing drums (the slowest step on long songs)...",
+    "midiStudio.statusGrouping": "Splitting notes into instrument tracks...",
     "midiStudio.repair": "Evidence repairer",
     "midiStudio.repairInfo": "dettato's second pass drops stray notes and tightens note times, and keeps instrument tracks cleaner. On by default; turn it off to get the transcriber's notes as they are. Note velocity in dettato MIDI shows how sure the model was of each pitched note, not how hard it was played.",
     "midiStudio.firstRunNote": "Weights download once per model from Hugging Face — you'll need model access and a saved token first (see Model Access above). Transcription runs fully locally on the native engine (GPU-accelerated).",

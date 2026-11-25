@@ -89,6 +89,8 @@ interface MidiJob {
   events: any[];
   chunksDone: number;
   chunksTotal: number;
+  /** dettato's stage (transcribe, repair, group, drums, done), from its progress events */
+  phase?: string;
   noteCount: number;
   error?: string;
   gated?: boolean;
@@ -141,6 +143,7 @@ function pushEvent(job: MidiJob, ev: any): void {
   if (ev.type === 'progress') {
     job.chunksDone = ev.completed ?? job.chunksDone;
     job.chunksTotal = ev.total ?? job.chunksTotal;
+    if (typeof ev.phase === 'string') job.phase = ev.phase;
   } else if (ev.type === 'note_start') {
     job.noteCount++;
   }
@@ -472,6 +475,7 @@ router.get('/jobs', (_req: Request, res: Response) => {
         durationSec: 0,
         chunksDone: job.chunksDone,
         chunksTotal: job.chunksTotal,
+        phase: job.phase,
         createdAt: new Date(job.createdAt).toISOString(),
         error: job.error,
         gated: job.gated,
@@ -504,6 +508,7 @@ router.get('/:jobId/progress', (req: Request, res: Response) => {
     status: job.status,
     chunksDone: job.chunksDone,
     chunksTotal: job.chunksTotal,
+    phase: job.phase,
     noteCount: job.noteCount,
     error: job.error,
     gated: job.gated,
@@ -678,11 +683,11 @@ router.delete('/:jobId', (req: Request, res: Response) => {
 export default router;
 
 /** Cover Prepare reuses MIDI Studio's lane, cancellation and Beat This! export. */
-export async function transcribeCoverMidi(url: string, signal: AbortSignal, source: 'muscriptor' | 'dettato' = 'muscriptor') {
+export async function transcribeCoverMidi(url: string, signal: AbortSignal, source: 'muscriptor' | 'dettato' = 'muscriptor', repair = true) {
   if (signal.aborted) throw new Error('Cancelled');
-  const model = coverMidiModel(yue2CoverService.readiness(source));
+  const model = coverMidiModel(yue2CoverService.readiness(source, repair));
   const job: MidiJob = { id: randomUUID(), status: 'queued', sourceAudioUrl: url,
-    sourceFileName: path.basename(url), model, repair: true, speculative: true, events: [], chunksDone: 0,
+    sourceFileName: path.basename(url), model, repair, speculative: true, events: [], chunksDone: 0,
     chunksTotal: 0, noteCount: 0, createdAt: Date.now(), listeners: new Set() };
   jobs.set(job.id, job);
   const cancel = () => { job.status = 'cancelled'; job.child?.kill(); };

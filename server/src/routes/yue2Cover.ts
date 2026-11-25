@@ -55,7 +55,7 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   // Optional source: sheetsage2 | sheetsage2-refined | muscriptor | dettato | yourmt3-chordnet.
   // Omission uses the stored sheet-transcriber preference. Supplied ABC needs no model.
   router.get('/readiness', (req: Request, res: Response) => {
-    try { res.json(service.readiness(req.query.source)); }
+    try { res.json(service.readiness(req.query.source, req.query.repair !== '0')); }
     catch (err) { fail(res, err); }
   });
 

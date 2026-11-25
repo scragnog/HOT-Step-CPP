@@ -51,8 +51,8 @@ export const coverWorkflowApi = {
   buildSave: (sessionId: string) => workflowApi.submit('cover-build-save', newId(), { sessionId }),
   source: (documentId: string, revision: number, leadSheetSource: CoverLeadSheetSource, assetId?: string) =>
     workflowApi.submit('cover-source', newId(), { documentId, revision, leadSheetSource, assetId }),
-  transcribe: (documentId: string, revision: number, force: boolean) =>
-    workflowApi.submit('cover-transcribe', newId(), { documentId, revision, force }),
+  transcribe: (documentId: string, revision: number, force: boolean, dettatoRepair?: boolean) =>
+    workflowApi.submit('cover-transcribe', newId(), { documentId, revision, force, dettatoRepair }),
   caption: (documentId: string, revision: number, artistId: number,
     provider: string, model: string, force: boolean) =>
     workflowApi.submit('cover-caption', newId(),

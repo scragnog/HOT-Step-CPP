@@ -71,7 +71,7 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Choose from Library | Search your [library](library.md) and pick a track with audio as the transcription source. |
 | Upload from PC | Upload a local `.wav`, `.mp3` or `.flac` as the source (same as dragging a file onto the panel). FLAC is converted to WAV before transcription. |
 | Transcription model | `small` (103M, fastest, runs on CPU), `medium` (307M, balanced, GPU recommended), `large` (1.4B, best quality, GPU required), or `dettato` (28M, very fast, instrument tracks and drums). |
-| Evidence repairer | Shown when dettato is selected; on by default. dettato's second pass removes stray notes, tightens note times and keeps instrument tracks cleaner. Turn it off for the transcriber's notes as they are. It needs the repairer's model (part of the dettato download). |
+| Evidence repairer | Shown when dettato is selected; on by default. dettato's second pass removes stray notes, tightens note times and keeps instrument tracks cleaner. Turn it off for the transcriber's notes as they are. Transcribe needs the repairer's model only while the switch is on. |
 | Download weights | Downloads the selected model's weights and its `config.json` from Hugging Face. MuScriptor's are gated and use your saved token; dettato's four models download together and need none. Shows live progress; needs a saved token first. It is the same download as Model Manager > Shared > MIDI Transcription, so starting it in one place shows progress in both. |
 | Transcribe to MIDI | Queues a transcription job for the selected source and model. Disabled until a source is picked and that model's weights are downloaded. |
 | Transcriptions list | Every job, newest first: queued/transcribing status with chunk progress, or a done/failed result. Jobs persist to disk and survive an app restart. |
@@ -113,7 +113,7 @@ was of the note, not how hard it was played; only drum hits carry a learned velo
 Transcription runs on the GPU when the engine has one (CUDA is tested; Vulkan runs on
 NVIDIA cards). AMD has not been tested on real hardware. The grouper runs on the CPU
 when the backend is not CUDA. Drums add about 40 seconds on the CPU for a 4-minute song;
-the progress bar follows the seconds of audio done. A source recorded below 40 kHz
+the progress bar follows the audio the windows have covered, then the job shows Splitting notes into instrument tracks and Transcribing drums as separate steps. A source recorded below 40 kHz
 skips the drums. dettato shows no notes until the whole song is done, so the piano roll
 fills at the end instead of live.
 

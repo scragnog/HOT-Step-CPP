@@ -59,8 +59,9 @@ export function resolveModelDir(r: MuscriptorRoots, variant: string): { dir: str
   }
   const shared = path.join(r.shared, variant);
   if (isCompleteModelDir(shared)) return { dir: shared, source: 'shared', complete: true };
+  // dettato never had a pre-#228 home: its four folders are read from one root, or the launch could not find them all.
   const legacy = path.join(r.legacy, variant);
-  if (isCompleteModelDir(legacy)) return { dir: legacy, source: 'legacy', complete: true };
+  if (!variant.startsWith('dettato') && isCompleteModelDir(legacy)) return { dir: legacy, source: 'legacy', complete: true };
   return { dir: shared, source: 'shared', complete: false };
 }
 

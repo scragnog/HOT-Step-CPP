@@ -236,7 +236,7 @@ export interface CoverDeps {
   analyze?: (path: string, signal: AbortSignal) => Promise<{ bpm: number | null; key: string; scale: string } | null>;
   datasetAnalysis?: (path: string) => { bpm: number; key: string; scale: string } | null;
   metadata?: (path: string) => Promise<{ artist: string; title: string; album: string; duration: number | null }>;
-  transcribe?: (url: string, label: string, user: string, signal: AbortSignal, force: boolean, source?: CoverLeadSheetSource) => Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult; notice?: string }>;
+  transcribe?: (url: string, label: string, user: string, signal: AbortSignal, force: boolean, source?: CoverLeadSheetSource, dettatoRepair?: boolean) => Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult; notice?: string }>;
   leadSheetDefault?: () => CoverLeadSheetSource;
   capability?: (backend: string) => Promise<boolean>;
   caption?: (artistId: number, provider: string, model: string, force: boolean, signal: AbortSignal) => Promise<{ text: string; generatedProfileId?: number }>;
@@ -249,7 +249,7 @@ async function defaultMetadata(path: string) {
     return { artist: m.common.artist || '', title: m.common.title || '', album: m.common.album || '', duration: m.format.duration ?? null };
   } catch { return { artist: '', title: '', album: '', duration: null }; }
 }
-async function defaultTranscribe(url: string, label: string, user: string, signal: AbortSignal, force: boolean, source: CoverLeadSheetSource = 'sheetsage2'): Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult; notice?: string }> {
+async function defaultTranscribe(url: string, label: string, user: string, signal: AbortSignal, force: boolean, source: CoverLeadSheetSource = 'sheetsage2', dettatoRepair = true): Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult; notice?: string }> {
   if (source === 'yourmt3-chordnet') {
     const { message } = yue2CoverService.readiness(source);
     if (message) throw new WorkflowError(400, message);
@@ -257,7 +257,7 @@ async function defaultTranscribe(url: string, label: string, user: string, signa
   }
   if (source === 'muscriptor' || source === 'dettato') {
     const { transcribeCoverMidi } = await import('../../routes/midiStudio.js');
-    return transcribeCoverMidi(url, signal, source);
+    return transcribeCoverMidi(url, signal, source, dettatoRepair);
   }
   const started = await yue2CoverService.start({ sourceAudioUrl: url, sourceLabel: label.slice(0, 120), force, transcriber: source }, user);
   if (signal.aborted) {
@@ -461,9 +461,10 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     const leadSheetSource = data.leadSheetSource || (dep('leadSheetDefault') || defaultLeadSheetSource)();
+    const dettatoRepair = input.dettatoRepair ?? data.dettatoRepair ?? true;
     ctx.emit('stage', { stage: 'Transcribing score' });
     const result = await (dep('transcribe') || defaultTranscribe)(source.url, data.sourceLabel || source.filename,
-      ctx.userId, ctx.signal, input.force, leadSheetSource);
+      ctx.userId, ctx.signal, input.force, leadSheetSource, dettatoRepair);
     ctx.throwIfCancelled();
     if (result.notice) ctx.emit('stage', { stage: result.notice });
     const updated = docs().update(input.documentId, ctx.userId, input.revision, current => {
@@ -471,7 +472,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
       if (asset(data.assetId, ctx.userId).sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
       const scoreSource = result.scoreSource || (leadSheetSource === 'sheetsage2-refined' ? 'sheetsage2' : leadSheetSource);
       const sheet = result.leadSheet || tryAbcCoverLeadSheet(result.abc, leadSheetSource, scoreSource as CoverLeadSheetResult['scoreSource']);
-      return { ...current, leadSheetSource, abc: result.abc, approvedAbc: '', scoreSource, leadSheet: sheet };
+      return { ...current, leadSheetSource, dettatoRepair, abc: result.abc, approvedAbc: '', scoreSource, leadSheet: sheet };
     });
     return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: updated.data.scoreSource, leadSheet: updated.data.leadSheet };
   } }, { kind: 'cover-render', input: render, async run(ctx) {

@@ -20,6 +20,15 @@ function put(dir: string, files: Record<string, string>) {
 }
 const FULL = { 'model.safetensors': 'weights', 'config.json': '{}' };
 
+test('dettato folders are read from one root, never from the pre-#228 legacy one', () => {
+  const f = fixture();
+  put(path.join(f.library, 'models', 'muscriptor', 'dettato'), FULL);
+  put(path.join(f.models, 'muscriptor', 'dettato-grouper'), FULL);
+  assert.equal(resolveModelDir(f.roots, 'dettato').complete, false);
+  assert.equal(resolveModelDir(f.roots, 'dettato').dir, path.join(f.models, 'muscriptor', 'dettato'));
+  assert.equal(resolveModelDir(f.roots, 'dettato-grouper').complete, true);
+});
+
 test('shared-only: read from <models>/muscriptor', () => {
   const f = fixture();
   put(path.join(f.models, 'muscriptor', 'small'), FULL);

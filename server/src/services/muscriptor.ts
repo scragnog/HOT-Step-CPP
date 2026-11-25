@@ -106,8 +106,9 @@ export function isModelDownloaded(m: DownloadableModel): boolean {
   return resolveModelDir(MODEL_ROOTS, m).complete;
 }
 
-/** The folder holding dettato's four model folders (--dettato-model). */
-export const dettatoRoot = (): string => path.dirname(modelDir(DETTATO_MODEL));
+/** The folder holding dettato's four model folders (--dettato-model). Readiness, downloads and the launch all use
+ *  it: resolveModelDir never reads a dettato folder from anywhere else. */
+export const dettatoRoot = (): string => targetRoot(MODEL_ROOTS);
 
 /** The folders a dettato run reads: the repairer's only when it is on. */
 export const dettatoParts = (repair: boolean): DettatoPart[] => DETTATO_PARTS.filter(p => repair || p !== 'dettato-evidence');

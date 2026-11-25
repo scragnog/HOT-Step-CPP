@@ -13,6 +13,9 @@ const P = '/midi-studio';
 export type MuscriptorModel = 'small' | 'medium' | 'large';
 /** What MIDI Studio can transcribe with: a MuScriptor size, or dettato (four folders, one download). */
 export type MidiModel = MuscriptorModel | 'dettato';
+/** dettato's four weight folders; its repairer is needed only while the Evidence repairer switch is on. */
+export const DETTATO_PARTS = ['dettato', 'dettato-evidence', 'dettato-grouper', 'dettato-drums'] as const;
+export type DettatoPart = typeof DETTATO_PARTS[number];
 
 export interface ModelState {
   downloaded: boolean;
@@ -31,13 +34,15 @@ export interface MidiStudioStatus {
   /** ace-midi engine binary present next to ace-server */
   engineAvailable: boolean;
   hfTokenSet: boolean;
-  models: Record<MidiModel | typeof BEAT_MODEL, ModelState>;
+  models: Record<MidiModel | DettatoPart | typeof BEAT_MODEL, ModelState>;
 }
 
 export interface MidiJobProgress {
   status: 'queued' | 'transcribing' | 'done' | 'failed' | 'cancelled';
   chunksDone?: number;
   chunksTotal?: number;
+  /** dettato's stage: transcribe, repair, group, drums or done */
+  phase?: string;
   noteCount?: number;
   error?: string;
   gated?: boolean;
@@ -63,6 +68,7 @@ export interface MidiJobSummary {
   /** chunk progress — present on in-flight jobs */
   chunksDone?: number;
   chunksTotal?: number;
+  phase?: string;
   /** options the MIDI was last re-exported with */
   exportOptions?: MidiExportOptions;
 }

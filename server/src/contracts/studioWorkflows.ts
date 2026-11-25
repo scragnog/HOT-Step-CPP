@@ -137,7 +137,9 @@ export interface CoverCaptionResult { documentId: string; revision: number; capt
  *  still requires a readable tempo and supported notation.
  *  HeartMuLa renders record leadSheetRenderingPath: native uses raw seconds,
  *  abc uses parsed score seconds, abc-edited regenerates from approved edits. */
-export const coverTranscribeSchema = coverDraftRefSchema.extend({ force: z.boolean().default(false) });
+export const coverTranscribeSchema = coverDraftRefSchema.extend({ force: z.boolean().default(false),
+  /** dettato only: run its evidence repairer. Absent keeps the draft's choice, which defaults to on. */
+  dettatoRepair: z.boolean().optional() });
 export interface CoverLeadSheetResult {
   abc: string; scoreSource: z.infer<typeof coverScoreSourceSchema>; leadSheetSource: CoverLeadSheetSource;
   chordQuality: 'estimated' | 'transcribed' | 'provided';
@@ -243,6 +245,8 @@ export interface CoverDraft {
   scoreOnly?: boolean;
   abc?: string; approvedAbc?: string; scoreSource?: string;
   leadSheetSource?: CoverLeadSheetSource;
+  /** dettato's evidence repairer; absent (older drafts) means on. */
+  dettatoRepair?: boolean;
   leadSheet?: CoverLeadSheetResult;
 }
 export interface CoverRenderResult { request: Record<string, unknown>; audioIntentId: string; audio: unknown }

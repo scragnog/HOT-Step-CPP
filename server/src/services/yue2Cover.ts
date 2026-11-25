@@ -97,7 +97,7 @@ export function createYue2CoverService(deps = {
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }, midi = muscriptorReadinessDeps, nativeMissing: () => string | null = nativeMissingMessage) {
   /** GET readiness accepts an optional lead-sheet source; omission uses the stored sheet preference. */
-  function readiness(requestedSource?: unknown) {
+  function readiness(requestedSource?: unknown, dettatoRepair = true) {
     if (requestedSource !== undefined && !LEAD_SHEET_SOURCES.includes(requestedSource as LeadSheetSource)) {
       throw new CoverRequestError(`source must be one of: ${LEAD_SHEET_SOURCES.join(', ')}`);
     }
@@ -108,8 +108,8 @@ export function createYue2CoverService(deps = {
       return { source, ready: !message, model: message ? null : YOURMT3_CHORDNET_MODEL_IDS.join('+'), refined: false, message };
     }
     if (source === 'dettato') {
-      // Cover Prepare runs dettato with the repairer on, so all four folders are needed.
-      const missing = DETTATO_PARTS.filter(part => !midi.installed(part)).map(part => `dettato (${part})`);
+      // The repairer's folder is needed only while its switch is on.
+      const missing = DETTATO_PARTS.filter(part => (dettatoRepair || part !== 'dettato-evidence') && !midi.installed(part)).map(part => `dettato (${part})`);
       if (!midi.installed(BEAT_MODEL)) missing.push('Beat This! (muscriptor-beat-this)');
       const executable = midi.executable();
       return { source, ready: missing.length === 0 && !!executable, model: missing.length ? null : DETTATO_MODEL, refined: false,

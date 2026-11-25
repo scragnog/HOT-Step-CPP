@@ -45,7 +45,7 @@ test('a library transcription retains its draft, then approval and source change
     coverDraftId: '', coverDraftRevision: 0, sourceChangeRef: { current: false },
     sourceKey: 'library-source', sourceKeyRef: { current: 'library-source' }, sourceLookupRef: { current: 1 },
     sheetRequestRef: { current: 0 }, coverWorkflowJobRef: { current: '' }, sourceHydratedRef: { current: '' },
-    sheetAbc: '', selectedSource: 'sheetsage2', advancedMode: false, heartmulaMode: false,
+    sheetAbc: '', dettatoRepair: true, selectedSource: 'sheetsage2', advancedMode: false, heartmulaMode: false,
     sourceMode: 'audio', sourceFileName: 'library.wav', sheetPreparing: false, approvedSheet: null,
     prepareYue2Source: async () => ({ audioUrl: '/audio/library.wav', songId: 'library' }),
     apiClient: { get: async () => new Blob(['audio']) },
@@ -81,7 +81,7 @@ test('a library transcription retains its draft, then approval and source change
   await (handler('changeLeadSheetSource', state) as (choice: string) => Promise<void>)('muscriptor');
   assert.equal(state.sheetError, '');
   assert.deepEqual(calls, [
-    ['transcribe', 'library-draft', 1, false], ['approve', 'library-draft', 2, 'score'],
+    ['transcribe', 'library-draft', 1, false, true], ['approve', 'library-draft', 2, 'score'],
     ['source', 'library-draft', 3, 'muscriptor'],
   ]);
   assert.equal(state.coverDraftRevision, 4);
