@@ -8,9 +8,9 @@
 //   - the peak-picking note decode, with numpy's float32 steps kept where a
 //     threshold reads them;
 //   - the tuning estimate and the retune resampler.
-// Audio enters at 16 kHz. The resamplers reproduce soxr's "HQ" recipe with
-// ChordNet's fitted kernel (chordnet/features.h): exact for the 2:1 stage,
-// an approximation for other ratios (48 kHz music: about 3e-4 on the waveform).
+// Audio enters at 16 kHz. The resamplers reproduce soxr's "HQ" recipe: a Kaiser-windowed
+// sinc fitted to soxr's taps per ratio (to_16k: 2:1, 3:1, 3:2 to 1e-8, 6:1 to 6e-7; other
+// ratios, 44.1 kHz included, about 6e-5 off), and ChordNet's kernel for the retune.
 
 #include <algorithm>
 #include <cmath>
@@ -464,6 +464,55 @@ static Tuning estimate_tuning(const std::vector<float> & y) {
     out.shift_cents    = shift ? -out.estimate_cents : 0.0;
     out.ratio          = std::pow(2.0, out.shift_cents / 1200.0);
     return out;
+}
+
+// soxr.resample(x, sr, 16000, quality="HQ") (audio.Audio.at): output length round(n * 16000 / sr). soxr's HQ filter
+// is a Kaiser-windowed sinc whose support depends on the ratio, measured with impulses through soxr 1.0 and fitted
+// (cutoff, beta, half-support in output samples): 3:1 and 3:2 to 1e-8, 6:1 to 6e-7. 2:1 is ChordNet's measured
+// kernel, exact. Other ratios (44.1 and 22.05 kHz are not a single kernel in soxr) use ChordNet's kernel, about
+// 6e-5 off soxr's taps. The grouping of a song can hang on differences of that size.
+static std::vector<float> to_16k(const std::vector<float> & x, int sr) {
+    if (sr == SR) return x;
+    struct Fit { long long L, M; double fc, beta, half; };
+    static const Fit fits[] = {
+        { 1, 3, 0.47843591, 13.0419451, 96.84028625 },   // 48 kHz
+        { 2, 3, 0.47843591, 13.04187884, 96.84003156 },  // 24 kHz
+        { 1, 6, 0.47843591, 13.91563587, 102.21895554 },  // 96 kHz
+    };
+    const long long g = std::gcd((long long) sr, (long long) SR), L = SR / g, M = sr / g, n = (long long) x.size();
+    const long long n_out = (2 * n * L + M) / (2 * M);
+    double fc = 0.47843592, beta = 13.04003601, half = 194.5 / 2;  // chordnet::soxr_hq_kernel
+    for (const Fit & f : fits)
+        if (f.L == L && f.M == M) {
+            fc   = f.fc;
+            beta = f.beta;
+            half = f.half;
+        }
+    const bool   down = L < M;
+    const double unit = (double) std::max(L, M), gain = down ? (double) L / M : 1.0, i0b = chordnet::bessel_i0(beta);
+    auto kern = [&](double t) {  // in units of the lower rate's samples
+        if (std::fabs(t) > half) return 0.0;
+        const double u = t / half, w = chordnet::bessel_i0(beta * std::sqrt(std::max(0.0, 1.0 - u * u))) / i0b, a = 2.0 * fc * t;
+        return 2.0 * fc * (a == 0.0 ? 1.0 : std::sin(M_PI * a) / (M_PI * a)) * w;
+    };
+    const int           K = (int) std::ceil(half * unit / L) + 1;
+    std::vector<double> tab((size_t) L * (2 * K + 1));
+    for (long long p = 0; p < L; p++)
+        for (int d = -K; d <= K; d++) tab[(size_t) p * (2 * K + 1) + d + K] = gain * kern((p + (double) d * L) / unit);
+    std::vector<float> y((size_t) n_out, 0.0f);
+    Average::frames(0, (int) n_out, [&](int m0, int m1) {
+        for (long long m = m0; m < m1; m++) {
+            const long long pos = m * M, k0 = pos / L, p = pos % L;
+            const double *  t   = &tab[(size_t) p * (2 * K + 1)];
+            double          acc = 0.0;
+            for (int d = -K; d <= K; d++) {
+                const long long k = k0 - d;
+                if (k >= 0 && k < n) acc += t[d + K] * x[(size_t) k];
+            }
+            y[(size_t) m] = (float) acc;
+        }
+    });
+    return y;
 }
 
 // soxr.resample(y, SR, SR / r, quality="HQ"): plays the audio r times faster. Arbitrary ratio, the fitted soxr

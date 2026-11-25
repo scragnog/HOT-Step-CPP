@@ -130,7 +130,7 @@ static bool read_config(Model & m, const std::string & path) {
         o.absorb = num(dc, "absorb", o.absorb);
         o.absorb_fraction = num(dc, "absorb_frac", o.absorb_fraction);
         // the window layout this port implements (24 s windows, 25.5 s of audio)
-        ok = m.window_s == 24.0 && m.max_notes > 0;
+        ok = m.window_s == 24.0 && m.window_hop > 0 && m.window_hop <= 1 && m.max_notes > 0;  // a hop of 0 would never advance
     }
     if (!ok) fprintf(stderr, "[dettato] %s: not the dettato 2.0 grouper configuration\n", path.c_str());
     yyjson_doc_free(doc);

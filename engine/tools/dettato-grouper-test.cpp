@@ -141,7 +141,7 @@ int main(int argc, char ** argv) {
             double     dm = 0;
             size_t     codes_off = 0, codes_far = 0, sc_off = 0;
             if (same_n) {
-                for (size_t i = 0; i < meta.size(); i++) dm = std::max(dm, (double) std::fabs(meta[i] - f.meta[i]));
+                for (size_t i = 0; i < meta.size(); i++) dm = std::isfinite(meta[i]) && std::isfinite(f.meta[i]) ? std::max(dm, (double) std::fabs(meta[i] - f.meta[i])) : INFINITY;
                 for (size_t i = 0; i < feat.size(); i++) {
                     const int d = std::abs((int) feat[i] - (int) f.feat[i]);
                     codes_off += d > 0;
@@ -149,7 +149,7 @@ int main(int argc, char ** argv) {
                 }
                 for (size_t i = 0; i < fsc.size(); i++) {
                     const int d = std::abs((int) fsc[i] - (int) f.fsc[i]);  // same sign: float16 steps
-                    sc_off += d > 1;
+                    sc_off += d > 1 || !std::isfinite(ggml_fp16_to_fp32(fsc[i])) || !std::isfinite(ggml_fp16_to_fp32(f.fsc[i]));
                 }
             }
             std::printf("gather: %d notes (oracle %zu), meta max abs %.3g, int8 codes off %zu (beyond +-1: %zu) of %zu, scales beyond one step %zu\n",
@@ -190,14 +190,17 @@ int main(int argc, char ** argv) {
                 const auto r = read_binary<float>(rd / name);
                 if (r.size() != v.size()) return (double) INFINITY;
                 double d = 0;
-                for (size_t i = 0; i < r.size(); i++) d = std::max(d, (double) std::fabs(r[i] - v[i]));
+                for (size_t i = 0; i < r.size(); i++) d = std::isfinite(r[i]) && std::isfinite(v[i]) ? std::max(d, (double) std::fabs(r[i] - v[i])) : INFINITY;
                 return d;
             };
             auto gap16 = [&](const char * name, const std::vector<ggml_fp16_t> & v) {
                 const auto r = read_binary<ggml_fp16_t>(rd / name);
                 if (r.size() != v.size()) return (double) INFINITY;
                 double d = 0;
-                for (size_t i = 0; i < r.size(); i++) d = std::max(d, (double) std::fabs(ggml_fp16_to_fp32(r[i]) - ggml_fp16_to_fp32(v[i])));
+                for (size_t i = 0; i < r.size(); i++) {
+                    const float a = ggml_fp16_to_fp32(r[i]), b = ggml_fp16_to_fp32(v[i]);
+                    d = std::isfinite(a) && std::isfinite(b) ? std::max(d, (double) std::fabs(a - b)) : INFINITY;
+                }
                 return d;
             };
             const auto wc = read_binary<int64_t>(rd / "grouper.win.count.bin");

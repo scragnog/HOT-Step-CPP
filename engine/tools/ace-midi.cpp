@@ -2867,16 +2867,6 @@ struct DettatoCapture {
     }
 };
 
-// soxr's output length round(n * out / in), filled by ChordNet's soxr-HQ resampler.
-static std::vector<float> dettato_to_16k(const std::vector<float> & mono, int sr) {
-    using dettato::transcriber::SR;
-    if (sr == SR) return mono;
-    std::vector<float> y = chordnet::resample(mono, sr, SR, false);
-    const long long    g = std::gcd((long long) sr, (long long) SR), L = SR / g, M = sr / g, n = (long long) mono.size();
-    y.resize((size_t) ((2 * n * L + M) / (2 * M)));
-    return y;
-}
-
 struct DettatoTrack {
     std::string                                   name;     // upstream's instrument name, spaces for underscores
     int                                           program;  // upstream's General MIDI program
@@ -2925,7 +2915,7 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
         mono    = load_audio_mono(audio_path, &sr);
         seconds = (double) mono.size() / sr;
         if (!beat_model.empty() && !run_beats(beat_model, mono, sr, &tr)) return 1;
-        x16 = dettato_to_16k(mono, sr);
+        x16 = to_16k(mono, sr);
         tu  = estimate_tuning(x16);
         y   = tu.shift_cents != 0 ? retune_resample(x16, tu.ratio) : x16;
     }
