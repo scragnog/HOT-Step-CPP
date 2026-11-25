@@ -23,7 +23,7 @@ import { LEAD, ix } from '../model/index.ts';
 import { useDesk } from '../store/desk.ts';
 import { deskFold } from '../store/fold.ts';
 import { mtime, reduced } from '../kit/motion.ts';
-import { flushPack } from '../desk/layout.ts';
+import { deferPack, flushPack } from '../desk/layout.ts';
 
 const ANCHORS = '#bento > .tile[data-m], .lyr-card';
 const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
@@ -78,14 +78,16 @@ const PARTS: [string, (el: HTMLElement) => string, string | ((el: HTMLElement) =
   ['.latest', () => 'vt-latest', 'swap'],
 ];
 /** Names every part for the transition (on), or takes every name off. A part not drawn has no name; a name is given
- *  once. */
+ *  once. Whether each is drawn is read before any is named: a name restyles its part, and a read after it would have
+ *  the page restyled again, once a part. */
 function nameForMorph(on: boolean): void {
   const used = new Set<string>();
-  for (const [sel, name, cls] of PARTS) document.querySelectorAll<HTMLElement>(sel).forEach(el => {
-    const n = on && el.getClientRects().length ? name(el) : '';
-    if (!n || used.has(n)) { el.style.removeProperty('view-transition-name'); el.style.removeProperty('view-transition-class'); return; }
+  const parts = PARTS.flatMap(([sel, name, cls]) => [...document.querySelectorAll<HTMLElement>(sel)].map(el => ({ el, name, cls, drawn: on && el.getClientRects().length > 0 })));
+  for (const { el, name, cls, drawn } of parts) {
+    const n = drawn ? name(el) : '';
+    if (!n || used.has(n)) { el.style.removeProperty('view-transition-name'); el.style.removeProperty('view-transition-class'); continue; }
     used.add(n); el.style.setProperty('view-transition-name', n); el.style.setProperty('view-transition-class', typeof cls === 'function' ? cls(el) : cls);
-  });
+  }
 }
 
 let seq = 0;
@@ -100,8 +102,9 @@ export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; 
   const s = useDesk.getState();
   if (s.desk.tier === t) { if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true }); return; }
   const was = new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles), keep = deskAnchor();
-  /* drawn and laid out now, so the anchor is put back before the page is painted */
-  const go = () => { flushSync(() => useDesk.getState().setTier(t)); flushPack(); keep(); };
+  /* drawn and laid out now, so the anchor is put back before the page is painted; the desk is laid out once, after the
+     parts' own effects have run */
+  const go = () => { deferPack(() => flushSync(() => useDesk.getState().setTier(t))); flushPack(); keep(); };
   const after = () => {
     if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
     if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods, deskFold.get()).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }

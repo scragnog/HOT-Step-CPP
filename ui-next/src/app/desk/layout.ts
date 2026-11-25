@@ -62,15 +62,18 @@ const observed = new WeakMap<HTMLElement, MutationObserver>();
 /* a change inside a tile (React drew it again, a part set a size) marks the tile. Not: a change of the tile's own
    attributes (the layout's style and classes, a drag's marks: what of them a measurement depends on is the tile's look,
    lookOf); the desk's children coming and going (a new element is measured as new); the board's cables, drawn over it;
-   a style set back to what it was, or changed only in what names it for the tier change (view-transition-*) */
+   a style set back to what it was (by the first of the records about it: a box measured at another size for a moment
+   and set back leaves two), or changed only in what names it for the tier change (view-transition-*) */
 const VT_DECL = /view-transition-[a-z]+:[^;]*;?/g;
 const sameStyle = (a: string | null, b: string | null) => (a ?? '').replace(VT_DECL, '').trim() === (b ?? '').replace(VT_DECL, '').trim();
 function noteMutations(g: HTMLElement, rs: MutationRecord[]): void {
+  const was = new Map<Node, string | null>();
+  for (const r of rs) if (r.type === 'attributes' && r.attributeName === 'style' && !was.has(r.target)) was.set(r.target, r.oldValue);
   for (const r of rs) {
     if (r.target === g) continue;
     const t = tileOf(g, r.target); if (!t) continue;
     if (r.type === 'attributes' && r.target === t) { placed.add(t); continue; }
-    if (r.type === 'attributes' && r.attributeName === 'style' && sameStyle(r.oldValue, (r.target as Element).getAttribute('style'))) continue;
+    if (r.type === 'attributes' && r.attributeName === 'style' && sameStyle(was.get(r.target)!, (r.target as Element).getAttribute('style'))) continue;
     if (stale.has(t) || (r.target as Element).closest?.('.cables') || r.target.parentElement?.closest('.cables')) continue;
     stale.add(t);
   }
@@ -93,8 +96,8 @@ let fontGen = 0;
 function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (t: HTMLElement, nat: number) => number[], geo: string, ks: Map<string, Kept>): void {
   tally('measure'); tally('measure.tiles', need.length);
   const rows = (h: number) => Math.max(1, Math.ceil((h + PACK_GAP) / PACK_ROW));
-  g.classList.add('measuring');
   need.forEach(t => { t.style.gridColumn = ''; t.style.gridRow = ''; t.classList.remove('stretched', 'widened', 'narrowed'); wrote.delete(t); });
+  const end = measuring(g);
   const nat = need.map(t => { const cs = getComputedStyle(t), e = cs.gridColumnEnd, sp = [cs.gridColumnStart, e].find(v => /^span/.test(v)); return e === '-1' ? cols : sp ? Math.min(cols, parseInt(sp.slice(5)) || 1) : 1; });
   const ws = need.map((t, i) => widths(t, nat[i]!));
   tally('measure.layouts');
@@ -107,8 +110,22 @@ function measureAll(g: HTMLElement, need: HTMLElement[], cols: number, widths: (
     need.forEach((t, i) => { if (ws[i]![j]) hs[i]![j] = rows(t.offsetHeight); });
     set.forEach(t => { t.style.gridColumn = ''; t.classList.remove('narrowed', 'widened'); });
   }
-  g.classList.remove('measuring');
+  end();
   need.forEach((t, i) => { ks.set(packKey(t), { el: t, look: lookOf(t), geo, nat: nat[i]!, hs: new Map(ws[i]!.map((w, j) => [w, hs[i]![j]!])) }); stale.delete(t); });
+}
+
+/** Stands the desk's children as the concept's `.bento.measuring > *` does (each at its own height, its row end free)
+ *  until the function it returns puts back what they had. Written on the children, not as the class on the desk: a class
+ *  on the desk restyles everything in it (its :has rules), 14 ms each way on a full desk. */
+function measuring(g: HTMLElement): () => void {
+  const kids = [...g.children].filter((k): k is HTMLElement => k instanceof HTMLElement);
+  const had = kids.map(k => [k.style.getPropertyValue('align-self'), k.style.getPropertyPriority('align-self'), k.style.getPropertyValue('grid-row-end'), k.style.getPropertyPriority('grid-row-end')] as const);
+  kids.forEach(k => { k.style.setProperty('align-self', 'start'); k.style.setProperty('grid-row-end', 'auto', 'important'); });
+  return () => kids.forEach((k, i) => {
+    const [a, ap, e, ep] = had[i]!;
+    if (a) k.style.setProperty('align-self', a, ap); else k.style.removeProperty('align-self');
+    if (e) k.style.setProperty('grid-row-end', e, ep); else k.style.removeProperty('grid-row-end');
+  });
 }
 
 /** The widths a tile may take (its own first), as the concept's deskMeasure offers them. */
@@ -177,11 +194,22 @@ const solve = (C: number, items: PackItem[]): Layout => { const k = itemsKey(C, 
 /** The desk's make-up: what, when it changes, makes the layout choose its widths afresh. */
 export const deskMake = (tier: string, engine: string, mods: string[], qAll: boolean) => [tier, engine, mods.join(), qAll, innerWidth].join('|');
 
-/** A render: note whether the make-up changed (a fresh layout), then place the tiles. */
+/** A render: note whether the make-up changed (a fresh layout), then place the tiles (or, while `deferPack` runs,
+ *  leave them for flushPack). */
 export function renderPack(make: string): void {
   if (make !== packMake) packFresh = performance.now();
   packMake = make;
+  if (deferring) { deferred = make; return; }
   packNow(make);
+}
+/* the make-up a render left for flushPack */
+let deferring = false, deferred: string | null = null;
+/** Runs fn (a drawing of the desk) with the layout left for flushPack: the desk is then measured once, after everything
+ *  the drawing set off has run (the parts' own effects, which can change a tile's content), not before them and again
+ *  after (a tier change). */
+export function deferPack(fn: () => void): void {
+  deferring = true;
+  try { fn(); } finally { deferring = false; }
 }
 
 /** Places every tile. `keep`: keep the widths chosen for this same desk (a content change). Writes only what changed. */
@@ -228,7 +256,11 @@ export function packSoon(make: () => string, content: boolean): void {
   if (!raf) raf = requestAnimationFrame(() => { raf = 0; slidePack(() => packNow(...pend)); });
 }
 /** A re-pack waiting for the next frame runs now (a tier change lays the desk out inside its transition). */
-export function flushPack(): void { if (!raf) return; cancelAnimationFrame(raf); raf = 0; packNow(...pend); }
+export function flushPack(): void {
+  const make = deferred; deferred = null;
+  if (raf) { cancelAnimationFrame(raf); raf = 0; if (make === null) { packNow(...pend); return; } }
+  if (make !== null) packNow(make);
+}
 /** The desk laid out now for what its tiles hold now (a tile that grew since the last pack, before the ResizeObserver
  *  has said so): the desk's own transition measures where things end only once they are there. */
 export function settlePack(): void { if (raf) { flushPack(); return; } if (packMake) packNow(packMake); }
