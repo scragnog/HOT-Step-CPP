@@ -89,15 +89,19 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 
 ## Preview SoundFont
 
-Download **GeneralUser GS 2.0.3 SoundFont** in **Model Manager → Shared → MIDI Transcription**.
-MIDI Studio uses it for instrument and drum sounds in both live and finished previews.
-The preview uses oscillator sounds while the bank loads or when it is unavailable.
+Download a bank in **Model Manager → Shared → MIDI Transcription**. **Preview SoundFont**
+in MIDI Studio and **Settings → General → MIDI Studio** share the same choice. You can
+switch during playback. The current sound plays until the new bank loads.
 
-To use your own General MIDI bank, open **Settings → General → MIDI Studio** and choose
-a `.sf2` or `.sf3` file. The browser keeps the file on this device. **Use default** removes
-that selection. Open a preview after changing the bank.
+Use **Choose SoundFont…** to add your own General MIDI `.sf2` or `.sf3`. The browser
+keeps the file on this device, so you can switch back to it later. If the selected bank
+is missing, the picker shows a message and the preview falls back to GeneralUser GS
+when installed, or to oscillator sounds.
 
-GeneralUser GS by S. Christian Collins uses the [GeneralUser GS License v2.0](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/LICENSE.txt).
+- GeneralUser GS 2.0.3 by S. Christian Collins is the default bank. [GeneralUser GS License v2.0](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/LICENSE.txt)
+- FluidR3 GM by Frank Wen and contributors is a 148 MB stereo SF2. [MIT licence](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/FluidR3_COPYING.txt) · [Original credits](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/FluidR3_README.txt)
+- FluidR3 Mono GM 2.312 by Michael Cowgill is a 14.6 MB compressed mono SF3 based on Frank Wen's FluidR3, with percussion from Ethan Winer and Michael Schorsch. [MIT licence and credits](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/FluidR3Mono_License.md)
+
 Playback uses [SpessaSynth](https://github.com/spessasus/spessasynth_lib), licensed under Apache 2.0.
 
 ## Tips and limits

@@ -27,6 +27,7 @@ import {
   type MuscriptorModel, type MidiModel,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
+import { MidiSoundFontPicker } from './MidiSoundFontPicker';
 import { MidiExportPanel } from './MidiExportPanel';
 import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { Toggle } from '@/components/shared/controls/Toggle';
@@ -513,6 +514,7 @@ export const MidiStudio: React.FC = () => {
         {/* ── Transcriptions list ── */}
         <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4">
           <div className="text-sm font-semibold text-zinc-900 dark:text-white mb-3">{t('midiStudio.transcriptions')}</div>
+          <div className="mb-3"><MidiSoundFontPicker /></div>
           {jobs.length === 0 && (
             <div className="text-xs text-zinc-400 dark:text-zinc-500 py-2">{t('midiStudio.noJobs')}</div>
           )}
