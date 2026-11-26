@@ -142,6 +142,14 @@ computed at 44.1 and 16 kHz. The kit and orchestral models run on the CPU,
 with song-level attention and a per-song router. Drum frame numbers are
 at 50 fps.
 
+The kit network and the three orchestral experts run side by side, each on
+its own GGML CPU backend with a quarter of the threads, and each network's
+512-frame stem tiles run side by side on one-thread backends. No op's
+result depends on its thread count and the experts are summed in their
+fixed order, so the probabilities are bit for bit those of a serial run.
+On a Ryzen 9 9950X3D the drum stage in `ace-midi` takes 4.7 s for a 90 s
+song (16.1 s with the networks run in turn) and 13.5 s for a 260 s song.
+
 Build the standalone dettato-drums-test target and pass a model directory,
 fixture WAV and CPU capture directory from the
 [Dettato reference](../../tools/dettato-reference/README.md).

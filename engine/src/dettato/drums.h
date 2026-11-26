@@ -8,8 +8,11 @@
 #include <array>
 #include <functional>
 #include <filesystem>
+#include <exception>
 #include <limits>
+#include <mutex>
 #include <optional>
+#include <thread>
 
 namespace dettato::drums {
 
@@ -239,18 +242,24 @@ struct DrumNet {
 
     KitOutput forward(const Cpu & cpu, const Data & features, int frames) const {
         // Even tile boundaries keep the 2x pool on the song grid. The margins
-        // exceed the stem's temporal receptive field.
+        // exceed the stem's temporal receptive field. Tiles are independent, so
+        // they run side by side, each on a one-thread backend: the stem's ops
+        // are too small for ggml's own threads to pay.
         constexpr int chunk = 512, margin = 64;
         const int n = frames / 2;
         Data h(size_t(n) * width);
-        for (int s = 0; s < frames; s += chunk) {
-            const int a = std::max(0, s - margin);
-            const int end = std::min(s + chunk, frames);
-            const int b = std::min(end + margin, frames);
-            const auto x = embed(cpu, features.data() + size_t(a) * feature_bands, b - a);
-            std::copy_n(x.data() + size_t((s - a) / 2) * width, size_t((end - s) / 2) * width,
-                        h.data() + size_t(s / 2) * width);
-        }
+        cpu.parallel((frames + chunk - 1) / chunk, [&](int first, int last) {
+            const Cpu one(1);
+            for (int i = first; i < last; ++i) {
+                const int s = i * chunk;
+                const int a = std::max(0, s - margin);
+                const int end = std::min(s + chunk, frames);
+                const int b = std::min(end + margin, frames);
+                const auto x = embed(one, features.data() + size_t(a) * feature_bands, b - a);
+                std::copy_n(x.data() + size_t((s - a) / 2) * width, size_t((end - s) / 2) * width,
+                            h.data() + size_t(s / 2) * width);
+            }
+        });
         Data conv(h.size());
         cpu.parallel(n, [&](int first, int end) {
             for (int t = first; t < end; ++t) {
@@ -452,19 +461,54 @@ public:
         Probabilities p;
         p.frames = int(feats.size() / (2 * feature_bands));
         if (p.frames == 0) return p;
-        detail::Cpu cpu(threads);
-        const auto kit = kit_.forward(cpu, feats, 2 * p.frames);
+        // The kit network and the three experts are independent, and one network stops scaling at about four
+        // threads, so they run side by side, each on its own CPU backend with a share of the threads. No op's result
+        // depends on its thread count and the experts are summed in their fixed order: the output is bit for bit a
+        // serial run's.
+        const size_t n = size_t(p.frames) * drum_keys;
+        const int share = std::max(1, threads / int(1 + experts_.size()));
+        std::array<Probabilities, std::tuple_size_v<decltype(experts_)>> part;
+        std::array<float, std::tuple_size_v<decltype(experts_)>> gate{};
+        detail::KitOutput kit;
+        std::mutex lock;
+        std::exception_ptr error;
+        const auto job = [&](auto fn) {
+            return [&, fn] {
+                try {
+                    detail::Cpu cpu(share);
+                    fn(cpu);
+                    std::lock_guard<std::mutex> g(lock);
+                    if (network_done && !error) network_done();
+                } catch (...) {
+                    std::lock_guard<std::mutex> g(lock);
+                    if (!error) error = std::current_exception();
+                }
+            };
+        };
+        std::vector<std::thread> pool;
+        pool.emplace_back(job([&](const detail::Cpu & cpu) { kit = kit_.forward(cpu, feats, 2 * p.frames); }));
+        for (size_t e = 0; e < experts_.size(); ++e) {
+            pool.emplace_back(job([&, e](const detail::Cpu & cpu) {
+                part[e].drum.resize(n);
+                part[e].vel.resize(n);
+                part[e].timpani.resize(size_t(p.frames) * timpani_keys);
+                gate[e] = experts_[e].forward(cpu, feats, 2 * p.frames, part[e]);
+            }));
+        }
+        for (auto & t : pool) t.join();
+        if (error) std::rethrow_exception(error);
         p.kit.resize(kit.onset.size());
         p.kit_vel.resize(kit.velocity.size());
         std::transform(kit.onset.begin(), kit.onset.end(), p.kit.begin(), cpu_gru::sigmoid);
         std::transform(kit.velocity.begin(), kit.velocity.end(), p.kit_vel.begin(), cpu_gru::sigmoid);
-        p.drum.resize(p.kit.size());
-        p.vel.resize(p.kit.size());
+        p.drum.resize(n);
+        p.vel.resize(n);
         p.timpani.resize(size_t(p.frames) * timpani_keys);
-        if (network_done) network_done();
-        for (const auto & expert : experts_) {
-            p.router += expert.forward(cpu, feats, 2 * p.frames, p);
-            if (network_done) network_done();
+        for (size_t e = 0; e < experts_.size(); ++e) {
+            p.router += gate[e];
+            detail::add(p.drum, part[e].drum);
+            detail::add(p.vel, part[e].vel);
+            detail::add(p.timpani, part[e].timpani);
         }
         p.router /= double(experts_.size());
         for (auto * tensor : {&p.drum, &p.vel, &p.timpani}) {

@@ -7,8 +7,10 @@
 #include "ggml-backend.h"
 
 #include <algorithm>
+#include <exception>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 
@@ -58,15 +60,25 @@ struct Cpu {
         if (set_threads) set_threads(backend.get(), threads);
     }
 
+    // fn(first, end) over [0, count) in contiguous slices; the first exception any slice throws is rethrown here.
     template <class Fn>
     void parallel(int count, Fn fn) const {
         const int workers = std::min(count, threads);
         std::vector<std::thread> pool;
-        for (int i = 1; i < workers; ++i) {
-            pool.emplace_back([&, i] { fn(i * count / workers, (i + 1) * count / workers); });
-        }
-        if (workers) fn(0, count / workers);
+        std::mutex lock;
+        std::exception_ptr error;
+        const auto slice = [&](int i) {
+            try {
+                fn(i * count / workers, (i + 1) * count / workers);
+            } catch (...) {
+                std::lock_guard<std::mutex> g(lock);
+                if (!error) error = std::current_exception();
+            }
+        };
+        for (int i = 1; i < workers; ++i) pool.emplace_back(slice, i);
+        if (workers) slice(0);
         for (auto & worker : pool) worker.join();
+        if (error) std::rethrow_exception(error);
     }
 };
 
@@ -230,21 +242,21 @@ struct Conv {
             auto * ctx = graph.context.get();
             auto * input = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, x.f, span, in);
             auto * weight = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, kf, kt, in, out);
-            auto * bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, out);
+            auto * bias = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, out);
             auto * windows = ggml_im2col(ctx, weight, input, 1, stride, pf, 0, 1, 1, true, GGML_TYPE_F32);
-            auto * res = ggml_mul_mat(ctx, ggml_reshape_2d(ctx, weight, cols, out),
-                                     ggml_reshape_2d(ctx, windows, cols, count * x.f));
+            // Windows first: the product comes out [out][count * bands], each channel's tile already in the
+            // Image layout, so it copies straight in.
+            auto * res = ggml_mul_mat(ctx, ggml_reshape_2d(ctx, windows, cols, count * x.f),
+                                     ggml_reshape_2d(ctx, weight, cols, out));
             res = ggml_add(ctx, res, bias);
             Data block(size_t(count) * x.f * out);
             graph.run(res, {{input, part.data.data()}, {weight, w.data()}, {bias, b.data()}}, block.data());
-            for (int t = 0; t < count; ++t) {
-                for (int c = 0; c < out; ++c) {
-                    float * dst = y.row(c, start + t);
-                    for (int f = 0; f < x.f; ++f) {
-                        const float value = block[(size_t(t) * x.f + f) * out + c];
-                        dst[f] = activate ? silu(value) : value;
-                    }
-                }
+            const size_t area = size_t(count) * x.f;
+            for (int c = 0; c < out; ++c) {
+                const float * src = block.data() + c * area;
+                float * dst = y.row(c, start);
+                if (activate) std::transform(src, src + area, dst, silu);
+                else std::copy_n(src, area, dst);
             }
         }
         return y;
