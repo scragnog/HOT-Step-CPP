@@ -13,7 +13,10 @@ export interface PlayNote {
   pitch: number;      // MIDI 0-127
   start: number;      // seconds
   duration: number;   // seconds
-  family: string;     // instrument family key ('drums' special-cased)
+  family: string;     // playback track key ('drums' special-cased)
+  velocity?: number;
+  program?: number;
+  voice?: string;
 }
 
 const LOOKAHEAD_S = 0.35;   // schedule window
@@ -238,19 +241,21 @@ export class MidiSynth {
       const when = Math.max(this.ctx.currentTime, ctxBase + note.start);
       const remaining = duration - (resumeHeldNotes ? elapsed : 0);
       if (this.soundFont) {
-        this.soundFont.play(note.family, note.pitch, when, remaining, this.familyAudible.get(note.family) !== false);
+        this.soundFont.play(note.family, note.pitch, note.velocity ?? 100, when, remaining,
+          this.familyAudible.get(note.family) !== false, note.program);
       } else if (note.family.toLowerCase() === 'drums') this.playDrum(note, when);
       else this.playTone(note, when, remaining);
     }
   }
 
   private playTone(n: PlayNote, when: number, duration: number): void {
-    const v = voiceForFamily(n.family);
+    const v = voiceForFamily(n.voice ?? n.family);
+    const gain = VOICE_GAIN * (n.velocity ?? 100) / 127;
     const g = this.ctx.createGain();
     g.connect(this.gainForFamily(n.family));
     g.gain.setValueAtTime(0, when);
-    g.gain.linearRampToValueAtTime(VOICE_GAIN, when + v.attack);
-    g.gain.setTargetAtTime(VOICE_GAIN * v.sustain, when + v.attack, 0.08);
+    g.gain.linearRampToValueAtTime(gain, when + v.attack);
+    g.gain.setTargetAtTime(gain * v.sustain, when + v.attack, 0.08);
     const end = when + duration;
     g.gain.setTargetAtTime(0, end, v.release / 3);
 
@@ -278,6 +283,7 @@ export class MidiSynth {
 
   private playDrum(n: PlayNote, when: number): void {
     const p = n.pitch;
+    const gain = VOICE_GAIN * (n.velocity ?? 100) / 127;
     const g = this.ctx.createGain();
     g.connect(this.gainForFamily(n.family));
 
@@ -287,7 +293,7 @@ export class MidiSynth {
       o.type = 'sine';
       o.frequency.setValueAtTime(120, when);
       o.frequency.exponentialRampToValueAtTime(45, when + 0.09);
-      g.gain.setValueAtTime(VOICE_GAIN * 2.2, when);
+      g.gain.setValueAtTime(gain * 2.2, when);
       g.gain.setTargetAtTime(0, when + 0.02, 0.05);
       o.connect(g);
       o.start(when);
@@ -305,7 +311,7 @@ export class MidiSynth {
     filt.frequency.value = isHat ? 7000 : isSnare ? 2200 : 900 + (p % 12) * 220;
     filt.Q.value = isHat ? 0.8 : 1.2;
     const len = isHat ? 0.05 : isSnare ? 0.14 : 0.1;
-    g.gain.setValueAtTime(VOICE_GAIN * (isHat ? 1.0 : 1.7), when);
+    g.gain.setValueAtTime(gain * (isHat ? 1.0 : 1.7), when);
     g.gain.setTargetAtTime(0, when + 0.005, len / 3);
     src.connect(filt);
     filt.connect(g);

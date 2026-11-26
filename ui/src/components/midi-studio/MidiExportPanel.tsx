@@ -6,12 +6,11 @@
 // The options are MuScriptor v0.4's export options (ace-midi --help).
 
 import React, { useState } from 'react';
-import { Copy, Download, Loader2, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Download, Loader2, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { midiJobsOptions, midiNotesOptions } from '@/queries/studios/midi';
-import { queryManager } from '@/queries/invalidation';
-import { channelLabel, exportMidi, getMidiAbc, type MidiExportOptions } from '@/services/midiStudioApi';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { midiNotesOptions } from '@/queries/studios/midi';
+import { channelLabel, getMidiAbc, type MidiExportOptions, type MidiGrid } from '@/services/midiStudioApi';
 import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { StyledSelect } from '@/components/shared/controls/StyledSelect';
 import { Toggle } from '@/components/shared/controls/Toggle';
@@ -21,27 +20,56 @@ import { formatDecimal } from '@/utils/format/format';
 
 interface Props {
   jobId: string;
-  /** options the MIDI was last exported with */
-  initial?: MidiExportOptions;
+  applied: MidiExportOptions;
+  apply: (next: MidiExportOptions, onSuccess?: () => void) => void;
+  busy: boolean;
 }
 
 const input = 'w-full px-2.5 py-1.5 rounded-lg text-xs bg-zinc-100 dark:bg-black/30 border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white placeholder-zinc-400 outline-none focus:border-purple-500/40';
 
-export const MidiExportPanel: React.FC<Props> = ({ jobId, initial }) => {
+export function MidiDownbeatShift({ grid, busy, onShift }: {
+  grid: MidiGrid;
+  busy: boolean;
+  onShift: (downbeat: number) => void;
+}) {
   const { t } = useTranslation();
-  const client = useQueryClient();
+  const period = 60 / grid.bpm;
+  const anchor = grid.firstDownbeat ?? (grid.bars[0] ?? grid.beats[0] ?? 0) - grid.onsetDelay;
+  const shift = (direction: -1 | 1) => {
+    if (!grid.steady) {
+      // A tempo map needs the adjacent tracked beat, even when the local beat
+      // spacing differs considerably from the song's average BPM.
+      const bar = grid.bars.find(b => {
+        const index = grid.beats.indexOf(b);
+        return index >= 0 && grid.beats[index + direction] !== undefined;
+      });
+      if (bar !== undefined) {
+        onShift(grid.beats[grid.beats.indexOf(bar) + direction] - grid.onsetDelay);
+        return;
+      }
+    }
+    onShift(anchor + direction * period);
+  };
+  return (
+    <div className="mt-3 flex items-center gap-2 text-xs">
+      <ParamLabel label={t('midiStudio.export.downbeat')} info={t('midiStudio.export.downbeatInfo')} />
+      {([-1, 1] as const).map(direction => {
+        const label = t(direction < 0 ? 'midiStudio.export.downbeatEarlier' : 'midiStudio.export.downbeatLater');
+        const Icon = direction < 0 ? ChevronLeft : ChevronRight;
+        return <button key={direction} type="button" disabled={busy} aria-label={label} title={label}
+          className="rounded border border-zinc-200 p-1 hover:text-purple-500 disabled:opacity-50 dark:border-white/10"
+          onClick={() => shift(direction)}><Icon size={15} /></button>;
+      })}
+    </div>
+  );
+}
+
+export const MidiExportPanel: React.FC<Props> = ({ jobId, applied, apply, busy }) => {
+  const { t } = useTranslation();
   const gridQuery = useQuery(midiNotesOptions(jobId));
   const grid = gridQuery.data?.grid;
-  const [opts, setOpts] = useState<MidiExportOptions>(initial ?? {});
-
-  const { mutate: apply, isPending: busy, error: applyError } = useMutation({
-    mutationFn: (next: MidiExportOptions) => exportMidi(jobId, next),
-    onSuccess: (__, next) => {
-      setOpts(next);
-      void queryManager.invalidate(client, midiNotesOptions(jobId).queryKey);
-      void queryManager.invalidate(client, midiJobsOptions().queryKey);
-    },
-  });
+  const [draft, setDraft] = useState<MidiExportOptions>({});
+  const opts = { ...applied, ...draft };
 
   if (!grid) {
     return gridQuery.isError
@@ -49,8 +77,7 @@ export const MidiExportPanel: React.FC<Props> = ({ jobId, initial }) => {
       : null;
   }
 
-  const error = applyError?.message ?? '';
-  const set = (patch: MidiExportOptions) => setOpts(o => ({ ...o, ...patch }));
+  const set = (patch: MidiExportOptions) => setDraft(o => ({ ...o, ...patch }));
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
 
   const summary = [
@@ -101,6 +128,13 @@ export const MidiExportPanel: React.FC<Props> = ({ jobId, initial }) => {
         </div>
       </div>
 
+      {grid.beats.length > 1 && (
+        <MidiDownbeatShift grid={grid} busy={busy}
+          onShift={firstDownbeat => apply({
+            ...applied, firstDownbeat, beatsPerBar: applied.beatsPerBar ?? (grid.beatsPerBar ? undefined : 4),
+          })} />
+      )}
+
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3">
         <Toggle size="sm" accent="purple" checked={!!opts.quantize} onChange={v => set({ quantize: v })}
           label={t('midiStudio.export.quantize')} info={t('midiStudio.export.quantizeInfo')} />
@@ -134,15 +168,16 @@ export const MidiExportPanel: React.FC<Props> = ({ jobId, initial }) => {
       </div>
 
       <div className="flex items-center gap-3 mt-3">
-        <button onClick={() => apply(opts)} disabled={busy}
+        <button onClick={() => apply(opts, () => setDraft({}))} disabled={busy}
           className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 transition-colors flex items-center gap-1.5">
           {busy && <Loader2 size={12} className="animate-spin" />} {t('midiStudio.export.apply')}
         </button>
-        <button onClick={() => apply({})} disabled={busy}
+        <button onClick={() => apply({
+          fullVelocity: applied.fullVelocity, programOverrides: applied.programOverrides,
+        }, () => setDraft({}))} disabled={busy}
           className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:text-purple-600 dark:hover:text-purple-400 border border-zinc-200 dark:border-white/10 transition-colors flex items-center gap-1.5">
           <RotateCcw size={11} /> {t('midiStudio.export.reset')}
         </button>
-        {error && <span className="text-xs text-red-500 dark:text-red-400">{error}</span>}
       </div>
 
       <AbcRow jobId={jobId} />
@@ -159,7 +194,7 @@ const AbcRow: React.FC<{ jobId: string }> = ({ jobId }) => {
   const [ins, setIns] = useState(-1);
   const [chords, setChords] = useState(true);
   const [note, setNote] = useState('');
-  const programs = [...new Set(channels.filter(c => !c.isDrums && c.program !== 52).map(c => c.program))];
+  const programs = [...new Set(channels.filter(c => !c.isDrums).map(c => c.sourceProgram ?? c.program).filter(p => p !== 52))];
 
   const { mutate: makeAbc, isPending: busy, error: abcError } = useMutation({
     mutationFn: async (action: 'copy' | 'save') => {

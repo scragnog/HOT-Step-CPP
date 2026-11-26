@@ -236,8 +236,8 @@ uninitialised already, and graph build plus allocation is about 6% of a decode s
 `ace-midi --beat-model <dir>` runs Beat This! (`tools/beat-this.h`, a GGML port of
 CPJKU's beat and downbeat tracker, MIT weights `final0` as `model.safetensors`) on the
 source audio at its own rate. `tools/midi-grid.h` then fits upstream MuScriptor v0.4's
-grid to the beats: least-squares tempo, meter from downbeat spacing (written as n/4 when
-90% of bars agree), an onset-delay correction, and a tempo map when the beats do not fit
+grid to the beats: least-squares tempo, meter from downbeat spacing (n/4 when
+90% of bars agree, 4/4 when they disagree), an onset-delay correction, and a tempo map when the beats do not fit
 one tempo within 5% of a beat. The MIDI gets a time signature, `set_tempo` in every track,
 and a whole-bar delay so tick 0 is a bar line. Without `--beat-model` the output is the old
 fixed 120 BPM file, byte for byte (`--validate-midi`).
@@ -250,7 +250,8 @@ fixed 120 BPM file, byte for byte (`--validate-midi`).
 | `--beat-scale <2\|0.5\|…>` | Beats per detected beat, a power of two |
 | `--quantize [--grid N] [--quantize-strength x]` | Snap notes to 1/N beat (default: the measured subdivision) |
 | `--fill-gaps <beats>`, `--trim-leading-bars` | Hold notes over short rests; drop empty leading bars |
-| `--export <events.jsonl> --beats-in <beats.json>` | Re-export a transcription with new options; no MuScriptor model loaded |
+| `--export <events.jsonl> [--beats-in <beats.json>]` | Re-export saved notes without loading a transcription model. Supply tracked beats for grid edits. |
+| `--full-velocity` / `--program-override <source:target>` | Write note-ons at velocity 127 or replace a track's program change. Programs are zero-based. Repeat the program flag for multiple tracks. Both options work for re-export and for Dettato's initial MIDI. |
 | `--abc-out <file> [--abc-ins <program>] [--abc-melody-only]` | Also write a YuE2 two-voice ABC lead sheet (`tools/midi-abc.h`) through SheetSage2's notation stage: voice notes → Vocal, one instrument's top line → Ins, a Krumhansl key estimate and half-bar template chords, notes pre-snapped to the 4-per-beat subbeat grid. Prints a `{"type":"abc",...}` summary line |
 | `--track <audio>` | Beats and grid only (needs `--beat-model` and `--beats-out`) |
 | `--self-test-grid` | Grid maths on synthetic beats with known answers |
@@ -646,8 +647,9 @@ repairer, the grouper and the drums. Before those, after every trunk batch, `--j
 the frames every window has already covered, minus the last 0.5 s, which the next batch can
 still change. Times are on the source's clock. They are a preview only: `note_start` and
 `note_end` lines, the MIDI and every later stage are byte-identical to a run without them, and
-MIDI Studio keeps them out of `events.jsonl`. The MIDI itself still uses velocity 100. The tempo,
-grid, `--export` and ABC options work as for MuScriptor.
+MIDI Studio keeps them out of `events.jsonl`. The MIDI normally uses Dettato's note velocities.
+Velocity and program overrides apply in the MIDI writer, after final note events are emitted.
+The tempo, grid, `--export` and ABC options work as for MuScriptor.
 
 `--dettato-capture <dir>` writes, in the layout of `tools/dettato-reference` captures, the
 six maps, the every-4 s sub-run maps, the float16 `hidden` and `stem` taps, both note

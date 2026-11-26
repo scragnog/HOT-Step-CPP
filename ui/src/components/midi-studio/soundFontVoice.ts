@@ -5,7 +5,7 @@ import { CUSTOM_SOUND_FONT, DEFAULT_SOUND_FONT, DEFAULT_SOUND_FONT_ID, libraryBa
 const DRUM_CHANNEL = 9;
 const EXPRESSION = 11;
 
-// Completed jobs use the GM family label. Live jobs use ace-midi's instrument name.
+// Live jobs identify instruments by name; completed jobs supply the exact GM program.
 const PROGRAMS: ReadonlyMap<string, number> = new Map(Object.entries({
   piano: 0, acoustic_piano: 0, electric_piano: 2,
   'chromatic perc.': 8, chromatic_percussion: 8, organ: 16,
@@ -28,6 +28,7 @@ function programForFamily(family: string): number {
 
 export class SoundFontVoice {
   private channels = new Map<string, number>();
+  private programs = new Map<number, number>();
   private nextChannel = 0;
   private channelCount = 16;
   private timers = new Set<number>();
@@ -107,7 +108,6 @@ export class SoundFontVoice {
       this.channelCount++;
     }
     this.channels.set(key, channel);
-    this.synth.programChange(channel, programForFamily(key));
     this.setFamilyAudible(family, audible);
     return channel;
   }
@@ -117,10 +117,19 @@ export class SoundFontVoice {
     if (channel !== undefined) this.synth.controllerChange(channel, EXPRESSION, audible ? 127 : 0);
   }
 
-  play(family: string, pitch: number, when: number, duration: number, audible: boolean): void {
+  play(family: string, pitch: number, velocity: number, when: number, duration: number, audible: boolean, program?: number): void {
     const channel = this.channelFor(family, audible);
+    const patch = channel === DRUM_CHANNEL ? 0
+      : program !== undefined && program >= 0 && program <= 127 ? program
+      : programForFamily(family.toLowerCase());
     // Keep pending events cancellable when the transport pauses or seeks.
-    this.schedule(when, () => this.synth.noteOn(channel, pitch, 80));
+    this.schedule(when, () => {
+      if (this.programs.get(channel) !== patch) {
+        this.synth.programChange(channel, patch);
+        this.programs.set(channel, patch);
+      }
+      this.synth.noteOn(channel, pitch, velocity);
+    });
     this.schedule(when + duration, () => this.synth.noteOff(channel, pitch));
   }
 

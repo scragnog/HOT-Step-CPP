@@ -120,6 +120,7 @@ export interface MidiNote {
 export interface MidiChannelInfo {
   channel: number;
   program: number;
+  sourceProgram?: number;
   isDrums: boolean;
   noteCount: number;
 }
@@ -127,11 +128,12 @@ export interface MidiChannelInfo {
 /** The grid a tempo-aware MIDI was written on; times are seconds of the audio. */
 export interface MidiGrid {
   bpm: number;
-  /** 0 when the meter was unclear and no time signature was written */
+  /** 0 for older exports without a time signature or when beat tracking failed */
   beatsPerBar: number;
   /** false: the MIDI follows the performance with a tempo map */
   steady: boolean;
   onsetDelay: number;
+  firstDownbeat?: number;
   subdivision: number;
   audioShift: number;
   beats: number[];
@@ -150,6 +152,8 @@ export interface MidiExportOptions {
   strength?: number;
   fillGaps?: number;
   trimLeadingBars?: boolean;
+  fullVelocity?: boolean;
+  programOverrides?: Record<number, number>;
 }
 
 export interface ParsedMidi {
@@ -170,6 +174,7 @@ export interface TranscribeParams {
   speculative?: boolean;
   /** dettato only: run the evidence repairer (the server defaults it on) */
   repair?: boolean;
+  electricGuitarProgram?: number;
 }
 
 // ── API Functions ────────────────────────────────────────────────────────

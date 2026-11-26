@@ -158,12 +158,13 @@ static bool grid_detect(const std::vector<double> & tracked, const std::vector<d
     *g                = BeatGrid();
     g->bpm            = fit.first;
     g->steady         = fit.second <= GRID_MAX_TEMPO_RESIDUAL * 60.0 / fit.first;
-    g->beats_per_bar  = grid_infer_meter(beats, downbeats);
+    const int meter   = grid_infer_meter(beats, downbeats);
+    g->beats_per_bar  = meter ? meter : 4;
     g->first_downbeat = downbeats.empty() ? beats[0] : downbeats[0];
     g->beats          = beats;
     fprintf(stderr, "[ace-midi] grid: %.3f BPM%s, %s, first downbeat %.3f s (residual %.1f ms)\n", g->bpm,
             g->steady ? "" : " on average, not steady",
-            g->beats_per_bar ? (std::to_string(g->beats_per_bar) + "/4").c_str() : "meter unknown",
+            meter ? (std::to_string(meter) + "/4").c_str() : "assumed 4/4",
             g->first_downbeat, fit.second * 1000.0);
     return true;
 }
@@ -428,6 +429,12 @@ static int grid_self_test() {
     check(g.beats_per_bar == 3, "meter 3");
     check(g.beats.size() == 60, "missed beat restored, extra dropped");
 
+    BeatGrid unsure;
+    check(grid_detect(beats, { beats[0], beats[3], beats[7] }, &unsure) && unsure.beats_per_bar == 4,
+          "conflicting bar lengths default to 4/4");
+    check(grid_detect(beats, {}, &unsure) && unsure.beats_per_bar == 4, "missing downbeats default to 4/4");
+    check(!grid_detect({}, {}, &unsure), "no grid without tracked beats");
+
     // onsets 15 ms late on eighths
     std::vector<double> on;
     for (int i = 0; i < 100; i++) on.push_back(0.37 + i * 0.3 + 0.015);
@@ -441,6 +448,14 @@ static int grid_self_test() {
     Timeline t = grid_timeline(r, 0.0);
     double p = t.beats_at(r.first_downbeat);
     check(fabs(p / 3 - nearbyint(p / 3)) < 1e-9, "downbeat on a bar line");
+    for (int direction : { -1, 1 }) {
+        GridExport shift;
+        shift.has_downbeat = true;
+        shift.first_downbeat = g.first_downbeat + direction * 60.0 / g.bpm;
+        const auto moved = grid_timeline(grid_resolve(&g, shift, on), 0.0);
+        const double bar_phase = grid_pymod(moved.beats_at(g.first_downbeat), 3.0);
+        check(fabs(bar_phase - (direction < 0 ? 1.0 : 2.0)) < 1e-9, "downbeat shift moves bars one beat");
+    }
     auto tc = t.tempo_changes(480);
     check(tc.size() == 1 && tc[0].second == 600000, "one tempo, 600000 us");
 

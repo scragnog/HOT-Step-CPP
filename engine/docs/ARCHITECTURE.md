@@ -1236,6 +1236,22 @@ a lead sheet whose BPM or vocal is rejected: the JSON states why); 1 unreadable 
 model or capture, non-finite logits, or a failed parity row; 2 a YourMT3 mode without
 `--yourmt3-model`, or `--lead-sheet` without its models.
 
+## ace-midi MIDI export
+
+```text
+ace-midi --export <events.jsonl> [--beats-in <beats.json> --beats-out <file>] --out <file.mid>
+         [--first-downbeat <seconds>] [--full-velocity] [--program-override <source:target>]
+```
+
+The saved note events remain the source of the export. The beat file supplies the
+grid for tempo, meter and downbeat edits. The engine assumes 4/4 when it detects a
+beat grid but cannot infer the meter. The first downbeat is in grid seconds
+before the onset-delay correction. The velocity flag writes note-ons at 127.
+Program overrides change the patch for an original zero-based GM program and
+leave its track and channel separate. The flags also work on Dettato's initial
+MIDI. See [the engine guide](../../docs/dev/engine.md#ace-midi-tempo-meter-and-bars)
+for the rest of the grid options.
+
 ## ace-midi dettato reference
 
 dettato: instrument-named tracks and a drum track. It loads no MuScriptor model. Pipeline,

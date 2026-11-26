@@ -16,19 +16,21 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/context/AuthContext';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { midiJobsOptions, midiStatusOptions, removeMidiJob } from '@/queries/studios/midi';
+import { midiJobsOptions, midiNotesOptions, midiStatusOptions, removeMidiJob } from '@/queries/studios/midi';
 import { queryManager } from '@/queries/invalidation';
 import { useStudioSongs } from '@/queries/studios/shared';
 import type { Song } from '@/types';
 import {
-  submitTranscription,
+  exportMidi, submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
   HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, dettatoReady, midiPhaseLabel,
-  type MuscriptorModel, type MidiModel,
+  type MuscriptorModel, type MidiModel, type MidiJobSummary, type MidiExportOptions,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
 import { MidiSoundFontPicker } from './MidiSoundFontPicker';
 import { MidiExportPanel } from './MidiExportPanel';
+import { MidiProgramSelect } from './MidiTrackControls';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { ParamLabel } from '@/components/shared/controls/ParamLabel';
 import { Toggle } from '@/components/shared/controls/Toggle';
 import { useUpload } from '@/queries/writes';
@@ -73,6 +75,7 @@ export const MidiStudio: React.FC = () => {
   const [sourceSongId, setSourceSongId] = useState<string | undefined>(undefined);
   const [model, setModel] = useState<MidiModel>(() =>
     (localStorage.getItem('hs-midi-model') as MidiModel) || 'small');
+  const [electricGuitarProgram, setElectricGuitarProgram] = usePersistedState('hs-midi-electric-guitar-program', 30);
   const [repair, setRepair] = useState(() => localStorage.getItem('hs-midi-repair') !== '0');
   const [speculative, setSpeculative] = useState(() => localStorage.getItem('hs-midi-speculative') !== '0');
 
@@ -150,7 +153,7 @@ export const MidiStudio: React.FC = () => {
   });
 
   const transcribeMut = useMutation({
-    mutationFn: () => submitTranscription({ sourceAudioUrl, sourceFileName: sourceName, songId: sourceSongId, model, speculative, repair }),
+    mutationFn: () => submitTranscription({ sourceAudioUrl, sourceFileName: sourceName, songId: sourceSongId, model, speculative, repair, electricGuitarProgram }),
     onSuccess: () => refreshJobs(),
     onError: err => setSubmitError(errorMessage(err)),
   });
@@ -454,6 +457,7 @@ export const MidiStudio: React.FC = () => {
               <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
                 <Toggle size="sm" accent="purple" checked={repair} onChange={handleRepairChange}
                   label={t('midiStudio.repair')} info={t('midiStudio.repairInfo')} />
+                <MidiProgramSelect defaultRemap value={electricGuitarProgram} onChange={setElectricGuitarProgram} />
               </div>
             )}
 
@@ -611,9 +615,8 @@ export const MidiStudio: React.FC = () => {
                   </div>
                   {/* one player per job: live while transcribing, then the finished notes in place */}
                   {(job.status === 'transcribing' || open) && (
-                    <MidiPlayer key={job.id} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={job.status === 'transcribing'} />
+                    <MidiJobDetail key={job.id} job={job} />
                   )}
-                  {open && job.status === 'done' && <MidiExportPanel jobId={job.id} initial={job.exportOptions} />}
                 </div>
               );
             })}
@@ -649,5 +652,39 @@ export const MidiStudio: React.FC = () => {
     </div>
   );
 };
+
+function MidiJobDetail({ job }: { job: MidiJobSummary }) {
+  const client = useQueryClient();
+  const { data, error, isPending: busy, mutate } = useMutation({
+    mutationFn: async (next: MidiExportOptions) => {
+      await exportMidi(job.id, next);
+      return next;
+    },
+    onSuccess: () => Promise.all([
+      queryManager.invalidate(client, midiNotesOptions(job.id).queryKey),
+      queryManager.invalidate(client, midiJobsOptions().queryKey),
+    ]),
+  });
+  const applied = data ?? job.exportOptions ?? {};
+  const apply = (next: MidiExportOptions, onSuccess?: () => void) => mutate(next, { onSuccess });
+  const performance = job.status === 'done' ? {
+    busy,
+    fullVelocity: applied.fullVelocity === true,
+    onVelocity: (fullVelocity: boolean) => apply({ ...applied, fullVelocity }),
+    onProgram: (source: number, target: number) => {
+      const programOverrides = { ...applied.programOverrides };
+      if (source === target) delete programOverrides[source];
+      else programOverrides[source] = target;
+      apply({ ...applied, programOverrides });
+    },
+  } : undefined;
+
+  return <>
+    <MidiPlayer jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={job.status === 'transcribing'}
+      performance={performance} />
+    {error && <p role="alert" className="mt-2 text-xs text-red-500 dark:text-red-400">{errorMessage(error)}</p>}
+    {job.status === 'done' && <MidiExportPanel jobId={job.id} applied={applied} apply={apply} busy={busy} />}
+  </>;
+}
 
 export default MidiStudio;

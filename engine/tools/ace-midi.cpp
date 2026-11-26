@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -1111,7 +1112,13 @@ struct MidiTiming {
 // meta track (the byte-exact v0.2 layout --validate-midi checks). With it:
 // beats, the tempo map in every track (MuseScore ignores a note-less
 // conductor track), a time signature, drum offs +1/32 beat.
-static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTiming * tm = nullptr) {
+struct MidiPerformance {
+    bool full_velocity = false;
+    std::map<int, int> program_overrides;  // original track program -> output program
+};
+
+static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTiming * tm = nullptr,
+                                       const MidiPerformance & performance = {}) {
     const int    TPB = 480;
     const int    TEMPO = 500000;
     const double drum_len = tm ? 1.0 / 32 : 0.01;
@@ -1167,7 +1174,8 @@ static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTi
             } else {
                 t.channel = 15;
             }
-            gm_program = key;
+            const auto override = performance.program_overrides.find(key);
+            gm_program = override == performance.program_overrides.end() ? key : override->second;
             const char * inm = instrument_for_program(key);
             if (inm) {
                 name = inm;
@@ -1207,7 +1215,8 @@ static std::vector<uint8_t> write_midi(std::vector<MidiNote> notes, const MidiTi
         put_varlen(t.bytes, (uint32_t) (delta < 0 ? 0 : delta));
         t.bytes.push_back((uint8_t) ((e.velocity > 0 ? 0x90 : 0x80) | t.channel));
         t.bytes.push_back((uint8_t) e.pitch);
-        t.bytes.push_back((uint8_t) (e.velocity > 0 ? std::min(127, std::max(1, e.vel)) : 0));
+        const int velocity = performance.full_velocity ? 127 : std::min(127, std::max(1, e.vel));
+        t.bytes.push_back((uint8_t) (e.velocity > 0 ? velocity : 0));
     }
     for (auto & t : tracks) {
         while (tm && t.tempo_i < tempo.size()) put_tempo(t.bytes, t.last_tick, tempo[t.tempo_i++]);
@@ -1288,7 +1297,7 @@ static void gaps_filled(std::vector<MidiNote> & notes, double max_gap) {
 }
 
 static std::vector<uint8_t> write_midi_grid(std::vector<MidiNote> notes, const BeatGrid * detected,
-                                            const GridExport & o, GridOut * out) {
+                                            const GridExport & o, GridOut * out, const MidiPerformance & performance) {
     validate_notes_fix(notes);
     notes = trim_overlapping(notes);
     std::vector<double> onsets;
@@ -1326,7 +1335,7 @@ static std::vector<uint8_t> write_midi_grid(std::vector<MidiNote> notes, const B
     tm.beats_per_bar = g.beats_per_bar;
     tm.offset_s      = -tl.seconds_at(0.0);
     if (out) *out = { g, tl, tm.offset_s };
-    return write_midi(notes, &tm);
+    return write_midi(notes, &tm, performance);
 }
 
 // ---------------------------------------------------------------------------
@@ -1780,6 +1789,7 @@ static bool write_beats_json(const std::string & path, const BeatTrack & tr, dou
     snprintf(buf, sizeof(buf), "\"beats_per_bar\":%d,", g.beats_per_bar); j += buf;
     snprintf(buf, sizeof(buf), "\"steady\":%s,", g.steady ? "true" : "false"); j += buf;
     snprintf(buf, sizeof(buf), "\"onset_delay\":%.6f,", delay); j += buf;
+    snprintf(buf, sizeof(buf), "\"first_downbeat\":%.9f,", g.first_downbeat); j += buf;
     snprintf(buf, sizeof(buf), "\"subdivision\":%d,", g.subdivision); j += buf;
     snprintf(buf, sizeof(buf), "\"offset_s\":%.6f,", go.offset_s); j += buf;
     snprintf(buf, sizeof(buf), "\"audio_shift_s\":%.6f,", delay - go.offset_s); j += buf;
@@ -1839,12 +1849,12 @@ static void write_abc(const std::vector<MidiNote> & notes, const GridOut & go, d
 // meter), as upstream's best-effort.
 static std::vector<uint8_t> grid_midi(const std::vector<MidiNote> & notes, const BeatTrack & tr, double duration,
                                       const GridExport & opts, const std::string & beats_out,
-                                      const AbcOpts & ao = {}) {
+                                      const AbcOpts & ao = {}, const MidiPerformance & performance = {}) {
     BeatGrid g;
     bool     ok = grid_detect(tr.beats, tr.downbeats, &g);
     if (!ok) fprintf(stderr, "[ace-midi] only %zu beats detected, need %d; writing 120 BPM\n", tr.beats.size(), GRID_MIN_BEATS);
     GridOut go;
-    std::vector<uint8_t> mid = write_midi_grid(notes, ok ? &g : nullptr, opts, &go);
+    std::vector<uint8_t> mid = write_midi_grid(notes, ok ? &g : nullptr, opts, &go, performance);
     if (!beats_out.empty()) write_beats_json(beats_out, tr, duration, go);
     if (!ao.out.empty()) write_abc(notes, go, duration, ao);
     return mid;
@@ -1909,9 +1919,9 @@ static std::string read_text(const std::string & path) {
 // Re-export: the streamed note events (--jsonl output) + beats.json -> MIDI
 // with new export options. No transcription model needed.
 static int run_export(const std::string & events_path, const std::string & beats_in, const std::string & out_path,
-                      const GridExport & opts, const std::string & beats_out, const AbcOpts & ao) {
-    std::string ev = read_text(events_path), bj = read_text(beats_in);
-    if (ev.empty() || bj.empty()) {
+                      const GridExport & opts, const std::string & beats_out, const AbcOpts & ao, const MidiPerformance & performance) {
+    std::string ev = read_text(events_path), bj = beats_in.empty() ? "" : read_text(beats_in);
+    if (ev.empty() || (!beats_in.empty() && bj.empty())) {
         fprintf(stderr, "[ace-midi] cannot read %s or %s\n", events_path.c_str(), beats_in.c_str());
         return 1;
     }
@@ -1971,7 +1981,9 @@ static int run_export(const std::string & events_path, const std::string & beats
     const size_t dp       = bj.find("\"duration\":");
     const double duration = dp == std::string::npos ? 0.0 : atof(bj.c_str() + dp + 11);
 
-    std::vector<uint8_t> mid = grid_midi(notes, tr, duration, opts, beats_out, ao);
+    std::vector<uint8_t> mid = beats_in.empty()
+        ? write_midi(notes, nullptr, performance)
+        : grid_midi(notes, tr, duration, opts, beats_out, ao, performance);
     if (!write_file(out_path, mid.data(), mid.size())) return 1;
     fprintf(stderr, "[ace-midi] exported %s (%zu notes, %zu bytes)\n", out_path.c_str(), notes.size(), mid.size());
     return 0;
@@ -2909,7 +2921,8 @@ struct DettatoTrack {
 };
 
 static int run_dettato(const DettatoOpts & o, const std::string & audio_path, const std::string & out_path, bool jsonl,
-                       const std::string & beat_model, const GridExport & opts, const std::string & beats_out, const AbcOpts & ao) {
+                       const std::string & beat_model, const GridExport & opts, const std::string & beats_out, const AbcOpts & ao,
+                       const MidiPerformance & performance) {
     using namespace dettato::transcriber;
     namespace dg = dettato::grouper;
     namespace dr = dettato::repairer;
@@ -3211,7 +3224,9 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
             printf("{\"type\":\"note_end\",\"index\":%zu,\"time\":%.6f}\n", i, e.off);
         }
     }
-    std::vector<uint8_t> mid = beat_model.empty() ? write_midi(mid_notes) : grid_midi(mid_notes, tr, seconds, opts, beats_out, ao);
+    std::vector<uint8_t> mid = beat_model.empty()
+        ? write_midi(mid_notes, nullptr, performance)
+        : grid_midi(mid_notes, tr, seconds, opts, beats_out, ao, performance);
     if (!write_file(out_path, mid.data(), mid.size())) return done(1);
     if (jsonl) {
         printf("{\"type\":\"done\",\"notes\":%zu,\"midi_bytes\":%zu}\n", mid_notes.size(), mid.size());
@@ -3251,6 +3266,7 @@ int main(int argc, char ** argv) {
     std::string beat_model, beats_out, export_events, beats_in, track_path, draft_dir;
     int         draft_k = 2;  // upstream default
     GridExport  opts;
+    MidiPerformance performance;
     AbcOpts     abc;
     bool   jsonl  = false;
     bool   is_raw = false;
@@ -3272,6 +3288,17 @@ int main(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--bpm") && i + 1 < argc) opts.bpm = atof(argv[++i]);
         else if (!strcmp(argv[i], "--beats-per-bar") && i + 1 < argc) opts.beats_per_bar = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--first-downbeat") && i + 1 < argc) { opts.has_downbeat = true; opts.first_downbeat = atof(argv[++i]); }
+        else if (!strcmp(argv[i], "--full-velocity")) performance.full_velocity = true;
+        else if (!strcmp(argv[i], "--program-override") && i + 1 < argc) {
+            int source, target;
+            char extra;
+            if (sscanf(argv[++i], "%d:%d%c", &source, &target, &extra) != 2 ||
+                source < 0 || source > 127 || target < 0 || target > 127) {
+                fprintf(stderr, "[ace-midi] --program-override needs two GM programs (0-127), source:target\n");
+                return 2;
+            }
+            performance.program_overrides[source] = target;
+        }
         else if (!strcmp(argv[i], "--tempo-map")) opts.tempo_map = 1;
         else if (!strcmp(argv[i], "--fixed-tempo")) opts.tempo_map = 0;
         else if (!strcmp(argv[i], "--beat-scale") && i + 1 < argc) opts.beat_scale = atof(argv[++i]);
@@ -3369,14 +3396,14 @@ int main(int argc, char ** argv) {
             return 2;
         }
         ggml_time_init();
-        return run_dettato(dettato, audio_path, out_path, jsonl, beat_model, opts, beats_out, abc);
+        return run_dettato(dettato, audio_path, out_path, jsonl, beat_model, opts, beats_out, abc, performance);
     }
     if (!export_events.empty()) {
-        if (beats_in.empty()) {
-            fprintf(stderr, "[ace-midi] --export needs --beats-in <beats.json>\n");
+        if (beats_in.empty() && (!beats_out.empty() || !abc.out.empty())) {
+            fprintf(stderr, "[ace-midi] --beats-out and --abc-out need --beats-in when re-exporting\n");
             return 2;
         }
-        return run_export(export_events, beats_in, out_path, opts, beats_out, abc);
+        return run_export(export_events, beats_in, out_path, opts, beats_out, abc, performance);
     }
     if (model_dir.empty()) {
         fprintf(stderr,
@@ -3398,6 +3425,7 @@ int main(int argc, char ** argv) {
                 "                              tempo, meter and downbeats, write them into the MIDI\n"
                 "    --beats-out <beats.json>  tracked beats + the written grid in audio seconds\n"
                 "    --bpm <x> | --beats-per-bar <n> | --first-downbeat <s>   override the grid\n"
+                "    --full-velocity | --program-override <source:target>   rewrite velocity or a GM program\n"
                 "    --tempo-map | --fixed-tempo   follow the beats / one tempo (default: follow\n"
                 "                              when the beats don't fit one tempo)\n"
                 "    --beat-scale <2|0.5|...>  beats per detected beat\n"
@@ -3409,7 +3437,7 @@ int main(int argc, char ** argv) {
                 "                              estimated key and chords, on the same grid\n"
                 "  ace-midi --track <audio> --beat-model <dir> --beats-out <beats.json>\n"
                 "                              beats and grid only, no transcription model\n"
-                "  ace-midi --export <events.jsonl> --beats-in <beats.json> [options] --out x.mid\n"
+                "  ace-midi --export <events.jsonl> [--beats-in <beats.json>] [options] --out x.mid\n"
                 "                              re-export a transcription, no model needed\n"
                 "  ace-midi --self-test-grid   grid maths on synthetic beats\n"
                 "  ace-midi --chords <audio> --chord-model <gguf> --chord-vocab <tsv> [--out chords.json]\n"

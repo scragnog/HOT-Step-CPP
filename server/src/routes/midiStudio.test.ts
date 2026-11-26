@@ -5,6 +5,39 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { runOnMidiLane, startStallTimer } from './midiStudio.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
+import { exportArgs, readGrid, sourceTrackPrograms } from '../services/muscriptor.js';
+
+test('MIDI rewrite flags accept signed downbeats and zero-based GM programs', () => {
+  assert.deepEqual(exportArgs({
+    firstDownbeat: -0.25,
+    fullVelocity: true,
+    programOverrides: { 26: 30, 33: 0, [-1]: 50, 40: 128, 128: 1 },
+  }), ['--first-downbeat', '-0.25', '--full-velocity', '--program-override', '26:30', '--program-override', '33:0']);
+  assert.deepEqual(exportArgs({ fullVelocity: false, firstDownbeat: Infinity }), []);
+});
+
+test('beat data preserves a signed downbeat and reads old audio-clock bar markers', () => {
+  const grid = { bpm: 120, onset_delay: 0.125, bars: [1, 3] };
+  assert.equal(readGrid(JSON.stringify({ grid: { ...grid, first_downbeat: -0.25 } }))?.firstDownbeat, -0.25);
+  assert.equal(readGrid(JSON.stringify({ grid }))?.firstDownbeat, 0.875);
+});
+
+test('two MIDI tracks remapped to the same patch retain separate source programs', () => {
+  const track = (channel: number, name: string) => {
+    const events = Buffer.concat([
+      Buffer.from([0, 0xff, 3, name.length]),
+      Buffer.from(name),
+      Buffer.from([0, 0xc0 | channel, 30, 0, 0xff, 0x2f, 0]),
+    ]);
+    const header = Buffer.alloc(8);
+    header.write('MTrk');
+    header.writeUInt32BE(events.length, 4);
+    return Buffer.concat([header, events]);
+  };
+  const header = Buffer.from('4d546864000000060001000301e0', 'hex');
+  const midi = Buffer.concat([header, track(0, 'clean electric guitar'), track(1, 'program 30'), track(9, 'drums')]);
+  assert.deepEqual([...sourceTrackPrograms(midi)], [[0, 26], [1, 30]]);
+});
 
 test('a MIDI job waits behind a running GPU job (#227)', async () => {
   let releaseRender!: () => void;

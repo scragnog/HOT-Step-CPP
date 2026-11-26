@@ -176,11 +176,12 @@ export function withDettatoTotal(out: Record<string, StateRow>): Record<string, 
 /** The grid a tempo-aware MIDI was written on, in seconds of the audio. */
 export interface MidiGrid {
   bpm: number;
-  /** 0 when the meter was not clear enough to write a time signature */
+  /** 0 for older exports without a time signature or when beat tracking failed */
   beatsPerBar: number;
   /** false: the MIDI carries a tempo map that follows the performance */
   steady: boolean;
   onsetDelay: number;
+  firstDownbeat?: number; // grid seconds, before adding onsetDelay
   /** grid steps per beat the notes sit on (0: none found) */
   subdivision: number;
   /** add to a MIDI time (seconds from tick 0) to get the audio time */
@@ -195,6 +196,7 @@ export function readGrid(beatsJsonText: string): MidiGrid | null {
     if (!g || typeof g.bpm !== 'number') return null;
     return {
       bpm: g.bpm, beatsPerBar: g.beats_per_bar || 0, steady: !!g.steady, onsetDelay: g.onset_delay || 0,
+      firstDownbeat: g.first_downbeat ?? (g.bars?.length ? g.bars[0] - (g.onset_delay || 0) : undefined),
       subdivision: g.subdivision || 0, audioShift: g.audio_shift_s || 0, beats: g.beats || [], bars: g.bars || [],
     };
   } catch { return null; }
@@ -222,6 +224,8 @@ export interface MidiExportOptions {
   strength?: number;
   fillGaps?: number;
   trimLeadingBars?: boolean;
+  fullVelocity?: boolean;
+  programOverrides?: Record<number, number>;
 }
 
 /** ace-midi flags for speculative decoding (upstream MuScriptor PR #95): the
@@ -234,6 +238,19 @@ export function speculativeArgs(model: MuscriptorModel, enabled: boolean, smallR
     : [];
 }
 
+export const isGmProgram = (p: unknown): p is number =>
+  typeof p === 'number' && Number.isInteger(p) && p >= 0 && p <= 127;
+
+export function performanceArgs(o: MidiExportOptions): string[] {
+  const args = o.fullVelocity === true ? ['--full-velocity'] : [];
+  for (const [source, target] of Object.entries(o.programOverrides ?? {})) {
+    if (/^(0|[1-9][0-9]{0,2})$/.test(source) && isGmProgram(Number(source)) && isGmProgram(target)) {
+      args.push('--program-override', source + ':' + target);
+    }
+  }
+  return args;
+}
+
 export function exportArgs(o: MidiExportOptions): string[] {
   const a: string[] = [];
   const num = (flag: string, v: unknown, ok: (x: number) => boolean) => {
@@ -241,7 +258,7 @@ export function exportArgs(o: MidiExportOptions): string[] {
   };
   num('--bpm', o.bpm, x => x >= 20 && x <= 400);
   num('--beats-per-bar', o.beatsPerBar, x => Number.isInteger(x) && x >= 1 && x <= 16);
-  num('--first-downbeat', o.firstDownbeat, x => x >= 0);
+  num('--first-downbeat', o.firstDownbeat, x => Math.abs(x) <= 86400);
   if (o.tempoMode === 'map') a.push('--tempo-map');
   if (o.tempoMode === 'fixed') a.push('--fixed-tempo');
   num('--beat-scale', o.beatScale, x => [0.25, 0.5, 2, 4].includes(x));
@@ -252,7 +269,7 @@ export function exportArgs(o: MidiExportOptions): string[] {
   }
   num('--fill-gaps', o.fillGaps, x => x > 0 && x <= 4);
   if (o.trimLeadingBars) a.push('--trim-leading-bars');
-  return a;
+  return a.concat(performanceArgs(o));
 }
 
 // ── Partial MIDI from the streamed events ────────────────────────────────
@@ -269,6 +286,30 @@ const INSTRUMENT_PROGRAMS: Record<string, number> = {
   tenor_sax: 66, baritone_sax: 67, oboe: 68, english_horn: 69, bassoon: 70,
   clarinet: 71, flutes: 72, synth_lead: 80, synth_pad: 88,
 };
+
+/** ace-midi starts each instrument MTrk with a short track-name event and a
+ *  program change, both at tick zero. The name identifies the original program
+ *  even if two tracks are assigned the same patch or grid edits reorder them. */
+export function sourceTrackPrograms(midi: Buffer): Map<number, number> {
+  const sources = new Map<number, number>();
+  for (let pos = 8 + midi.readUInt32BE(4); pos + 8 <= midi.length;) {
+    const size = midi.readUInt32BE(pos + 4);
+    const start = pos + 8;
+    const end = start + size;
+    if (end > midi.length) break;
+    pos = end;
+    if (size < 7 || midi[start] !== 0 || midi[start + 1] !== 0xff || midi[start + 2] !== 0x03) continue;
+    const length = midi[start + 3];
+    const change = start + 4 + length;
+    if (length >= 128 || change + 2 >= end || midi[change] !== 0 || (midi[change + 1] & 0xf0) !== 0xc0) continue;
+    const channel = midi[change + 1] & 0x0f;
+    if (channel === 9 || sources.has(channel)) continue;
+    const name = midi.toString('ascii', start + 4, change).replace(/ /g, '_');
+    const source = INSTRUMENT_PROGRAMS[name] ?? Number(/^program_(\d+)$/.exec(name)?.[1]);
+    if (isGmProgram(source)) sources.set(channel, source);
+  }
+  return sources;
+}
 
 function varLen(n: number): number[] {
   const out = [n & 0x7f];

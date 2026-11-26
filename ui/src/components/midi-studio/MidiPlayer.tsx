@@ -9,13 +9,14 @@ import { queryManager } from '@/queries/invalidation';
 // notes appear on the roll (and become playable) while transcription is still
 // running; for finished jobs it loads notes.json and offers the same player.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pause, Play, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
-  getMidiStreamUrl, channelLabel, midiPhaseLabel,
+  getMidiStreamUrl, channelLabel, midiPhaseLabel, type MidiChannelInfo,
 } from '@/services/midiStudioApi';
 import { MidiSynth, type PlayNote } from './midiSynth';
+import { MidiFullVelocity, MidiProgramSelect } from './MidiTrackControls';
 import { QueryError } from '@/components/shared/feedback/QueryError';
 import { formatClock } from '@/utils/format/format';
 
@@ -33,33 +34,47 @@ function familyColor(family: string, alpha = 1): string {
   return `hsla(${h}, 70%, 55%, ${alpha})`;
 }
 
+const trackKey = (ch: MidiChannelInfo) => ch.isDrums ? 'drums' : 'track-' + (ch.sourceProgram ?? ch.program);
+
 interface Props {
   jobId: string;
   sourceAudioUrl?: string;
   live: boolean;
+  performance?: {
+    busy: boolean;
+    fullVelocity: boolean;
+    onVelocity: (checked: boolean) => void;
+    onProgram: (source: number, target: number) => void;
+  };
 }
 
-export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => {
+export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live, performance }) => {
   const { t } = useTranslation();
   const client = useQueryClient();
   const notesQuery = useQuery({ ...midiNotesOptions(jobId), enabled: !live });
+  const parsed = live ? undefined : notesQuery.data;
 
   // NOTE: parent must mount this component with a key unique per job. Live
   // notes accumulate; when live turns false the finished notes (notes.json)
   // replace them in place, so playback carries on.
   const notesRef = useRef<PlayNote[]>([]);
-  const [noteCount, setNoteCount] = useState(0);      // mirrors notesRef length -> redraw
+  const [liveNoteCount, setNoteCount] = useState(0);
   const [redraw, setRedraw] = useState(0);            // bump from event handlers
   const [isPlaying, setIsPlaying] = useState(false);
   const [crossfade, setCrossfade] = useState(50);
-  const [duration, setDuration] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
   const [curTime, setCurTime] = useState(0);
-  const [frontier, setFrontier] = useState<number | null>(live ? 0 : null);
+  const [liveFrontier, setFrontier] = useState<number | null>(live ? 0 : null);
   const [chunks, setChunks] = useState<{ done: number; total: number; phase?: string; sub?: number } | null>(null);
   const [liveDone, setLiveDone] = useState(!live);
-  const [families, setFamilies] = useState<string[]>([]);
+  const [liveFamilies, setFamilies] = useState<string[]>([]);
   const [muted, setMuted] = useState<Set<string>>(new Set());
   const [soloed, setSoloed] = useState<Set<string>>(new Set());
+
+  const families = useMemo(() => parsed ? parsed.channels.map(trackKey) : liveFamilies, [parsed, liveFamilies]);
+  const noteCount = parsed?.noteCount ?? liveNoteCount;
+  const duration = Math.max(audioDuration, parsed?.durationSec ?? 0);
+  const frontier = live ? liveFrontier : null;
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -117,7 +132,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
   // ── data source: SSE (live) or notes.json (finished) ──
   useEffect(() => {
     if (live) {
-      const open = new Map<number, { pitch: number; time: number; instrument: string }>();
+      const open = new Map<number, { pitch: number; time: number; instrument: string; velocity?: number }>();
       const es = new EventSource(getMidiStreamUrl(jobId));
       const batch: PlayNote[] = [];
       let provisional = false;
@@ -128,19 +143,19 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
           const ev = JSON.parse(msg.data);
           if (ev.type === 'provisional') {
             provisional = true;
-            batch.push({ pitch: ev.pitch, start: ev.time, duration: Math.max(0.03, ev.end - ev.time), family: PROVISIONAL });
+            batch.push({ pitch: ev.pitch, start: ev.time, duration: Math.max(0.03, ev.end - ev.time), family: PROVISIONAL, velocity: ev.velocity });
           } else if (ev.type === 'note_start') {
             if (provisional) {
               flush();
               dropProvisional();
               provisional = false;
             }
-            open.set(ev.index, { pitch: ev.pitch, time: ev.time, instrument: ev.instrument });
+            open.set(ev.index, { pitch: ev.pitch, time: ev.time, instrument: ev.instrument, velocity: ev.velocity });
           } else if (ev.type === 'note_end') {
             const st = open.get(ev.index);
             if (st) {
               open.delete(ev.index);
-              batch.push({ pitch: st.pitch, start: st.time, duration: Math.max(0.03, ev.time - st.time), family: st.instrument });
+              batch.push({ pitch: st.pitch, start: st.time, duration: Math.max(0.03, ev.time - st.time), family: st.instrument, velocity: st.velocity });
             }
           } else if (ev.type === 'progress') {
             setChunks({ done: ev.completed, total: ev.total, phase: ev.phase, sub: ev.sub });
@@ -166,23 +181,21 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
 
   // ── audio element wiring (original track = master clock) ──
   useEffect(() => {
-    const parsed = notesQuery.data;
-    if (live || !parsed) return;
-    const label = new Map(parsed.channels.map(ch => [ch.channel, channelLabel(ch)]));
-    const notes = parsed.notes.map(n => ({ pitch: n.pitch, start: n.start, duration: n.duration,
-      family: label.get(n.channel) || `ch${n.channel}` }));
-    notesRef.current = [];
-    synthRef.current?.setAllNotes([]);
-    setFamilies([]);
-    setFrontier(null);
-    addNotes(notes);
-    setDuration(d => Math.max(d, parsed.durationSec));
-  }, [notesQuery.data, live, addNotes]);
+    if (!parsed) return;
+    const channels = new Map(parsed.channels.map(ch => [ch.channel, ch]));
+    const notes = parsed.notes.map(n => {
+      const ch = channels.get(n.channel);
+      return { pitch: n.pitch, start: n.start, duration: n.duration, velocity: n.velocity,
+        program: ch?.program, voice: ch && channelLabel(ch), family: ch ? trackKey(ch) : `ch${n.channel}` };
+    });
+    notesRef.current = notes;
+    synthRef.current?.setAllNotes(notes);
+  }, [parsed]);
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el || !sourceAudioUrl) return;
-    const onMeta = () => setDuration(d => Math.max(d, el.duration || 0));
+    const onMeta = () => setAudioDuration(el.duration || 0);
     const onEnd = () => setIsPlaying(false);
     el.addEventListener('loadedmetadata', onMeta);
     el.addEventListener('ended', onEnd);
@@ -320,6 +333,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
   }, [isPlaying, draw]);
 
   const fmt = (s: number) => formatClock(s);
+  const tracks = parsed?.channels ?? [];
 
   return (
     <div className="mt-3">
@@ -358,6 +372,8 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
           </span>
         </div>
 
+        {performance && <MidiFullVelocity checked={performance.fullVelocity} disabled={performance.busy}
+          onChange={performance.onVelocity} />}
         {live && !liveDone && chunks && (
           <span className="flex items-center gap-1.5 text-[11px] text-purple-500 dark:text-purple-400">
             <Radio size={11} className="animate-pulse" />
@@ -373,6 +389,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
       {families.length > 0 && (
         <div className="flex flex-wrap gap-x-2 gap-y-1 mb-1.5">
           {families.map(f => {
+            const track = tracks.find(ch => trackKey(ch) === f);
             const isMuted = muted.has(f);
             const isSolo = soloed.has(f);
             const audible = soloed.size > 0 ? isSolo : !isMuted;
@@ -387,8 +404,12 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
               >
                 <span className="w-2.5 h-2.5 rounded-sm inline-block flex-shrink-0" style={{ backgroundColor: familyColor(f) }} />
                 <span className={isMuted && soloed.size === 0 ? 'line-through' : ''}>
-                  {f === PROVISIONAL ? t('midiStudio.player.provisional') : f.replace(/_/g, ' ')}
+                  {track ? channelLabel(track) : f === PROVISIONAL ? t('midiStudio.player.provisional') : f.replace(/_/g, ' ')}
                 </span>
+                {track && !track.isDrums && performance && track.program <= 127 && (
+                  <MidiProgramSelect value={track.program} disabled={performance.busy}
+                    onChange={program => performance.onProgram(track.sourceProgram ?? track.program, program)} />
+                )}
                 <button
                   onClick={() => toggleMute(f)}
                   title={t('midiStudio.player.mute')}
