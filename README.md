@@ -1,6 +1,6 @@
 # HOT-Step CPP
 
-A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Four backends run natively in the C++ engine and switch from the sidebar: **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2** and **Stable Audio 3**. It also runs on Windows, Linux and macOS, in Colab, on [RunPod](https://console.runpod.io/hub/template/wdeq7ahkw8), and from your phone.
+A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Switch between **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2**, **Stable Audio 3** and **HeartMuLa** in the sidebar. All five run in the native C++ engine. It also runs on Windows, Linux and macOS, in Colab, on [RunPod](https://console.runpod.io/hub/template/wdeq7ahkw8), and from your phone.
 
 [![Open in Colab](https://img.shields.io/badge/Open%20in%20Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white)](https://colab.research.google.com/github/scragnog/HOT-Step-CPP/blob/master/colab/HOT-Step.ipynb)
 [![Deploy on RunPod](https://img.shields.io/badge/Deploy%20on-RunPod-673AB7?style=for-the-badge)](https://console.runpod.io/hub/template/wdeq7ahkw8)
@@ -47,20 +47,22 @@ The release files are not code-signed, so Windows can refuse to start `HOT-Step.
 
 ## Highlights
 
-- **Four backends, one app.** ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3 run in the same engine process. The backend picker appears whenever two or more are registered, the sidebar lists only the studios the active backend supports, and the global bar hides controls that do nothing on it. See [Backends](docs/user/backends.md).
+- **Classic skins.** Change the look of the app under **Settings > General > Skin**. Choose Skeuo, Phosphor, Neon, Ivory or Retro, or return to Default. To make your own overlay or try a different layout in the developer preview, start with [the skin contributor guide](SKINS.md).
+- **Five generation backends.** The sidebar and generation controls adapt to your model. YuE2 has a configurable song-length cap of up to 15 minutes. MiniMax-Music3 checks available GPU memory before generation and can train with an installed BF16 planner. HeartMuLa generates from style tags and lyrics. See [Backends](docs/user/backends.md).
 - **Training Studio.** Style adapters for ACE-Step 1.5, MiniMax-Music3, YuE2 and Stable Audio 3, trained on your own GPU. See [Training Studio](docs/user/studios/training-studio.md).
 - **Auto-Gen and Custom-Gen.** Pick a genre and let the language model write the caption, lyrics and title, or set every field yourself. See [Auto-Gen](docs/user/studios/insta-gen.md) and [Custom-Gen](docs/user/studios/create.md).
 - **Lyric Studio.** A lyrics workspace with artist profiles, several LLM providers, bulk generation and the same generation controls as Custom-Gen. See [Lyric Studio](docs/user/studios/lyric-studio.md).
-- **Cover Studio.** Style-matched covers of a reference track on ACE-Step and YuE2. ACE-Step conditions on the source audio directly; YuE2 adds a two-step Prepare flow (fix the structure, assign lyrics) and a Build page that assembles the song section by section. MiniMax-Music3 covers are included but not yet working right: you are free to test them, but the results are not production-grade yet. See [Cover Studio](docs/user/studios/cover-studio.md).
+- **Cover Studio.** Style-matched covers of a reference track on ACE-Step and YuE2. ACE-Step conditions on the source audio directly; YuE2 adds a two-step Prepare flow (fix the structure, assign lyrics) and a Build page that assembles the song section by section. MiniMax-Music3 source-audio covers are experimental. HeartMuLa can render an approved lead sheet with the separate MuLaCover pack. Stable Audio 3 offers instrumental refinement. See [Cover Studio](docs/user/studios/cover-studio.md).
 - **Repaint, Song Builder and Stem Builder.** Regenerate one region and keep the rest, build a song a section at a time, or generate a new instrument stem over a backing track (ACE-Step). See [Repaint Studio](docs/user/studios/repaint-studio.md), [Song Builder](docs/user/studios/song-builder.md) and [Stem Builder](docs/user/studios/stem-builder.md).
 - **Compare.** A/B listening with one shared playhead for seed sweeps, plugin tests and checkpoint ladders, with a loudness and spectral analyser. See [Compare](docs/user/studios/compare-studio.md).
 - **STORM.** A live performance mode that streams crossfaded slots while you retune the style, lyrics, seed and sampler. It runs on ACE-Step and YuE2. See [STORM](docs/user/studios/storm.md).
 - **Stem separation.** BS-RoFormer, Mel-Band RoFormer, MDX23C and Leap Xe running in native GGML, with a mixer and ZIP export. See [Stem Separator](docs/user/studios/stem-studio.md).
-- **MIDI Studio.** Audio-to-MIDI transcription on a native GGML port of MuScriptor, with tempo and bar detection, a live piano roll and playback. See [MIDI Studio](docs/user/studios/midi-studio.md).
+- **MIDI Studio.** Turn a recording into editable instrument and drum MIDI with dettato or MuScriptor. See provisional dettato notes in the piano roll as the rest of the transcription runs. Play back with a downloadable SoundFont or add your own General MIDI SF2 or SF3 bank to the shared SoundFont library. Beat This! adds tempo and bars. See [MIDI Studio](docs/user/studios/midi-studio.md).
 - **Lua plugins.** Solvers, schedulers, guidance modes and postprocess steps are Lua files: drop one into the `plugins/` folder of your data folder (or `engine/plugins/` in a source checkout) and it appears in the UI at the next launch, no rebuild. See [Plugins](docs/user/plugins.md) and [Plugin authoring](docs/dev/plugins-authoring.md).
 - **LoRA, LoKr and DoRA adapters.** Merge or runtime mode, per-group strengths, stacking, and per-section masking from the lyrics. See [Adapters](docs/user/adapters.md).
 - **Post-processing chain.** Mastering against a reference track, a VST3 host, StableStep refinement through Stable Audio 3, PP-VAE and denoising. See [Generation](docs/user/generation.md#post-processing).
-- **Model Manager.** Starter packs and every model file, downloaded in the app with resumable progress, including importance-matrix quants that keep the small sizes usable. See [Model Manager](docs/user/studios/model-manager.md) and [Model files](docs/user/models.md).
+- **Model Manager.** Download generation and training packs by backend, including YuE2-RS fine-tunes and quantized MiniMax-Music3 planners. Under **Shared**, find transcription, stem separation and captioning models, plus MIDI playback banks. dettato downloads without a Hugging Face token. MuScriptor requires one. See [Model Manager](docs/user/studios/model-manager.md) and [Model files](docs/user/models.md).
+- **Workspace archives.** Export a workspace ZIP or restore it to a new data folder in **Settings > Storage & Data**. See [Settings](docs/user/studios/settings.md#storage--data-tab).
 - **Phones and the PWA.** A navigation drawer, a full-screen player and narrow-screen layouts for Custom-Gen, Lyric Studio, Repaint, Stem Separator, MIDI Studio and Training, and over HTTPS the app installs to your home screen. See [Install on your phone](docs/user/getting-started.md#install-on-your-phone).
 - **DAW facade.** `/api/v1/daw` lets a DAW client generate and analyse audio against the running app. See the [API reference](docs/dev/api.md#daw-facade-notes-apiv1daw).
 - **Agents.** Two local MCP servers let an agent drive the app. See [MCP](docs/user/mcp.md).
@@ -101,7 +103,7 @@ Curated starter packs for different hardware tiers, from minimal setups to Black
 - [Contribute a skin or a UI design](SKINS.md)
 - [FEATURES.md](FEATURES.md): one line per feature, each linking to its page.
 - [Getting started](docs/user/getting-started.md): download, first launch, first model pack, first song.
-- [Backends](docs/user/backends.md): what each of the four models does, and a capability matrix.
+- [Backends](docs/user/backends.md): model capabilities and supported studios.
 - [Getting higher quality output](docs/user/quality.md): quants, prompts, steps, and a per-backend cheat sheet.
 - [Troubleshooting](docs/user/troubleshooting.md): logs, common failures, and what to put in a bug report.
 
