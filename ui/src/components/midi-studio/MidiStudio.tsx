@@ -23,7 +23,7 @@ import type { Song } from '@/types';
 import {
   submitTranscription,
   getMidiFileUrl, saveHfToken, startModelDownload,
-  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, dettatoReady,
+  HF_MODEL_URLS, HF_TOKEN_SETTINGS_URL, BEAT_MODEL, dettatoReady, midiPhaseLabel,
   type MuscriptorModel, type MidiModel,
 } from '@/services/midiStudioApi';
 import { MidiPlayer } from './MidiPlayer';
@@ -415,7 +415,7 @@ export const MidiStudio: React.FC = () => {
                 );
               })}
             </div>
-            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-2">{t('midiStudio.firstRunNote')}</p>
+            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-2">{t(model === 'dettato' ? 'midiStudio.firstRunNoteDettato' : 'midiStudio.firstRunNote')}</p>
 
             {/* Beat This!: optional, gives the MIDI tempo, time signature and bar lines */}
             <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
@@ -515,7 +515,7 @@ export const MidiStudio: React.FC = () => {
               const running = job.status === 'queued' || job.status === 'transcribing';
               // A failed job can still hold a partial .mid (the failed badge stays).
               const hasMidi = job.status === 'done' || (job.status === 'failed' && !!job.partial);
-              const pct = job.chunksTotal ? Math.round(100 * (job.chunksDone || 0) / job.chunksTotal) : 0;
+              const pct = job.chunksTotal ? 100 * ((job.chunksDone || 0) + (job.sub || 0)) / job.chunksTotal : 0;
               return (
                 <div key={job.id} className="rounded-lg border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-black/20 px-3 py-2.5">
                   <div className="flex items-center gap-3">
@@ -530,9 +530,9 @@ export const MidiStudio: React.FC = () => {
                             <Loader2 size={11} className="animate-spin flex-shrink-0" />
                             {job.status === 'queued'
                               ? t('midiStudio.statusQueued')
-                              : job.phase === 'drums' ? t('midiStudio.statusDrums')
-              : job.phase === 'group' ? t('midiStudio.statusGrouping')
-              : t('midiStudio.statusTranscribing', { done: job.chunksDone || 0, total: job.chunksTotal || 0, notes: job.noteCount })}
+                              : midiPhaseLabel(t, job.phase, job.sub) ?? t('midiStudio.statusTranscribing', {
+                                done: job.chunksDone || 0, total: job.chunksTotal || 0, notes: job.noteCount,
+                              })}
                           </span>
                           {job.status === 'transcribing' && (
                             <span className="block h-1 mt-1 rounded bg-zinc-200 dark:bg-white/10 overflow-hidden">

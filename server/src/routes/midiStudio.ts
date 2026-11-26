@@ -91,6 +91,8 @@ interface MidiJob {
   chunksTotal: number;
   /** dettato's stage (transcribe, repair, group, drums, done), from its progress events */
   phase?: string;
+  /** how far through the current step (0 to 1), from dettato's drum pass */
+  sub?: number;
   noteCount: number;
   error?: string;
   gated?: boolean;
@@ -144,6 +146,7 @@ function pushEvent(job: MidiJob, ev: any): void {
     job.chunksDone = ev.completed ?? job.chunksDone;
     job.chunksTotal = ev.total ?? job.chunksTotal;
     if (typeof ev.phase === 'string') job.phase = ev.phase;
+    job.sub = typeof ev.sub === 'number' ? ev.sub : undefined;
   } else if (ev.type === 'note_start') {
     job.noteCount++;
   }
@@ -476,6 +479,7 @@ router.get('/jobs', (_req: Request, res: Response) => {
         chunksDone: job.chunksDone,
         chunksTotal: job.chunksTotal,
         phase: job.phase,
+        sub: job.sub,
         createdAt: new Date(job.createdAt).toISOString(),
         error: job.error,
         gated: job.gated,
@@ -509,6 +513,7 @@ router.get('/:jobId/progress', (req: Request, res: Response) => {
     chunksDone: job.chunksDone,
     chunksTotal: job.chunksTotal,
     phase: job.phase,
+    sub: job.sub,
     noteCount: job.noteCount,
     error: job.error,
     gated: job.gated,

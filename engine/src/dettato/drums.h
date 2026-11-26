@@ -6,6 +6,7 @@
 #include "yyjson.h"
 
 #include <array>
+#include <functional>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -445,7 +446,8 @@ public:
 
     Branch choose(double router) const { return router < thresholds_.router ? Branch::kit : Branch::orchestral; }
 
-    Probabilities probabilities(const std::vector<float> & feats, int threads = 4) const {
+    Probabilities probabilities(const std::vector<float> & feats, int threads = 4,
+                                const std::function<void()> & network_done = {}) const {
         if (feats.size() % feature_bands != 0) throw std::invalid_argument("invalid drum features shape");
         Probabilities p;
         p.frames = int(feats.size() / (2 * feature_bands));
@@ -459,7 +461,11 @@ public:
         p.drum.resize(p.kit.size());
         p.vel.resize(p.kit.size());
         p.timpani.resize(size_t(p.frames) * timpani_keys);
-        for (const auto & expert : experts_) p.router += expert.forward(cpu, feats, 2 * p.frames, p);
+        if (network_done) network_done();
+        for (const auto & expert : experts_) {
+            p.router += expert.forward(cpu, feats, 2 * p.frames, p);
+            if (network_done) network_done();
+        }
         p.router /= double(experts_.size());
         for (auto * tensor : {&p.drum, &p.vel, &p.timpani}) {
             for (float & v : *tensor) v /= float(experts_.size());
@@ -494,15 +500,24 @@ public:
         return hits;
     }
 
-    Result transcribe(const float * mono, size_t n, int source_rate, int threads = 4) const {
+    Result transcribe(const float * mono, size_t n, int source_rate, int threads = 4,
+                      const std::function<void(double)> & progress = {}) const {
         Result out;
         out.skipped = source_rate < min_source_rate;
         if (out.skipped) return out;
-        const auto p = probabilities(features(mono, n, source_rate, threads), threads);
+        // Count completed stages: features, kit, each orchestral expert, then decode.
+        int completed = 0;
+        const auto stage_done = [&] {
+            if (progress) progress(++completed / double(3 + experts_.size()));
+        };
+        const auto f = features(mono, n, source_rate, threads);
+        stage_done();
+        const auto p = probabilities(f, threads, stage_done);
         if (p.frames == 0) return out;
         out.router = p.router;
         out.branch = choose(p.router);
         out.hits = decode(p, out.branch);
+        stage_done();
         return out;
     }
 };

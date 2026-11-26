@@ -1,4 +1,5 @@
 import { apiClient, type ReadOptions } from './httpClient';
+import type { TFunction } from 'i18next';
 // midiStudioApi.ts — API client for MIDI Studio (audio → MIDI transcription)
 //
 // Communicates with Node server /api/midi-studio endpoints, which run the
@@ -52,6 +53,7 @@ export interface MidiJobProgress {
   chunksTotal?: number;
   /** dettato's stage: transcribe, repair, group, drums or done */
   phase?: string;
+  sub?: number;
   noteCount?: number;
   error?: string;
   gated?: boolean;
@@ -78,8 +80,20 @@ export interface MidiJobSummary {
   chunksDone?: number;
   chunksTotal?: number;
   phase?: string;
+  /** progress inside the current step, 0 to 1 */
+  sub?: number;
   /** options the MIDI was last re-exported with */
   exportOptions?: MidiExportOptions;
+}
+
+/** Both the live player and the polled job list display the engine's current phase. */
+export function midiPhaseLabel(t: TFunction, phase?: string, sub?: number): string | undefined {
+  switch (phase) {
+    case 'repair': return t('midiStudio.statusRepairing');
+    case 'group': return t('midiStudio.statusGrouping');
+    case 'drums': return sub == null ? t('midiStudio.statusDrums')
+      : t('midiStudio.drumProgress', { percent: Math.round(sub * 100) });
+  }
 }
 
 /**
