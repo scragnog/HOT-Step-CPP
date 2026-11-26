@@ -1,8 +1,9 @@
 # HOT-Step CPP
 
-A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Four backends run natively in the C++ engine and switch from the sidebar: **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2** and **Stable Audio 3**. It also runs on Windows, Linux and macOS, in Colab, and from your phone (a RunPod image arrives with the next release).
+A desktop app for local AI music generation, built on [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and GGML. Describe a song with a style caption and lyrics and get stereo audio back, generated entirely on your own hardware with no cloud, API keys or subscription. Four backends run natively in the C++ engine and switch from the sidebar: **ACE-Step 1.5**, **MiniMax-Music3**, **YuE2** and **Stable Audio 3**. It also runs on Windows, Linux and macOS, in Colab, on [RunPod](https://console.runpod.io/hub/template/wdeq7ahkw8), and from your phone.
 
 [![Open in Colab](https://img.shields.io/badge/Open%20in%20Colab-F9AB00?style=for-the-badge&logo=googlecolab&logoColor=white)](https://colab.research.google.com/github/scragnog/HOT-Step-CPP/blob/master/colab/HOT-Step.ipynb)
+[![Deploy on RunPod](https://img.shields.io/badge/Deploy%20on-RunPod-673AB7?style=for-the-badge)](https://console.runpod.io/hub/template/wdeq7ahkw8)
 [![Discord](https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/ezVtmg9GKX)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/scragnog)
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-scragnog-FFD21E?style=for-the-badge)](https://huggingface.co/scragnog)
@@ -166,6 +167,7 @@ Contributions are accepted under the repository licence (MIT) unless a file says
 - **Alexander Allan ([MDMAchine](https://github.com/MDMAchine))**, for ongoing and generous contributions: the STORM solver and MD Audio Tiled Core postprocess plugins, the real-time VST3 monitoring UX (chain presets, live monitor transport, pause/resume/restart), and a run of JUCE VST3 hosting crash fixes in the engine. This project is better for it.
 - **AI-Toolkit**: inspiration for HOT-Step's YuE2 Joint Training method.
 - **MotherSuperior** (kytr.ai, [Hugging Face](https://huggingface.co/Mothersuperior)): the original YuE2 encoder that turns songs into the codes the YuE2 trainers learn from.
+- **semtex1987**: the [HOT-Step RunPod template](https://console.runpod.io/hub/template/wdeq7ahkw8).
 
 ### The MiniMax-Music3 encoder effort
 
