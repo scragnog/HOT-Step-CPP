@@ -8,6 +8,10 @@
     {
       "id": "40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole",
       "why": "A first change to a tier measures the desk once, after the parts' own effects have run (it was measured in the desk's layout effect, then again mid-motion), and never sets a class on the desk to measure it (the class restyled all 2,206 elements of the full desk through its :has rules, 14 ms each way)."
+    },
+    {
+      "id": "40-tier/a-tier-change-answers-the-click-at-once",
+      "why": "The click is answered in its own frame: the tier switch shows the choice and the old faces start to go before the new tier is drawn, and the change is drawn by hand (shell/morph.ts), never as a View Transition, which froze the page from the click until the new tier was drawn and captured (150-250 ms on a full desk, and a GPU stall rasterising the captures)."
     }
   ]
 }

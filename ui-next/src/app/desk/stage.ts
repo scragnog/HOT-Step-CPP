@@ -1,9 +1,9 @@
 // A tier change staged by what is in view (docs/09, "Rendering"). Drawing a full desk at the new tier, laying it out and
-// capturing it for the View Transition took 100-230 ms before anything moved. When the desk has been laid out at the new
+// capturing it (it was a View Transition then) took 100-230 ms before anything moved. When the desk has been laid out at the new
 // tier before (taken as that tier was left: desk/layout.ts deskLeaving) and nothing a tile out of view drew there can
 // have changed since (what its models read: render/tileTier.ts), the change draws only what will be in view: a tile out
 // of view before and after keeps what it was drawn at (a tile the change brings is drawn as its shell), stands in the
-// layout as what was kept of it at the new tier, lays nothing out and takes no part in the View Transition, which no one
+// layout as what was kept of it at the new tier, lays nothing out and takes no part in the motion (shell/morph.ts), which no one
 // would see; once the motion has started, the held tiles are drawn at the new tier one a frame, nearest first, and each
 // is checked against what was kept (a tile that is not the height it was kept at is measured and the desk laid out
 // again, as for any change of content). Drawing only: which tiles show, and every value, are the core's as before.

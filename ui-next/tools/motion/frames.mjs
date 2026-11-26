@@ -1,10 +1,10 @@
 // Motion, frame by frame, against its approved samples: each motion of motions.mjs is set up and set off on the test
 // build, every animation is then held and moved to 0, 16, 32 ... ms, and at each step the boxes that move are read:
-// elements by their on-screen box (a running transform included), the tier change's parts by their View Transition
-// group's box and their old and new images' opacity. Each step must agree with the motion's approved samples
-// (tools/motion/approved/<motion>.json, committed) within TOL px and OTOL of opacity, and each motion must move (but
-// for one marked `still`). --approve records the current build's samples as the approved ones, after a deliberate
-// change to a motion.
+// elements by their on-screen box (a running transform included), the tier change's parts (`vt:<name>`, shell/morph.ts)
+// by their box (a frame's surface) and their faces' opacity (a View Transition's group box and images, if one runs).
+// Each step must agree with the motion's approved samples (tools/motion/approved/<motion>.json, committed) within TOL
+// px and OTOL of opacity, and each motion must move (but for one marked `still`). --approve records the current
+// build's samples as the approved ones, after a deliberate change to a motion.
 //
 //   node tools/motion/frames.mjs [--only <regex>] [--page <file>] [--approve] [--shots] [--workers n] [--list]
 //
@@ -55,6 +55,8 @@ async function capture(browser, url, m, shotsDir) {
     const end = await page.evaluate(async () => {
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       if (window.__vt) await window.__vt.ready.catch(() => {});
+      /* a tier change: its motion starts once the new tier is drawn (shell/tier.ts, the task after the click's frame) */
+      for (let i = 0; i < 60 && window.__morph && document.documentElement.classList.contains('tier-morph') && !window.__morph().length; i++) await new Promise(r => setTimeout(r, 16));
       const as = document.getAnimations().filter(a => { const t = a.effect?.getComputedTiming(); return t && Number.isFinite(t.endTime); });
       window.__as = as; as.forEach(a => a.pause());
       return Math.max(0, ...as.map(a => a.effect.getComputedTiming().endTime));
@@ -65,6 +67,14 @@ async function capture(browser, url, m, shotsDir) {
         window.__as.forEach(a => { try { a.currentTime = t; } catch (e) {} });
         const out = {}, root = document.documentElement, r4 = r => [r.left, r.top, r.width, r.height].map(v => Math.round(v * 10) / 10);
         for (const k of keys) {
+          const mp = k.startsWith('vt:') && window.__morph ? window.__morph().find(p => p.name === k.slice(3)) : null;
+          if (mp) { /* a tier change's part (shell/morph.ts): its box (a frame's or a band's surface, else the element's), its faces' opacity */
+            const e = mp.el.getBoundingClientRect(), b = getComputedStyle(mp.el, '::before'), px = v => parseFloat(v) || 0;
+            out[k] = (mp.surface ? [e.left + mp.el.clientLeft + px(b.left), e.top + mp.el.clientTop + px(b.top), px(b.width), px(b.height)] : [e.left, e.top, e.width, e.height]).map(v => Math.round(v * 10) / 10);
+            out[`${k}:old`] = [0];
+            out[`${k}:new`] = [Math.round(parseFloat(getComputedStyle(mp.faces[0] ?? mp.el).opacity) * 100) / 100];
+            continue;
+          }
           if (k.startsWith('vt:')) { /* a View Transition part: its group's box, its images' opacity */
             const n = k.slice(3), g = getComputedStyle(root, `::view-transition-group(${n})`);
             if (g.width === 'auto' || !g.width) continue;
@@ -131,7 +141,7 @@ try {
     const ok = !left.length && !errs.length;
     if (!ok) failed++;
     console.log(`${ok ? 'ok  ' : 'FAIL'} ${m.id}: ${times.length} steps of 16ms, ${moving} of them in motion${left.length ? `, ${left.length} keys differ from the approved samples` : ''}`);
-    for (const l of left.slice(0, 12)) console.log(l); if (left.length > 12) console.log(`    ... ${left.length - 12} more`);
+    for (const l of left.slice(0, +(process.env.MOTION_SHOW || 12))) console.log(l); if (left.length > +(process.env.MOTION_SHOW || 12)) console.log(`    ... ${left.length - +(process.env.MOTION_SHOW || 12)} more`);
     for (const e of errs) console.log('    ' + e);
   }
 } finally { await browser.close(); server.close(); }

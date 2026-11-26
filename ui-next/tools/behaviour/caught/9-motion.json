@@ -1,7 +1,7 @@
 {
  "about": "The scenarios that caught each switch of switches/9-motion.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
  "caught": {
-  "motion tier view transition": ["19-desk-round5/tier-change-is-one-object-per-part","38-motion/tier-change-frames-grow-in-place"],
+  "motion tier drawn by hand": ["19-desk-round5/tier-change-is-one-object-per-part","38-motion/tier-change-frames-grow-in-place"],
   "motion tier anchor under the pointer": ["19-desk-round5/tier-change-keeps-the-place-pointer"],
   "motion tier reveal rings": ["38-motion/what-arrives-is-shown"],
   "motion desk arrivals scale in": ["38-motion/a-tile-arrives-and-pushes","38-motion/a-tile-leaves-and-comes-back"],

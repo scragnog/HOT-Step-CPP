@@ -47,16 +47,20 @@ export default [
   } },
   { id: 'tier-change-is-one-object-per-part', w: 1600, h: 900, run: async t => {
     await desk('quick', ['tempo', 'avoid', 'takes', 'seed'])(t);
-    await t.do('listen to the transition', () => { window.__vtA = null; const o = document.startViewTransition.bind(document);
-      document.startViewTransition = cb => { const v = o(cb); v.ready.then(() => { const as = document.getAnimations().filter(a => a.effect?.pseudoElement); window.__vtA = as.map(a => ({ p: a.effect.pseudoElement, delay: a.effect.getTiming().delay, end: a.effect.getComputedTiming().endTime })); }, () => {}); return v; }; });
+    /* every animation the page starts, with what it animates and where; a View Transition started is counted */
+    await t.do('listen to the motion', () => { window.__vts = 0; const v = document.startViewTransition?.bind(document); if (v) document.startViewTransition = cb => { window.__vts++; return v(cb); };
+      const rec = window.__anims = [], o = Element.prototype.animate;
+      Element.prototype.animate = function (k, opt) { const a = o.call(this, k, opt), op = Array.isArray(k) && 'opacity' in k[0] ? [k[0].opacity, k[k.length - 1].opacity] : null, tile = this.closest('#bento > .tile[data-m]');
+        const face = !!tile && this.parentElement === tile && !this.matches('.tile-head');
+        rec.push({ el: this, a, op, face, m: tile?.dataset.m, pseudo: opt?.pseudoElement ?? '', delay: opt?.delay ?? 0, live: op && op[0] === 0 && face ? rec.filter(r => r.face && r.m === tile.dataset.m && r.op?.[0] === 1 && r.a.playState === 'running').length : 0 }); return a; }; });
     await t.click('#tiers [data-tier="studio"]');
-    await t.ok('a tier change ran as a view transition', () => Array.isArray(window.__vtA) && window.__vtA.length > 0 || 'no animations seen');
-    await t.ok('the page itself does not cross-fade: no fade of the old or new page (Q-13)', () => !window.__vtA.some(a => /-(old|new)\(root\)/.test(a.p)) || window.__vtA.filter(a => /root/.test(a.p)).map(a => a.p + ' ' + a.end));
-    await t.ok('the tier switch does not take part: no group, no image animates (Q-13)', () => !window.__vtA.some(a => /vt-tiers\)/.test(a.p)));
-    await t.ok('a tile\'s header does not fade (Q-13)', () => !window.__vtA.some(a => /^::view-transition-(old|new)\(vt-h-(tempo|takes|seed|avoid)\)/.test(a.p)));
-    await t.ok('a tile\'s old and new faces are never shown together (Q-13)', () => { const bad = ['tempo', 'avoid', 'takes', 'seed'].filter(m => { const o = window.__vtA.find(a => a.p === `::view-transition-old(vt-${m})`), n = window.__vtA.find(a => a.p === `::view-transition-new(vt-${m})`); return !o || !n || o.end > n.delay + 1; }).map(m => JSON.stringify(window.__vtA.filter(a => a.p.includes(`(vt-${m})`)))); return !bad.length || bad; });
-    await t.ok('the prompt card\'s words are one object: they do not fade at all (Q-13)', () => !window.__vtA.some(a => /^::view-transition-(old|new)\(vt-prompt\)/.test(a.p)));
-    await t.eq('after it, nothing is left named', () => [document.documentElement.classList.contains('tier-morph'), [...document.querySelectorAll('[style*="view-transition-name"]')].length], [false, 0]);
+    await t.ok('a tier change is drawn by hand: the page moves, and no View Transition is started', () => (window.__anims.length > 0 && window.__vts === 0) || `${window.__anims.length} animations, ${window.__vts} transitions`);
+    await t.ok('the page itself does not cross-fade: nothing animates the page or its column (Q-13)', () => !window.__anims.some(r => [document.documentElement, document.body, document.getElementById('centre')].includes(r.el)));
+    await t.ok('the tier switch does not take part: nothing in it is animated (Q-13)', () => !window.__anims.some(r => r.el.closest('#tiers')));
+    await t.ok("a tile's header does not fade (Q-13)", () => !window.__anims.some(r => r.op && r.el.matches('.tile-head')));
+    await t.ok("a tile's old and new faces are never shown together (Q-13)", () => { const bad = ['tempo', 'avoid', 'takes', 'seed'].filter(m => { const ins = window.__anims.filter(r => r.face && r.m === m && r.op?.[0] === 0); return !ins.length || ins.some(r => r.live || r.delay < 60); }); return !bad.length || bad; });
+    await t.ok("the prompt card's words are one object: they do not fade at all (Q-13)", () => !window.__anims.some(r => r.op && r.el.closest('.prompt-card')));
+    await t.eq('after it, nothing is left drawn for it', () => [document.documentElement.classList.contains('tier-morph'), document.querySelectorAll('[data-morph]').length, window.__anims.filter(r => r.a.playState === 'running').length], [false, 0, 0]);
   } },
   { id: 'rapid-tier-changes-raise-no-error', w: 1600, h: 900, run: async t => {
     await desk('studio', ACE)(t);

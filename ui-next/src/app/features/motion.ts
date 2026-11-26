@@ -1,5 +1,5 @@
 // The desk's own transition (the concept's transition(), 30-desk.js, M-02): structural changes animate only what
-// changed. When the modules, the board, the engine or (without a View Transition) the tier change, the store tells this
+// changed. When the modules, the board, the engine or (under reduced motion) the tier change, the store tells this
 // file before the page is drawn again; where every tile and pedal stood is taken then, and once the desk has been laid
 // out (desk/layout.ts onPacked) each is compared with where it is now:
 // - a tile that arrived scales in (--t-base); one that left fades out where it stood (--t-fast), its node put back for
@@ -133,7 +133,7 @@ function ringStill(el: HTMLElement, cls: string, ms = reduced() ? 1200 : mtime('
   window.setTimeout(() => el.classList.remove(cls), ms);
 }
 
-/** Whether the desk's own transition plays: not while the page loads, nor inside a tier change's View Transition. */
+/** Whether the desk's own transition plays: not while the page loads, nor while a tier change's own motion runs (shell/morph.ts). */
 const moving = () => booted() && !document.documentElement.classList.contains('tier-morph');
 
 /* the store says the desk is about to change its make-up: where everything stands is taken now, while the page still

@@ -7,7 +7,7 @@ import type { Tier } from '../../definitions/types.ts';
 import { useDesk } from '../store/desk.ts';
 import { ui, useSay } from '../i18n/index.ts';
 import { Desk, HiddenNote } from '../desk/Desk.tsx';
-import { setTierFromView } from './tier.ts';
+import { setTierFromView, useShownTier } from './tier.ts';
 import { toggleDrawer } from './drawers.ts';
 import { usePanelStore } from '../store/panels.ts';
 import { Slot } from '../register/Slot.tsx';
@@ -15,8 +15,8 @@ import { Slot } from '../register/Slot.tsx';
 const TIERS: Tier[] = ['quick', 'studio', 'lab'];
 
 function Tiers() {
-  const say = useSay(), tier = useDesk(s => s.desk.tier), el = useRef<HTMLDivElement>(null);
-  /* the thumb slides under the chosen tier; its place is measured (31-shell.js placeTierThumb) */
+  const say = useSay(), tier = useShownTier(useDesk(s => s.desk.tier)), el = useRef<HTMLDivElement>(null);
+  /* the thumb slides under the chosen tier (from the click on, before the desk is drawn at it); its place is measured (31-shell.js placeTierThumb) */
   useLayoutEffect(() => {
     const t = el.current, b = t?.querySelector<HTMLElement>('[aria-checked="true"]'); if (!t || !b || !b.offsetWidth) return;
     t.style.setProperty('--tx', b.offsetLeft + 'px'); t.style.setProperty('--tw', b.offsetWidth + 'px');

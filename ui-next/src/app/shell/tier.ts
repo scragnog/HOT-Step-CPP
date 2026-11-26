@@ -2,20 +2,21 @@
 // shows more or less of itself, the place the user was reading stays where it was on screen (Q-14, RC-11), and the
 // controls a link named are rung on arrival.
 //
-// It is one View Transition in which every part that exists in both tiers is one object throughout (Q-04, Q-13):
+// Every part that exists in both tiers is one object throughout (Q-04, Q-13); the motion is drawn by hand (morph.ts):
 // - a tile, the prompt card and the lyric sheet are frames: the frame grows or shrinks from its old box to its new one,
-//   drawn by the transition itself, and what is on it is never scaled: the old face, at its own size and pinned to the
-//   frame's top-left, hands over to the new one, clipped by the frame. A tile's header is the same in both tiers and
-//   does not fade; its remove button slides to its new corner;
+//   and what is on it is never scaled: the old face goes, the new one, at its own size and pinned to the frame's
+//   top-left, comes in, clipped by the frame. A tile's header is the same in both tiers and does not fade; its remove
+//   button slides to its new corner;
 // - what only one tier has (a Lab module, Quick's heading, the hidden-modules note) fades out or in where it stands;
 // - the bars never fade: their contents slide where the column puts them, and they stay above the tiles moving under
 //   them; the tier switch does not take part (its thumb has its own slide);
 // - the rest of the page is shown in its new state at once.
-// The choreography is the concept's stylesheet (35-motion.css, html.tier-morph); this names the parts and gives each
-// its class. React draws the new tier inside the transition's update (flushSync), and the desk is laid out there, so
-// what the transition captures is the page as it will stay. Under reduced motion, or without View Transitions, the
-// desk's own transition runs (features/motion.ts: nothing moves, what arrives fades in).
+// The choreography is the concept's (35-motion.css, html.tier-morph; morph.ts); this names the parts and gives each its
+// class. The click is answered at once: the switch shows the chosen tier and the old faces start to go in the click's
+// own frame; the new tier is drawn in the next task, and the desk laid out there, then everything moves from where it
+// stood. Under reduced motion the desk's own transition runs (features/motion.ts: nothing moves, what arrives fades in).
 
+import { useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import type { Tier } from '../../definitions/types.ts';
 import { deskModel } from '../../derive.ts';
@@ -27,6 +28,7 @@ import { deferPack, flushPack } from '../desk/layout.ts';
 import { drawHeld, drawInView, hold, leaving, planStage, settle, type Stage } from '../desk/stage.ts';
 import { heldTiles } from '../render/tileTier.ts';
 import { TALLY, tally } from '../tally.ts';
+import { morphEnd, morphIn, morphOut, type Part } from './morph.ts';
 
 const ANCHORS = '#bento > .tile[data-m], .lyr-card';
 const anchorKey = (el: Element) => (el as HTMLElement).dataset.m ? `#bento > .tile[data-m="${(el as HTMLElement).dataset.m}"]` : '.lyr-card';
@@ -49,25 +51,14 @@ function deskAnchor(): { put: () => void; reader: { key: string; top: number } |
   return { put: () => { const n = document.querySelector(k); if (!n) return; const d = n.getBoundingClientRect().top - top; if (Math.abs(d) > 0.5) scrollTo(scrollX, scrollY + d); }, reader: id ? { key: id, top } : null };
 }
 
-/** Whether a tile stands within a third of the window of the view (a tile that leaves out of view is not named). */
-function inView(id: string): boolean {
-  const r = document.querySelector(`#bento > .tile[data-m="${id}"]`)?.getBoundingClientRect(), m = innerHeight / 3;
-  return !!r && r.bottom > -m && r.top < innerHeight + m;
-}
-
-type VT = { finished: Promise<void>; ready: Promise<void>; updateCallbackDone: Promise<void> };
-const doc = document as Document & { startViewTransition?: (f: () => void) => VT };
-/** View Transitions with their classes: the tier change is choreographed only where both are there. */
-const VT_OK = !!doc.startViewTransition && !!window.CSS?.supports?.('view-transition-class: a');
-
-/* the tiles only one of the two tiers shows, whether the old state is being named, and the tiles left unnamed (out of
-   view: a staged change holds them, or they leave where no one sees them) */
-let only = new Set<string>(), naming: 'old' | 'new' = 'old', unnamed = new Set<string>();
+/* the tiles only one of the two tiers shows, which side is being named, and the tiles left out (held by a staged change:
+   out of view, they take no part) */
+let only = new Set<string>(), side: 'old' | 'new' = 'old', left = new Set<string>();
 const tileIdOf = (el: Element) => el.closest<HTMLElement>('#bento > .tile[data-m]')?.dataset.m ?? '';
-const frame = (el: HTMLElement) => 'frame' + (el.dataset.m === LEAD?.id ? ' keep' : '') + (el.classList.contains('source') ? ' source' : '') + (only.has(el.dataset.m!) ? (naming === 'old' ? ' gone' : ' fresh') : '');
+const frame = (el: HTMLElement) => 'frame' + (el.dataset.m === LEAD?.id ? ' keep' : '') + (el.classList.contains('source') ? ' source' : '') + (only.has(el.dataset.m!) ? (side === 'old' ? ' gone' : ' fresh') : '');
 const m = (el: Element) => (el as HTMLElement).dataset.m ?? '';
 const tileOf = (el: Element) => m(el.closest('.tile')!);
-/** [selector, the name of each match, its view-transition-class] (the concept's VT_PARTS, the same names and classes) */
+/** [selector, the name of each match, its class] (the concept's VT_PARTS, the same names and classes) */
 const PARTS: [string, (el: HTMLElement) => string, string | ((el: HTMLElement) => string)][] = [
   ['.top', () => 'vt-top', 'still'],
   ['.deskbar', () => 'vt-bar', 'band'],
@@ -89,70 +80,109 @@ const PARTS: [string, (el: HTMLElement) => string, string | ((el: HTMLElement) =
   ['.gobar > [id]', el => 'vt-g-' + el.id, el => (el.id === 'meter' ? 'swap' : 'slide')],
   ['.latest', () => 'vt-latest', 'swap'],
 ];
-/** Names every part for the transition (on), or takes every name off. A part not drawn has no name; a name is given
- *  once. Whether each is drawn is read before any is named: a name restyles its part, and a read after it would have
- *  the page restyled again, once a part. */
-function nameForMorph(on: boolean): void {
-  const used = new Set<string>();
-  const parts = PARTS.flatMap(([sel, name, cls]) => [...document.querySelectorAll<HTMLElement>(sel)].map(el => ({ el, name, cls, drawn: on && !unnamed.has(tileIdOf(el)) && el.getClientRects().length > 0 })));
-  for (const { el, name, cls, drawn } of parts) {
-    const n = drawn ? name(el) : '';
-    if (!n || used.has(n)) { el.style.removeProperty('view-transition-name'); el.style.removeProperty('view-transition-class'); continue; }
-    used.add(n); el.style.setProperty('view-transition-name', n); el.style.setProperty('view-transition-class', typeof cls === 'function' ? cls(el) : cls);
+/** Every part on the page now, with its name and class; a name is taken once, and a tile left out has none. */
+function collect(): Part[] {
+  const used = new Set<string>(), out: Part[] = [];
+  for (const [sel, name, cls] of PARTS) for (const el of document.querySelectorAll<HTMLElement>(sel)) {
+    const n = left.has(tileIdOf(el)) ? '' : name(el); if (!n || used.has(n)) continue;
+    used.add(n); out.push({ name: n, el, cls: typeof cls === 'function' ? cls(el) : cls });
   }
+  return out;
+}
+/** Which tiles only one of the desk now and the desk at `t` shows. */
+function onlyOne(t: Tier): Set<string> {
+  const s = useDesk.getState(), now = new Set([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(m)), next = new Set(deskModel(ix, { ...s.desk, tier: t }, s.mods, deskFold.get()).tiles);
+  return new Set([...now, ...next].filter(x => now.has(x) !== next.has(x)));
 }
 
-let seq = 0, flying = 0;
-/* what the change's own drawing (the View Transition's update, before anything moves) counted: the views' models asked,
-   and the tiles measured (the test layer's counters, tools/behaviour/scenarios/40-tier.mjs; nothing in other builds) */
+/* the tier the switch shows from the click on, while the desk is still to be drawn at it */
+let going: Tier | null = null;
+const goers = new Set<() => void>();
+const setGoing = (t: Tier | null) => { if (going === t) return; going = t; goers.forEach(f => f()); };
+/** The tier the switch shows: the one chosen, from the moment it is chosen. */
+export const useShownTier = (tier: Tier): Tier => useSyncExternalStore(f => { goers.add(f); return () => goers.delete(f); }, () => going) ?? tier;
+
+let seq = 0, timer = 0, frameId = 0, inDraw = false;
+/* the place the user is reading, taken as the change is chosen (before anything about it moves) */
+let anchorAt: ReturnType<typeof deskAnchor> | null = null;
+/* what the change's own drawing (before anything moves) counted: the views' models asked, and the tiles measured (the
+   test layer's counters, tools/behaviour/scenarios/40-tier.mjs; nothing in other builds) */
 const SYNC = ['model', 'model.changed', 'measure.tiles'];
 const counts = () => SYNC.map(k => TALLY[k] ?? 0);
 const counted = (was: number[]) => SYNC.forEach((k, i) => tally('tier.sync.' + k, (TALLY[k] ?? 0) - was[i]!));
 const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select, textarea, [tabindex="0"]';
 const ringFor = () => (reduced() ? 1200 : mtime('--t-slow') * 4);
+const focusTier = (t: Tier) => document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
+/** A change chosen but not drawn yet is called off, and a motion that runs ends where it was going. */
+function callOff(): void {
+  cancelAnimationFrame(frameId); clearTimeout(timer); frameId = timer = 0; seq++; anchorAt = null;
+  morphEnd(); document.documentElement.classList.remove('tier-morph');
+}
 
+type Opts = { ring?: string[]; focus?: boolean; reveal?: boolean; instant?: boolean };
 /** Changes the tier. `focus`: focus the chosen tier's button (Q-16); `ring`: ring the controls a link named, focus going
  *  to the first (Q-28); `reveal`: ring the tiles the new tier brings, the first brought into view (Q-15); `instant`: the
- *  tier is in force when this returns, for what the caller does next in it (Lab's offer adds its module there), so the
- *  desk's own transition carries the change instead of the View Transition, whose update waits for the next frame. */
-export function setTierFromView(t: Tier, o: { ring?: string[]; focus?: boolean; reveal?: boolean; instant?: boolean } = {}): void {
-  const s = useDesk.getState();
-  if (s.desk.tier === t) { if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true }); return; }
-  leaving();
-  const was = new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles), anchor = deskAnchor(), keep = anchor.put;
-  /* drawn and laid out now, so the anchor is put back before the page is painted; the desk is laid out once, after the
-     parts' own effects have run. A staged change holds the tiles out of view (desk/stage.ts) */
-  const draw = (st: Stage | null) => { if (!st) settle(); deferPack(() => flushSync(() => { if (st) hold(st); useDesk.getState().setTier(t); })); };
-  const go = (st: Stage | null = null) => { draw(st); flushPack(); keep(); };
-  const after = () => {
-    if (o.focus) document.querySelector<HTMLElement>(`#tiers [data-tier="${t}"]`)?.focus({ preventScroll: true });
-    if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods, deskFold.get()).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }
-    if (o.ring?.length) ringCtls(o.ring);
-  };
-  if (VT_OK && !o.instant && !reduced() && !document.hidden) {
-    const me = ++seq, root = document.documentElement;
-    const now = new Set([...document.querySelectorAll<HTMLElement>('#bento > .tile[data-m]')].map(m)), next = new Set(deskModel(ix, { ...s.desk, tier: t }, s.mods, deskFold.get()).tiles);
-    only = new Set([...now, ...next].filter(x => now.has(x) !== next.has(x))); naming = 'old';
-    /* staged only when no other change is still to be drawn, and nothing is to be rung in the tiles */
-    const st = !flying && !o.ring && !o.reveal ? planStage(t, anchor.reader) : null;
-    unnamed = new Set(st ? [...st.holds.keys(), ...[...only].filter(id => now.has(id) && !inView(id))] : []);
-    nameForMorph(true); root.classList.add('tier-morph');
-    flying++;
-    const vt = doc.startViewTransition!(() => {
-      flying--; const was = counts();
-      go(st); if (st) drawInView(); unnamed = new Set(heldTiles()); naming = 'new'; nameForMorph(true); after();
-      counted(was);
-    });
-    vt.ready.then(drawHeld, drawHeld);
-    /* a change started while another runs skips the first (Q-21): only the last one clears up */
-    const clear = () => { if (me !== seq) return; nameForMorph(false); root.classList.remove('tier-morph'); };
-    vt.finished.then(clear, clear); vt.ready.catch(() => {}); vt.updateCallbackDone.catch(() => {});
-    return;
-  }
-  go();
-  /* again once the tiles' own sizes have settled the layout (a re-pack on the next frame) */
-  requestAnimationFrame(() => { keep(); after(); });
+ *  tier is in force when this returns, for what the caller does next in it (Lab's offer adds its module there), and the
+ *  desk's own transition carries the change. A change chosen while another is still to be drawn replaces it; one chosen
+ *  while another moves ends that one where it was going (Q-21). */
+export function setTierFromView(t: Tier, o: Opts = {}): void {
+  const s = useDesk.getState(), drawing = !!(frameId || timer);
+  if (drawing && t === s.desk.tier) { callOff(); flushSync(() => setGoing(null)); if (o.focus) focusTier(t); return; }
+  if ((going ?? s.desk.tier) === t) { if (o.focus) focusTier(t); return; }
+  if (o.instant || reduced() || document.hidden) { callOff(); drawNow(t, o); return; }
+  const root = document.documentElement;
+  if (!drawing) { morphEnd(); anchorAt = deskAnchor(); only = onlyOne(t); side = 'old'; left = new Set(); morphOut(collect()); root.classList.add('tier-morph'); }
+  /* the switch shows the choice in the click's own frame; the new tier is drawn once that frame is on screen */
+  flushSync(() => setGoing(t)); if (o.focus) focusTier(t);
+  const me = ++seq;
+  cancelAnimationFrame(frameId); clearTimeout(timer);
+  frameId = requestAnimationFrame(() => { frameId = 0; timer = window.setTimeout(() => { timer = 0; if (me === seq) drawMoving(t, o, me); }); });
 }
+
+/** The desk drawn at `t` and laid out, the reader's place put back before the page is painted (the desk laid out once,
+ *  after the parts' own effects have run); a staged change holds the tiles out of view (desk/stage.ts). */
+function drawAt(t: Tier, st: Stage | null, keep: () => void): void {
+  if (!st) settle();
+  deferPack(() => flushSync(() => { if (st) hold(st); setGoing(null); useDesk.getState().setTier(t); }));
+  flushPack(); keep();
+}
+/** What the change does once the tier is drawn: focus, the tiles it brought rung, the controls a link named rung. */
+function after(t: Tier, o: Opts, was: Set<string>): void {
+  if (o.focus) focusTier(t);
+  if (o.reveal) { const st = useDesk.getState(); deskModel(ix, st.desk, st.mods, deskFold.get()).tiles.filter(id => !was.has(id)).forEach((id, i) => ringTile(id, i > 0)); }
+  if (o.ring?.length) ringCtls(o.ring);
+}
+const tilesNow = () => { const s = useDesk.getState(); return new Set(deskModel(ix, s.desk, s.mods, deskFold.get()).tiles); };
+
+function drawMoving(t: Tier, o: Opts, me: number): void {
+  leaving();
+  const was = tilesNow(), anchor = anchorAt ?? deskAnchor(), c = counts();
+  anchorAt = null;
+  only = onlyOne(t);
+  /* staged only when nothing is to be rung in the tiles */
+  const st = !o.ring && !o.reveal ? planStage(t, anchor.reader) : null;
+  inDraw = true; drawAt(t, st, anchor.put); inDraw = false; if (st) drawInView();
+  left = new Set(heldTiles()); side = 'new';
+  const parts = collect(); after(t, o, was); counted(c);
+  morphIn(parts).then(() => { if (me === seq) document.documentElement.classList.remove('tier-morph'); });
+  /* once the motion has started, the tiles a staged change held are drawn */
+  requestAnimationFrame(() => { anchor.put(); drawHeld(); });
+}
+
+function drawNow(t: Tier, o: Opts): void {
+  leaving();
+  const was = tilesNow(), anchor = deskAnchor();
+  inDraw = true; drawAt(t, null, anchor.put); inDraw = false;
+  /* again once the tiles' own sizes have settled the layout (a re-pack on the next frame) */
+  requestAnimationFrame(() => { anchor.put(); after(t, o, was); });
+}
+
+/* the desk's make-up changed some other way while a change was chosen or moving (the tier set directly, a module added,
+   the engine switched): that change is called off, its motion ended where it was going */
+useDesk.subscribe((s, p) => {
+  if (inDraw || !(frameId || timer || document.documentElement.classList.contains('tier-morph'))) return;
+  if (s.desk.tier !== p.desk.tier || s.mods !== p.mods || s.board !== p.board || s.desk.engine !== p.desk.engine) { callOff(); setGoing(null); }
+});
 
 /** A tile the tier brought: the "it is here" ring; the first is brought into view (the concept's flash). */
 function ringTile(id: string, stay: boolean): void {

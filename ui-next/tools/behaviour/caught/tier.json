@@ -5,6 +5,8 @@
   "tier: a tile's models do not depend on the desk's tier": ["40-tier/a-return-to-a-tier-draws-only-what-is-in-view"],
   "tier: the held tiles are drawn once the motion has started": ["40-tier/a-return-to-a-tier-draws-only-what-is-in-view"],
   "tier: the desk is laid out once a change, after the parts' effects": ["40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole"],
-  "tier: the desk is measured without a class on it": ["40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole"]
+  "tier: the desk is measured without a class on it": ["40-tier/a-first-change-measures-the-desk-once-without-restyling-it-whole"],
+  "tier: the switch answers the click in its own frame": ["40-tier/a-tier-change-answers-the-click-at-once"],
+  "tier: the old faces start to go in the click's own frame": ["40-tier/a-tier-change-answers-the-click-at-once"]
  }
 }

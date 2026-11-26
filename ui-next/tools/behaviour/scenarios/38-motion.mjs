@@ -13,8 +13,9 @@ const seek = (t, ms) => t.js(ms => { for (const a of document.getAnimations()) {
 /* boxes are read in page coordinates: a page that scrolls to what arrived does not move what stands still */
 const box = (t, sel) => t.js(sel => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height), o: Math.round(+getComputedStyle(el).opacity * 100) / 100 }; }, sel);
 const boxes = (t, sel, key) => t.js(([sel, key]) => Object.fromEntries([...document.querySelectorAll(sel)].map(el => { const r = el.getBoundingClientRect(); return [el.getAttribute(key), { x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) }]; })), [sel, key]);
-/* a View Transition part's group box and its images' opacity, at the moment the animations stand at */
-const vt = (t, name) => t.js(n => { const root = document.documentElement, g = getComputedStyle(root, `::view-transition-group(${n})`); if (!g.width || g.width === 'auto') return null; const m = new DOMMatrix(g.transform === 'none' ? undefined : g.transform), op = side => { const s = getComputedStyle(root, `::view-transition-${side}(${n})`); return s.display === 'none' ? 0 : Math.round(+s.opacity * 100) / 100; }; return { x: Math.round(m.m41), y: Math.round(m.m42), w: Math.round(parseFloat(g.width)), h: Math.round(parseFloat(g.height)), old: op('old'), new: op('new') }; }, name);
+/* a tier change's part (shell/morph.ts): its box (a frame's surface, else the element's) and its faces' opacity (the old
+   faces are gone before the new tier is drawn: 0), at the moment the animations stand at */
+const vt = (t, name) => t.js(n => { const p = window.__morph?.().find(p => p.name === n); if (!p) return null; const e = p.el.getBoundingClientRect(), b = getComputedStyle(p.el, '::before'), px = v => parseFloat(v) || 0, r = p.surface ? { x: e.left + p.el.clientLeft + px(b.left), y: e.top + p.el.clientTop + px(b.top), w: px(b.width), h: px(b.height) } : { x: e.left, y: e.top, w: e.width, h: e.height }; return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h), old: 0, new: Math.round(+getComputedStyle(p.faces[0] ?? p.el).opacity * 100) / 100 }; }, name);
 const xy = (a, b) => !!a && !!b && Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2;
 const at = (a, b, d = 2) => !!a && !!b && ['x', 'y', 'w', 'h'].every(k => Math.abs(a[k] - b[k]) <= d);
 const check = (t, label, ok, detail) => t.ok(label, ([ok, d]) => ok || d, [!!ok, JSON.stringify(detail)]);
@@ -31,10 +32,10 @@ export default [
     await listenVT(t);
     const before = await box(t, '.tile[data-m="tempo"]');
     await t.js(() => document.querySelector('#tiers [data-tier="studio"]').click());
-    await t.js(() => window.__vt?.ready.catch(() => {}));
+    await tick(t, 3);
     const steps = [];
     for (const ms of [0, 32, 48, 64, 96, 160, 270]) { await seek(t, ms); steps.push([ms, await vt(t, 'vt-tempo'), await vt(t, 'vt-h-tempo')]); }
-    await check(t, 'the tier change is a View Transition, Tempo a part of it', steps[0][1], steps);
+    await check(t, 'the tier change moves Tempo as one of its parts', steps[0][1], steps);
     await check(t, 'at its start Tempo\'s frame stands where the tile stood', at(steps[0][1], before), [before, steps[0][1]]);
     const hs = steps.map(s => s[1]?.h ?? 0), grows = hs[hs.length - 1] > hs[0];
     await check(t, 'its frame grows step by step, never back (one object, not a cut)', hs.every((h, i) => !i || (grows ? h >= hs[i - 1] - 0.5 : h <= hs[i - 1] + 0.5)) && new Set(hs).size > 3, hs);
@@ -43,7 +44,7 @@ export default [
     await t.settle();
     const after = await box(t, '.tile[data-m="tempo"]');
     await check(t, 'at its end the frame stands where the tile now stands', at(steps[steps.length - 1][1], after), [steps[steps.length - 1][1], after]);
-    await t.eq('after it, nothing is left named', () => [document.documentElement.classList.contains('tier-morph'), document.querySelectorAll('[style*="view-transition-name"]').length], [false, 0]);
+    await t.eq('after it, nothing is left drawn for it: no surface, no animation, no View Transition', () => [document.documentElement.classList.contains('tier-morph'), document.querySelectorAll('[data-morph]').length, window.__morph().length, window.__vts], [false, 0, 0, 0]);
   } },
   /* a tile that arrives scales in where it lands; the tiles it pushes slide from where they stood */
   { id: 'a-tile-arrives-and-pushes', run: async t => {
@@ -204,7 +205,7 @@ export default [
   /* what the tier brings is rung when a link reveals it, and what is added is brought into view */
   { id: 'what-arrives-is-shown', w: 1600, h: 900, run: async t => {
     await desk('studio', ['tempo', 'sampler', 'guidance', 'seed'])(t);
-    await t.js(() => document.querySelector('#hiddenNote [data-tier="lab"]').click()); await t.js(() => window.__vt?.ready.catch(() => {})); await tick(t, 3);
+    await t.js(() => document.querySelector('#hiddenNote [data-tier="lab"]').click()); await tick(t, 3);
     await t.ok('Show in Lab rings the module it reveals', () => document.querySelector('.tile[data-m="guidance"]').classList.contains('flash'));
     await desk('studio', ['tempo', 'avoid', 'timbre', 'adapters', 'planner', 'sampler', 'takes'])(t);
     await t.do('add Seed', () => addItem('seed'), null, 400);

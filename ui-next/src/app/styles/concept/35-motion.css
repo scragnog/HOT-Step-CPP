@@ -34,47 +34,10 @@
 }
 /* Order: the picker's More button keeps its centring translate when pressed (after the press rule above). */
 .fl-more { translate: -50% 0; }
-/* A tier change (Q-04, Q-13; setTier in 31-shell.js names the parts and gives each a class). Set only while a tier
-   change runs (html.tier-morph), so the theme's cross-fade keeps its own. Every box moves and resizes from its old place
-   to its new one over --t-move with --e-out; what is inside a box is never scaled.
-   - the page itself does not cross-fade: it is shown in its new state at once */
-html.tier-morph::view-transition-group(*) { animation-duration: var(--t-move); animation-timing-function: var(--e-out); }
-html.tier-morph::view-transition-old(root) { display: none; }
-html.tier-morph::view-transition-new(root) { animation: none; }
-html.tier-morph::view-transition-old(*), html.tier-morph::view-transition-new(*) { mix-blend-mode: normal; }
-/* - frames (tiles, the prompt card, the lyric sheet): the frame is drawn by the group, at the size of the moment, in the
-     tile's own surface, line and radius; the faces are shown at their own size, pinned top-left, clipped by the frame and
-     inside its line, and hand over without ever showing both: the old one is gone in the first 60ms, the new one comes
-     in from 60ms to 190ms. The prompt card and the lyric sheet hold the same words in both tiers: their faces do not
-     fade at all, the new one is shown at once and the frame reveals it (keep) */
-html.tier-morph::view-transition-group(*.frame) { background: var(--surface); border-radius: var(--r-tile); box-shadow: inset 0 0 0 1px var(--line); overflow: clip; }
-html.tier-morph::view-transition-group(*.swap) { overflow: clip; }
-html.tier-morph::view-transition-group(*.source) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hot) 55%, var(--line)); }
-html.tier-morph::view-transition-group(*.prompt) { box-shadow: inset 0 0 0 1px var(--line), var(--shadow); }
-html.tier-morph::view-transition-old(*.frame), html.tier-morph::view-transition-new(*.frame), html.tier-morph::view-transition-old(*.swap), html.tier-morph::view-transition-new(*.swap) { width: auto; height: auto; }
-html.tier-morph::view-transition-old(*.frame), html.tier-morph::view-transition-new(*.frame) { clip-path: inset(2px round calc(var(--r-tile) - 2px)); }
-html.tier-morph::view-transition-old(*.frame), html.tier-morph::view-transition-old(*.swap) { animation: vtOut 60ms var(--e-out) both; }
-html.tier-morph::view-transition-new(*.frame), html.tier-morph::view-transition-new(*.swap) { animation: vtIn 130ms var(--e-out) 60ms both; }
-html.tier-morph::view-transition-old(*.keep) { display: none; }
-html.tier-morph::view-transition-new(*.keep) { animation: none; }
-@keyframes vtOut { to { opacity: 0; } }
-@keyframes vtIn { from { opacity: 0; } }
-/*   a frame or a swap that only one tier has fades where it stands, its frame with it */
-html.tier-morph::view-transition-group(*.gone) { animation: vtOut 100ms var(--e-in) both; }
-html.tier-morph::view-transition-group(*.fresh) { animation: vtIn 160ms var(--e-out) 80ms both; }
-html.tier-morph::view-transition-old(*.gone), html.tier-morph::view-transition-new(*.fresh) { animation: none; }
-/* - a tile's header (grip and name) is the same object in both tiers: it does not fade; its remove button, Generate, the
-     saved state and Undo, the panel toggles slide as they are */
-html.tier-morph::view-transition-old(*.head), html.tier-morph::view-transition-old(*.slide), html.tier-morph::view-transition-old(*.still), html.tier-morph::view-transition-old(*.band) { display: none; }
-html.tier-morph::view-transition-new(*.head), html.tier-morph::view-transition-new(*.slide), html.tier-morph::view-transition-new(*.still), html.tier-morph::view-transition-new(*.band) { animation: none; }
-html.tier-morph::view-transition-new(*.head), html.tier-morph::view-transition-new(*.slide) { width: auto; height: auto; }
-html.tier-morph::view-transition-new(*.end) { inset-inline-start: auto; inset-inline-end: 0; }
-html.tier-morph::view-transition-old(*.head):only-child, html.tier-morph::view-transition-old(*.slide):only-child { display: block; animation: vtOut 100ms var(--e-in) both; }
-html.tier-morph::view-transition-new(*.head):only-child, html.tier-morph::view-transition-new(*.slide):only-child { animation: vtIn 160ms var(--e-out) 80ms both; }
-/* - the bars' bands (no words of their own: their contents are named) stretch to the column; the top bar and the tier
-     switch do not move at all (the switch's thumb slides on its own) */
-html.tier-morph::view-transition-new(*.band) { width: 100%; height: 100%; }
-html.tier-morph::view-transition-group(*.still) { animation: none; }
-/* - Quick's heading leaves before the prompt card passes over it, and comes back once the card has gone up */
-html.tier-morph::view-transition-old(*.only) { animation: vtOut 60ms var(--e-out) both; }
-html.tier-morph::view-transition-new(*.only) { animation: vtIn 120ms var(--e-out) 160ms both; }
+/* A tier change (Q-04, Q-13): the choreography is the concept's html.tier-morph View Transition, drawn by hand on the
+   page's own elements (shell/morph.ts, which holds its timings): every box moves and resizes from its old place to its
+   new one over --t-move with --e-out, what is inside a box is never scaled, and html.tier-morph is set while it runs.
+   - a frame or a band (a tile, the prompt card, the lyric sheet, the bars) shows its surface, line, radius and shadow
+     on its ::before for the moment, at the size of the moment, under its content; its own are taken off */
+[data-morph] { background: transparent !important; border-color: transparent !important; box-shadow: none !important; isolation: isolate; }
+[data-morph]::before { content: ""; position: absolute; z-index: -1; pointer-events: none; }

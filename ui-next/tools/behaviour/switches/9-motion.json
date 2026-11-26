@@ -2,10 +2,10 @@
  "about": "Package 9's motions, each switched off by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of the acceptance fail (most are caught by scenarios/38-motion.mjs, which reads the page at moments of each motion).",
  "switches": [
   {
-   "feature": "motion tier view transition",
+   "feature": "motion tier drawn by hand",
    "file": "src/app/shell/tier.ts",
-   "find": "if (VT_OK && !o.instant && !reduced() && !document.hidden) {",
-   "replace": "if (VT_OK && false) {"
+   "find": "if (o.instant || reduced() || document.hidden) {",
+   "replace": "if (true) {"
   },
   {
    "feature": "motion tier anchor under the pointer",
@@ -16,8 +16,8 @@
   {
    "feature": "motion tier reveal rings",
    "file": "src/app/shell/tier.ts",
-   "find": "    if (o.reveal) {",
-   "replace": "    if (o.reveal && false) {"
+   "find": "  if (o.reveal) { const st",
+   "replace": "  if (o.reveal && false) { const st"
   },
   {
    "feature": "motion desk arrivals scale in",

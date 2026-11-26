@@ -38,6 +38,7 @@ Playwright is found as the other tools find it (`npm install`, or `PLAYWRIGHT_MO
 | `solve-bench.ts` | the desk's layout solver on the recorded desks (`node tools/perf/solve-bench.ts`) |
 | `make-desks.cjs` | writes `desks/*.json`, the saved desks the others open (from the test build) |
 | `tier.cjs` | the tier change on each engine's full desk, every pair of tiers both ways: click to the motion's first frame, longest frame, main thread, frames dropped in the motion, settled, the counters; `--again` the return to a tier the desk was laid out at, `--split` where the time goes by source group (`PERF_PROD=1` instrumented test build) |
+| `tier-frames.cjs` | the same changes headed on the GPU, traced, read from the frames the display presented (viz's DrawFrame), not the page's rAF: click to the first presented frame that shows the switch's new state (answered) and the motion's start (moving), the longest wait between presented frames until the motion ends, the GPU's raster time, the main thread; `--again` the return, `--reduced` reduced motion, `TIER_KEEP=<prefix>` keeps a trace of each change |
 | `../motion/cost.mjs` | what each motion costs the main thread (package 9's) |
 
 ## The guards

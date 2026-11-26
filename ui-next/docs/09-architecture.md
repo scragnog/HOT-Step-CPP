@@ -286,7 +286,7 @@ layers before any is measured (`features/motion.ts`).
 
 **A tier change draws what is in view first** (`desk/stage.ts`). On a full desk the change drew every tile at the new
 tier, laid the desk out and measured it twice (once in the desk's layout effect, again mid-motion for what the parts'
-own effects changed), and the View Transition captured every part, before anything moved: 93 to 210 ms from the click
+own effects changed), and the View Transition the change then was captured every part, before anything moved: 93 to 210 ms from the click
 to the motion's first frame, one frame of up to 200 ms. Now the desk is measured once, after the parts' effects
 (`desk/layout.ts deferPack`), without a class set on the desk to measure it (`.bento.measuring` restyled the whole
 desk through its :has rules; the rule's two declarations are written on the children instead), and the parts' boxes are
@@ -295,13 +295,22 @@ that tier is left: `deskLeaving`, each tile's item, look and what its models rea
 draws only what will be in view: a tile out of view before and after the change, whose content there cannot have
 changed since (nothing its models read differs), is held at the tier it was drawn at (or drawn as its shell, a tile the
 change brings), stands in the layout as what was kept of it, lays nothing out (`content-visibility: hidden` for the
-moment) and is not named for the View Transition, which no one would see; once the motion has started the held tiles
+moment) and takes no part in the motion, which no one would see; once the motion has started the held tiles
 are drawn at the new tier one a frame, nearest first, each checked against what was kept (one not the height it was
 kept at is measured and the desk laid out again, as any change of content is). A tile's models are asked at the tile's
 tier (`useModel` sees the desk at it), so a held tile asks nothing again. On every ACE-Step module, pedal and side unit
 at 1920x1080, a return to a tier now shows its first frame in 60 to 110 ms and settles in about 400 (the motion is 280);
 a first visit to a tier, or one after a module was added or removed, draws everything (94 to 193 ms). The tools:
-`tools/perf/tier.cjs` (every pair of tiers both ways on each engine's full desk; `--again` the return).
+`tools/perf/tier.cjs` (every pair of tiers both ways on each engine's full desk; `--again` the return), and
+`tools/perf/tier-frames.cjs`, the same changes headed on the GPU and read from the frames the display presented (a
+trace), which is what the user sees: the click answered, the motion's first frame, the longest wait between frames.
+The View Transition the change was froze the page from the click until the new tier was drawn and captured: the first
+frame that moved came 121 to 230 ms after a first visit's click (87 to 132 on a return), after one wait of 59 to 195 ms,
+and the first change after a load sometimes stalled the GPU 500 to 800 ms rasterising the captures. Drawn by hand
+(TC-2), the click is answered and the old faces start to go in the next presented frame (8 to 19 ms); on a return no
+wait between frames is longer than 15 ms; on a first visit the new tier is still drawn in one task, after the old faces
+have gone, and the longest wait is 11 to 87 ms (medians of 3; two of 54 first changes saw one raster task of the GPU of
+110 and 220 ms, the first time the new tier's content was rasterised).
 
 PERF-TABLE
 
@@ -336,16 +345,20 @@ vocabulary is the concept's (`00-tokens.css`: `--t-*`, `--e-*`, read through `ki
 each motion plays the concept's designed alternative: nothing moves, every change of state still shows (a 120ms fade,
 rings as still outlines).
 
-- **The tier change** (`shell/tier.ts`) is one View Transition in which every part present in both tiers is one object:
-  `PARTS` names each part with its `view-transition-class` (`frame`, `keep`, `head`, `slide`, `swap`, `band`, `still`,
-  `only`; the choreography is the concept's `35-motion.css`, `html.tier-morph`), React draws the new tier inside the
-  transition's update (`flushSync`) and the desk is laid out there (`desk/layout.ts flushPack`), so what is captured is
-  the page as it will stay; the tile being read keeps its place (focus, else the pointer, else the bars' edge, Q-14).
-  A new part of the page that should take part is one line in `PARTS`. `instant` changes the tier without it, for a
-  caller that acts in the new tier at once (Lab's offer).
+- **The tier change** (`shell/tier.ts`, `shell/morph.ts`) moves every part present in both tiers as one object, drawn
+  by hand on the page's own elements (TC-2): `PARTS` names each part with its class (`frame`, `keep`, `head`, `slide`,
+  `swap`, `band`, `still`, `only`, `gone`, `fresh`: the choreography of the concept's `html.tier-morph` View
+  Transition, its timings in `morph.ts`). In the click's own task the switch shows the choice (`useShownTier`), every
+  part's box is read and the old faces start to go (`morphOut`); in the task after that frame React draws the new tier
+  (`flushSync`), the desk is laid out (`desk/layout.ts flushPack`), the tile being read is put back where it was (focus,
+  else the pointer, else the bars' edge, Q-14), and every part moves from its old box to its new one (`morphIn`): a frame
+  is moved back (transform) and clipped to the frame of the moment (clip-path), its surface drawn for the moment by its
+  `::before` (`[data-morph]`, `35-motion.css`) at the size of the moment, so what is on it is never scaled. A new part
+  of the page that should take part is one line in `PARTS`. `instant` changes the tier without it, for a caller that acts
+  in the new tier at once (Lab's offer); a change chosen before the last is drawn replaces it, one chosen while another
+  moves ends that one where it was going (Q-21).
   When the desk has been laid out at the new tier before, the change is staged (`desk/stage.ts`, above, "Rendering"):
-  the tiles out of view are held and not named, the parts in view move exactly as in the full change
-  (`tools/motion/frames.mjs tier-studio-to-lab-again` against `tier-studio-to-lab`: 0 px on every part both name).
+  the tiles out of view are held and take no part, the parts in view move exactly as in the full change.
 - **The desk's own transition** (`features/motion.ts`): the store tells it, before the page is drawn again, that the
   modules, the board, the engine or the tier change; where every tile and pedal stands is taken then, and once the desk
   has been laid out (`desk/layout.ts onPacked`, after the commit) arrivals scale in, exits fade where they stood (the
@@ -860,9 +873,17 @@ PF-2. **A workflow's name cut short leads its row's tooltip once the list is pai
 The tier change (above, "Rendering" and "Motion"):
 
 TC-1. **A return to a tier draws what is in view first**: the tiles out of view before and after the change are held at
-    the tier they were drawn at, take no part in the View Transition, and are drawn at the new tier one a frame once
-    the motion has started (on a full desk all within about 120 ms of its start). What is in view moves as before; a
-    window scrolled within that moment shows a held tile's frame without its content.
+    the tier they were drawn at, take no part in the motion, and are drawn at the new tier one a frame once the motion
+    has started (on a full desk all within about 120 ms of its start). What is in view moves as before; a window
+    scrolled within that moment shows a held tile's frame without its content.
+TC-2. **The tier change is drawn by hand, not as a View Transition** (`shell/morph.ts`): the View Transition froze the
+    page from the click until the new tier was drawn, laid out and captured (one wait of up to 200 ms on a full desk,
+    and a GPU stall on the first change after a load), so the click went unanswered. Now the switch shows the choice and
+    the old faces start to go in the click's own frame, and the new tier is drawn in the task after it; the motion is
+    the View Transition's, part by part, with one difference: the old faces go before the new tier is drawn (a
+    pre-roll), not while the frames move (`tools/motion/approved/tier-*`, approved again; side-by-side strips in the
+    package's notes). Showing faces prepared beforehand for the other tiers was measured and not built: see the
+    package's notes (the copies' lookups, ids and per-change drawing).
 
 ## Adding from the how-to, on a copy
 
@@ -948,7 +969,7 @@ feature on; the verdict for each switch is the one the whole acceptance would gi
 | 6. Generation, go bar, Latest, player, song menu | `features/generate.tsx`, `generate/`, `player/`, `store/generate.ts` (the queue: server-owned, not undoable), `services/generate.ts` | `fill('centre.gobar' / 'centre.latest' / 'overlays')`, `onKey({ id: 'generate' })` (Ctrl+Enter) | `shell/Toast.tsx` (the stack of three, Tab into it) |
 | 7. Workflows, revisions, drafts, storage | `features/workflows.tsx`, `workflows/`, `store/workflows.ts` | `fill('panel.workflows')`, `defineUndoable('workflow')`, `deskStep` for opening one | `src/derive/records.ts` (unreadable records kept aside) |
 | 8. Picker, overlays, tooltips, touch, drag and drop | `features/picker.tsx`, `features/popover.tsx`, `features/tooltips.ts`, `features/touch.ts`, `features/focus-ring.ts`, `features/dnd.ts` (delegated listeners on the desk and the board, `add(id, before)` and `move`) | `fill('overlays')`, `onKey` (F9, Escape, F6) | `shell/Panels.tsx` (the Lab offer becomes the popover) |
-| 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts` (the View Transition around the tier change), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
+| 9. Motion | `features/motion.ts`, `styles/rebuild/35-motion.css` | `onKey` none | `shell/tier.ts`, `shell/morph.ts` (the tier change, drawn by hand), `desk/layout.ts` (FLIP around a pack), `board/cables.ts` (cables drawing out) |
 | 10. The real application | `services/real/*.ts`, the Tailwind scoping | `defineService` real adapters | `main.tsx`, `index.html`, `App.tsx` (its root inside the real app) |
 | Quick's fold (after the consolidation round) | `derive/fold.ts`, `desk/Fold.tsx`, `store/fold.ts`, `features/fold.ts`, `kit/session.ts` (the kept-state registration point), `testing/standins.ts`, `testing/compat/fold.ts`, `tools/test-fold.ts`, its acceptance, switches, states | `keptFlag('desk.fold')`, `keptFlag('prompt.songInfo')` | `derive/models.ts deskModel` (`open`, `fold`), `desk/Desk.tsx` (draws the button, passes `open`), `features/dnd.tsx` and `model/index.ts` (one line each), `parts/PromptBox.tsx` (Song info kept), `switches/4-fields.json` (its Song info switch's text) |
 | The performance pass (after package 9 and the fold) | `render/reads.ts`, `tally.ts`, `features/fonts.ts`, `testing/compat/perf.ts`, `tools/perf/`, `scenarios/39-perf.mjs`, `acceptance/perf.json`, `switches/perf.json` | none new | `render/useModel.ts`, `desk/layout.ts`, `desk/pack.ts`, `store/desk.ts`; and, each the smallest change: `App.tsx`, `desk/Desk.tsx` (the focus request and the ring as leaves), `workflows/useWfModel.ts`, `workflows/List.tsx`, `store/generate.ts`, `features/dnd.tsx`, `features/motion.ts`, `features/motion-blocks.ts`, `kit/motion.ts`, `i18n/index.ts`, `testing/compat/fields.ts` (the gesture through `gestureNow()`), `switches/7-workflows.json` (one find) |
