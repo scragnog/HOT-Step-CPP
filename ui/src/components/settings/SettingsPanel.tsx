@@ -20,6 +20,7 @@ import { SKIN_KEY, themesFor } from '../../themes/registry';
 import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
 import { WorkspaceArchivePanel } from './WorkspaceArchivePanel';
+import { MidiSoundFontSettings } from './MidiSoundFontSettings';
 import { SettingsBackupPanel } from './SettingsBackupPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ReportIssuePanel } from './ReportIssuePanel';
@@ -747,6 +748,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           defaultValue={DEFAULT_SETTINGS.discoKickExtract}
         />
       </div>
+
+      <MidiSoundFontSettings />
 
       {/* Downloads Section */}
       <div className="settings-section">

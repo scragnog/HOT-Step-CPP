@@ -7,7 +7,9 @@
 // POST /api/model-manager/download/:id/resume  — resume download
 // DELETE /api/model-manager/files/:key         — delete installed model (key = filename, or the entry id for MuScriptor models)
 
+import path from 'node:path';
 import { Router } from 'express';
+import { MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME } from '../services/midiSoundFont.js';
 import { modelDownloadService } from '../services/modelDownloadService.js';
 import type { ModelRegistryResponse, DownloadStartResponse } from '../contracts/modelManager.js';
 
@@ -21,6 +23,20 @@ router.get('/registry', (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/model-manager/midi-soundfont
+router.get('/midi-soundfont', (_req, res) => {
+  const file = path.join(modelDownloadService.modelsDir, MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME);
+  res.set('Cache-Control', 'no-cache');
+  res.type('application/octet-stream').sendFile(file, { cacheControl: false }, error => {
+    if (!error) return;
+    if (res.headersSent) {
+      res.destroy(error);
+      return;
+    }
+    res.sendStatus((error as { status?: number }).status === 404 ? 404 : 500);
+  });
 });
 
 // POST /api/model-manager/download

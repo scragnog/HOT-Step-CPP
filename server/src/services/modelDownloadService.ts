@@ -18,6 +18,7 @@ import { getBusyBlockers, registerBusyCheck } from '../dataroot/pointer.js';
 import { maintenance } from './updates/maintenance.js';
 import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 import { MODEL_ROOTS, getHfToken, looksLikeGatedError, type DownloadableModel, type ModelDownloadState } from './muscriptor.js';
+import { MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME, MIDI_SOUNDFONT_LICENSE } from './midiSoundFont.js';
 import { MODEL_FILES, resolveModelDir, targetRoot } from './muscriptorPaths.js';
 
 // Load registry - resolve path based on mode:
@@ -290,6 +291,12 @@ class ModelDownloadService extends EventEmitter {
     const dir = this.modelsDir;
     const files = new Set<string>();
 
+    const soundFontDir = path.join(dir, MIDI_SOUNDFONT_DIRECTORY);
+    if (fs.statSync(path.join(soundFontDir, MIDI_SOUNDFONT_FILENAME), { throwIfNoEntry: false })?.isFile()
+      && fs.statSync(path.join(soundFontDir, MIDI_SOUNDFONT_LICENSE), { throwIfNoEntry: false })?.isFile()) {
+      files.add(MIDI_SOUNDFONT_FILENAME);
+    }
+
     // Scan models root directory
     if (fs.existsSync(dir)) {
       for (const f of fs.readdirSync(dir)) {
@@ -497,6 +504,13 @@ class ModelDownloadService extends EventEmitter {
     // name model.safetensors, so a filename cannot say which one to remove.
     const managed = registry.files.find((f: RegistryFile) => f.id === filename && f.muscriptorModel);
     if (managed) return this._deleteMuscriptor(managed);
+
+    if (filename === MIDI_SOUNDFONT_FILENAME) {
+      const filePath = path.join(this.modelsDir, MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME);
+      if (!fs.existsSync(filePath)) return false;
+      fs.unlinkSync(filePath);
+      return true;
+    }
 
     // Safety: only known model/runtime extensions.
     // .json covers StableStep tokenizer files under onnx/sa3; .i32 is the YuE2 minted

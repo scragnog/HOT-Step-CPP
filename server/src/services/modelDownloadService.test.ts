@@ -336,3 +336,36 @@ test('background hashing waits for registered jobs, then resumes', async () => {
     cleanup();
   }
 });
+
+test('only the registered SoundFont path counts as installed', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'model-soundfont-'));
+  t.mock.getter(modelDownloadService, 'modelsDir', () => root);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'soundfonts');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(root, 'GeneralUser-GS.sf2'), 'elsewhere');
+  assert.equal(modelDownloadService.getInstalledFiles().has('GeneralUser-GS.sf2'), false);
+  fs.writeFileSync(path.join(dir, 'GeneralUser-GS.sf2'), 'bank');
+  assert.equal(modelDownloadService.getInstalledFiles().has('GeneralUser-GS.sf2'), false);
+  fs.writeFileSync(path.join(dir, 'LICENSE.txt'), 'licence');
+  assert.equal(modelDownloadService.getInstalledFiles().has('GeneralUser-GS.sf2'), true);
+});
+
+test('removing the registered SoundFont leaves other banks alone', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'model-soundfont-'));
+  t.mock.getter(modelDownloadService, 'modelsDir', () => root);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'soundfonts');
+  fs.mkdirSync(dir);
+  const bank = path.join(dir, 'GeneralUser-GS.sf2');
+  fs.writeFileSync(bank, 'bank');
+  fs.writeFileSync(path.join(root, 'GeneralUser-GS.sf2'), 'elsewhere');
+  fs.writeFileSync(path.join(dir, 'custom.sf2'), 'custom');
+  assert.throws(() => modelDownloadService.deleteFile('custom.sf2'));
+  assert.throws(() => modelDownloadService.deleteFile('../GeneralUser-GS.sf2'));
+  assert.equal(modelDownloadService.deleteFile('GeneralUser-GS.sf2'), true);
+  assert.equal(modelDownloadService.deleteFile('GeneralUser-GS.sf2'), false);
+  assert.equal(fs.existsSync(bank), false);
+  assert.equal(fs.readFileSync(path.join(root, 'GeneralUser-GS.sf2'), 'utf8'), 'elsewhere');
+  assert.equal(fs.readFileSync(path.join(dir, 'custom.sf2'), 'utf8'), 'custom');
+});

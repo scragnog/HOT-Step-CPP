@@ -365,6 +365,7 @@ Audio-to-MIDI transcription on its own native engine, with the song's tempo, tim
 
 | Feature | What it does |
 |---|---|
+| SoundFont preview | Hear live and finished MIDI through GeneralUser GS or a custom SF2/SF3 bank, with per-family mute and solo and an original-audio crossfade. |
 | Native transcription | `ace-midi`, a C++/GGML port of MuScriptor and of KobiMusic's dettato (instrument tracks, drums, no token), on any backend, from a library track or a WAV or MP3. |
 | Multi-instrument output | A `.mid` with separate parts for drums, bass, guitar, keys and the rest. |
 | Model sizes | Small (CPU), medium and large. |

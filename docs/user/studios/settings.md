@@ -39,6 +39,8 @@ The Storage & Data tab can export a versioned JSON backup of application setting
 
 ### General tab
 
+Under **MIDI Studio**, choose a custom `.sf2` or `.sf3` for the next preview. **Use default** switches back to the installed GeneralUser GS bank when available. The file stays in this browser and is excluded from Settings backups. See [MIDI Studio](midi-studio.md#preview-soundfont).
+
 | Control | What it does |
 |---|---|
 | Display Language | Sets the application interface language: English, Russian, Chinese, Japanese or Korean. Applies immediately. |

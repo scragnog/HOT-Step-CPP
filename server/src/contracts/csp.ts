@@ -21,7 +21,8 @@ export function contentSecurityPolicy(dev = false): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
     // Dev: Vite injects the React Refresh preamble as an inline module script.
-    'script-src': ["'self'", ...(dev ? ["'unsafe-inline'"] : [])],
+    // SpessaSynth initializes its WebAssembly Vorbis decoder before loading any bank.
+    'script-src': ["'self'", "'wasm-unsafe-eval'", ...(dev ? ["'unsafe-inline'"] : [])],
     // Inline styles: React style props, Vite's dev CSS, library-injected <style> tags.
     'style-src': ["'self'", "'unsafe-inline'", GOOGLE_FONTS_CSS],
     'font-src': ["'self'", 'data:', GOOGLE_FONTS_FILES],

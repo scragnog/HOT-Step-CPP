@@ -87,6 +87,19 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | YuE2 lead sheet | Writes the transcription as the two-voice ABC score that YuE2 covers use, on the job's current bars: the sung notes as the Vocal line, the top notes of one instrument as the Ins line (Ins line picks which; Automatic takes the busiest one that is not voice, bass or drums), an estimated key, and, with Chords on, a chord symbol every half bar estimated from the accompaniment. "Copy ABC" puts it on the clipboard for Cover Studio's ABC box; "Save .abc" downloads it. |
 | Piano roll | Click anywhere on the roll to seek. Notes are colored by instrument family; with tempo and bars, the background shows the MIDI's beats and numbered bar lines instead of 10-second marks; an unfinished region is shaded while a live job is still transcribing. |
 
+## Preview SoundFont
+
+Download **GeneralUser GS 2.0.3 SoundFont** in **Model Manager → Shared → MIDI Transcription**.
+MIDI Studio uses it for instrument and drum sounds in both live and finished previews.
+The preview uses oscillator sounds while the bank loads or when it is unavailable.
+
+To use your own General MIDI bank, open **Settings → General → MIDI Studio** and choose
+a `.sf2` or `.sf3` file. The browser keeps the file on this device. **Use default** removes
+that selection. Open a preview after changing the bank.
+
+GeneralUser GS by S. Christian Collins uses the [GeneralUser GS License v2.0](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/LICENSE.txt).
+Playback uses [SpessaSynth](https://github.com/spessasus/spessasynth_lib), licensed under Apache 2.0.
+
 ## Tips and limits
 
 The transcription list refreshes about every 1.5 seconds while jobs are queued

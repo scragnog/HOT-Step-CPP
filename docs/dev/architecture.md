@@ -495,11 +495,13 @@ responses carry no policy.
 Production policy:
 
 ```
-default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
 font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:;
 media-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none';
 base-uri 'self'; form-action 'self'; report-uri /api/csp-report
 ```
+
+MIDI Studio's SpessaSynth Vorbis decoder requires `'wasm-unsafe-eval'` to compile WebAssembly.
 
 The dev variant adds `'unsafe-inline'` to `script-src`, for the React Refresh
 preamble Vite injects. `connect-src 'self'` already covers the HMR socket, since

@@ -10635,6 +10635,29 @@
       ]
     },
     {
+      "id": "midi-generaluser-gs",
+      "filename": "GeneralUser-GS.sf2",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "soundfonts",
+      "displayName": "GeneralUser GS 2.0.3 SoundFont",
+      "quant": "SF2",
+      "sizeBytes": 32319396,
+      "repo": "scragnog/HOT-Step-SoundFonts",
+      "description": "Optional General MIDI playback bank for MIDI Studio, by S. Christian Collins. GeneralUser GS License v2.0.",
+      "tags": [
+        "midi",
+        "soundfont"
+      ],
+      "sha256": "9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe",
+      "companions": [
+        {
+          "filename": "LICENSE.txt",
+          "required": true
+        }
+      ]
+    },
+    {
       "id": "dettato-transcriber",
       "filename": "model.safetensors",
       "role": "muscriptor",

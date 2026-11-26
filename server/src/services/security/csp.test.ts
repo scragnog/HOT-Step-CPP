@@ -11,7 +11,7 @@ const directive = (policy: string, name: string) =>
 
 test('production policy: scripts and connections stay on this origin', () => {
   const p = contentSecurityPolicy();
-  assert.deepEqual(directive(p, 'script-src'), ["'self'"]);
+  assert.deepEqual(directive(p, 'script-src'), ["'self'", "'wasm-unsafe-eval'"]);
   assert.deepEqual(directive(p, 'connect-src'), ["'self'"]);
   assert.deepEqual(directive(p, 'default-src'), ["'self'"]);
   assert.deepEqual(directive(p, 'object-src'), ["'none'"]);
@@ -20,7 +20,8 @@ test('production policy: scripts and connections stay on this origin', () => {
 });
 
 test('dev policy only adds inline scripts (Vite React Refresh preamble)', () => {
-  assert.deepEqual(directive(contentSecurityPolicy(true), 'script-src'), ["'self'", "'unsafe-inline'"]);
+  assert.deepEqual(directive(contentSecurityPolicy(true), 'script-src'), ["'self'", "'wasm-unsafe-eval'", "'unsafe-inline'"]);
+  assert.ok(!contentSecurityPolicy(true).includes("'unsafe-eval'"));
   const strip = (p: string) => p.replace(/script-src [^;]*/, '');
   assert.equal(strip(contentSecurityPolicy(true)), strip(contentSecurityPolicy()));
   assert.ok(CSP_HEADER === 'Content-Security-Policy' || CSP_HEADER === 'Content-Security-Policy-Report-Only');

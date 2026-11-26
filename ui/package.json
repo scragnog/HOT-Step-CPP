@@ -27,6 +27,8 @@
     "react-dom": "^19.2.4",
     "react-i18next": "^17.0.7",
     "react-toastify": "^11.1.0",
+    "spessasynth_core": "4.4.12",
+    "spessasynth_lib": "4.4.10",
     "wavesurfer.js": "^7.12.6",
     "zustand": "^5.0.12"
   },

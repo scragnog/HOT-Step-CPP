@@ -1,8 +1,9 @@
 import { clamp01 } from '@/utils/format/clamp';
 import { byNumber } from '@/utils/sort';
+import { SoundFontVoice } from './soundFontVoice';
 // midiSynth.ts — WebAudio playback engine for MIDI Studio
 //
-// Plays transcribed notes with simple per-family synth voices, in sync with
+// Plays transcribed notes through a SoundFont or oscillator voices, in sync with
 // the original audio track (an <audio> element is the master clock), with an
 // equal-power crossfade between the two. Notes can be appended while playing
 // (live transcription streaming): a lookahead scheduler picks them up.
@@ -48,6 +49,9 @@ export class MidiSynth {
   private midiGain: GainNode;
   private origGain: GainNode;
   private noiseBuf: AudioBuffer;
+  private soundFont: SoundFontVoice | null = null;
+  private loadingSoundFont = false;
+  private lifetime = new AbortController();
   private audioEl: HTMLAudioElement | null = null;
   private mediaSrc: MediaElementAudioSourceNode | null = null;
 
@@ -106,6 +110,7 @@ export class MidiSynth {
     this.familyAudible.set(family, audible);
     const g = this.familyGains.get(family);
     if (g) g.gain.setTargetAtTime(audible ? 1 : 0, this.ctx.currentTime, 0.02);
+    this.soundFont?.setFamilyAudible(family, audible);
   }
 
   /** 0 = original only, 1 = MIDI only; equal-power blend in between. */
@@ -128,6 +133,7 @@ export class MidiSynth {
   }
 
   setAllNotes(notes: PlayNote[]): void {
+    this.stopScheduled();
     this.notes = [...notes].sort(byNumber(x => x.start));
     this.resync();
   }
@@ -140,6 +146,9 @@ export class MidiSynth {
     await this.ctx.resume();
     this.resync();
     await this.audioEl.play();
+    if (this.lifetime.signal.aborted) return;
+    if (!this.soundFont && !this.loadingSoundFont) void this.loadSoundFont();
+    this.tick();
     if (this.timer === null) {
       this.timer = window.setInterval(() => this.tick(), TICK_MS);
     }
@@ -159,11 +168,28 @@ export class MidiSynth {
   }
 
   dispose(): void {
+    if (this.lifetime.signal.aborted) return;
+    this.lifetime.abort();
     this.pause();
-    try { this.ctx.close(); } catch { /* already closed */ }
+    this.soundFont?.dispose();
+    void this.ctx.close();
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  private async loadSoundFont(): Promise<void> {
+    this.loadingSoundFont = true;
+    try {
+      const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15000)]);
+      const voice = await SoundFontVoice.load(this.ctx, this.midiGain, signal);
+      if (this.lifetime.signal.aborted) voice?.dispose();
+      else this.soundFont = voice;
+    } catch (error) {
+      if (!this.lifetime.signal.aborted) console.warn('MIDI Studio SoundFont could not load', error);
+    } finally {
+      this.loadingSoundFont = false;
+    }
+  }
 
   private resync(): void {
     const t = this.currentTime;
@@ -176,6 +202,7 @@ export class MidiSynth {
     const t = this.ctx.currentTime;
     for (const v of this.active) v.stop(t);
     this.active.clear();
+    this.soundFont?.stop();
   }
 
   private tick(): void {
@@ -188,8 +215,11 @@ export class MidiSynth {
     while (this.schedIdx < this.notes.length && this.notes[this.schedIdx].start < horizon) {
       const n = this.notes[this.schedIdx++];
       if (n.start < trackTime - 0.05) continue;  // stale (seek/underrun)
-      const when = ctxBase + n.start;
-      if (n.family === 'drums' || n.family === 'Drums') this.playDrum(n, when);
+      const when = Math.max(this.ctx.currentTime, ctxBase + n.start);
+      if (this.soundFont) {
+        const duration = Math.max(0.04, Math.min(n.duration, 12));
+        this.soundFont.play(n.family, n.pitch, when, duration, this.familyAudible.get(n.family) !== false);
+      } else if (n.family.toLowerCase() === 'drums') this.playDrum(n, when);
       else this.playTone(n, when);
     }
   }
@@ -221,7 +251,10 @@ export class MidiSynth {
 
     const voice = { stop: (t: number) => { try { g.gain.cancelScheduledValues(t); g.gain.setTargetAtTime(0, t, 0.01); oscs.forEach(o => o.stop(t + 0.05)); } catch { /* ended */ } } };
     this.active.add(voice);
-    oscs[0].onended = () => this.active.delete(voice);
+    oscs[0].onended = () => {
+      this.active.delete(voice);
+      g.disconnect();
+    };
   }
 
   private playDrum(n: PlayNote, when: number): void {
@@ -240,6 +273,7 @@ export class MidiSynth {
       o.connect(g);
       o.start(when);
       o.stop(when + 0.3);
+      this.trackDrum(o, g);
       return;
     }
     // snare / hats / percussion: filtered noise burst
@@ -258,5 +292,20 @@ export class MidiSynth {
     filt.connect(g);
     src.start(when);
     src.stop(when + len + 0.1);
+    this.trackDrum(src, g);
+  }
+
+  private trackDrum(source: AudioScheduledSourceNode, gain: GainNode): void {
+    const voice = {
+      stop: (time: number) => {
+        gain.disconnect();
+        source.stop(time);
+      },
+    };
+    this.active.add(voice);
+    source.onended = () => {
+      this.active.delete(voice);
+      gain.disconnect();
+    };
   }
 }
