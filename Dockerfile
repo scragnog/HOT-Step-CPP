@@ -18,7 +18,7 @@ ARG ENABLE_TRT=1
 ARG BUILD_JOBS
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake ninja-build build-essential git curl ca-certificates \
+    cmake ninja-build build-essential git curl ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # TensorRT SDK for DiT/LM acceleration (native TRT API)
@@ -28,11 +28,22 @@ RUN if [ "$ENABLE_TRT" = 1 ]; then \
         && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# Download ONNX Runtime GPU SDK (Linux x64) for SuperSep stem separation
+# Stage the Linux x64 ONNX Runtime GPU SDK from NuGet.
+# NuGet ships the unversioned file. The Linux loader uses the ELF SONAME.
 ARG ORT_VERSION=1.25.1
-RUN curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-gpu-${ORT_VERSION}.tgz" \
-    | tar xz -C /opt \
-    && mv "/opt/onnxruntime-linux-x64-gpu-${ORT_VERSION}" /opt/onnxruntime
+RUN ort_tmp="$(mktemp -d)" \
+    && curl -fSL --retry 3 -o "$ort_tmp/ort.nupkg" \
+        "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.Gpu.Linux/${ORT_VERSION}" \
+    && python3 -m zipfile -e "$ort_tmp/ort.nupkg" "$ort_tmp/sdk" \
+    && mkdir -p /opt/onnxruntime \
+    && mv "$ort_tmp/sdk/buildTransitive/native/include" /opt/onnxruntime/include \
+    && mv "$ort_tmp/sdk/runtimes/linux-x64/native" /opt/onnxruntime/lib \
+    && test -f /opt/onnxruntime/include/onnxruntime_cxx_api.h \
+    && test -f /opt/onnxruntime/lib/libonnxruntime.so \
+    && test -f /opt/onnxruntime/lib/libonnxruntime_providers_cuda.so \
+    && test -f /opt/onnxruntime/lib/libonnxruntime_providers_shared.so \
+    && ln -s libonnxruntime.so /opt/onnxruntime/lib/libonnxruntime.so.1 \
+    && rm -rf "$ort_tmp"
 
 WORKDIR /build/engine
 COPY engine/ .
@@ -61,7 +72,7 @@ RUN mkdir -p /staging/engine \
        done \
     && find build/ -maxdepth 1 -name '*.so' -exec cp {} /staging/engine/ \; \
     && find build/ -maxdepth 1 -name '*.so.*' -exec cp {} /staging/engine/ \; \
-    && cp /opt/onnxruntime/lib/libonnxruntime*.so* /staging/engine/
+    && cp -P /opt/onnxruntime/lib/libonnxruntime*.so* /staging/engine/
 
 
 # ── Stage 2: Server Dependencies ────────────────────────────────────

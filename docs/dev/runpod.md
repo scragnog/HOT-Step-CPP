@@ -36,6 +36,10 @@ space for the CUDA build layers. On Apple Silicon, use a remote x86_64 builder;
 building CUDA under emulation is slow. The recursive clone must initialize
 `engine/ggml` and `engine/vendor/vst3sdk` before the build.
 
+The Docker builder downloads the Linux x64 ONNX Runtime GPU package
+(`Microsoft.ML.OnnxRuntime.Gpu.Linux`) from NuGet. The `ORT_VERSION` build
+argument in the Dockerfile pins the package version.
+
 Replace `YOUR_REGISTRY` and `YOUR_VERSION` below with your registry namespace and
 an immutable version tag, such as the source commit hash.
 
