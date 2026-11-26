@@ -1,5 +1,6 @@
+import { apiClient, ApiError, HttpStatus } from '@/services/httpClient';
 import type { WorkletSynthesizer } from 'spessasynth_lib';
-import { readCustomSoundFont } from './soundFontPreference';
+import { CUSTOM_SOUND_FONT, DEFAULT_SOUND_FONT, DEFAULT_SOUND_FONT_ID, readSoundFontPreference } from './soundFontPreference';
 
 const DRUM_CHANNEL = 9;
 const EXPRESSION = 11;
@@ -40,13 +41,25 @@ export class SoundFontVoice {
   }
 
   static async load(context: AudioContext, output: AudioNode, signal: AbortSignal): Promise<SoundFontVoice | null> {
-    const custom = await readCustomSoundFont().catch(() => undefined);
+    const preference = await readSoundFontPreference().catch(() => ({ selection: DEFAULT_SOUND_FONT, custom: undefined }));
     signal.throwIfAborted();
-    const loadDefault = async () => {
-      const response = await fetch('/api/model-manager/midi-soundfont', { signal });
-      return response.ok ? response.arrayBuffer() : null;
+    const { selection, custom } = preference;
+    const defaultBank = '/model-manager/midi-soundfont';
+    const loadBank = async (url: string) => {
+      try {
+        const blob = await apiClient.get<Blob>(url, { signal, responseType: 'blob', timeout: 0 });
+        return blob.arrayBuffer();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === HttpStatus.notFound) return null;
+        throw error;
+      }
     };
-    const bank = custom ? await custom.arrayBuffer() : await loadDefault();
+    const useDefault = selection === DEFAULT_SOUND_FONT || selection === DEFAULT_SOUND_FONT_ID;
+    const loadSelection = selection === CUSTOM_SOUND_FONT
+      ? () => custom?.arrayBuffer()
+      : () => loadBank(useDefault ? defaultBank : `${defaultBank}/${encodeURIComponent(selection)}`);
+    const selectedBank = await loadSelection();
+    const bank = selectedBank ?? (useDefault ? null : await loadBank(defaultBank));
     if (!bank) return null;
     signal.throwIfAborted();
     const [{ WorkletSynthesizer }, { default: processorUrl }] = await Promise.all([
@@ -63,8 +76,8 @@ export class SoundFontVoice {
       try {
         await synth.soundBankManager.addSoundBank(bank, 'preview');
       } catch (error) {
-        if (!custom || signal.aborted) throw error;
-        const fallback = await loadDefault();
+        if (useDefault || !selectedBank || signal.aborted) throw error;
+        const fallback = await loadBank(defaultBank);
         if (!fallback) throw error;
         await synth.soundBankManager.addSoundBank(fallback, 'preview');
       }

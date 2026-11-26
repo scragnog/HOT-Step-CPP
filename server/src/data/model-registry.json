@@ -10658,6 +10658,52 @@
       ]
     },
     {
+      "id": "midi-fluidr3-gm",
+      "filename": "FluidR3_GM.sf2",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "soundfonts",
+      "displayName": "FluidR3 GM SoundFont",
+      "quant": "SF2",
+      "sizeBytes": 148398306,
+      "repo": "scragnog/HOT-Step-SoundFonts",
+      "description": "Optional stereo General MIDI bank by Frank Wen and contributors. MIT licence.",
+      "tags": [
+        "midi",
+        "soundfont"
+      ],
+      "sha256": "74594e8f4250680adf590507a306655a299935343583256f3b722c48a1bc1cb0",
+      "companions": [
+        {
+          "filename": "FluidR3_COPYING.txt",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "midi-fluidr3-mono-gm",
+      "filename": "FluidR3Mono_GM.sf3",
+      "role": "muscriptor",
+      "family": "shared",
+      "subdir": "soundfonts",
+      "displayName": "FluidR3 Mono GM 2.312 SoundFont",
+      "quant": "SF3",
+      "sizeBytes": 14563174,
+      "repo": "scragnog/HOT-Step-SoundFonts",
+      "description": "Optional compact, compressed mono General MIDI bank by Michael Cowgill, based on Frank Wen’s FluidR3. MIT licence.",
+      "tags": [
+        "midi",
+        "soundfont"
+      ],
+      "sha256": "cfcd66d89e8386823400eca64934b14fbea7bf48ba1f00d21189af1262794ec2",
+      "companions": [
+        {
+          "filename": "FluidR3Mono_License.md",
+          "required": true
+        }
+      ]
+    },
+    {
       "id": "dettato-transcriber",
       "filename": "model.safetensors",
       "role": "muscriptor",

@@ -43,9 +43,9 @@ Settings > Updates reads `GET /api/updates/status` (cached, never calls GitHub) 
 
 ## Settings page and hot reload
 
-The MIDI Studio custom SoundFont is a file in this browser's IndexedDB. It stays with the
-browser profile and is excluded from Settings backups. The default GeneralUser GS download
-lives under `soundfonts/` in the configured models directory.
+MIDI Studio stores the SoundFont selection and the optional custom file in this browser's
+IndexedDB, outside Settings backups. Registry banks live under `soundfonts/` in the
+configured models directory. The server resolves each HTTP request by registry ID.
 
 Settings > General > Adapters includes **Update adapter references**. This explicit
 command posts to `/api/lireek/presets/update-adapter-references` and clears missing

@@ -18,7 +18,7 @@ import { getBusyBlockers, registerBusyCheck } from '../dataroot/pointer.js';
 import { maintenance } from './updates/maintenance.js';
 import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 import { MODEL_ROOTS, getHfToken, looksLikeGatedError, type DownloadableModel, type ModelDownloadState } from './muscriptor.js';
-import { MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME, MIDI_SOUNDFONT_LICENSE } from './midiSoundFont.js';
+import { MIDI_SOUNDFONT_DIRECTORY } from './midiSoundFont.js';
 import { MODEL_FILES, resolveModelDir, targetRoot } from './muscriptorPaths.js';
 
 // Load registry - resolve path based on mode:
@@ -29,6 +29,10 @@ const registryPath = PORTABLE_MODE
   ? path.join(PROJECT_ROOT, 'server', 'data', 'model-registry.json')
   : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data', 'model-registry.json');
 const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+const soundFontEntries = (registry.files as RegistryFile[]).filter(file =>
+  file.subdir === MIDI_SOUNDFONT_DIRECTORY && file.tags?.includes('soundfont') &&
+  file.filename === path.basename(file.filename) && /\.sf[23]$/i.test(file.filename),
+);
 
 // Engine variant detection — controls which registry items are visible.
 // 'cuda' (default for legacy/pre-v1.1 builds) shows everything;
@@ -285,16 +289,27 @@ class ModelDownloadService extends EventEmitter {
     };
   }
 
+  /** Serve only complete, registered SoundFonts at their catalogue paths. */
+  getInstalledSoundFont(id: string): string | undefined {
+    const entry = soundFontEntries.find(file => file.id === id);
+    if (!entry) return undefined;
+    const dir = this.getTargetDir(entry);
+    const bank = path.join(dir, entry.filename);
+    const isFile = (file: string) => fs.statSync(file, { throwIfNoEntry: false })?.isFile();
+    if (isFile(bank) && entry.companions?.every(file => !file.required || isFile(path.join(dir, file.filename)))) {
+      return bank;
+    }
+    return undefined;
+  }
+
   /** Scan models directory for installed model files (.gguf, .onnx, .safetensors),
    *  and engine directory for runtime DLLs */
   getInstalledFiles(): Set<string> {
     const dir = this.modelsDir;
     const files = new Set<string>();
 
-    const soundFontDir = path.join(dir, MIDI_SOUNDFONT_DIRECTORY);
-    if (fs.statSync(path.join(soundFontDir, MIDI_SOUNDFONT_FILENAME), { throwIfNoEntry: false })?.isFile()
-      && fs.statSync(path.join(soundFontDir, MIDI_SOUNDFONT_LICENSE), { throwIfNoEntry: false })?.isFile()) {
-      files.add(MIDI_SOUNDFONT_FILENAME);
+    for (const entry of soundFontEntries) {
+      if (this.getInstalledSoundFont(entry.id)) files.add(entry.filename);
     }
 
     // Scan models root directory
@@ -505,9 +520,10 @@ class ModelDownloadService extends EventEmitter {
     const managed = registry.files.find((f: RegistryFile) => f.id === filename && f.muscriptorModel);
     if (managed) return this._deleteMuscriptor(managed);
 
-    if (filename === MIDI_SOUNDFONT_FILENAME) {
-      const filePath = path.join(this.modelsDir, MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME);
-      if (!fs.existsSync(filePath)) return false;
+    const soundFont = soundFontEntries.find(file => file.filename === filename);
+    if (soundFont) {
+      const filePath = this.getInstalledSoundFont(soundFont.id);
+      if (!filePath) return false;
       fs.unlinkSync(filePath);
       return true;
     }

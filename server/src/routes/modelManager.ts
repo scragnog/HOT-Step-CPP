@@ -7,9 +7,7 @@
 // POST /api/model-manager/download/:id/resume  — resume download
 // DELETE /api/model-manager/files/:key         — delete installed model (key = filename, or the entry id for MuScriptor models)
 
-import path from 'node:path';
-import { Router } from 'express';
-import { MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME } from '../services/midiSoundFont.js';
+import { Router, type Response } from 'express';
 import { modelDownloadService } from '../services/modelDownloadService.js';
 import type { ModelRegistryResponse, DownloadStartResponse } from '../contracts/modelManager.js';
 
@@ -25,9 +23,12 @@ router.get('/registry', (_req, res) => {
   }
 });
 
-// GET /api/model-manager/midi-soundfont
-router.get('/midi-soundfont', (_req, res) => {
-  const file = path.join(modelDownloadService.modelsDir, MIDI_SOUNDFONT_DIRECTORY, MIDI_SOUNDFONT_FILENAME);
+function sendSoundFont(id: string, res: Response): void {
+  const file = modelDownloadService.getInstalledSoundFont(id);
+  if (!file) {
+    res.sendStatus(404);
+    return;
+  }
   res.set('Cache-Control', 'no-cache');
   res.type('application/octet-stream').sendFile(file, { cacheControl: false }, error => {
     if (!error) return;
@@ -37,7 +38,10 @@ router.get('/midi-soundfont', (_req, res) => {
     }
     res.sendStatus((error as { status?: number }).status === 404 ? 404 : 500);
   });
-});
+}
+
+router.get('/midi-soundfont', (_req, res) => sendSoundFont('midi-generaluser-gs', res));
+router.get('/midi-soundfont/:id', (req, res) => sendSoundFont(req.params.id, res));
 
 // POST /api/model-manager/download
 // Body: { fileId, hfToken? } — hfToken is an optional Hugging Face token

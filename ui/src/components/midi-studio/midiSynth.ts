@@ -1,6 +1,7 @@
 import { clamp01 } from '@/utils/format/clamp';
 import { byNumber } from '@/utils/sort';
 import { SoundFontVoice } from './soundFontVoice';
+import { subscribeToSoundFontChanges } from './soundFontPreference';
 // midiSynth.ts — WebAudio playback engine for MIDI Studio
 //
 // Plays transcribed notes through a SoundFont or oscillator voices, in sync with
@@ -18,6 +19,7 @@ export interface PlayNote {
 const LOOKAHEAD_S = 0.35;   // schedule window
 const TICK_MS = 120;        // scheduler tick
 const VOICE_GAIN = 0.10;
+const MAX_NOTE_S = 12;
 
 interface FamilyVoice {
   type: OscillatorType;
@@ -50,7 +52,8 @@ export class MidiSynth {
   private origGain: GainNode;
   private noiseBuf: AudioBuffer;
   private soundFont: SoundFontVoice | null = null;
-  private loadingSoundFont = false;
+  private bankLoad: AbortController | null = null;
+  private unsubscribeSoundFont: () => void;
   private lifetime = new AbortController();
   private audioEl: HTMLAudioElement | null = null;
   private mediaSrc: MediaElementAudioSourceNode | null = null;
@@ -67,6 +70,9 @@ export class MidiSynth {
 
   constructor() {
     this.ctx = new AudioContext();
+    this.unsubscribeSoundFont = subscribeToSoundFontChanges(() => {
+      if (this.ctx.state === 'running' || this.bankLoad) void this.loadSoundFont();
+    });
     const comp = this.ctx.createDynamicsCompressor();
     comp.threshold.value = -18;
     comp.ratio.value = 6;
@@ -147,7 +153,7 @@ export class MidiSynth {
     this.resync();
     await this.audioEl.play();
     if (this.lifetime.signal.aborted) return;
-    if (!this.soundFont && !this.loadingSoundFont) void this.loadSoundFont();
+    if (!this.soundFont && !this.bankLoad) void this.loadSoundFont();
     this.tick();
     if (this.timer === null) {
       this.timer = window.setInterval(() => this.tick(), TICK_MS);
@@ -170,6 +176,7 @@ export class MidiSynth {
   dispose(): void {
     if (this.lifetime.signal.aborted) return;
     this.lifetime.abort();
+    this.unsubscribeSoundFont();
     this.pause();
     this.soundFont?.dispose();
     void this.ctx.close();
@@ -178,24 +185,35 @@ export class MidiSynth {
   // ── internals ──────────────────────────────────────────────────────────
 
   private async loadSoundFont(): Promise<void> {
-    this.loadingSoundFont = true;
+    this.bankLoad?.abort();
+    const load = new AbortController();
+    this.bankLoad = load;
     try {
-      const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15000)]);
+      const signal = AbortSignal.any([load.signal, this.lifetime.signal, AbortSignal.timeout(60000)]);
       const voice = await SoundFontVoice.load(this.ctx, this.midiGain, signal);
-      if (this.lifetime.signal.aborted) voice?.dispose();
-      else this.soundFont = voice;
+      if (signal.aborted) {
+        voice?.dispose();
+        return;
+      }
+      if (!voice && !this.soundFont) return;
+
+      // Keep the old voice and source clock running until the replacement is ready.
+      this.stopScheduled();
+      this.soundFont?.dispose();
+      this.soundFont = voice;
+      this.resync(this.playing ? MAX_NOTE_S : 0.05);
+      this.tick(true);
     } catch (error) {
-      if (!this.lifetime.signal.aborted) console.warn('MIDI Studio SoundFont could not load', error);
+      if (!load.signal.aborted && !this.lifetime.signal.aborted) console.warn('MIDI Studio SoundFont could not load', error);
     } finally {
-      this.loadingSoundFont = false;
+      if (this.bankLoad === load) this.bankLoad = null;
     }
   }
 
-  private resync(): void {
-    const t = this.currentTime;
+  private resync(lookBehind = 0.05): void {
+    const t = this.currentTime - lookBehind;
     this.schedIdx = 0;
-    // binary search would be nicer; linear is fine at 10k notes on seek only
-    while (this.schedIdx < this.notes.length && this.notes[this.schedIdx].start < t - 0.05) this.schedIdx++;
+    while (this.schedIdx < this.notes.length && this.notes[this.schedIdx].start < t) this.schedIdx++;
   }
 
   private stopScheduled(): void {
@@ -205,7 +223,7 @@ export class MidiSynth {
     this.soundFont?.stop();
   }
 
-  private tick(): void {
+  private tick(resumeHeldNotes = false): void {
     if (!this.audioEl || this.audioEl.paused) return;
     const trackTime = this.audioEl.currentTime;
     const horizon = trackTime + LOOKAHEAD_S;
@@ -213,26 +231,27 @@ export class MidiSynth {
     const ctxBase = this.ctx.currentTime - trackTime;
 
     while (this.schedIdx < this.notes.length && this.notes[this.schedIdx].start < horizon) {
-      const n = this.notes[this.schedIdx++];
-      if (n.start < trackTime - 0.05) continue;  // stale (seek/underrun)
-      const when = Math.max(this.ctx.currentTime, ctxBase + n.start);
+      const note = this.notes[this.schedIdx++];
+      const elapsed = Math.max(0, trackTime - note.start);
+      const duration = Math.max(0.04, Math.min(note.duration, MAX_NOTE_S));
+      if (resumeHeldNotes ? elapsed >= duration || (elapsed > 0.05 && note.family.toLowerCase() === 'drums') : elapsed > 0.05) continue;
+      const when = Math.max(this.ctx.currentTime, ctxBase + note.start);
+      const remaining = duration - (resumeHeldNotes ? elapsed : 0);
       if (this.soundFont) {
-        const duration = Math.max(0.04, Math.min(n.duration, 12));
-        this.soundFont.play(n.family, n.pitch, when, duration, this.familyAudible.get(n.family) !== false);
-      } else if (n.family.toLowerCase() === 'drums') this.playDrum(n, when);
-      else this.playTone(n, when);
+        this.soundFont.play(note.family, note.pitch, when, remaining, this.familyAudible.get(note.family) !== false);
+      } else if (note.family.toLowerCase() === 'drums') this.playDrum(note, when);
+      else this.playTone(note, when, remaining);
     }
   }
 
-  private playTone(n: PlayNote, when: number): void {
+  private playTone(n: PlayNote, when: number, duration: number): void {
     const v = voiceForFamily(n.family);
-    const dur = Math.max(0.04, Math.min(n.duration, 12));
     const g = this.ctx.createGain();
     g.connect(this.gainForFamily(n.family));
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime(VOICE_GAIN, when + v.attack);
     g.gain.setTargetAtTime(VOICE_GAIN * v.sustain, when + v.attack, 0.08);
-    const end = when + dur;
+    const end = when + duration;
     g.gain.setTargetAtTime(0, end, v.release / 3);
 
     const oscs: OscillatorNode[] = [];
