@@ -92,9 +92,7 @@ export function parseDawRequest(raw: unknown): DawGenerateRequest {
     throw new DawError(400, 'unsupported_mode', `mode must be one of ${DAW_MODES.join(', ')}`);
   }
   if (mode === 'complete') {
-    // The server's ACE path only loads sourceAudioUrl for cover/repaint/lego/extract,
-    // and the app UI never submits 'complete', so the source would be dropped.
-    throw new DawError(400, 'unsupported_mode', "mode 'complete' is not supported yet (the server does not pass the source clip for it)");
+    throw new DawError(400, 'unsupported_mode', "mode 'complete' is not supported by the DAW API");
   }
   for (const k of STRING_FIELDS) {
     if (r[k] !== undefined && typeof r[k] !== 'string') throw new DawError(400, 'bad_request', `${k} must be a string`);

@@ -27,7 +27,8 @@ test('engine fork hooks and HOT-ggml changes intact (verify-hooks.ps1)', { timeo
 test('server unit tests (src/**/*.test.ts via tsx --test)', { timeout: 15 * MIN }, (t) => {
   const files = walk(path.join(SERVER, 'src'), /\.test\.ts$/).map((f) => path.relative(SERVER, f));
   assert.ok(files.length > 0, 'no unit tests found under server/src');
-  const r = sh('npx', ['tsx', '--test', ...files], { cwd: SERVER });
+  // Call Node directly so the file list does not hit cmd.exe's command-line limit.
+  const r = sh(process.execPath, ['--import', 'tsx', '--test', ...files], { cwd: SERVER });
   assert.equal(r.status, 0, tail(r.out, 80));
   const ran = Number(r.out.match(/tests (\d+)/)?.[1] ?? 0);
   const failed = Number(r.out.match(/fail (\d+)/)?.[1] ?? 0);

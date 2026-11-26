@@ -17,7 +17,7 @@ import { readAdapterTrigger } from '../../adapters/stMetadata.js';
 import { computeLmCacheKey, getLmCache, setLmCache, getLmCacheSize, type LmCacheEntry } from '../../generation/lmCache.js';
 import { degeneratePlanReason } from '../../generation/planGuard.js';
 import { aceLmSongsPerPass, planLmPasses, trackFromPlan } from './lmBatch.js';
-import { claimLmFollowers, runSharedLmPass, songsOf, type LmFollower } from './lmCoalesce.js';
+import { claimLmFollowers, isAceSourceTask, needsAceLm, runSharedLmPass, songsOf, type LmFollower } from './lmCoalesce.js';
 import { loadSourceAudio, loadSourceLatent, applyTempoAndPitch, loadTimbreReference } from '../../generation/sourceAudio.js';
 import { runPostProcessingChain, normalizePpParams } from '../../generation/postProcessing.js';
 import { getCachedLatent, saveCachedLatent } from '../../generation/sourceLatentCache.js';
@@ -84,8 +84,8 @@ export async function runAceGeneration(
   try {
     // Determine if we need the LM phase
     const skipLm = job.params.skipLm === true;
-    const isCoverTask = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'].includes(aceReq.task_type || '');
-    const needsLm = !skipLm && !aceReq.audio_codes && !isCoverTask;
+    const isSourceTask = isAceSourceTask(aceReq.task_type);
+    const needsLm = needsAceLm(job.params, aceReq);
     const taskType = aceReq.task_type || 'text2music';
 
     // Start per-generation log
@@ -94,7 +94,7 @@ export async function runAceGeneration(
 
     let lmResults: AceRequest[] = [aceReq];
 
-    if (skipLm && !isCoverTask) {
+    if (skipLm && !isSourceTask) {
       // LM disabled — fill in sensible defaults for any "auto" metadata
       // The ace-server /lm always generates audio codes, so we can't call it for metadata only
       if (!aceReq.bpm) aceReq.bpm = 120;
@@ -435,12 +435,12 @@ export async function runAceGeneration(
 
     const coResident = job.params.coResident === true;
 
-    // ── Source audio (for cover/repaint/lego/extract tasks) ──
+    // ── Source audio for source-conditioned tasks ──
     const log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => logGeneration(job.id, level, msg);
     const srcPrepStart = performance.now();
     let srcAudioBuf: Buffer | undefined;
     let srcAudioPath: string | undefined;  // filesystem path for cache key
-    if (isCoverTask && job.params.sourceAudioUrl) {
+    if (isSourceTask && job.params.sourceAudioUrl) {
       srcAudioBuf = loadSourceAudio(job.params.sourceAudioUrl, job.id, log);
       // Resolve URL to filesystem path (mirrors loadSourceAudio resolution)
       const u = job.params.sourceAudioUrl;

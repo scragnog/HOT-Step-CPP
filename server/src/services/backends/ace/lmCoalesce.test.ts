@@ -39,6 +39,7 @@ test('skips jobs that cannot share the pass', () => {
     job('lm-off', { lmModel: 'm', skipLm: true }),
     job('has-codes', { lmModel: 'm', codes: '1,2' }),
     job('cover', { lmModel: 'm', task: 'cover' }),
+    job('complete', { lmModel: 'm', task: 'complete' }),
     job('cancelled', { lmModel: 'm' }, 'cancelled'),
     job('big', { lmModel: 'm', batchSize: 4 }),
     job('cached', { lmModel: 'm' }),

@@ -15,7 +15,11 @@ const LM_SHARED = [
   'lm_negative_prompt',
 ] as const;
 
-const COVER_TASKS = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract'];
+const SOURCE_TASKS = ['cover', 'cover-nofsq', 'repaint', 'lego', 'extract', 'complete'];
+
+export function isAceSourceTask(task: AceRequest['task_type']): boolean {
+  return SOURCE_TASKS.includes(task ?? '');
+}
 
 /** Same key = may share a pass. Co-resident is part of it because it picks
  *  the engine's eviction policy for the whole call. */
@@ -24,9 +28,9 @@ export function aceLmKey(req: AceRequest, coResident: boolean): string {
   return JSON.stringify([coResident, ...LM_SHARED.map(k => r[k] ?? null)]);
 }
 
-/** The LM runs for this job: not switched off, no codes given, not a cover task. */
+/** The LM runs when the job needs a plan and synthesizes without a source. */
 export function needsAceLm(params: any, req: AceRequest): boolean {
-  return params?.skipLm !== true && !req.audio_codes && !COVER_TASKS.includes(req.task_type || '');
+  return params?.skipLm !== true && !req.audio_codes && !isAceSourceTask(req.task_type);
 }
 
 export function songsOf(job: GenerationJob): number {

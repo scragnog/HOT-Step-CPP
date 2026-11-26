@@ -642,8 +642,9 @@ These task names describe ACE-Step engine modes. YuE2 Cover Studio submits an or
 YuE2 generation with `yue2Cover` source identity and an approved `yue2Abc` score;
 the AR composer follows that score instead of planning a new one. It does not run
 ACE-Step's `cover` or `cover-nofsq` mode. ACE-Step skips the LM stage for cover,
-cover-nofsq, repaint, lego and extract; the caption and lyrics go to the DiT as
-written. lego, extract and complete need a base or SFT DiT, not a turbo model.
+cover-nofsq, repaint, lego, extract and complete. The DiT receives the source and
+uses the caption and lyrics as written. Use a base or SFT DiT for lego, extract
+and complete.
 Stem Separator's extract jobs run outside the shared queue, through the Stem Separator's
 own route. They use the studio's own model picker with adapters off and a random seed;
 the bar's steps, solver, schedule and guidance settings do not reach them, so the engine
