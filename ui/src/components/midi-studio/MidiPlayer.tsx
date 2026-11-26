@@ -22,8 +22,11 @@ import { formatClock } from '@/utils/format/format';
 const PPS = 40;          // px per second
 const ROLL_H = 230;
 const PITCH_MIN = 21, PITCH_MAX = 108;
+/** dettato's transcriber notes, streamed before its instrument tracks exist; the final notes replace them. */
+const PROVISIONAL = 'provisional';
 
 function familyColor(family: string, alpha = 1): string {
+  if (family === PROVISIONAL) return `hsla(270, 15%, 60%, ${alpha})`;
   if (/drum/i.test(family)) return `hsla(0, 70%, 55%, ${alpha})`;
   let h = 0;
   for (let i = 0; i < family.length; i++) h = (h * 31 + family.charCodeAt(i)) % 360;
@@ -41,8 +44,9 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
   const client = useQueryClient();
   const notesQuery = useQuery({ ...midiNotesOptions(jobId), enabled: !live });
 
-  // NOTE: parent must mount this component with a key unique per (job, mode)
-  // — notes accumulate for the component's lifetime, no in-place reset.
+  // NOTE: parent must mount this component with a key unique per job. Live
+  // notes accumulate; when live turns false the finished notes (notes.json)
+  // replace them in place, so playback carries on.
   const notesRef = useRef<PlayNote[]>([]);
   const [noteCount, setNoteCount] = useState(0);      // mirrors notesRef length -> redraw
   const [redraw, setRedraw] = useState(0);            // bump from event handlers
@@ -101,18 +105,36 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
     setNoteCount(notesRef.current.length);
   }, []);
 
+  // the final tracks have started to arrive: the provisional ones go, playback carries on
+  const dropProvisional = useCallback(() => {
+    notesRef.current = notesRef.current.filter(n => n.family !== PROVISIONAL);
+    synthRef.current?.setAllNotes(notesRef.current);
+    setFamilies(prev => prev.filter(f => f !== PROVISIONAL));
+    setNoteCount(notesRef.current.length);
+    setRedraw(r => r + 1);
+  }, []);
+
   // ── data source: SSE (live) or notes.json (finished) ──
   useEffect(() => {
     if (live) {
       const open = new Map<number, { pitch: number; time: number; instrument: string }>();
       const es = new EventSource(getMidiStreamUrl(jobId));
       const batch: PlayNote[] = [];
+      let provisional = false;
       const flush = () => { if (batch.length) { addNotes(batch.splice(0)); } };
       const flushTimer = window.setInterval(flush, 200);
       es.onmessage = (msg) => {
         try {
           const ev = JSON.parse(msg.data);
-          if (ev.type === 'note_start') {
+          if (ev.type === 'provisional') {
+            provisional = true;
+            batch.push({ pitch: ev.pitch, start: ev.time, duration: Math.max(0.03, ev.end - ev.time), family: PROVISIONAL });
+          } else if (ev.type === 'note_start') {
+            if (provisional) {
+              flush();
+              dropProvisional();
+              provisional = false;
+            }
             open.set(ev.index, { pitch: ev.pitch, time: ev.time, instrument: ev.instrument });
           } else if (ev.type === 'note_end') {
             const st = open.get(ev.index);
@@ -152,6 +174,7 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
     notesRef.current = [];
     synthRef.current?.setAllNotes([]);
     setFamilies([]);
+    setFrontier(null);
     addNotes(notes);
     setDuration(d => Math.max(d, parsed.durationSec));
   }, [notesQuery.data, live, addNotes]);
@@ -363,7 +386,9 @@ export const MidiPlayer: React.FC<Props> = ({ jobId, sourceAudioUrl, live }) => 
                 } ${audible ? '' : 'opacity-45'}`}
               >
                 <span className="w-2.5 h-2.5 rounded-sm inline-block flex-shrink-0" style={{ backgroundColor: familyColor(f) }} />
-                <span className={isMuted && soloed.size === 0 ? 'line-through' : ''}>{f.replace(/_/g, ' ')}</span>
+                <span className={isMuted && soloed.size === 0 ? 'line-through' : ''}>
+                  {f === PROVISIONAL ? t('midiStudio.player.provisional') : f.replace(/_/g, ' ')}
+                </span>
                 <button
                   onClick={() => toggleMute(f)}
                   title={t('midiStudio.player.mute')}

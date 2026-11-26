@@ -2382,6 +2382,7 @@
     "midiStudio.player.crossfade": "Blend between the original track and the MIDI rendition",
     "midiStudio.player.liveChunk": "LIVE — transcribing chunk {{done}}/{{total}}",
     "midiStudio.player.noteCount": "{{count}} notes",
+    "midiStudio.player.provisional": "Provisional (instrument tracks when done)",
     "midiStudio.player.mute": "Mute this instrument (MIDI side)",
     "midiStudio.player.solo": "Solo this instrument (MIDI side)",
     "midiStudio.paper": "Paper (arXiv)",

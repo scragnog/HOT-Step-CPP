@@ -2989,8 +2989,38 @@ static int run_dettato(const DettatoOpts & o, const std::string & audio_path, co
             fflush(stdout);
         }
     };
+    // Provisional notes, so MIDI Studio can play while the rest runs: after a trunk batch, every frame before the next
+    // window's first one has all its contributions. Decode that settled stretch and send the notes that start in it, up
+    // to PROV_GUARD frames short of its end (a peak there can still move). Their own event type: events.jsonl, the MIDI
+    // and every later stage never see them.
+    constexpr int PROV_GUARD = 25, PROV_CONTEXT = 50;
+    int  prov_from = 0;  // first frame whose onsets are not sent yet
+    auto provisional = [&](int d) {
+        if (!jsonl || fed) return;
+        const int g = d < n_win ? std::min(r.T, frame_offset(lay.starts[d])) : r.T;
+        const int cut = d < n_win ? g - PROV_GUARD : g;
+        if (cut <= prov_from) return;
+        const int a = std::max(0, prov_from - PROV_CONTEXT);
+        std::vector<float> P[N_HEADS_OUT];
+        for (int h = 0; h < N_HEADS_OUT; h++) {
+            P[h].resize((size_t) (g - a) * N_KEYS);
+            for (int t = a; t < g; t++) {
+                const float w = std::max(r.all.wsum[t], 1e-6f);
+                for (int k = 0; k < N_KEYS; k++) P[h][(size_t) (t - a) * N_KEYS + k] = r.all.P[h][(size_t) t * N_KEYS + k] / w;
+            }
+        }
+        for (const Note & n : decode_notes(P, g - a, th)) {
+            const double on = n.onset + a * FRAME_S;
+            if (on < prov_from * FRAME_S || on >= cut * FRAME_S) continue;
+            printf("{\"type\":\"provisional\",\"pitch\":%d,\"time\":%.6f,\"end\":%.6f,\"velocity\":%d}\n", n.pitch, on * tu.ratio,
+                   (n.offset + a * FRAME_S) * tu.ratio, dettato::transcriber::velocity(n.conf));
+        }
+        prov_from = cut;
+        fflush(stdout);
+    };
     progress(0, "transcribe");
     run(m, y, fed ? o.all_hidden : o.repair || o.all_hidden, fed ? capture : true, r, [&](int d, int) {
+        provisional(std::min(d, n_win));
         if (d < n_win || fed) progress(d, "transcribe");
         else if (o.repair) progress(d, "repair");
     });

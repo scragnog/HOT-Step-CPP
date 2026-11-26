@@ -75,7 +75,7 @@ labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
 | Download weights | Downloads the selected model's weights and its `config.json` from Hugging Face. MuScriptor's are gated and use your saved token; dettato's four models download together and need none. Shows live progress. It is the same download as Model Manager > Shared > MIDI Transcription, so starting it in one place shows progress in both. |
 | Transcribe to MIDI | Queues a transcription job for the selected source and model. Disabled until a source is picked and that model's weights are downloaded. |
 | Transcriptions list | Every job, newest first: queued/transcribing status with chunk progress, or a done/failed result. Jobs persist to disk and survive an app restart. |
-| Preview piano roll (chevron) | Expands the finished job into the piano-roll player. A failed job that kept a partial `.mid` has it too. |
+| Preview piano roll (chevron) | Expands the finished job into the piano-roll player. A failed job that kept a partial `.mid` has it too. The player of a job you watched live stays open when it finishes; the chevron closes it. |
 | Download .mid | Downloads the transcribed MIDI file. |
 | Cancel / delete | Stops a running job, or removes a finished one and its files. |
 | Play / pause (in preview) | Plays the original audio and the MIDI transcription together, in sync. |
@@ -125,10 +125,14 @@ matters for their use. In dettato MIDI, a pitched note's velocity is how sure th
 was of the note, not how hard it was played; only drum hits carry a learned velocity.
 Transcription runs on the GPU when the engine has one (CUDA is tested; Vulkan runs on
 NVIDIA cards). AMD has not been tested on real hardware. The grouper runs on the CPU
-when the backend is not CUDA. Drums add about 40 seconds on the CPU for a 4-minute song;
+when the backend is not CUDA. Drums add about 14 seconds on the CPU for a 4-minute song
+(16-core desktop CPU; fewer cores take longer);
 the progress bar follows the audio the windows have covered, then the job shows Splitting notes into instrument tracks and Transcribing drums as separate steps. A source recorded below 40 kHz
-skips the drums. dettato shows no notes until the whole song is done, so the piano roll
-fills at the end instead of live.
+skips the drums. While dettato works, the piano roll fills with its notes as one grey
+Provisional track, about 6 seconds behind the shaded frontier, and you can play them
+straight away. The instrument tracks and drums exist only at the end, so when the job
+finishes they replace the provisional track in the same player and playback carries on.
+The downloaded MIDI holds only the final tracks.
 
 Mute and solo in the preview only silence the synthesized MIDI playback; the
 original audio track is unaffected and keeps playing under the crossfade.

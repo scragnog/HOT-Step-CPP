@@ -641,7 +641,12 @@ upstream's General MIDI programs, except the string ensemble: dettato writes 44,
 becomes 48 (`string_ensemble`). With `--jsonl`, `note_start` lines carry `"instrument"`
 (our instrument names, `program_<n>` for a program without one, `drums`) and `"velocity"`,
 in onset order. Progress counts the transcriber's windows plus one step each for the
-repairer, the grouper and the drums. The MIDI itself still uses velocity 100. The tempo,
+repairer, the grouper and the drums. Before those, after every trunk batch, `--jsonl` sends
+`{"type":"provisional","pitch","time","end","velocity"}` lines: the transcriber's decode of
+the frames every window has already covered, minus the last 0.5 s, which the next batch can
+still change. Times are on the source's clock. They are a preview only: `note_start` and
+`note_end` lines, the MIDI and every later stage are byte-identical to a run without them, and
+MIDI Studio keeps them out of `events.jsonl`. The MIDI itself still uses velocity 100. The tempo,
 grid, `--export` and ABC options work as for MuScriptor.
 
 `--dettato-capture <dir>` writes, in the layout of `tools/dettato-reference` captures, the

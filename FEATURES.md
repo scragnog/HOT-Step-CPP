@@ -370,7 +370,7 @@ Audio-to-MIDI transcription on its own native engine, with the song's tempo, tim
 | Multi-instrument output | A `.mid` with separate parts for drums, bass, guitar, keys and the rest. |
 | Model sizes | Small (CPU), medium and large. |
 | Gated weights in-app | Save a Hugging Face token and download weights with live progress. |
-| Live piano roll | Notes appear as chunks complete. |
+| Live piano roll | Notes appear as chunks complete. dettato streams a provisional track you can play at once, and its instrument tracks replace it in place when the job finishes. |
 | Preview | Plays original and MIDI together with a crossfade and per-instrument mute and solo. |
 | Tempo & bars | With the optional Beat This! model (80 MB), the `.mid` carries the song's tempo, time signature and bar lines, and the piano roll shows numbered bars. Re-export with corrected BPM, beats per bar, half or double time, quantize, gap fill and a leading-bar trim. |
 | YuE2 lead sheet | Writes the transcription as the two-voice ABC score YuE2 covers use, with an estimated key and optional chords, to copy or save for Cover Studio's ABC box. |

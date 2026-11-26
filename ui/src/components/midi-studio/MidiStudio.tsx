@@ -77,6 +77,11 @@ export const MidiStudio: React.FC = () => {
 
   // ── Jobs ──
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  // The job whose live player is showing stays open when it finishes, so playback carries on into the final tracks.
+  // Set while rendering (guarded): an effect would run after the done render and remount the player.
+  const [followJob, setFollowJob] = useState<string | null>(null);
+  const liveJob = jobs.find(j => j.status === 'transcribing')?.id;
+  if (liveJob && liveJob !== followJob) setFollowJob(liveJob);
   const [submitError, setSubmitError] = useState('');
   const filteredSongs = useMemo(() => {
     if (!librarySearch.trim()) return librarySongs;
@@ -172,6 +177,7 @@ export const MidiStudio: React.FC = () => {
     try {
       await deletion.mutateAsync(jobId);
       if (expandedJob === jobId) setExpandedJob(null);
+      if (followJob === jobId) setFollowJob(null);
     } catch (err) { setSubmitError(errorMessage(err)); }
   };
 
@@ -515,6 +521,7 @@ export const MidiStudio: React.FC = () => {
               const running = job.status === 'queued' || job.status === 'transcribing';
               // A failed job can still hold a partial .mid (the failed badge stays).
               const hasMidi = job.status === 'done' || (job.status === 'failed' && !!job.partial);
+              const open = hasMidi && (expandedJob === job.id || followJob === job.id);
               const pct = job.chunksTotal ? 100 * ((job.chunksDone || 0) + (job.sub || 0)) / job.chunksTotal : 0;
               return (
                 <div key={job.id} className="rounded-lg border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-black/20 px-3 py-2.5">
@@ -570,11 +577,16 @@ export const MidiStudio: React.FC = () => {
                       {hasMidi && (
                         <>
                           <button
-                            onClick={() => setExpandedJob(e => e === job.id ? null : job.id)}
+                            onClick={() => {
+                              if (open) {
+                                if (expandedJob === job.id) setExpandedJob(null);
+                                if (followJob === job.id) setFollowJob(null);
+                              } else setExpandedJob(job.id);
+                            }}
                             className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors"
                             title={t('midiStudio.preview')}
                           >
-                            {expandedJob === job.id ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                           </button>
                           <a
                             href={getMidiFileUrl(job.id)}
@@ -595,15 +607,11 @@ export const MidiStudio: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  {job.status === 'transcribing' && (
-                    <MidiPlayer key={`${job.id}-live`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live />
+                  {/* one player per job: live while transcribing, then the finished notes in place */}
+                  {(job.status === 'transcribing' || open) && (
+                    <MidiPlayer key={job.id} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={job.status === 'transcribing'} />
                   )}
-                  {expandedJob === job.id && hasMidi && (
-                    <>
-                      <MidiPlayer key={`${job.id}-done`} jobId={job.id} sourceAudioUrl={job.sourceAudioUrl} live={false} />
-                      {job.status === 'done' && <MidiExportPanel jobId={job.id} initial={job.exportOptions} />}
-                    </>
-                  )}
+                  {open && job.status === 'done' && <MidiExportPanel jobId={job.id} initial={job.exportOptions} />}
                 </div>
               );
             })}

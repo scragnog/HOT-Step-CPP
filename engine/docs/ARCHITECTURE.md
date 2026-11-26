@@ -1251,8 +1251,11 @@ Usage: ace-midi --dettato-model <dir> --transcribe <audio> [--out out.mid] [--js
   --transcribe <audio>        WAV or MP3 at any rate; writes --out (default out.mid)
   --dettato-no-repair         skip the evidence repairer (on by default)
   --jsonl                     progress lines (transcriber batches, then the repairer, grouper
-                              and drums), then note_start (with "instrument" and "velocity")
-                              and note_end lines in onset order and a done line on stdout
+                              and drums), provisional lines (pitch, time, end, velocity:
+                              transcriber notes from the settled frames, sent after each
+                              batch, preview only), then note_start (with "instrument" and
+                              "velocity") and note_end lines in onset order and a done line
+                              on stdout
   --dettato-capture <dir>     also write maps, sub-run maps, float16 taps, both note lists,
                               the grouper's features, predictions and groups, the tracks and
                               the drum router in tools/dettato-reference's capture layout
