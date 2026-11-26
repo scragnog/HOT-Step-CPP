@@ -43,9 +43,10 @@ Settings > Updates reads `GET /api/updates/status` (cached, never calls GitHub) 
 
 ## Settings page and hot reload
 
-MIDI Studio stores the SoundFont selection and the optional custom file in this browser's
-IndexedDB, outside Settings backups. Registry banks live under `soundfonts/` in the
-configured models directory. The server resolves each HTTP request by registry ID.
+MIDI Studio stores the SoundFont selection in the browser's IndexedDB. Custom banks
+and their metadata live in `soundfonts/` under `config.data.dir`. Settings JSON backups
+and workspace archives exclude that folder. Registry banks live under `soundfonts/`
+in the configured models directory. Each collection has its own API and IDs.
 
 Settings > General > Adapters includes **Update adapter references**. This explicit
 command posts to `/api/lireek/presets/update-adapter-references` and clears missing

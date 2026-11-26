@@ -93,10 +93,16 @@ Download a bank in **Model Manager → Shared → MIDI Transcription**. **Previe
 in MIDI Studio and **Settings → General → MIDI Studio** share the same choice. You can
 switch during playback. The current sound plays until the new bank loads.
 
-Use **Choose SoundFont…** to add your own General MIDI `.sf2` or `.sf3`. The browser
-keeps the file on this device, so you can switch back to it later. If the selected bank
-is missing, the picker shows a message and the preview falls back to GeneralUser GS
-when installed, or to oscillator sounds.
+Use **Add SoundFont…** to add a General MIDI `.sf2` or `.sf3` up to 1 GB. The app
+selects the bank and keeps a copy in the server's **SoundFont library**. Every browser
+connected to that server can pick it. Your selection is saved in your browser.
+Adding the same file again selects the existing library entry.
+
+Open **SoundFont library** in MIDI Studio or use the list in Settings to rename or
+remove a custom bank. Removing the selected bank switches the preview to the default.
+If GeneralUser GS is unavailable, the preview uses oscillator sounds. The first time
+you open the picker in a browser with a previously saved custom bank, the app adds it
+to the library and clears the browser copy after the upload succeeds.
 
 - GeneralUser GS 2.0.3 by S. Christian Collins is the default bank. [GeneralUser GS License v2.0](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/LICENSE.txt)
 - FluidR3 GM by Frank Wen and contributors is a 148 MB stereo SF2. [MIT licence](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/FluidR3_COPYING.txt) · [Original credits](https://huggingface.co/scragnog/HOT-Step-SoundFonts/blob/main/FluidR3_README.txt)

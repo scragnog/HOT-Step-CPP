@@ -39,7 +39,7 @@ The Storage & Data tab can export a versioned JSON backup of application setting
 
 ### General tab
 
-Under **MIDI Studio**, choose an installed bank from **Preview SoundFont** or add a custom `.sf2` or `.sf3` with **Choose SoundFont…**. The picker in MIDI Studio shares this preference. The custom file stays in this browser and is excluded from Settings backups. See [MIDI Studio](midi-studio.md#preview-soundfont).
+Under **MIDI Studio**, choose an installed or custom bank from **Preview SoundFont**. **Add SoundFont…** saves an `.sf2` or `.sf3` to the server library and selects it. The list below the picker lets you rename or remove custom banks. MIDI Studio shares this browser's selection. Settings backups and workspace archives both exclude the SoundFont library. See [MIDI Studio](midi-studio.md#preview-soundfont).
 
 | Control | What it does |
 |---|---|

@@ -1,6 +1,6 @@
 import { apiClient, ApiError, HttpStatus } from '@/services/httpClient';
 import type { WorkletSynthesizer } from 'spessasynth_lib';
-import { CUSTOM_SOUND_FONT, DEFAULT_SOUND_FONT, DEFAULT_SOUND_FONT_ID, readSoundFontPreference } from './soundFontPreference';
+import { CUSTOM_SOUND_FONT, DEFAULT_SOUND_FONT, DEFAULT_SOUND_FONT_ID, libraryBankUrl, readSoundFontPreference } from './soundFontPreference';
 
 const DRUM_CHANNEL = 9;
 const EXPRESSION = 11;
@@ -55,9 +55,10 @@ export class SoundFontVoice {
       }
     };
     const useDefault = selection === DEFAULT_SOUND_FONT || selection === DEFAULT_SOUND_FONT_ID;
+    const libraryUrl = libraryBankUrl(selection);
     const loadSelection = selection === CUSTOM_SOUND_FONT
       ? () => custom?.arrayBuffer()
-      : () => loadBank(useDefault ? defaultBank : `${defaultBank}/${encodeURIComponent(selection)}`);
+      : () => loadBank(libraryUrl ?? (useDefault ? defaultBank : `${defaultBank}/${encodeURIComponent(selection)}`));
     const selectedBank = await loadSelection();
     const bank = selectedBank ?? (useDefault ? null : await loadBank(defaultBank));
     if (!bank) return null;
