@@ -1,0 +1,12 @@
+<!-- Thumbnail ex-wh: inner drawing in the thumbnail kit's classes, on the side-unit canvas. Captured from the concept at vanilla-reference. -->
+<g class="k pk">
+<path class="k-t" d="M69.6 62.4A9 9 0 1 1 82.4 62.4"/>
+<path class="k-a" d="M69.6 62.4A9 9 0 0 1 76 47"/>
+<circle class="k-c" cx="76" cy="56" r="6.4"/>
+<circle class="k-r" cx="76" cy="56" r="5.6"/>
+<path class="k-p" d="M76 56L76 50.2"/>
+</g>
+<rect class="lcd" x="94" y="40" width="46" height="13" rx="3"/>
+<rect class="lcd-t" x="104" y="45" width="26" height="3" rx="1.5"/>
+<rect class="lcd" x="94" y="59" width="46" height="13" rx="3"/>
+<rect class="lcd-t" x="101" y="64" width="32" height="3" rx="1.5"/>

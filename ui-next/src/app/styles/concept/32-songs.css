@@ -1,0 +1,68 @@
+/* Latest: song cards, runs in progress, errors. */
+.dur { display: grid; gap: 4px; }
+/* songs */
+.song { position: relative; display: grid; gap: 6px; min-width: 0; }
+.song .play { position: absolute; left: 8px; bottom: 8px; width: 34px; height: 34px; border-radius: 50%; border: 0; background: #ffffffe6; color: #1b1722; display: grid; place-items: center; opacity: 0; font-size: 12px; }
+.song:hover .play, .song .play:focus-visible, .song.playing .play { opacity: 1; }
+.song .dur { position: absolute; right: 6px; top: 6px; background: #0009; color: #fff; font: 11px var(--mono); padding: 1px 5px; border-radius: 5px; }
+.song .meta { display: flex; gap: 4px; align-items: start; min-width: 0; }
+.song .meta > div { flex: 1; min-width: 0; }
+.song h3 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song p { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.song .bk { font-family: var(--mono); color: var(--faint); }
+.song.new .dur { animation: durIn var(--t-base) var(--e-out) var(--t-fast) both; }
+@keyframes durIn { from { opacity: 0; translate: 0 -4px; } }
+.pending .bar { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--hot); width: 0; }
+.pending .stage { color: var(--muted); }
+.more { border: 0; background: none; color: var(--muted); width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex: none; }
+.more[aria-expanded="true"] { background: var(--raised); color: var(--fg); }
+/* a take's number: a badge on the art beside the length, the same chip (C-11) */
+.song .take-no { position: absolute; right: 6px; bottom: 6px; z-index: 1; background: #0009; color: #fff; font: 600 11px var(--mono); font-variant-numeric: tabular-nums; padding: 1px 5px; border-radius: 5px; }
+.song.pending .take-no { bottom: 10px; }
+/* new and not yet played: a small dot on the art, gone once it is heard (C-45) */
+.song .new-dot { position: absolute; top: 14px; left: 38px; z-index: 1; width: 8px; height: 8px; border-radius: 50%; background: var(--hot); box-shadow: 0 0 0 2px #ffffffd9; }
+/* the queue folded: one card that says how many more wait, and opens them (C-47) */
+.song.qfold { display: grid; place-content: center; gap: 2px; aspect-ratio: 1; align-self: start; border: 1px dashed var(--line); border-radius: var(--r-well); background: none; color: var(--fg); text-align: center; font: inherit; cursor: pointer; }
+.song.qfold b { font: 600 16px var(--display); }
+.song.qfold small { font-size: 12px; color: var(--muted); }
+.song.qfold:hover { background: var(--raised); border-color: var(--faint); }
+.more:hover { background: var(--surface); color: var(--fg); }
+.latest { display: grid; gap: 10px; }
+.latest .res-head { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.latest .res-head .linkbtn { white-space: nowrap; padding-block: 6px; margin-block: -2px; } /* a 26px target (F-26) */
+/* on a phone the count takes a line of its own under "Latest" and "Open the Library" (S-27) */
+@media (max-width: 480px) { .latest .res-head #songCount { order: 3; flex-basis: 100%; } }
+.latest h2 { margin: 0; font: 700 18px var(--display); }
+.songgrid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+/* a refused run: a one-line notice across the top of Latest, not a card in the grid (G-D-09) */
+.song.errored { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--s-3); min-height: 48px; padding: var(--s-1) var(--s-2) var(--s-1) var(--s-3); border: 1px solid color-mix(in srgb, var(--hot) 35%, var(--line)); border-radius: var(--r-ctl); background: color-mix(in srgb, var(--hot) 6%, var(--surface)); }
+.err-mark { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--hot); color: var(--hot-ink); display: grid; place-items: center; font: 700 13px/1 var(--body); }
+.err-line { flex: 1; min-width: 0; margin: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.err-line b { color: var(--hot); font-weight: 600; }
+.err-line .err-t { color: var(--fg); font-weight: 500; }
+.err-acts { flex: none; display: flex; gap: var(--s-2); }
+.err-acts .small-btn { height: 32px; padding: 0 12px; }
+.tile[data-m="tempo"] .dur .lbl { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.pend-x { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: #000a; color: #fff; display: grid; place-items: center; opacity: 0; transition: opacity var(--t-fast) var(--e-out); }
+.song.pending:hover .pend-x, .pend-x:focus-visible { opacity: 1; }
+@media (hover: none) { .pend-x { opacity: 1; } }
+/* without hover, a song's Play is always shown (B-23) */
+@media (hover: none) { .song .play { opacity: 1; } }
+.song.waiting .bar { filter: saturate(.2); opacity: .6; }
+.song.waiting .stage { color: var(--amber); }
+/* Latest: the engine is a small mark on the art, so the meta line can carry the style (D-26) */
+.song .art .eng-mark { position: absolute; top: 8px; left: 8px; z-index: 1; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: #fff; background: #0000004d; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); box-shadow: inset 0 0 0 1px #ffffff26; }
+.song .art .eng-mark svg { display: block; }
+.song .play { transition: opacity var(--t-fast) var(--e-out), scale var(--t-fast) var(--e-out); }
+.song .play:active { scale: .94; translate: none; }
+/* Play while rendering (E-40): the playable part of a rendering song is the bar's second, lighter tone, a window behind
+   the render; its Play stays in sight once there is anything to hear */
+.pending .bar.ready { background: color-mix(in srgb, var(--hot) 45%, #fff); transition: width var(--t-fast) linear; }
+.song.pending.streams .play { opacity: 1; }
+/* the ⋯ button shares the title's line only; the description runs the card's full width on two lines, and every card
+   keeps room for two, so cards stay one height (F-14) */
+.song .meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--s-1); align-items: center; }
+.song .meta > div { display: contents; }
+.song .meta h3 { grid-column: 1; grid-row: 1; line-height: 20px; }
+.song .meta .more { grid-column: 2; grid-row: 1; margin-block: -4px; }
+.song .meta p { grid-column: 1 / -1; grid-row: 2; white-space: normal; line-height: 16px; min-height: 32px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }

@@ -1,0 +1,21 @@
+/* Toasts. */
+.toast { position: fixed; z-index: 60; background: var(--fg); color: var(--bg); border-radius: var(--r-well); font-size: 13px; }
+.toast { top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: none; }
+.toast { display: flex; align-items: center; }
+.toast-act { border: 0; background: none; color: inherit; font: 600 13px var(--body); text-decoration: underline; text-underline-offset: 3px; padding: 2px 4px; border-radius: 4px; }
+.toast { left: auto; right: 16px; max-width: min(440px, calc(100% - 32px)); padding: 8px 6px 8px 14px; gap: 6px; }
+/* a message that wraps does so in balanced lines, so no word is left alone on the second (C-29) */
+.toast { max-width: min(480px, calc(100% - 32px)); }
+.toast-msg { flex: 1; min-width: 0; text-wrap: balance; }
+.toast-x { border: 0; background: none; color: inherit; opacity: .7; width: 26px; height: 26px; border-radius: 6px; flex: none; display: grid; place-items: center; }
+.toast-x:hover { opacity: 1; background: color-mix(in srgb, var(--bg) 18%, transparent); }
+.toast :focus-visible { outline-color: var(--bg); }
+/* the toast rises 8px into its place; a replaced message cross-fades its text instead of re-entering (textIn) */
+@keyframes toastIn { from { opacity: 0; translate: 0 8px; } }
+.toast { animation: toastIn var(--t-base) var(--e-out); transition: left var(--t-base) var(--e-out), bottom var(--t-base) var(--e-out); }
+/* an Undo toast's time left, as a hairline along its foot; it stops while the toast is pointed at or focused (G-M-02) */
+.toast-life { position: absolute; left: 10px; right: 10px; bottom: 3px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--bg) 55%, transparent); transform-origin: 0 50%; animation: toastLife var(--life, 10s) linear forwards; pointer-events: none; }
+.toast:is(:hover, :focus-within) .toast-life { animation-play-state: paused; }
+@keyframes toastLife { to { transform: scaleX(0); } }
+.toast { box-shadow: var(--elev-overlay); }
+@media (prefers-reduced-motion: reduce) { .toast-life { display: none; } }

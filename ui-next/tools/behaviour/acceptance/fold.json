@@ -1,0 +1,37 @@
+{
+ "about": "Quick's fold (A-28, Q-05: past six modules Quick shows six and a button names the rest; the Pedalboard, a source and a module holding a set value are never folded; its open state is kept with the session): the fold's own scenarios (38-fold.mjs), each reaching its state by real input once the test build's two stand-in modules are on the desk, and the two older ones about it.",
+ "scenarios": [
+  {
+   "id": "01-desk/quick-more-parked-empty",
+   "why": "The concept's own: eight modules show all eight, eight and the Pedalboard all nine, ten and the board fold four behind a button that names them, a changed value keeps its module in sight, a ring aimed at a folded tile opens the fold, and the button folds them again; then the parked tray and the empty desk. The stand-ins are the test build's definitions (testing/standins.ts), named by the test layer's defineModule (testing/compat/fold.ts)."
+  },
+  {
+   "id": "08-persistence-cables/reload-keeps-the-desk",
+   "why": "Every part of the desk comes back, now with Quick's fold standing open (S.qAll) and Song info open (S.songInfoOpen): both are view state kept with the session (kit/session.ts), which closes deviation 53."
+  },
+  {
+   "id": "38-fold/the-button-shows-and-folds-again",
+   "why": "The button's words closed and open, its place after the tiles across the desk, aria-expanded, no undo step, a click and Enter."
+  },
+  {
+   "id": "38-fold/a-module-that-arrives-folded-opens-it",
+   "why": "A module added from its card where the fold would hide it opens the fold; Undo takes it and the fold away; adding what is already there, folded, opens the fold and rings it."
+  },
+  {
+   "id": "38-fold/a-set-value-keeps-its-module-in-sight",
+   "why": "A value set on a tile the open fold shows keeps it out of the fold, and the button names one fewer; Undo puts it back in the fold."
+  },
+  {
+   "id": "38-fold/the-fold-is-kept-over-a-reload",
+   "why": "Open and closed, each kept over a reload."
+  },
+  {
+   "id": "38-fold/only-quick-folds",
+   "why": "Studio shows every module with no button; back at Quick the fold is as it was."
+  },
+  {
+   "id": "38-fold/song-info-is-kept-over-a-reload",
+   "why": "Song info opened and closed by its button, each kept over a reload (deviation 53 closed)."
+  }
+ ]
+}

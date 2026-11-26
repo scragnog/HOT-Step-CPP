@@ -1,0 +1,53 @@
+/* The engine and models panel. */
+/* engine panel */
+.eng-panel { --ec: var(--hot); position: fixed; z-index: 45; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-well); box-shadow: var(--elev-overlay); padding: 16px; display: grid; gap: 14px; overflow-y: auto; overscroll-behavior: contain; animation: ovIn var(--t-base) var(--e-out); transform-origin: 70% 0; }
+.ep-head { display: grid; gap: 2px; }
+.ep-head b { font: 700 16px var(--display); }
+.ep-head span { font-size: 13px; color: var(--muted); }
+.ep-cards { display: grid; gap: 8px; }
+.ep-card { position: relative; display: grid; gap: 4px; align-content: start; text-align: left; border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: var(--raised); color: var(--fg); cursor: pointer; transition: translate var(--t-base) var(--e-out), border-color var(--t-fast) var(--e-out), box-shadow var(--t-base) var(--e-out); }
+.ep-card:hover { translate: 0 -3px; border-color: color-mix(in srgb, var(--c) 55%, var(--line)); }
+.ep-scope { height: 58px; border-radius: 9px; display: grid; place-items: center; color: var(--c); margin-bottom: 4px; background: radial-gradient(ellipse at 50% 120%, color-mix(in srgb, var(--c) 30%, transparent), transparent 70%), repeating-linear-gradient(90deg, #ffffff08 0 1px, transparent 1px 12px), var(--inst); box-shadow: inset 0 2px 8px #000a; overflow: hidden; }
+.ep-scope svg { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--c) 70%, transparent)); opacity: .6; transition: opacity var(--t-base) var(--e-out), scale var(--t-slow) var(--e-out); }
+.ep-card:hover .ep-scope svg, .ep-card[aria-checked="true"] .ep-scope svg { opacity: 1; scale: 1.08; }
+.ep-card b { font: 600 13px var(--body); }
+.ep-card small { font-size: 11.5px; color: var(--muted); line-height: 1.3; min-height: calc(2 * 1.3em); }
+/* taglines hold two lines and the spec chips sit on one row at the card's foot, so they line up across the cards (D-23) */
+.ep-card { grid-template-rows: auto auto auto 1fr; }
+.ep-specs { display: flex; gap: 4px; flex-wrap: nowrap; margin-top: 4px; align-self: end; }
+.ep-specs i { font: normal 10.5px var(--mono); color: var(--faint); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+/* the chosen engine wears a 2px ring in its colour, so it reads above a card that only has focus (whose ring stands 2px
+   outside it) (F-32) */
+.ep-card[aria-checked="true"] { border-color: color-mix(in srgb, var(--c) 80%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 80%, var(--line)), 0 14px 28px -16px var(--c); }
+.ep-card[aria-checked="true"]::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px; pointer-events: none;
+  background: conic-gradient(from var(--sa), transparent 0 50%, color-mix(in srgb, var(--c) 55%, transparent) 72%, #fff 86%, var(--c) 90%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); animation: sweep 1.2s var(--e-out) 1 both; }
+.ep-models { display: grid; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px; }
+.ep-mh { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.ep-mh b { font: 600 13px var(--body); }
+.ep-mh span { font-size: 12px; color: var(--faint); }
+.ep-cards { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.eng-panel { width: min(780px, calc(100vw - 24px)); }
+.ep-scope { position: relative; }
+.ep-badge { position: absolute; top: 5px; right: 5px; font: 600 9.5px/1 var(--mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; color: var(--inst); background: #ffd27a; border-radius: 4px; padding: 3px 5px; }
+.ep-test { font-style: normal; color: var(--amber); }
+/* narrow: the engines are one strip that scrolls sideways, so the models stay on the first screen (B-21) */
+@media (max-width: 760px) { .ep-cards { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(136px, 42%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; } .ep-cards > .ep-card { scroll-snap-align: start; } }
+.exp { font: 700 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; border-radius: 4px; padding: 1px 5px; margin-right: 4px; }
+.plugctl { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #f5a623 40%, var(--line)); border-radius: 12px; background: color-mix(in srgb, #f5a623 5%, transparent); }
+.plugctl.none { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; border-style: dashed; }
+.pc-head { display: flex; gap: 8px; align-items: center; }
+.pc-head b { flex: 1; font-size: 13px; }
+/* labels on one line across a row, controls on the next, whatever each control's height (E-27) */
+.pc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 14px; align-items: start; }
+.pc-i { display: grid; gap: 3px; grid-template-rows: auto minmax(26px, auto); align-items: center; }
+.pc-grid > .pill-tog { align-self: end; justify-self: start; }
+.pc-i.wide { grid-column: span 2; }
+.pc-i .tok { justify-self: start; }
+.exp { background: #f5b544; color: var(--inst); }
+/* engine cards: one height whatever their spec chips do */
+.ep-cards { align-items: stretch; }
+.ep-card { height: 100%; }
+/* the engine glyph animates while hovered and while a run is live, not forever on the selected card */
+.ep-card[aria-checked="true"]:not(:hover) :is(.lg-spark, .lg-glint, .lg-run, .lg-line, .n1, .n2, .n3, .lg-b1, .lg-b2) { animation: none; }
+.ep-card[aria-checked="true"]:not(:hover) :is(.lg-run) { opacity: 0; }

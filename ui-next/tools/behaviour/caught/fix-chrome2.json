@@ -1,0 +1,10 @@
+{
+ "about": "The scenarios that caught each switch of switches/fix-chrome2.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "fix2 create keys do nothing on another page": ["37-fix-chrome2/rc01-create-keys-do-nothing-on-another-page"],
+  "fix2 a module is described on its engine": ["15-other-engines/tempo-has-one-name","37-fix-chrome2/e15-modules-describe-tempo-per-engine"],
+  "fix2 a symbol under a finger says a second tap uses it": ["37-fix-chrome2/s02-plugin-symbol-first-tap-shows-it"],
+  "fix2 undo says what it left alone": ["09-undo-storage/undo-keeps-a-later-edit-of-the-same-thing","37-fix-chrome2/undo-says-what-it-left-alone"],
+  "fix2 a spent undo says so": ["37-fix-chrome2/undo-says-what-it-left-alone"]
+ }
+}

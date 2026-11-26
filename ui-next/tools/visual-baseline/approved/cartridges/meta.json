@@ -1,0 +1,24 @@
+{
+ "set": "cartridges",
+ "at": "2026-11-24T20:04:07.427Z",
+ "commit": "3e66102542",
+ "states": [
+  "cartridges-quick-one",
+  "cartridges-quick-two-dark",
+  "cartridges-studio-one",
+  "cartridges-studio-unused-dark",
+  "cartridges-studio-stack",
+  "cartridges-lab-stack-dark",
+  "cartridges-lab-planner-forced",
+  "cartridges-lab-one-planner",
+  "cartridges-yue-studio",
+  "cartridges-yue-lab-two-dark",
+  "cartridges-hm-studio",
+  "cartridges-mm3-lab",
+  "cartridges-list",
+  "cartridges-planner-list-dark",
+  "cartridges-xy-topp-off",
+  "cartridges-xy-planner-off-dark",
+  "cartridges-mood-planner-off"
+ ]
+}

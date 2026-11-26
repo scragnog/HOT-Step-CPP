@@ -1,0 +1,90 @@
+/* The containers and read-outs (package 2; styles/rebuild/, loaded after the concept's, whose files stay as they are).
+   The containers emit the concept's housings (a terminal and its lines, a rack group, a deck, an LCD's rows, a fader
+   bank), so the concept's own rules style them; here are the few places where the definitions put a part in a
+   housing by a rule of its own where the concept wrote the markup out by hand, and every part on the surfaces these
+   containers give, so that a part a definition puts in a terminal, a rack group, a deck or an LCD's row reads right
+   there. tools/visual-baseline/gallery.mjs draws every part on each of them, both themes, every tier. */
+
+/* ---- a terminal without a bar (a repetition guard) starts with its line, as the concept's plain first line does:
+   no hang and no gap above it */
+:is(.term, .gline) > .tline.hang:first-child { padding-left: 0; text-indent: 0; margin-top: 0; }
+
+/* ---- the planner off (Q-17): what only it reads stands back at 45%, still editable; its power switch does not */
+.term.pw-off > :is(.tline, .tparams), .term.pw-off .term-bar > :not(.tpow) { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }
+
+/* ---- a caption above a strip of switches (the plans' Endings): the strip is the concept's endings chips */
+.endings > .rackrow { gap: 6px 8px; align-items: center; font-size: inherit; line-height: inherit; text-align: inherit; }
+
+/* ---- a caption above a text field: its example link hides once the field holds a list, as the concept's .ts-ex */
+.ts-foot > .linkbtn { justify-self: start; font-size: 12px; color: var(--muted); }
+.ts:has(> input:not(:placeholder-shown)) .ts-foot > .linkbtn { display: none; }
+
+/* ---- the speed gauge: its small LCD stands as the concept stands it beside its knob (25-module-perf.css .padside):
+   the number over its word, as wide as the number */
+:is(.tile-body, .knobs) > .gauge { flex-direction: column; align-items: center; gap: 0; padding: 8px 12px; width: 7ch; box-sizing: content-box; text-align: center; justify-self: center; }
+.knobs:has(> .gauge) { justify-content: center; align-items: end; gap: 22px; }
+
+/* ---- a guard with the planner off (L-11): its lines stand back at 45%, still editable, and say so where they say
+   "guard off" (the concept's tile class lm-off, here the terminal's own: plan-off) */
+.term .term-plan-off { display: none; margin-left: var(--s-2); color: #f5c26b; }
+.term.plan-off .term-plan-off { display: inline; }
+.term.plan-off .term-off { display: none; }
+.term.plan-off > :not(:first-child), .term.plan-off > :first-child > :not(.term-plan-off) { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }
+
+/* ---- every part in the containers' housings: what the concept gives a part on paper or in a terminal, here too */
+/* an XY pad takes a plane of its own in a bar, a strip, a group or a row of an LCD */
+:is(.term-bar, .schctl, .lcd-row, .lcd-top, .pc-grid) > .xy { flex: 1 1 240px; min-width: 220px; align-self: stretch; }
+.ad-g > .xy, .deck-c > .xy { justify-self: stretch; width: 100%; min-width: 0; }
+/* an LED switch on a group's paper is the page's raised switch (15-parts.css, the LED switch on paper) */
+:is(.ad-g, .schctl, .pc-grid, .lat-opt) > .led-btn { background: var(--raised); border-color: var(--line); color: var(--muted); --chg: var(--amber); }
+:is(.ad-g, .schctl, .pc-grid, .lat-opt) > .led-btn.on { color: var(--fg); }
+/* a quiet note in a terminal's bar or line is the bar's ink (its flags', #a39cae), which reads on the terminal */
+.term-bar > .k, .term .opt > .k:only-child { color: #a39cae; }
+/* a note on the dark deck is in the deck's ink */
+.deck .lbl { color: #a39cae; }
+/* a plain text field above its caption takes the page's field look */
+.ts > input[type="text"]:not(.lcd-input) { font: inherit; color: var(--fg); background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; min-width: 0; }
+/* in an LCD's row an XY pad is a plane of its own height, as on a pedal */
+:is(.lcd-row, .lcd-top) > .xy { height: 120px; }
+/* a ruler's words on the dark terminal and deck, in their ink */
+:is(.term, .deck) .dur :is(.lbl, .ruler-labels) { color: #a39cae; }
+/* a chip selector on a group's paper: the page's segmented look (15-controls-1.css, on paper) */
+:is(.ad-g, .schctl, .pc-grid) > .chipsw > .kl { color: var(--faint); }
+:is(.ad-g, .schctl, .pc-grid) > .chipsw > div { background: var(--raised); border-color: var(--line); }
+:is(.ad-g, .schctl, .pc-grid) > .chipsw button { color: var(--muted); }
+:is(.ad-g, .schctl, .pc-grid) > .chipsw button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+:is(.ad-g, .schctl, .pc-grid) > .chipsw { --chg: var(--amber); }
+
+/* ---- a wide part (a ruler, a look-back strip, the flow windows, a curve, a drop zone, the plan) takes the whole
+   width of a group, a strip, a plugin's grid, a deck's column or an LCD's row, as it takes a tile's */
+.ad-g > :is(.dur, .codes, .codes-cap, .flowviz, .cap, .scope, .drop, [data-term]) { justify-self: stretch; }
+.pc-grid > :is(.dur, .codes, .codes-cap, .flowviz, .cap, .scope, .drop, [data-term], .xy) { grid-column: 1 / -1; }
+:is(.schctl, .lcd-row, .lcd-top, .term-bar) > :is(.dur, .codes, .codes-cap, .flowviz, .cap, .scope, .drop, [data-term]) { flex: 1 1 100%; min-width: 0; }
+.deck-c > :is(.dur, .codes, .codes-cap, .flowviz, .cap, .scope, .drop, [data-term]) { flex: 1 1 100%; min-width: 0; }
+.deck-c:has(> :is(.codes, .flowviz)) { flex-wrap: wrap; }
+/* the speed gauge stands as beside its knob wherever it stands */
+:is(.ad-g, .schctl, .pc-grid, .deck-c, .lcd-row) > .gauge { flex-direction: column; align-items: center; gap: 0; padding: 8px 12px; width: 7ch; box-sizing: content-box; text-align: center; }
+
+/* ---- the plan text is terminal text: outside a terminal it brings a small terminal of its own */
+[data-term]:not(.term [data-term]) { background: var(--inst); color: #cfc7da; border-radius: 10px; padding: 10px 12px; font: 12px/20px var(--mono); white-space: pre-wrap; box-shadow: inset 0 2px 8px #000a, var(--bezel); }
+[data-term]:not(.term [data-term]) :is(.k) { color: #a39cae; }
+[data-term]:not(.term [data-term]) .v { color: var(--lcd-fg); }
+[data-term]:not(.term [data-term]) .p { color: #ff7aa0; }
+[data-term]:not(.term [data-term]) .y { color: #f5c26b; }
+[data-term]:not(.term [data-term]) .cursor { display: inline-block; width: 7px; height: 13px; background: #cfc7da; vertical-align: -2px; }
+
+/* ---- an LCD (and its rows) lends its green ink to what it holds; a part with a paper face of its own (a plugin's or
+   a model's picker, a chip picker, the master switch, a choice row, a segmented choice, a drop zone) keeps the page's
+   ink on that face, as it has on a tile */
+.lcd :is(.pk-plugin, .pk-model, .pchip, .master, .qchoice, .seg, .drop) { color: var(--fg); }
+/* a choice row's pill is paper (its words and the one chosen as on a tile); its caption stands on the LCD, in its ink */
+.lcd .qchoice button { color: var(--muted); }
+.lcd .qchoice button[aria-checked="true"] { color: var(--bg); }
+.lcd .qchoice > .kl { color: color-mix(in srgb, var(--lcd-fg) 80%, transparent); }
+
+/* ---- the beat lamps are an LCD's own: off an LCD they bring a small LCD housing, as the LCD's other parts do
+   (15-controls-1.css) */
+.lcd-pulse:not(.lcd .lcd-pulse) { flex: none; background: var(--lcd); border-radius: 7px; padding: 8px 10px; box-shadow: inset 0 2px 6px #000a, var(--bezel); width: max-content; justify-self: start; align-self: center; }
+
+/* ---- a switched rack group's option row: a compact choice stands in it as the concept's .lat-opt does */
+.lat-g > .seg.sm { align-self: center; }

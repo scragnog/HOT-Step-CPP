@@ -1,0 +1,35 @@
+/* The ruler (the value strip). */
+.ruler-labels { position: relative; height: 16px; font: 11px/16px var(--mono); color: var(--faint); }
+.ruler-labels > span { position: absolute; top: 0; translate: -50% 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ruler-labels > span:first-child { translate: 0 0; }
+.ruler-labels > span:last-child:not(:first-child)[style*="left:100%"] { translate: -100% 0; }
+.ruler2 { --w: 30%; position: relative; height: 30px; margin-top: 18px; cursor: ew-resize; touch-action: none; outline: none; border-radius: 7px; background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--fg) 34%, transparent) 0 1px, transparent 1px var(--maj, 20%)), repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px var(--min, 10%)), var(--raised); }
+.ruler2 .rbar { position: absolute; left: 0; top: 9px; height: 12px; width: var(--rw); border-radius: 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--hot) 35%, transparent), var(--hot)); }
+.ruler2.auto .rbar { background: repeating-linear-gradient(90deg, var(--faint) 0 6px, transparent 6px 10px); opacity: .45; }
+.ruler2::after { content: ""; position: absolute; left: var(--rw); top: 3px; bottom: 3px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--fg); box-shadow: 0 0 0 2px var(--surface); }
+.ruler2.auto::after { opacity: .3; }
+.ruler2 .rcap { position: absolute; top: -18px; transform: translateX(-50%); font: 600 12px var(--mono); white-space: nowrap; pointer-events: none; }
+.ruler2 .io { position: absolute; top: 7px; height: 16px; z-index: 1; background: repeating-linear-gradient(45deg, var(--ok) 0 3px, transparent 3px 6px); border: 1px solid var(--ok); border-radius: 3px; pointer-events: none; }
+.ruler2 .trim { position: absolute; font: 11px var(--mono); color: var(--hot); border: 1px solid var(--hot); border-radius: 3px; padding: 0 3px; background: var(--surface); pointer-events: none; }
+.ruler2 + .ruler-labels { margin-top: 4px; }
+.ruler2 .rcap { color: color-mix(in srgb, var(--hot) 78%, var(--fg)); }
+.ruler2.auto .rcap { color: var(--muted); }
+/* duration ruler: the value stays inside the ruler at either end; the trim tag sits above the bar, clear of the scale */
+.ruler2 .rcap { left: clamp(22px, var(--rw), calc(100% - 22px)); }
+/* the trim tag rides above the bar on the time cap's line, just after it (before it near the end), so the tag, the end
+   hatch and the handle never pile up at the song's end (A-28) */
+.ruler2 .trim { bottom: auto; top: -17px; line-height: 12px; font-size: 10px; transform: none; margin-left: 28px; z-index: 2; }
+.ruler2 .trim.flip { transform: translateX(-100%); margin-left: 0; }
+@property --rw { syntax: '<length-percentage>'; inherits: true; initial-value: 0%; }
+.ruler2 { --rw: var(--w); transition: --rw var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+/* rulers: the cap widens a pixel and the strip lifts */
+.ruler2::after { transition: width var(--t-fast) var(--e-out), margin var(--t-fast) var(--e-out); }
+.ruler2:hover::after, .ruler2.sliding::after { width: 6px; margin-left: -3px; }
+.ruler2:hover:not(:focus-visible) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 22%, transparent); }
+/* near either end the time cap aligns to that end, so a longer cap ("up to 4:00") stays inside the ruler (B-32) */
+.ruler2 .rcap.at-end { left: 100%; transform: translateX(-100%); }
+/* and near the start it stands flush with the ruler's left end (S-31) */
+.ruler2 .rcap.at-start { left: 0; transform: none; }
+/* the handle's travel is inset by half its width, so at 0:10 and at the end it sits on the track, never over its rounded
+   end (Q-31) */
+.ruler2::after { left: clamp(2px, var(--rw), calc(100% - 2px)); }

@@ -1,0 +1,160 @@
+/* Thumbnails: the small drawings of modules, pedals and units in the Modules panel and the picker. */
+/* ---- the thumbnail family (11-thumbnails.js) ----
+   Every drawing is an inline SVG in one of two canvases; class names inside are prefixed t- so no page rule can reach
+   them. Materials are the page's own tokens, so the drawings follow the theme the way the modules do. Strokes keep
+   their width at every size (1.5 px lines, 1 px hairlines), which is what keeps the 96 px and 176 px drawings one family. */
+svg.th { display: block; width: 100%; height: 100%; overflow: hidden; --xc: var(--lab); }
+svg.th * { vector-effect: non-scaling-stroke; }
+svg.th.ped-th { overflow: visible; }
+svg.th.neutral { --pd-s1: 9%; --pd-s2: 9%; --pd-s3: 9%; }
+svg.th text { font-family: var(--lcdfont); }
+/* surfaces */
+.t-frame { fill: var(--surface); }
+.t-board { fill: var(--pb1); }
+.t-well, .t-rack, .t-chip, .t-nbox, .t-btn { fill: var(--raised); stroke: var(--line); stroke-width: 1; }
+.t-nbox, .t-btn { fill: var(--surface); }
+.t-rack.t-off { fill: none; stroke-dasharray: 3 3; }
+.t-lcd, .t-inst, .t-pad, .t-bezel { fill: var(--lcd); stroke: color-mix(in srgb, var(--fg) 16%, transparent); stroke-width: 1; }
+.t-inst { fill: var(--inst); }
+.t-pad { fill: color-mix(in srgb, var(--lab) 20%, var(--inst)); }
+.t-bezel { fill: none; }
+.t-paper { fill: var(--paper); stroke: var(--paper-line); stroke-width: 1; }
+.t-grid { stroke: #ffffff12; stroke-width: 1; fill: none; }
+.t-pad-s { stroke: #ffffff1c; stroke-width: 1; fill: none; }
+/* ink, engraving, LCD */
+.t-ink { fill: color-mix(in srgb, var(--fg) 72%, transparent); }
+.t-ink2 { fill: color-mix(in srgb, var(--fg) 34%, transparent); }
+.t-ink3, .t-eng { fill: color-mix(in srgb, var(--fg) 40%, transparent); }
+.t-lcd-t { fill: var(--lcd-fg); }
+.t-lcd-d { fill: var(--lcd-dim); }
+.t-lcd-n { fill: var(--lcd-fg); font-size: 34px; }
+.t-lcd-n.t-sm { font-size: 15px; }
+.t-lcd-n.t-big { font-size: 40px; }
+.t-hot { fill: var(--hot); }
+/* the knob (D-32's knob, drawn): track, value arc in the surface's accent, ridged cap, line pointer */
+.t-k-t, .t-k-a { fill: none; stroke-width: 2; stroke-linecap: round; }
+.t-k-t { stroke: color-mix(in srgb, var(--fg) 18%, transparent); }
+.t-k-a { stroke: var(--hot); }
+.t-k-c { fill: var(--kn-c1); stroke: color-mix(in srgb, var(--fg) 24%, transparent); stroke-width: 1; }
+.t-k-r { fill: none; stroke: color-mix(in srgb, var(--fg) 20%, transparent); stroke-width: 1.5; stroke-dasharray: 1 1.8; }
+.t-k-p { stroke: var(--kn-ptr); stroke-width: 1.5; stroke-linecap: round; }
+.t-k.t-off .t-k-c { fill: var(--raised); }
+.t-k.t-off .t-k-p { stroke: var(--faint); }
+.t-k.t-pk .t-k-t { stroke: var(--kn-track); }
+.t-k.t-pk .t-k-a { stroke: var(--pd-ink); }
+/* LEDs and chips */
+.t-led-on { fill: var(--led-on); filter: drop-shadow(0 0 2px var(--led-on)); }
+.t-led-off { fill: var(--led-off); }
+.t-chip { fill: var(--surface); }
+/* instrument interiors (dark in both themes, like the real ones) */
+.t-term-p { fill: #ff7aa0; }
+.t-term-k { fill: #8a819a; }
+.t-term-w { fill: #ece8f2; }
+.t-term-y { fill: #f5c26b; }
+.t-chip-g { fill: var(--lcd-fg); }
+.t-inst-t { fill: #ffffff70; }
+.t-hist { fill: #ffffff2e; }
+.t-hist-w { fill: var(--hot); }
+.t-amb { stroke: #f5b544; stroke-width: 1; fill: none; }
+.t-curve { stroke: var(--hot); stroke-width: 2; fill: none; stroke-linejoin: round; }
+.t-dot { fill: #fff; }
+.t-base { stroke: #ffffff30; stroke-width: 1.5; fill: none; }
+.t-base.t-dash { stroke-dasharray: 3 4; stroke-width: 1; }
+.t-curve-g { stroke: var(--lcd-fg); stroke-width: 2; fill: none; }
+.t-dot-g { fill: var(--lcd-fg); }
+.t-pad-h { stroke: color-mix(in srgb, var(--lcd-fg) 45%, transparent); stroke-width: 1; }
+.t-pad-d { fill: var(--lcd-fg); }
+.t-pad-ring { fill: none; stroke: color-mix(in srgb, var(--lcd-fg) 50%, transparent); stroke-width: 1; }
+.t-xy-amb { --xc: #f5b544; }
+.t-xy-h { fill: none; stroke: color-mix(in srgb, var(--xc) 55%, transparent); stroke-width: 1; }
+.t-xy-ring { fill: none; stroke: color-mix(in srgb, var(--xc) 55%, transparent); stroke-width: 1.5; }
+.t-xy-dot { fill: var(--xc); }
+.t-perf-0 { stop-color: color-mix(in srgb, var(--ok) 42%, var(--inst)); }
+.t-perf-1 { stop-color: var(--inst); }
+.t-perf-2 { stop-color: color-mix(in srgb, var(--hot) 40%, var(--inst)); }
+.t-win { fill: color-mix(in srgb, #ff6a3d 80%, transparent); }
+.t-win2 { fill: color-mix(in srgb, #ff6a3d 55%, transparent); }
+.t-rec { fill: #c0263d; }
+.t-rec-d, .t-rec-t { fill: #fff; }
+.t-play { fill: var(--lcd-fg); }
+/* the modules' own objects */
+.t-wheel { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.t-wheel-s { stroke: var(--line); stroke-width: 1; fill: none; }
+.t-wheel-i { fill: none; stroke: var(--line); stroke-width: 1; }
+.t-note { fill: var(--note); filter: drop-shadow(0 2px 2px #1b172224); }
+.t-note-fold { fill: color-mix(in srgb, var(--note-ink) 20%, var(--note)); }
+.t-note-ink { fill: none; stroke: var(--note-ink); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: .8; }
+.t-tape { fill: color-mix(in srgb, var(--surface) 72%, transparent); stroke: color-mix(in srgb, var(--fg) 10%, transparent); stroke-width: 1; }
+.t-vinyl { fill: var(--inst); }
+.t-groove { fill: none; stroke: #ffffff1c; stroke-width: 1; }
+.t-vinyl-l { fill: #4c6fff; }
+.t-blend-ref { fill: color-mix(in srgb, #4c6fff 16%, transparent); stroke: #4c6fff; stroke-width: 1.5; }
+.t-blend-you { fill: color-mix(in srgb, var(--hot) 16%, transparent); stroke: var(--hot); stroke-width: 1.5; }
+.t-dot-ref { fill: #4c6fff; }
+.t-dot-you { fill: var(--hot); }
+.t-cart-w { fill: color-mix(in srgb, var(--hot) 16%, var(--inst)); stroke: color-mix(in srgb, var(--hot) 30%, transparent); stroke-width: 1; }
+.t-cass { fill: none; stroke: var(--hot); stroke-width: 1.5; }
+.t-fdr-s { stroke: #ffffff26; stroke-width: 2; stroke-linecap: round; fill: none; }
+.t-fdr-v { stroke: var(--hot); stroke-width: 2; stroke-linecap: round; fill: none; }
+.t-fdr-c { fill: #f1edf5; stroke: #00000040; stroke-width: 1; }
+.t-staff { stroke: color-mix(in srgb, var(--paper-ink) 45%, transparent); stroke-width: 1; fill: none; }
+.t-note-h { fill: var(--paper-ink); }
+.t-stem { stroke: var(--paper-ink); stroke-width: 1.5; }
+.t-rule { stroke: var(--paper-line); stroke-width: 1; fill: none; }
+.t-p-ink { fill: color-mix(in srgb, var(--paper-ink) 42%, transparent); }
+.t-take { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.t-take.t-kept { fill: color-mix(in srgb, var(--c) 14%, var(--surface)); stroke: var(--c); stroke-width: 1.5; }
+.t-take-e { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.t-tick { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.t-sel-amb { fill: color-mix(in srgb, var(--amber) 16%, transparent); }
+.t-wave { fill: color-mix(in srgb, var(--fg) 28%, transparent); }
+.t-wave-amb { fill: var(--amber); }
+.t-box { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.t-box-on { fill: var(--fg); stroke: var(--fg); stroke-width: 1.5; }
+.t-flap { fill: var(--flap1); }
+.t-flap-s { stroke: #000000b0; stroke-width: 1; }
+.t-flap-t { fill: #ece8f2; font-size: 18px; }
+.t-lock { fill: none; stroke: var(--fg); stroke-width: 1.5; }
+.t-lock-b { fill: var(--fg); }
+.t-reel { fill: var(--raised); stroke: var(--line); stroke-width: 1; }
+.t-reel-on { fill: var(--hot); }
+.t-reel-h { fill: var(--surface); }
+.t-meter { fill: var(--inset); }
+.t-meter-v { fill: var(--ok); }
+/* pedals: the same materials as the board (27-pedalboard.css): face from --h and --pd-*, screws, jacks, the knob in pedal ink */
+.t-jack { fill: var(--jack); }
+.t-p-lip { fill: hsl(var(--h) var(--pd-s3, 45%) var(--pd-l3)); }
+.t-pf-1 { stop-color: hsl(var(--h) var(--pd-s1) var(--pd-l1)); }
+.t-pf-2 { stop-color: hsl(var(--h) var(--pd-s2) var(--pd-l2)); }
+.t-screw { fill: var(--screw); stroke: #00000055; stroke-width: .75; }
+.t-ped .t-eng { fill: color-mix(in srgb, var(--pd-ink) 50%, transparent); }
+.t-ped .t-eng.t-name { fill: color-mix(in srgb, var(--pd-ink) 78%, transparent); }
+.t-ped .t-lcd { stroke: #00000040; }
+.t-pkey { fill: var(--kn-c1); stroke: #00000040; stroke-width: 1; }
+.t-vu { fill: var(--vu1); stroke: #00000040; stroke-width: 1; }
+.t-vu-a { fill: none; stroke: var(--vu-ink); stroke-width: 1; }
+.t-vu-r { fill: none; stroke: var(--vu-red); stroke-width: 2; }
+.t-vu-n { stroke: var(--vu-ndl); stroke-width: 1.5; stroke-linecap: round; }
+.t-slot { fill: #00000030; stroke: #00000020; stroke-width: 1; }
+.t-plate { fill: #0000001c; stroke: #00000024; stroke-width: 1; }
+.t-ft-n { fill: #8d8b97; }
+.t-ft-c { fill: #e4e3e9; stroke: #4d4b55; stroke-width: 1; }
+.t-cable { stroke: var(--cb); stroke-width: 3; stroke-linecap: round; fill: none; }
+/* side units: a rack strip, the amber lip lit */
+.t-u-body { fill: var(--un2); stroke: #0000001c; stroke-width: 1; }
+.t-u-rail { fill: var(--un3); }
+.unit-th .t-eng { fill: color-mix(in srgb, var(--pd-ink) 50%, transparent); }
+.t-u-lip { fill: #5f5a68; }
+.t-u-pow { fill: none; stroke: #ffd27a; stroke-width: 1.5; stroke-linecap: round; }
+.t-mark { stroke: #f5b544; stroke-width: 1; }
+.t-art-bg { fill: #15121a; }
+.t-art-0 { stop-color: transparent; }
+.t-art-1 { stop-color: hsl(300 90% 65%); }
+.t-art-2 { stop-color: hsl(0 90% 60%); }
+.t-seg { fill: var(--un1); stroke: #00000020; stroke-width: 1; }
+.t-seg-on { fill: var(--pd-ink); }
+.t-badge { fill: var(--ok); }
+.t-badge-t { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* the timbre blend's track ticks and the re-planning dice's numerals (F-24) */
+.t-blend-tk { fill: none; stroke: var(--faint); stroke-width: 1.2; }
+svg.th text.t-box-n { fill: var(--fg); font: 600 12px var(--body); }

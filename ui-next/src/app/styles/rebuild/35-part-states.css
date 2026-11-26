@@ -1,0 +1,22 @@
+/* The shared states every part inherits by its markup, not by a list (styles/rebuild/; docs/09, "A part's look"). A
+   part's root carries data-ctl (the parameter it edits) and, when the value is changed, .changed; its label is a
+   direct child with class kl. Then, with nothing to add here:
+   - its label is the one mono caps label of the page (the concept's 35-labels.css system);
+   - its changed mark is the page's one mark, 4px after the label (the concept's 35-changed.css rule);
+   - its focus ring is the page's (35-states.css :focus-visible), and a disabled control stands back (01-base.css).
+   Every rule here has no weight of its own (:where), so wherever the concept already styles a part its own rules win:
+   these reach only a part, or a surface, the concept never drew. */
+
+:where([data-ctl]) > :where(.kl) {
+  font-family: var(--mono); font-size: var(--fs-11); font-weight: 500; letter-spacing: var(--caps-ls); text-transform: uppercase; color: var(--faint); }
+
+:where([data-ctl].changed) > :where(.kl)::after {
+  content: ""; display: inline-block; flex: none; position: static; width: 5px; height: 5px; margin: 0 -9px 0 calc(4px - var(--cg, 0px)); border-radius: 50%;
+  vertical-align: middle; translate: 0 -1px; background: var(--chg); box-shadow: none; }
+
+:where([data-ctl]) :where(button, input, [tabindex]):disabled, :where([data-ctl][aria-disabled="true"]) { cursor: not-allowed; opacity: .45; }
+:where([data-ctl]) :where([role="slider"], [role="radio"], [role="option"], button, input):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* on hardware the label is in the hardware's ink: a pedal's (27-pedals.css), an LCD's, a side unit's */
+:where(.pedal) :where([data-ctl]) > :where(.kl) { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+:where(.lcd) :where([data-ctl]) > :where(.kl) { color: color-mix(in srgb, var(--lcd-fg) 80%, transparent); }

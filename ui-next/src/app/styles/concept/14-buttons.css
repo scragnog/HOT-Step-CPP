@@ -1,0 +1,39 @@
+/* Shared buttons: small, icon, tool, link and chip buttons, the close x. Loads before the other controls (15-*): the dropdown button (15-pick.css) starts from the .pk reset here. */
+.icon-btn { border: 0; background: none; width: 28px; height: 28px; border-radius: 7px; color: var(--faint); display: grid; place-items: center; flex: none; }
+.icon-btn:hover { background: var(--raised); color: var(--fg); }
+.small-btn { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 4px 10px; font-size: 13px; white-space: nowrap; }
+.small-btn:hover { border-color: var(--faint); }
+.small-btn.primary { background: var(--hot); border-color: var(--hot); color: var(--hot-ink); font-weight: 600; }
+.tool { border: 0; background: var(--raised); border-radius: 8px; padding: 5px 10px; font-size: 13px; color: var(--muted); }
+.tool:hover { color: var(--fg); }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--muted); }
+.chip:hover { color: var(--fg); border-color: var(--faint); }
+.chips { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.x { border: 0; background: none; color: var(--faint); width: 28px; height: 28px; border-radius: 8px; font-size: 18px; line-height: 1; flex: none; }
+/* the remove button holds the drawn × (C-38), centred */
+button.x { display: inline-grid; place-items: center; padding: 0; }
+.x:hover { background: var(--raised); color: var(--fg); }
+.sbtn { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 5px 10px; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+.sbtn:hover { border-color: var(--faint); }
+/* a small toggle that is on is filled, as a segment's choice is (S-02) */
+.sbtn[aria-pressed="true"], .sbtn[aria-pressed="true"]:hover { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.linkbtn { border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; margin-left: auto; }
+/* Order: the dropdown button starts bare (15-pick.css builds on it). It sits here, before .pchip, because the chip variant is a .pchip too and takes the chip look. */
+.pk { border: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; background: none; padding: 0; }
+.pchip .x { width: 24px; height: 24px; font-size: 15px; }
+/* Order: the lyrics sheet's Expand-on-Generate toggle. It sits here, before .pchip, because the prompt card's copy (#wildAuto) is also a .pchip and takes the chip's look. */
+.wild-auto { border: 1px solid color-mix(in srgb, var(--paper-ink) 25%, transparent); background: none; color: inherit; border-radius: 6px; font: 12px var(--mono); padding: 2px 8px; }
+.wild-auto.on { background: var(--hot); border-color: var(--hot); color: var(--hot-ink); }
+.pchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 100%; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface); color: var(--fg); font: 13px var(--body); white-space: nowrap; }
+.pchip .k { color: var(--muted); }
+.pchip > button { border: 0; background: none; color: var(--muted); padding: 0 2px; margin-right: -4px; font-size: 15px; line-height: 1; }
+.pchip > button:hover { color: var(--fg); }
+button.pchip:hover, .pchip.pk:hover { border-color: var(--faint); }
+.pchip.pk[aria-expanded="true"] { border-color: var(--fg); }
+.pchip.static { color: var(--muted); }
+.tool:hover { background: var(--inset); }
+.small-btn.primary:hover { background: var(--hot); filter: brightness(1.07); }
+.small-btn.primary:active { filter: brightness(.94); }
+.linkbtn { text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+@media (prefers-reduced-motion: reduce) { :where(button, label.tool):active { translate: none !important; } }
+[data-abcfoot] .linkbtn { font-size: 12px; margin: 0 auto 0 0; }

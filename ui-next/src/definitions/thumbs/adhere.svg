@@ -1,0 +1,40 @@
+<!-- Thumbnail adhere: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="46" rx="8"/>
+<path class="grid" d="M29.6 15V61M44.2 15V61M58.8 15V61M73.4 15V61M88 15V61M102.6 15V61M117.2 15V61M131.8 15V61M146.4 15V61"/>
+<path class="base dash" d="M20 32H156"/>
+<path class="curve-g" d="M20 40L156 32"/>
+<rect class="rack" x="15" y="67" width="44" height="30" rx="6"/>
+<g class="k ">
+<path class="k-t" d="M23.4 86.6A6.5 6.5 0 1 1 32.6 86.6"/>
+<path class="k-a" d="M23.4 86.6A6.5 6.5 0 0 1 28 75.5"/>
+<circle class="k-c" cx="28" cy="82" r="3.9"/>
+<path class="k-p" d="M28 82L28 78.7"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M41.4 86.6A6.5 6.5 0 1 1 50.6 86.6"/>
+<path class="k-a" d="M41.4 86.6A6.5 6.5 0 0 1 46 75.5"/>
+<circle class="k-c" cx="46" cy="82" r="3.9"/>
+<path class="k-p" d="M46 82L46 78.7"/>
+</g>
+<rect class="rack off" x="66" y="67" width="44" height="30" rx="6"/>
+<g class="k off">
+<path class="k-t" d="M74.4 86.6A6.5 6.5 0 1 1 83.6 86.6"/>
+<circle class="k-c" cx="79" cy="82" r="3.9"/>
+<path class="k-p" d="M79 82L76.7 84.3"/>
+</g>
+<g class="k off">
+<path class="k-t" d="M92.4 86.6A6.5 6.5 0 1 1 101.6 86.6"/>
+<circle class="k-c" cx="97" cy="82" r="3.9"/>
+<path class="k-p" d="M97 82L94.7 84.3"/>
+</g>
+<rect class="rack off" x="117" y="67" width="44" height="30" rx="6"/>
+<g class="k off">
+<path class="k-t" d="M125.4 86.6A6.5 6.5 0 1 1 134.6 86.6"/>
+<circle class="k-c" cx="130" cy="82" r="3.9"/>
+<path class="k-p" d="M130 82L127.7 84.3"/>
+</g>
+<g class="k off">
+<path class="k-t" d="M143.4 86.6A6.5 6.5 0 1 1 152.6 86.6"/>
+<circle class="k-c" cx="148" cy="82" r="3.9"/>
+<path class="k-p" d="M148 82L145.7 84.3"/>
+</g>

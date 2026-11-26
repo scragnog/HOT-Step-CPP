@@ -1,0 +1,30 @@
+/* The five engine logos and their motion, wherever they are drawn (top bar, engine panel, songs, revisions). */
+/* engine marks: still by default; they move while hovered, when their card is chosen, and in the top bar while songs are being made */
+.lg { display: block; overflow: visible; }
+.lg-ace .lg-spark { transform-origin: 24px 24px; transform-box: view-box; }
+.lg-ace .lg-glint { transform-origin: 38px 12px; transform-box: view-box; opacity: 0; scale: .2; }
+.lg-mm3 .lg-base { opacity: 1; }
+.lg-mm3 .lg-run { stroke: #fff; stroke-width: 1.5; stroke-dasharray: 0 100; opacity: 0; }
+.lg-yue .lg-n { transform-box: view-box; }
+.lg-sa3 .lg-b1, .lg-sa3 .lg-b2 { transform-origin: 24px 40px; transform-box: view-box; }
+.lg-sa3 .lg-dome { opacity: .9; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-ace .lg-spark, .lg-live .lg-ace .lg-spark { animation: aceTwinkle 2.6s cubic-bezier(.5, 0, .2, 1) infinite; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-ace .lg-glint, .lg-live .lg-ace .lg-glint { animation: aceGlint 2.6s ease-out infinite; }
+@keyframes aceTwinkle { 0% { rotate: 0deg; scale: 1; } 30% { rotate: 90deg; scale: .78; } 45% { scale: 1.12; } 60%, 100% { rotate: 90deg; scale: 1; } }
+@keyframes aceGlint { 0%, 32% { opacity: 0; scale: .2; } 44% { opacity: 1; scale: 1.15; rotate: 45deg; } 70%, 100% { opacity: 0; scale: .3; rotate: 90deg; } }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-mm3 .lg-run, .lg-live .lg-mm3 .lg-run { opacity: 1; animation: mmRun 1.9s linear infinite; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-mm3 .lg-base, .lg-live .lg-mm3 .lg-base { opacity: .55; }
+@keyframes mmRun { 0% { stroke-dasharray: 0 100; stroke-dashoffset: 0; } 50% { stroke-dasharray: 22 100; } 100% { stroke-dasharray: 0 100; stroke-dashoffset: -100; } }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-yue .lg-line, .lg-live .lg-yue .lg-line { stroke-dasharray: 100; animation: yueDraw 2.4s cubic-bezier(.6, 0, .3, 1) infinite; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-yue .n1, .lg-live .lg-yue .n1 { animation: yueHop 2.4s ease-in-out infinite; animation-delay: .9s; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-yue .n2, .lg-live .lg-yue .n2 { animation: yueHop 2.4s ease-in-out infinite; animation-delay: 1.05s; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-yue .n3, .lg-live .lg-yue .n3 { animation: yueHop 2.4s ease-in-out infinite; animation-delay: 1.2s; }
+@keyframes yueDraw { 0% { stroke-dashoffset: 100; } 35%, 100% { stroke-dashoffset: 0; } }
+@keyframes yueHop { 0%, 30%, 100% { translate: 0 0; } 12% { translate: 0 -2.6px; } 20% { translate: 0 .4px; } }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-sa3 .lg-b1, .lg-live .lg-sa3 .lg-b1 { animation: saBreath 2.2s ease-in-out infinite alternate; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-sa3 .lg-b2, .lg-live .lg-sa3 .lg-b2 { animation: saBreath 2.2s ease-in-out infinite alternate-reverse; }
+@keyframes saBreath { from { scale: 1 .72; } to { scale: 1 1.12; } }
+.lg-hm .lg-run { stroke-dasharray: 0 100; opacity: 0; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-hm .lg-run, .lg-live .lg-hm .lg-run { opacity: 1; animation: hmRun 2.4s linear infinite; }
+:is(.anim, .eng-btn:hover, .ep-card:hover, .ep-card[aria-checked="true"]) .lg-hm .lg-base, .lg-live .lg-hm .lg-base { opacity: .35; }
+@keyframes hmRun { 0% { stroke-dasharray: 0 100; stroke-dashoffset: 0; } 50% { stroke-dasharray: 38 100; } 100% { stroke-dasharray: 0 100; stroke-dashoffset: -100; } }

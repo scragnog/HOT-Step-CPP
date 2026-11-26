@@ -1,0 +1,91 @@
+/* Design tokens: colours (light, dark and the explicit themes), fonts, type scale, spacing, radii, elevation, motion times and curves, registered properties. */
+/* Layout: presets rail | centre desk (prompt, lyrics, modules) | browser rail (modules / songs). Tier changes how much each module shows. */
+:root {
+  --bg: #f6f4f8; --surface: #ffffff; --raised: #f0edf4; --inset: #ebe7f0; --line: #ddd7e4;
+  --fg: #1b1722; --muted: #5f5869; --faint: #6c6577;
+  --hot: #e0225a; --hot-ink: #ffffff; --hot-soft: #e0225a1f; --lab: #6d4cff; --lab-soft: #6d4cff1f;
+  --paper: #fbf8f1; --paper-line: #e7dfcf; --paper-ink: #2a2520; --paper-margin: #e0225a55;
+  --note: #fff3b8; --note-ink: #4a3d10;
+  --lcd: #0f1510; --lcd-fg: #a6f5bd; --lcd-dim: #26382b;
+  --shadow: 0 1px 2px #1b172214, 0 8px 24px #1b17220f;
+  --pb1: #eeeaf2; --pb2: #dcd6e3; --pb-sh: #1b172222; --pd-s1: 62%; --pd-l1: 82%; --pd-s2: 46%; --pd-l2: 68%; --pd-l3: 46%; --pd-ink: #231e2a; --pd-chg: #8a5200; --kn-track: #231e2a2e; --kn-c1: #ffffff; --kn-c2: #cfc9d6; --led-off: #c4aab0; --cable: #b4acbf; --pd-well: #ffffff80; --pd-wline: #2a223a24; --screw: #f7f5fa; --jack: #8c8598; --kn-ptr: #2a2331; --cb: #5b536a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121017; --surface: #1a1720; --raised: #221e2a; --inset: #0d0b11; --line: #2d2836;
+    --fg: #ece8f2; --muted: #a39cae; --faint: #948da0;
+    --hot: #ff4d7e; --hot-ink: #1a0710; --hot-soft: #ff4d7e24; --lab: #9b85ff; --lab-soft: #9b85ff26;
+    --paper: #201d19; --paper-line: #3a332a; --paper-ink: #ede5d8; --paper-margin: #ff4d7e55;
+    --note: #a99a5e; --note-ink: #221b06;
+    --shadow: 0 1px 2px #0006, 0 10px 30px #0005; color-scheme: dark; --pb1: #2a2532; --pb2: #1b1822; --pb-sh: #0008; --pd-s1: 45%; --pd-l1: 34%; --pd-s2: 50%; --pd-l2: 24%; --pd-l3: 14%; --pd-ink: #ffffff; --pd-chg: #ffd27a; --kn-track: #ffffff30; --kn-c1: #555555; --kn-c2: #1d1b22; --led-off: #3a0d14; --cable: #4a4256; --pd-well: #00000059; --pd-wline: #ffffff22; --screw: #9a94a5; --jack: #0c0b0f; --kn-ptr: #f4ecd9; }
+}
+:root[data-theme="dark"] {
+  --bg: #121017; --surface: #1a1720; --raised: #221e2a; --inset: #0d0b11; --line: #2d2836;
+  --fg: #ece8f2; --muted: #a39cae; --faint: #948da0;
+  --hot: #ff4d7e; --hot-ink: #1a0710; --hot-soft: #ff4d7e24; --lab: #9b85ff; --lab-soft: #9b85ff26;
+  --paper: #201d19; --paper-line: #3a332a; --paper-ink: #ede5d8; --paper-margin: #ff4d7e55;
+  --note: #a99a5e; --note-ink: #221b06;
+  --shadow: 0 1px 2px #0006, 0 10px 30px #0005; color-scheme: dark; --pb1: #2a2532; --pb2: #1b1822; --pb-sh: #0008; --pd-s1: 45%; --pd-l1: 34%; --pd-s2: 50%; --pd-l2: 24%; --pd-l3: 14%; --pd-ink: #ffffff; --pd-chg: #ffd27a; --kn-track: #ffffff30; --kn-c1: #555555; --kn-c2: #1d1b22; --led-off: #3a0d14; --cable: #4a4256; --pd-well: #00000059; --pd-wline: #ffffff22; --screw: #9a94a5; --jack: #0c0b0f; --kn-ptr: #f4ecd9; }
+:root {
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px; --s-12: 48px; --s-half: 2px;
+  --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px; --fs-28: 28px; --fs-40: 40px;
+  --caps: 500 11px var(--mono); --caps-ls: .08em;
+  --r-chip: 4px; --r-ctl: 8px; --r-well: 12px; --r-tile: 16px; --r-pill: 999px;
+  --elev-line: 0 0 0 1px var(--line); --elev-overlay: 0 2px 6px #1b17221f, 0 22px 52px #1b172233; --inset-well: inset 0 2px 8px #000a;
+  --led-on: #ff3b5c; --inst: #0c0b10;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --elev-overlay: 0 2px 6px #0009, 0 24px 60px #000b; } }
+:root[data-theme="dark"] { --elev-overlay: 0 2px 6px #0009, 0 24px 60px #000b; }
+/* light-mode bezels around the dark screens */
+/* instrument bezel and split-flap material, both themes (D-16): in dark the bezel is a 1px light line outside and a
+   dark line inside, so a near-black LCD or pad still has an edge against the tile; the LCD face is lifted a step */
+/* the light bezel is drawn inside the screen's box, so a screen shares its left and right edges with the pickers and
+   rulers under it (L-23) */
+:root { --bezel: inset 0 0 0 1px #0000001c, inset 0 0 0 4px #ebe7f0, 0 6px 14px -6px #0004; --flap1: #26222d; --flap2: #1c1922; --flap-edge: #ffffff14; --flap-ring: 0 0 0 0 transparent; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bezel: 0 0 0 1px #ffffff14, inset 0 1px 0 #ffffff0f, inset 0 0 0 1px #00000080; --lcd: #141c16; --flap1: #2e2a37; --flap2: #2b2733; --flap-edge: #ffffff1a; --flap-ring: 0 0 0 1px #ffffff10; } }
+:root[data-theme="dark"] { --bezel: 0 0 0 1px #ffffff14, inset 0 1px 0 #ffffff0f, inset 0 0 0 1px #00000080; --lcd: #141c16; --flap1: #2e2a37; --flap2: #2b2733; --flap-edge: #ffffff1a; --flap-ring: 0 0 0 1px #ffffff10; }
+:root { --un1: #dcd8e2; --un2: #c8c3cf; --un3: #a39cad; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --un1: #3b3747; --un2: #25222d; --un3: #15131a; } }
+:root[data-theme="dark"] { --un1: #3b3747; --un2: #25222d; --un3: #15131a; }
+/* tokens: amber and green text pass 4.5:1 on the light surfaces (the dark theme already did) */
+:root { --amber: #9a6200; --ok: #15804a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --amber: #f5b544; --ok: #4fd18b; } }
+:root[data-theme="dark"] { --amber: #f5b544; --ok: #4fd18b; }
+/* Offline fallbacks with matched metrics (A-03). When the web fonts cannot load, each face falls back to a font already on
+   the machine, scaled (size-adjust) to the web face's average advance and given its ascent and descent, so a line keeps
+   its length and height: LCDs, knob labels and pedal names fit as designed. Two fallbacks per face: the Windows font,
+   then one found on Windows and macOS alike. Measured against the web faces on a 74-character sample; the display face at the small sizes it is used at (its optical size is wider there). */
+@font-face { font-family: "Geist FB"; src: local("Segoe UI"), local("SegoeUI"); font-weight: 100 450; size-adjust: 102.9%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist FB"; src: local("Segoe UI Semibold"), local("SegoeUI-Semibold"); font-weight: 451 900; size-adjust: 103.8%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist FB2"; src: local("Arial"), local("ArialMT"), local("Helvetica"); font-weight: 100 550; size-adjust: 99.4%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist FB2"; src: local("Arial Bold"), local("Arial-BoldMT"), local("Helvetica Bold"); font-weight: 551 900; size-adjust: 98.8%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Bricolage FB"; src: local("Segoe UI Semibold"), local("SegoeUI-Semibold"); font-weight: 100 600; size-adjust: 101%; ascent-override: 93%; descent-override: 27%; line-gap-override: 0%; }
+@font-face { font-family: "Bricolage FB"; src: local("Segoe UI Bold"), local("SegoeUI-Bold"); font-weight: 601 900; size-adjust: 100%; ascent-override: 93%; descent-override: 27%; line-gap-override: 0%; }
+@font-face { font-family: "Bricolage FB2"; src: local("Arial"), local("ArialMT"), local("Helvetica"); font-weight: 100 600; size-adjust: 101%; ascent-override: 93%; descent-override: 27%; line-gap-override: 0%; }
+@font-face { font-family: "Bricolage FB2"; src: local("Arial Bold"), local("Arial-BoldMT"), local("Helvetica Bold"); font-weight: 601 900; size-adjust: 99%; ascent-override: 93%; descent-override: 27%; line-gap-override: 0%; }
+@font-face { font-family: "Geist Mono FB"; src: local("Consolas"); font-weight: 100 550; size-adjust: 109.1%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist Mono FB"; src: local("Consolas Bold"), local("Consolas-Bold"); font-weight: 551 900; size-adjust: 109.1%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist Mono FB2"; src: local("Courier New"), local("CourierNewPSMT"); font-weight: 100 550; size-adjust: 100%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Geist Mono FB2"; src: local("Courier New Bold"), local("CourierNewPS-BoldMT"); font-weight: 551 900; size-adjust: 100%; ascent-override: 101%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Share Tech FB"; src: local("Consolas"); size-adjust: 98.2%; ascent-override: 89%; descent-override: 24%; line-gap-override: 0%; }
+@font-face { font-family: "Share Tech FB2"; src: local("Courier New"), local("CourierNewPSMT"); size-adjust: 90%; ascent-override: 89%; descent-override: 24%; line-gap-override: 0%; }
+@font-face { font-family: "Caveat FB"; src: local("Ink Free"), local("InkFree"); size-adjust: 77.6%; ascent-override: 96%; descent-override: 30%; line-gap-override: 0%; }
+@font-face { font-family: "Caveat FB2"; src: local("Comic Sans MS"), local("ComicSansMS"); size-adjust: 73.5%; ascent-override: 96%; descent-override: 30%; line-gap-override: 0%; }
+:root { --mono: "Geist Mono", "Geist Mono FB", "Geist Mono FB2", ui-monospace, monospace; --lcdfont: "Share Tech Mono", "Share Tech FB", "Share Tech FB2", ui-monospace, monospace; --display: "Bricolage Grotesque", "Bricolage FB", "Bricolage FB2", system-ui, sans-serif; --body: "Geist", "Geist FB", "Geist FB2", system-ui, -apple-system, sans-serif; --hand: "Caveat", "Caveat FB", "Caveat FB2", cursive; }
+/* --- motion vocabulary: every duration and curve in the file should come from here (M-05) ---
+   --t-instant press · --t-fast hover, colour, small state, exits of small things · --t-base popovers, toggles,
+   chips, a tile arriving · --t-slow drawers, panels, a tile or pedal sliding to a new place · --t-long once-only
+   arrivals. --t-land is the one physical landing (a pedal dropping onto the board).
+   --e-out for anything entering or moving; --e-in for anything leaving; --e-spring only for physical parts.
+   An exit is about 70% of its matching enter, with --e-in. */
+:root {
+  --t-instant: 80ms; --t-fast: 140ms; --t-base: 200ms; --t-slow: 280ms; --t-long: 420ms; --t-land: 220ms; --t-move: var(--t-slow);
+  --e-out: cubic-bezier(.2, .8, .2, 1); --e-in: cubic-bezier(.4, 0, 1, 1); --e-spring: cubic-bezier(.3, 1.4, .5, 1);
+}
+/* Mastering: a VU window (D-34) and a recessed reference slot (D-19) */
+:root { --vu1: #fbf4e1; --vu2: #e6d8b4; --vu-ink: #5a4a2e; --vu-red: #c0263d; --vu-ndl: #2a2420; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --vu1: #34302a; --vu2: #24211c; --vu-ink: #e9b65c; --vu-red: #ff5b6e; --vu-ndl: #f4ecd9; } }
+:root[data-theme="dark"] { --vu1: #34302a; --vu2: #24211c; --vu-ink: #e9b65c; --vu-red: #ff5b6e; --vu-ndl: #f4ecd9; }
+:root { --plug: #c9c5d1; --plug-c: #8c8598; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --cb: #5c5368; --plug: #8c8598; --plug-c: #2a2532; } }
+:root[data-theme="dark"] { --cb: #5c5368; --plug: #8c8598; --plug-c: #2a2532; }

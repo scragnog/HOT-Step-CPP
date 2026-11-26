@@ -1,0 +1,16 @@
+{
+ "about": "The scenarios that caught each switch of switches/fold.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "fold: Quick folds": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it","38-fold/a-set-value-keeps-its-module-in-sight","38-fold/only-quick-folds","38-fold/the-button-shows-and-folds-again","38-fold/the-fold-is-kept-over-a-reload"],
+  "fold: three or more": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it"],
+  "fold: a set value is never folded": ["01-desk/quick-more-parked-empty","38-fold/a-set-value-keeps-its-module-in-sight"],
+  "fold: the board is never folded": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it","38-fold/a-set-value-keeps-its-module-in-sight","38-fold/only-quick-folds","38-fold/the-button-shows-and-folds-again","38-fold/the-fold-is-kept-over-a-reload"],
+  "fold: the button names them": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it","38-fold/a-set-value-keeps-its-module-in-sight","38-fold/the-button-shows-and-folds-again"],
+  "fold: open shows them": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it","38-fold/a-set-value-keeps-its-module-in-sight","38-fold/the-button-shows-and-folds-again","38-fold/the-fold-is-kept-over-a-reload"],
+  "fold: the button works": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it","38-fold/a-set-value-keeps-its-module-in-sight","38-fold/the-button-shows-and-folds-again","38-fold/the-fold-is-kept-over-a-reload"],
+  "fold: a ring opens it": ["01-desk/quick-more-parked-empty","38-fold/a-module-that-arrives-folded-opens-it"],
+  "fold: an arrival opens it": ["38-fold/a-module-that-arrives-folded-opens-it"],
+  "fold: kept with the session": ["08-persistence-cables/reload-keeps-the-desk","38-fold/song-info-is-kept-over-a-reload","38-fold/the-fold-is-kept-over-a-reload"],
+  "fold: Song info kept with the session": ["08-persistence-cables/reload-keeps-the-desk","38-fold/song-info-is-kept-over-a-reload"]
+ }
+}

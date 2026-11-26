@@ -1,0 +1,6 @@
+{
+ "about": "The scenarios that caught each switch of switches/3a-instruments.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "takes cost": ["34-instruments/takes-reels-preview-keys-and-cost"]
+ }
+}

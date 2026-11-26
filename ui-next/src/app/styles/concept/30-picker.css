@@ -1,0 +1,155 @@
+/* The module picker (F9). */
+/* FL-style picker: a wall of snapshots, two columns, filters along the bottom */
+/* the scrim is dense enough that the wall is the only colour on screen (F-25) */
+.fl { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, #0b0910 93%, transparent); backdrop-filter: blur(8px) saturate(.7); -webkit-backdrop-filter: blur(8px) saturate(.7); color: #e9e4f0; display: grid;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) 0 max(24px, env(safe-area-inset-left, 0px)); transition: opacity var(--t-fast) var(--e-out); }
+.fl.peek { opacity: .05; pointer-events: none; }
+/* a drag that starts beside a drawing must not select the picker's own words (G-B-11) */
+.fl { user-select: none; -webkit-user-select: none; }
+.fl input { user-select: text; -webkit-user-select: text; }
+.fl-cols { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: calc(var(--s-12) * var(--pk-s)); min-height: 0; overflow: hidden; padding: 8px 8px 0; }
+.fl-col h2 { font: 500 24px var(--display); text-align: center; color: #ffffffd0; margin: 4px 0 26px; letter-spacing: .01em; }
+.fl-wall { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 30px 30px; }
+.fl-it { position: relative; flex: none; border-radius: 8px; transition: transform var(--t-fast) var(--e-out), filter var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out); filter: brightness(.82) saturate(.9); outline: none; }
+.fl-it:hover, .fl-it:focus-visible { filter: none; z-index: 2; }
+.fl-it:active { cursor: grabbing; }
+.fl-it .box { width: calc(var(--w) * var(--pk-s)); height: calc(var(--h) * var(--pk-s)); position: relative; overflow: hidden; box-shadow: 0 8px 22px #000a, 0 0 0 1px #ffffff12; }
+.fl-it.bare .box { box-shadow: none; overflow: visible; }
+.fl-it.gone { display: none; }
+/* the category bar: one size of word, and the pressed one filled, as the tier switch and the theme control show theirs
+   (F-09); All sits in the middle, which is mark enough */
+.fl-bar { display: flex; justify-content: center; align-items: center; gap: var(--s-1) var(--s-3); flex-wrap: wrap; padding: var(--s-2) 0 calc(var(--s-3) + env(safe-area-inset-bottom, 0px)); }
+.fl-bar button { border: 0; background: none; font: 500 17px var(--display); padding: 5px 16px; border-radius: var(--r-pill); transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.fl-bar button:hover { color: #fff; background: #ffffff14; }
+.fl-bar button[aria-pressed="true"], .fl-bar button[aria-pressed="true"]:hover { color: #15111b; background: #fff; }
+.fl-bar .all { margin: 0 var(--s-4); }
+.fl-bar .gap { width: 1px; }
+.fl-search { position: absolute; top: calc(18px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); font: 13px var(--mono); white-space: nowrap; z-index: 2; }
+.fl-search b { color: #fff; font: 500 18px var(--display); }
+.fl-search svg { flex: none; }
+.fl-close { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: 34px; height: 34px; border-radius: 50%; border: 1px solid #ffffff25; background: #ffffff0d; color: #fff; font-size: 20px; line-height: 1; z-index: 2; }
+/* The wall is sized to be seen whole (F-05): every snapshot, pedal and gap scales with --pk-s, and the Modules column is
+   --pk-n snapshots wide (sized to its content; the Pedalboard column takes the rest). At 1920x1080 and 1600x900 the
+   whole wall is on screen; on smaller windows the snapshots step down to the Modules panel's own size and a column that
+   still does not fit scrolls by itself, its groups whole. */
+.fl { --pk-s: 1; --pk-n: 6; }
+@media (max-width: 1699px), (max-height: 999px) { .fl { --pk-s: .8; } }
+@media (max-width: 1559px), (max-height: 879px) { .fl { --pk-s: .72; } }
+/* from 1180px down to the phone layout the Modules column is four snapshots wide, so the Pedalboard column keeps room for its
+   title and its pedals (S-22) */
+@media (min-width: 901px) and (max-width: 1180px) { .fl { --pk-n: 4; } }
+.fl-col { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.fl-col > .fl-wall { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s-2) var(--s-2) var(--s-6); margin: 0 calc(var(--s-2) * -1); scrollbar-width: thin; scrollbar-color: #ffffff30 transparent; }
+@media (max-width: 900px) {
+  .fl-cols { grid-template-columns: minmax(0, 1fr); gap: 20px; overflow: auto; }
+  .fl-col { display: block; }
+  .fl-col > .fl-wall { overflow: visible; }
+  .fl-bar .all { margin: 0; }
+}
+/* picker dialog */
+.fl { grid-template-rows: minmax(0, 1fr) auto auto; animation: flIn var(--t-base) var(--e-out); }
+.fl.closing { animation: flOut var(--t-fast) var(--e-in) forwards; pointer-events: none; }
+@keyframes flIn { from { opacity: 0; } }
+@keyframes flOut { to { opacity: 0; } }
+.fl .fl-cols { animation: flCols var(--t-slow) var(--e-out); }
+.fl.closing .fl-cols { animation: flColsOut var(--t-base) var(--e-in) forwards; }
+@keyframes flCols { from { transform: translateY(10px) scale(.98); opacity: 0; } }
+@keyframes flColsOut { to { transform: scale(.985); opacity: 0; } }
+.fl-search { display: flex; gap: 8px; align-items: center; background: #ffffff10; border: 1px solid #ffffff26; border-radius: 999px; padding: 5px 14px; color: #ffffffa0; }
+.fl-search:focus-within { border-color: var(--hot); background: #ffffff18; }
+.fl-search input { background: none; border: 0; outline: none; color: #fff; font: 14px var(--body); width: 220px; }
+.fl-search input::placeholder { color: #ffffff80; }
+#pkCount { font-size: 11px; white-space: nowrap; }
+.fl-it { display: grid; justify-items: center; cursor: pointer; }
+.fl-it:focus { outline: none; }
+.fl-name { font: 500 12px/1.2 var(--body); color: #ffffffb8; text-align: center; }
+.fl-it:hover .fl-name, .fl-it:focus .fl-name { color: #fff; }
+.fl-it.locked { cursor: pointer; }
+.fl-it.dim { opacity: .25; pointer-events: auto; }
+.fl-it.nomatch { display: none; }
+.fl-empty { color: #ffffff90; font-size: 13px; width: 100%; text-align: center; padding: 24px 0; margin: 0; }
+.fl-info { min-height: 46px; display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid #ffffff14; color: #ffffffc8; font-size: 13px; text-align: center; }
+.fl-info b { color: #fff; font: 600 15px var(--display); }
+.fl-info em { font-style: normal; color: var(--lcd-fg); }
+.fl-info em.warn { color: #f5c26b; }
+.fl-info .hint { color: #ffffff99; }
+/* below 1280px the column titles would meet the centred filter (S-22): it takes its own row above them, centred; up to 1500px
+   it is a little narrower, so it keeps 24px or more clear of the titles either side */
+@media (min-width: 1280px) and (max-width: 1499px) { .fl-search input { width: 180px; } }
+@media (max-width: 1279.98px) {
+  .fl-search { position: static; transform: none; justify-self: center; margin: 0 0 8px; }
+  .fl { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+}
+@media (max-width: 900px) {
+  .fl-search { display: flex; position: static; transform: none; margin: 0 52px 8px 0; width: auto; justify-self: stretch; }
+  .fl-search input { width: 100%; }
+  .fl { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+}
+.fl-it:hover, .fl-it:focus-visible { transform: none; scale: 1.07; }
+.fl-it .box::after, .opt-el::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px; pointer-events: none; z-index: 4; opacity: 0; transition: opacity var(--t-base) var(--e-out);
+  background: conic-gradient(from var(--sa), transparent 0 50%, color-mix(in srgb, var(--hot) 55%, transparent) 72%, #ffd0dc 86%, var(--hot) 90%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+/* the keyboard position in the picker is the strongest mark on the wall: a 2px pink ring 3px out, and its glow (G-D-45) */
+.fl-it:focus .box, .fl-it:focus-visible .box { outline: 2px solid var(--hot); outline-offset: 3px; box-shadow: 0 16px 30px -12px color-mix(in srgb, var(--hot) 70%, transparent); }
+.fl-it:focus .fl-name { opacity: 1; }
+.fl-it:focus { translate: 0 -4px; }
+.fl-it:focus .box::after, .opt-el[aria-selected="true"]::after { opacity: 1; animation: sweep 1.2s var(--e-out) 1 both; }
+.fl-bar button:not([aria-pressed="true"]) { color: #ffffffb3; }
+#pkCount { color: #ffffffc0; }
+/* a Lab-only item keeps its drawing whole and its Lab tag says why it waits (C-44); what is dimmed is dimmed by colour on
+   an opaque drawing, never by letting the page show through it (C-33) */
+.fl-it.locked { opacity: 1; }
+/* the picker: a heading per group, rows that share a baseline, a tag for modules this engine doesn't use */
+#pkLeft, #pkRight { display: grid; align-content: start; justify-content: stretch; }
+.fl-grp { display: grid; }
+.fl-gh { display: flex; align-items: baseline; gap: 10px; margin: 0; font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: #ffffffb3; }
+.fl-gh small { font: 12px var(--body); letter-spacing: 0; text-transform: none; color: #ffffff99; }
+.fl-gh .fl-gn { font-style: normal; color: #ffffff80; }
+.fl-gh::before, .fl-gh::after { content: ""; flex: 1; height: 1px; background: #ffffff1f; align-self: center; max-width: 160px; }
+.fl-row { flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .fl.closing, .fl.closing .fl-cols { animation: flOut 120ms linear forwards !important; } }
+#pkLeft, #pkRight { gap: calc(var(--s-6) * var(--pk-s)); }
+.fl-col h2 { margin-bottom: var(--s-4); }
+.fl-grp { gap: var(--s-3); }
+.fl-gh { justify-content: center; }
+.fl-row { display: grid; grid-template-columns: repeat(auto-fill, calc(176px * var(--pk-s))); justify-content: center; align-items: start; gap: calc(var(--s-4) * var(--pk-s)) calc(var(--s-6) * var(--pk-s)); }
+#pkLeft .fl-row { grid-template-columns: repeat(var(--pk-n), calc(176px * var(--pk-s))); }
+@media (max-width: 900px) { #pkLeft .fl-row { grid-template-columns: repeat(auto-fill, calc(176px * var(--pk-s))); } }
+.fl-grp[data-grp="Pedals"] .fl-row { grid-template-columns: repeat(auto-fill, calc(80px * var(--pk-s))); }
+/* a two-unit pedal is marked by a class, not by matching its style attribute, which the browser re-writes once the filter sets an order on it (F-21) */
+.fl-grp[data-grp="Pedals"] .fl-it.u2 { grid-column: span 2; }
+.fl-it { gap: var(--s-2); min-width: 0; }
+.fl-it .box { border-radius: var(--r-ctl); }
+.fl-it.bare .box { border-radius: 0; filter: drop-shadow(0 8px 10px #0008); }
+.fl-cap { display: grid; justify-items: center; gap: var(--s-1); min-width: 0; }
+/* a name may use half the gap on each side of its drawing, so the snapshots can shrink without cutting their names */
+.fl-cap { justify-self: stretch; width: auto; margin: 0 calc(var(--s-6) * var(--pk-s) / -2 + 1px); }
+.fl-name { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl .ct.lab { color: #c9bbff; background: #9b85ff2e; }
+.fl .ct.no { color: #f5c26b; background: #f5c26b24; }
+.fl .ct.in { color: #6fe0a0; background: #4fd18b24; }
+.fl .ct.park { color: #b9b3c4; background: #ffffff14; }
+.fl-it.in .box { filter: brightness(.62); }
+.fl-it.no .box { filter: grayscale(.6) brightness(.55); }
+.fl-it.no .fl-name { color: #ffffff8c; }
+.fl-it.bare.in .box { filter: brightness(.62) drop-shadow(0 8px 10px #0008); }
+.fl-it.bare.no .box { filter: grayscale(.6) brightness(.55) drop-shadow(0 8px 10px #0008); }
+/* the dark theme's drawings are dark already: there a module the engine does not use loses colour, not light (F-24) */
+:root[data-theme="dark"] .fl-it.no .box { filter: grayscale(.7) brightness(.9); }
+:root[data-theme="dark"] .fl-it.bare.no .box { filter: grayscale(.7) brightness(.9) drop-shadow(0 8px 10px #0008); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fl-it.no .box { filter: grayscale(.7) brightness(.9); } :root:not([data-theme="light"]) .fl-it.bare.no .box { filter: grayscale(.7) brightness(.9) drop-shadow(0 8px 10px #0008); } }
+/* when a column is taller than the window, it scrolls by itself: its foot fades and a count at the foot of that column
+   says how much of it is below (F-05) */
+.fl-more { position: absolute; z-index: 3; pointer-events: auto; border: 1px solid #ffffff26; background: #1b1722e6; color: #ffffffd0; font: 500 var(--fs-12) var(--mono); border-radius: var(--r-pill); padding: 3px 12px; cursor: pointer; }
+.fl-more:hover { color: #fff; border-color: #ffffff55; }
+.fl-it.weak:not(:focus-visible):not(:hover) { opacity: .6; }
+/* the wall never scrolls sideways, and on a phone two thumbnails share a row (B-46) */
+.fl-wall { overflow-x: clip; }
+@media (max-width: 480px) { .fl-grp:not([data-grp="Pedals"]) .fl-row, #pkLeft .fl-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3); } .fl-grp:not([data-grp="Pedals"]) .fl-it .box { width: 100% !important; height: auto !important; } .fl-grp:not([data-grp="Pedals"]) .fl-it .box > svg { width: 100%; height: auto; display: block; } }
+/* under reduced motion nothing on the wall grows or rises; the ring and the brightness still show where you are (F-29) */
+@media (prefers-reduced-motion: reduce) { .fl-it:hover, .fl-it:focus-visible { scale: none; } .fl-it:focus { translate: none; } }
+/* its close key holds the drawn x, centred, like every other close key on the page (F-34) */
+.fl-close { display: grid; place-items: center; padding: 0; }
+/* the smallest wall (1280x720): snapshots at the Modules panel's own size, and the headings and gaps around them tighter */
+@media (min-width: 901px) and (max-width: 1365px), (min-width: 901px) and (max-height: 759px) { .fl-search input { width: 150px; } }
+@media (max-width: 1365px), (max-height: 759px) { .fl { --pk-s: .66; } .fl-col h2 { font-size: var(--fs-20); margin: 6px 0 var(--s-2); } .fl-col > .fl-wall { padding-top: var(--s-1); padding-bottom: var(--s-3); } .fl-info { min-height: 38px; padding-block: 4px; } }

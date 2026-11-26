@@ -1,0 +1,33 @@
+{
+  "about": "Package 4's features (the prompt card, the lyric sheet, each field's own Ctrl+Z), each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+  "switches": [
+    { "feature": "field undo", "file": "src/app/features/field-undo.ts", "find": "  when: e => (isMod(e, 'z', false) || redoKey(e)) && isField(active())", "replace": "  when: e => false && (isMod(e, 'z', false) || redoKey(e)) && isField(active())" },
+    { "feature": "spent field", "file": "src/app/features/undo-keys.ts", "find": "  when: e => isMod(e, 'z', false) || redoKey(e),", "replace": "  when: e => (isMod(e, 'z', false) || redoKey(e)) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName ?? ''),"},
+    { "feature": "step moved", "file": "src/app/store/fields.ts", "find": "    if (e.after.get(path) !== was) break;", "replace": "    break;" },
+    { "feature": "page writes", "file": "src/app/store/fields.ts", "find": "  if (applying) return;\n  const el = fieldOf(param);", "replace": "  return;\n  const el = fieldOf(param);" },
+    { "feature": "prompt card", "file": "src/app/features/prompt.tsx", "find": "fill('centre.prompt', PromptCard);", "replace": "void PromptCard;" },
+    { "feature": "lyric tile", "file": "src/app/features/prompt.tsx", "find": "fill('desk.lead', LyricsLead);", "replace": "void LyricsLead;" },
+    { "feature": "quick lyrics", "file": "src/app/features/prompt.tsx", "find": "fill('centre.quickLyrics', QuickLyrics);", "replace": "void QuickLyrics;" },
+    { "feature": "section tabs", "file": "src/app/parts/LyricSheet.tsx", "find": "onClick={() => act('insertSectionTag', t.tag)}", "replace": "onClick={() => act('insertSectionTagOff', t.tag)}" },
+    { "feature": "instr read-only", "file": "src/app/parts/LyricSheet.tsx", "find": "readOnly={off}", "replace": "readOnly={false}" },
+    { "feature": "stamp stands back", "file": "src/app/parts/Pick.tsx", "find": "disabled: !!v.dim", "replace": "disabled: false" },
+    { "feature": "stamp at quick", "file": "src/derive/fields.ts", "find": "(desk.tier !== 'quick' || changed(ix, lang, desk)),", "replace": "(desk.tier !== 'quick'),"},
+    { "feature": "line estimate", "file": "src/derive/fields.ts", "find": "const t = estimateTempo(ix, desk, bpmKey, boxKey_), bpm = t.bpm ?? 120;", "replace": "const t = estimateTempo(ix, desk, bpmKey, undefined), bpm = t.bpm ?? 120;" },
+    { "feature": "sheet grows", "file": "src/app/parts/textGrow.ts", "find": "  const h = t.scrollHeight + 2;", "replace": "  const h = 160;" },
+    { "feature": "suggestions", "file": "src/derive/fields.ts", "find": "if (LYRICISH.test(shown) && !STRUCT.test(shown) && lyricsHere)", "replace": "if (LYRICISH.test('') && !STRUCT.test(shown) && lyricsHere)" },
+    { "feature": "tempo brings", "file": "src/app/features/prompt-tools.ts", "find": "    const r = brings ? addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone) : null;", "replace": "    const r = brings && false ? addTo(ix, s.desk, s.mods, s.board, brings, undefined, s.gone) : null;" },
+    { "feature": "lyrics focus", "file": "src/app/features/prompt-tools.ts", "find": "requestAnimationFrame(() => field(LYRICS_FIELD)?.focus({ preventScroll: true }))", "replace": "void LYRICS_FIELD" },
+    { "feature": "write for me", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('promptWrite', arg => {", "replace": "defineAction('promptWrite', arg => { return;" },
+    { "feature": "compose", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('composeCaption', () => {", "replace": "defineAction('composeCaption', () => { return;" },
+    { "feature": "expand", "file": "src/derive/fields.ts", "find": "src = str(read(ix, k, desk)), out = expandWild(src, rnd);", "replace": "src = str(read(ix, k, desk)), out = src;" },
+    { "feature": "caption lock", "file": "src/derive/fields.ts", "find": "  if (!src || src === 'custom' || !ds) return null;", "replace": "  return null;" },
+    { "feature": "edit a copy", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('editCaptionCopy', () => {", "replace": "defineAction('editCaptionCopy', () => { return;" },
+    { "feature": "locked says why", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('promptLocked', () => store().say(lockedMsg(ix, desk())));", "replace": "defineAction('promptLocked', () => { void lockedMsg; });" },
+    { "feature": "dataset drops", "file": "src/derive/fields.ts", "find": "const drops = !!src &&", "replace": "const drops = false &&" },
+    { "feature": "dataset tags", "file": "src/app/features/prompt-tools.ts", "find": "defineAction('datasetTag', tag => { if (tag) apply(", "replace": "defineAction('datasetTag', tag => { if (!tag) apply(" },
+    { "feature": "song info", "file": "src/app/parts/PromptBox.tsx", "find": "const toggleInfo = () => { const to = !open; songInfo.set(to);", "replace": "const toggleInfo = () => { const to = !open; void songInfo;" },
+    { "feature": "placeholder", "file": "src/app/parts/PromptBox.tsx", "find": "setPh(i => i + 1)", "replace": "setPh(i => i)" },
+    { "feature": "box word", "file": "src/derive/fields.ts", "find": "    aria: paramWords(ix, key, desk).label,", "replace": "    aria: msg('box.description')," },
+    { "feature": "reuse lock", "file": "src/derive/fields.ts", "find": "(trackNow(ix, desk) ? lockedMsg(ix, desk, 'reuse') : null)", "replace": "(trackNow(ix, desk) && false ? lockedMsg(ix, desk, 'reuse') : null)" }
+  ]
+}

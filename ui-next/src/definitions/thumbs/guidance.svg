@@ -1,0 +1,7 @@
+<!-- Thumbnail guidance: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="82" rx="8"/>
+<path class="grid" d="M33.3 15V97M51.5 15V97M69.8 15V97M88 15V97M106.3 15V97M124.5 15V97M142.8 15V97M15 35.5H161M15 56H161M15 76.5H161"/>
+<path class="pad-s" d="M33 15V97M15 81H161"/>
+<path class="xy-h xy-lab" d="M114 19V81M33 45H157"/>
+<circle class="xy-ring xy-lab" cx="114" cy="45" r="7.5"/>
+<circle class="xy-dot xy-lab" cx="114" cy="45" r="4"/>

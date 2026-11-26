@@ -1,0 +1,51 @@
+<!-- Thumbnail takes: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="lcd" x="15" y="26" width="76" height="42" rx="8"/>
+<text class="lcd-n" x="53" y="56" text-anchor="middle">1</text>
+<rect class="lcd-d" x="33" y="60.5" width="40" height="2.5" rx="1.25"/>
+<circle class="reel-on" cx="110" cy="27" r="8.6"/>
+<circle class="reel-h" cx="110" cy="27" r="2.5"/>
+<circle class="reel-h" cx="110" cy="21.7" r="1.8"/>
+<circle class="reel-h" cx="114.6" cy="29.7" r="1.8"/>
+<circle class="reel-h" cx="105.4" cy="29.7" r="1.8"/>
+<circle class="reel" cx="131" cy="27" r="8.6"/>
+<circle class="reel-h" cx="131" cy="27" r="2.5"/>
+<circle class="reel-h" cx="131" cy="21.7" r="1.8"/>
+<circle class="reel-h" cx="135.6" cy="29.7" r="1.8"/>
+<circle class="reel-h" cx="126.4" cy="29.7" r="1.8"/>
+<circle class="reel" cx="152" cy="27" r="8.6"/>
+<circle class="reel-h" cx="152" cy="27" r="2.5"/>
+<circle class="reel-h" cx="152" cy="21.7" r="1.8"/>
+<circle class="reel-h" cx="156.6" cy="29.7" r="1.8"/>
+<circle class="reel-h" cx="147.4" cy="29.7" r="1.8"/>
+<circle class="reel" cx="110" cy="48" r="8.6"/>
+<circle class="reel-h" cx="110" cy="48" r="2.5"/>
+<circle class="reel-h" cx="110" cy="42.7" r="1.8"/>
+<circle class="reel-h" cx="114.6" cy="50.7" r="1.8"/>
+<circle class="reel-h" cx="105.4" cy="50.7" r="1.8"/>
+<circle class="reel" cx="131" cy="48" r="8.6"/>
+<circle class="reel-h" cx="131" cy="48" r="2.5"/>
+<circle class="reel-h" cx="131" cy="42.7" r="1.8"/>
+<circle class="reel-h" cx="135.6" cy="50.7" r="1.8"/>
+<circle class="reel-h" cx="126.4" cy="50.7" r="1.8"/>
+<circle class="reel" cx="152" cy="48" r="8.6"/>
+<circle class="reel-h" cx="152" cy="48" r="2.5"/>
+<circle class="reel-h" cx="152" cy="42.7" r="1.8"/>
+<circle class="reel-h" cx="156.6" cy="50.7" r="1.8"/>
+<circle class="reel-h" cx="147.4" cy="50.7" r="1.8"/>
+<circle class="reel" cx="110" cy="69" r="8.6"/>
+<circle class="reel-h" cx="110" cy="69" r="2.5"/>
+<circle class="reel-h" cx="110" cy="63.7" r="1.8"/>
+<circle class="reel-h" cx="114.6" cy="71.7" r="1.8"/>
+<circle class="reel-h" cx="105.4" cy="71.7" r="1.8"/>
+<circle class="reel" cx="131" cy="69" r="8.6"/>
+<circle class="reel-h" cx="131" cy="69" r="2.5"/>
+<circle class="reel-h" cx="131" cy="63.7" r="1.8"/>
+<circle class="reel-h" cx="135.6" cy="71.7" r="1.8"/>
+<circle class="reel-h" cx="126.4" cy="71.7" r="1.8"/>
+<circle class="reel" cx="152" cy="69" r="8.6"/>
+<circle class="reel-h" cx="152" cy="69" r="2.5"/>
+<circle class="reel-h" cx="152" cy="63.7" r="1.8"/>
+<circle class="reel-h" cx="156.6" cy="71.7" r="1.8"/>
+<circle class="reel-h" cx="147.4" cy="71.7" r="1.8"/>
+<rect class="meter" x="15" y="91" width="146" height="4" rx="2"/>
+<rect class="meter-v" x="15" y="91" width="70" height="4" rx="2"/>

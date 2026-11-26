@@ -1,0 +1,23 @@
+{
+  "about": "The consolidation round's core share (review r3, RA-): each defect it fixed put back by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of acceptance/fix-core.json fail.",
+  "switches": [
+    {
+      "feature": "fc takes tile one figure",
+      "file": "src/derive/instruments.ts",
+      "find": "  const v = vramNeed(ix, desk, n), gb = (x: number) => x.toFixed(1), card = +v.card.toFixed(1);",
+      "replace": "  const v = vramNeed(ix, { ...desk, lists: {} }, n), gb = (x: number) => x.toFixed(1), card = +v.card.toFixed(1);"
+    },
+    {
+      "feature": "fc reuse its own step",
+      "file": "src/app/generate/actions.ts",
+      "find": "  const entry = setValue('prompt', c.text ?? c.style, w.label);",
+      "replace": "  setValue('prompt', c.text ?? c.style, w.label); const entry = useDesk.getState().undo.at(-1) ?? null;"
+    },
+    {
+      "feature": "fc vst host runner",
+      "file": "src/app/features/vst-host.ts",
+      "find": "defineAction('vstHost', () => useDesk.getState().showToast({ text: ui('action.vstHost') }));",
+      "replace": "defineAction('vstHost', () => { void useDesk; void ui; });"
+    }
+  ]
+}

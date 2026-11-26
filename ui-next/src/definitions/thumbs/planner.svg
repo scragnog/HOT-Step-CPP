@@ -1,0 +1,16 @@
+<!-- Thumbnail planner: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="52" rx="8"/>
+<rect class="term-p" x="23" y="25" width="5" height="3" rx="1.5"/>
+<rect class="term-k" x="31" y="25" width="24" height="3" rx="1.5"/>
+<rect class="term-w" x="58" y="25" width="20" height="3" rx="1.5"/>
+<rect class="term-k" x="23" y="35" width="18" height="3" rx="1.5"/>
+<rect class="lcd-t" x="45" y="35" width="62" height="3" rx="1.5"/>
+<rect class="term-k" x="23" y="45" width="18" height="3" rx="1.5"/>
+<rect class="term-y" x="45" y="45" width="40" height="3" rx="1.5"/>
+<rect class="term-k" x="23" y="55" width="18" height="3" rx="1.5"/>
+<rect class="term-y" x="45" y="55" width="26" height="3" rx="1.5"/>
+<rect class="lcd-t" x="74" y="52" width="4" height="7" rx="0"/>
+<rect class="pad" x="15" y="71" width="146" height="26" rx="8"/>
+<path class="pad-h" d="M100 71V97"/>
+<circle class="pad-d" cx="100" cy="77" r="3"/>
+<circle class="pad-ring" cx="100" cy="77" r="6"/>

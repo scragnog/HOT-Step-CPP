@@ -1,0 +1,54 @@
+// The page's keyboard shortcuts, registered by the features that own them (the concept's onKey, 02-events.js). The
+// page listens once (App.tsx) and asks each binding in order; the first whose `when` is true runs, and no other. A
+// feature adds a shortcut by registering it in its own file (src/app/features/); none edits another's.
+//
+//   onKey({ id: 'undo', when: e => isMod(e, 'z'), run: e => { ... } })
+//
+// `order` decides who is asked first where two could answer the same key (lower first; 50 by default): a text field's
+// own Ctrl+Z (the lyrics package) registers before the page's Undo with a lower order and declines (`when` false)
+// once the field has nothing of its own left to undo.
+//
+// `create: true` marks a key of the Create page (F9, Alt+1/2/3, F6, Space for the player, the drawers' keys): on
+// another page (Library, Settings...) it is not asked, so it does nothing there (31-screens.js); the keys every page
+// shares (Escape over the notes, the page's Undo, which on another page takes the key and does nothing) leave it out.
+
+import { onCreate } from '../shell/screens.ts';
+
+export interface KeyBinding {
+  /** A name, unique on the page: two features never bind under one name. */
+  id: string;
+  when(e: KeyboardEvent): boolean;
+  run(e: KeyboardEvent): void;
+  order?: number;
+  /** A key of the Create page: not asked while another page shows. */
+  create?: boolean;
+}
+
+const KEYS: KeyBinding[] = [];
+
+export function onKey(b: KeyBinding): void {
+  if (KEYS.some(k => k.id === b.id)) throw new Error(`the key binding "${b.id}" is registered twice`);
+  KEYS.push(b);
+  KEYS.sort((a, c) => (a.order ?? 50) - (c.order ?? 50));
+}
+
+/** Asks each binding in order; the first that answers runs. */
+/** Fields whose Enter is their own (a name being saved or renamed): Ctrl+Enter there is that Enter, not Generate, as
+ *  the concept's field stops it (RC-09). A feature names its fields by selector. */
+const OWN_ENTER: string[] = [];
+export const ownEnter = (sel: string): void => { OWN_ENTER.push(sel); };
+export const enterIsOwn = (el: Element | null): boolean => !!el && OWN_ENTER.some(s => !!el.closest?.(s));
+
+export function dispatchKey(e: KeyboardEvent): void {
+  const create = onCreate();
+  for (const k of KEYS) if ((create || !k.create) && k.when(e)) { k.run(e); return; }
+}
+
+/** Ctrl (or Cmd) and a key, without Alt; `shift` says whether Shift must be held (undefined: either). */
+export const isMod = (e: KeyboardEvent, key: string, shift?: boolean): boolean =>
+  (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === key && (shift === undefined || e.shiftKey === shift);
+
+/** A field that takes typing: its own keys (Ctrl+Z, arrows) are its own while it has focus. */
+export const isTextField = (el: Element | null): boolean => !!el && (el.tagName === 'TEXTAREA'
+  || (el.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|range|file|color)$/i.test((el as HTMLInputElement).type))
+  || (el as HTMLElement).isContentEditable);

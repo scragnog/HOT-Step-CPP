@@ -1,0 +1,43 @@
+/* The player. */
+.player { position: fixed; z-index: 35; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); width: min(520px, calc(100% - 32px)); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 14px; padding: 8px 10px; display: flex; gap: 10px; align-items: center; }
+.player .pi { flex: 1; }
+.player b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player .track i { display: block; background: var(--hot); width: 0; }
+.iconbtn { border: 0; background: var(--raised); width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.gobar .player { position: static; transform: none; left: auto; bottom: auto; width: auto; flex: 0 1 380px; min-width: 0; box-shadow: none; padding: 6px 8px; }
+/* the player: a 24px seek strip around the 4px track, play/pause beside the title */
+.player .track { margin-top: 0; overflow: visible; cursor: pointer; align-items: center; border-radius: 2px; }
+.player .track i { height: 4px; border-radius: 2px; }
+.player .track:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+.player .iconbtn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); flex: none; font-size: 12px; display: grid; place-items: center; }
+.player .iconbtn:hover { background: var(--raised); }
+/* --- the go-bar player (B-13): the seek bar is the song's waveform; the playing card's art carries the same progress
+   along its foot. In the go bar it asks for 420px and gives way before anything else does (C-05): the waveform
+   narrows first, then the title goes, then the time; nothing in it ever leaves its box. --- */
+.gobar .player:not([hidden]) { flex: 0 1 420px; min-width: 0; container-type: inline-size; }
+.player .pi { flex: 1 1 auto; min-width: 0; }
+.player > .art, .player > .iconbtn, .player > #ptime { flex: none; }
+/* the player always names its song, and its seek bar is never narrower than 160px: the time is the first thing to go
+   (F-03); the title goes only on a player squeezed below its go-bar minimum (a phone's floating player) */
+@container (max-width: 379px) { .player #ptime { display: none; } }
+@container (max-width: 300px) { .player .pi > b { display: none; } }
+.player .track { position: relative; height: 24px; background: none; display: block; }
+.player .track svg { position: absolute; inset: 2px 0; width: 100%; height: calc(100% - 4px); display: block; }
+/* the part still to play is the seek target: it reads at 3:1 on the bar in both themes (F-19) */
+.player .track svg path { stroke: color-mix(in srgb, var(--fg) 34%, transparent); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.player .track #trk { position: absolute; inset: 0; width: auto; height: auto; background: none; border-radius: 0; clip-path: inset(0 calc(100% - var(--pp, 0) * 100%) 0 0); }
+.player .track #trk svg path { stroke: var(--hot); }
+.player .track:hover svg path { stroke-width: 2.5; }
+/* the player time never breaks across two lines when the go bar is crowded */
+#ptime { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.player .ptk { font: 600 11px var(--mono); color: var(--muted); background: var(--raised); border-radius: 5px; padding: 1px 5px; margin-right: 6px; vertical-align: 1px; }
+/* one transport button by the title, and a quiet close at the end (C-27) */
+.player .pclose { border-color: transparent; background: none; color: var(--muted); }
+.player .pclose:hover { color: var(--fg); background: var(--raised); }
+/* In the go bar the player asks for 420px and keeps at least 310px (art, transport, title over a 160px waveform; the
+   time goes first). On a wide go bar (it follows the bar's width, not the window's: Quick's bar is 900px at every
+   size, F-03) it gives way before the status line does (F-32), down to 380px, which still shows its time, so the line
+   keeps its module count and changes beside it. (The line is a size container, so it has no width of its own to ask
+   for: it asks for 340px.) */
+.gobar .player:not([hidden]) { min-width: 310px; }
+@container gobar (min-width: 1100px) { .gobar .player:not([hidden]) { flex: 0 4 420px; min-width: 380px; } .gobar:has(.player:not([hidden])) .meter { flex: 1 1 340px; } }

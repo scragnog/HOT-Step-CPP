@@ -1,0 +1,17 @@
+{
+  "about": "The engine panel and the models: the engine cards, each engine's model rows and lists, the VRAM meter (35-models.mjs), with the older scenarios that exercise them.",
+  "scenarios": [
+    { "id": "35-models/engine-cards-say-what-each-engine-is", "why": "The engine cards: tagline in two lines, output rate and its tip, songs per Generate and its tip, HeartMuLa's testing badge (enginePanelModel)." },
+    { "id": "35-models/models-follow-the-tier-and-the-engine", "why": "The models heading and its words per tier, the testing note, each engine's rows by role, Quick showing the sound model (and HeartMuLa's variant) only, a variant without a size (the Models definition's two modelPicker nodes, modelRows)." },
+    { "id": "35-models/a-model-row-names-its-file-and-its-share-of-the-card", "why": "A model row's accessible name (role, then the technical name, C-28), its bar as its share of the card, nothing marked changed on the engine's own files (\"\" stands for the selected file)." },
+    { "id": "35-models/choosing-a-model-from-its-list", "why": "The model list (rows, quant chips, the role and the card in its head), the file in use chosen and focused, a click chooses and leaves the panel open, the step named by the role (F-12), the row and the meter follow, Undo puts it back." },
+    { "id": "35-models/the-panels-keys-with-a-model-row-in-it", "why": "Keyboard use: the panel opens on the engine in use, Tab reaches the model rows, an arrow on a row moves no engine, ArrowDown opens the list, arrows and Enter choose, Escape closes the list then the panel." },
+    { "id": "35-models/the-vram-meter-adds-up-the-engine", "why": "The meter's figures: loaded and needed per engine, the planner's per-take cost, its LEDs, peak and ticks, its tip and read-out naming the card (meterModel, meterLeds, vramNeed with the service's figures)." },
+    { "id": "35-models/the-vram-meter-says-when-a-run-will-not-fit", "why": "A refused run (MiniMax-Music3, over) and one that does not fit at once (ACE-Step, tight): the read-out shows what they need (G-B-08), the red LEDs." },
+    { "id": "35-models/the-panel-follows-an-engine-switch", "why": "The panel is the new engine's at once with its card in focus; each engine's own model choice comes back with it, and the meter with it." },
+    { "id": "35-models/a-narrow-panel-brings-its-engine-into-view", "why": "At 760 the engines are a sideways strip with the chosen one scrolled into view (B-21); the panel stays inside the window." },
+    { "id": "21-chrome-round5/model-steps-named-by-role", "why": "A model change is named by the model's role: \"Sound model XL Turbo · Q8_0 → Turbo · Q8_0\" (F-12; \"\" written as the file it stands for)." },
+    { "id": "15-other-engines/model-list-as-wide-as-its-row", "why": "YuE2's model list is as wide as its row and its five quant chips stand on one line (E-32): the service's full catalogue." },
+    { "id": "15-other-engines/switch-toast-names-models-and-counts-settings", "why": "The engine switch's toast names the models MiniMax-Music3 keeps without a separator inside a name (E-33, F-34), from the catalogue's words." }
+  ]
+}

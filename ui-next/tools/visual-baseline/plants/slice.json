@@ -1,0 +1,20 @@
+{
+  "about": "Defects planted one at a time, to show the visual comparison and the gallery see them (tools/visual-baseline/plants.mjs). The review's (slice-review2, 1c and plant.mjs: 0 to 12) written against the code as it is now, and the parts-on-every-surface ones (13 to 15). Each is applied to the test build only, by vite.config.ts (HS_SWITCH); one that no longer applies fails the run. 12 is behaviour, not looks: the switches check ('knob keys') catches it.",
+  "switches": [
+    { "feature": "plant-00 wrong class on the LCD picker wrapper", "file": "src/app/parts/Pick.tsx", "find": "className={`pk-lcdwrap${", "replace": "className={`pk-lcd-wrap${" },
+    { "feature": "plant-01 pedal selectors without their .psels wrapper", "file": "src/app/board/Board.tsx", "find": "<div className=\"psels\">{m.sels.map(cell)}</div>", "replace": "<>{m.sels.map(cell)}</>" },
+    { "feature": "plant-02 a pedal's hue off by 10", "file": "src/app/board/Board.tsx", "find": "style={{ '--h': m.hue } as CSSProperties}", "replace": "style={{ '--h': (m.hue ?? 0) + 10 } as CSSProperties}" },
+    { "feature": "plant-03 a knob's read-out before its label", "file": "src/app/parts/Knob.tsx", "find": "      <span className={`kl${sym ? ' sym' : ''}`}>{label}{auto}</span>\n      {out}", "replace": "      {out}\n      <span className={`kl${sym ? ' sym' : ''}`}>{label}{auto}</span>" },
+    { "feature": "plant-04 the LED button never marked changed", "file": "src/app/parts/LedButton.tsx", "find": "${p.changed ? ' changed' : ''}", "replace": "" },
+    { "feature": "plant-05 the knob never marked changed", "file": "src/app/parts/Knob.tsx", "find": "className={`kn${p.changed ? ' changed' : ''}${p.canAuto ? ' has-auto' : ''}`}", "replace": "className={`kn${p.canAuto ? ' has-auto' : ''}`}" },
+    { "feature": "plant-06 a knob's role a button, and junk ARIA", "file": "src/app/parts/Knob.tsx", "find": "role=\"slider\" tabIndex={0}", "replace": "role=\"button\" aria-description=\"x\" tabIndex={0}" },
+    { "feature": "plant-07 a segmented choice never says which is pressed", "file": "src/app/parts/Segmented.tsx", "find": "aria-pressed={o.on}", "replace": "aria-pressed={false}" },
+    { "feature": "plant-08 a side unit's power says the opposite", "file": "src/app/board/Board.tsx", "find": "aria-pressed={!!m.foot?.on}", "replace": "aria-pressed={!m.foot?.on}" },
+    { "feature": "plant-09 a pedal knob prints its full label", "file": "src/derive/models.ts", "find": "label: f.short && w.short ? w.short : w.label,", "replace": "label: w.label," },
+    { "feature": "plant-10 the tier button's tooltip names the wrong key (same length)", "file": "src/app/shell/Centre.tsx", "find": "n: i + 1 }))}", "replace": "n: i + 2 }))}" },
+    { "feature": "plant-11 the knob's tooltip dropped", "file": "src/app/parts/Knob.tsx", "find": " data-ctl={p.key} title={say(v.title)}>", "replace": " data-ctl={p.key}>" },
+    { "feature": "plant-13 the meter's look off the board dropped", "file": "src/app/styles/rebuild/15-parts.css", "find": ".vu:not(.board .vu) { display: block;", "replace": ".vu-gone { display: block;" },
+    { "feature": "plant-14 the shared changed mark dropped", "file": "src/app/styles/rebuild/35-part-states.css", "find": ":where([data-ctl].changed) > :where(.kl)::after {", "replace": ".gone::after {" },
+    { "feature": "plant-15 the LED button on paper left as the rack's slab", "file": "src/app/styles/rebuild/15-parts.css", "find": "  background: var(--raised); border-color: var(--line); color: var(--muted); }", "replace": "  }" }
+  ]
+}

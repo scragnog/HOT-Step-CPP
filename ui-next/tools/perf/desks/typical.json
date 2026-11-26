@@ -1,0 +1,5 @@
+{
+ "hotstep.create.engines": "[\"ace\"]",
+ "hotstep.create.panels": "{\"left\":true,\"right\":true}",
+ "hotstep.create.desk": "{\"v\":1,\"engine\":\"ace\",\"tier\":\"studio\",\"modules\":[\"tempo\",\"seed\",\"sampler\",\"adapters\",\"timbre\",\"post\"],\"board\":[\"ppvae\",\"gain\",\"norm\"],\"vals\":{},\"auto\":{},\"state\":{\"stars\":[{\"v\":1834920213,\"n\":\"kick-heavy take\",\"d\":\"Punchy low end, the chorus lands hard\",\"tags\":[\"drums\",\"keeper\"],\"star\":true},{\"v\":77104,\"n\":\"airy chorus\",\"d\":\"\",\"tags\":[\"vocals\"]}],\"latent\":null},\"stash\":{},\"hold\":{},\"tab\":\"qxzcoqho\",\"at\":1795537183042}"
+}

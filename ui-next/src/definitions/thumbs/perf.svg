@@ -1,0 +1,22 @@
+<!-- Thumbnail perf: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<defs>
+<linearGradient id="thg13" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" class="perf-0"/>
+<stop offset=".55" class="perf-1"/>
+<stop offset="1" class="perf-2"/>
+</linearGradient>
+</defs>
+<rect x="15" y="15" width="146" height="52" rx="8" fill="url(#thg13)"/>
+<rect class="bezel" x="15" y="15" width="146" height="52" rx="8"/>
+<path class="xy-h xy-amb" d="M147 19V63M19 57H157"/>
+<circle class="xy-ring xy-amb" cx="147" cy="57" r="6.5"/>
+<circle class="xy-dot xy-amb" cx="147" cy="57" r="3.5"/>
+<rect class="lcd" x="50" y="73" width="40" height="24" rx="5"/>
+<text class="lcd-n sm" x="70" y="91" text-anchor="middle">0%</text>
+<g class="k ">
+<path class="k-t" d="M109.3 91.7A9.5 9.5 0 1 1 122.7 91.7"/>
+<path class="k-a" d="M109.3 91.7A9.5 9.5 0 1 1 123 91.4"/>
+<circle class="k-c" cx="116" cy="85" r="6.9"/>
+<circle class="k-r" cx="116" cy="85" r="6.1"/>
+<path class="k-p" d="M116 85L120.7 89.2"/>
+</g>

@@ -1,0 +1,39 @@
+<!-- Thumbnail pd-lift: inner drawing in the thumbnail kit's classes, on the pedal canvas. Captured from the concept at vanilla-reference. -->
+<g class="k pk">
+<path class="k-t" d="M25.6 46.4A9 9 0 1 1 38.4 46.4"/>
+<path class="k-a" d="M25.6 46.4A9 9 0 0 1 24.7 34.7"/>
+<circle class="k-c" cx="32" cy="40" r="6.4"/>
+<circle class="k-r" cx="32" cy="40" r="5.6"/>
+<path class="k-p" d="M32 40L27.3 36.6"/>
+</g>
+<rect class="eng" x="25" y="53" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M55.6 46.4A9 9 0 1 1 68.4 46.4"/>
+<path class="k-a" d="M55.6 46.4A9 9 0 0 1 53.4 42.8"/>
+<circle class="k-c" cx="62" cy="40" r="6.4"/>
+<circle class="k-r" cx="62" cy="40" r="5.6"/>
+<path class="k-p" d="M62 40L56.5 41.8"/>
+</g>
+<rect class="eng" x="55" y="53" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M85.6 46.4A9 9 0 1 1 98.4 46.4"/>
+<circle class="k-c" cx="92" cy="40" r="6.4"/>
+<circle class="k-r" cx="92" cy="40" r="5.6"/>
+<path class="k-p" d="M92 40L87.9 44.1"/>
+</g>
+<rect class="eng" x="85" y="53" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M115.6 46.4A9 9 0 1 1 128.4 46.4"/>
+<circle class="k-c" cx="122" cy="40" r="6.4"/>
+<circle class="k-r" cx="122" cy="40" r="5.6"/>
+<path class="k-p" d="M122 40L117.9 44.1"/>
+</g>
+<rect class="eng" x="115" y="53" width="14" height="2.5" rx="1.25"/>
+<g class="k pk">
+<path class="k-t" d="M145.6 46.4A9 9 0 1 1 158.4 46.4"/>
+<path class="k-a" d="M145.6 46.4A9 9 0 0 1 156.1 32"/>
+<circle class="k-c" cx="152" cy="40" r="6.4"/>
+<circle class="k-r" cx="152" cy="40" r="5.6"/>
+<path class="k-p" d="M152 40L154.6 34.8"/>
+</g>
+<rect class="eng" x="145" y="53" width="14" height="2.5" rx="1.25"/>

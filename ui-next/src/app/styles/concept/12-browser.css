@@ -1,0 +1,53 @@
+/* The Modules panel: the cards for modules, pedals and side units. */
+/* browser */
+.br-group { font: 500 11px var(--mono); color: var(--faint); }
+.br-search { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 100%; }
+.br-group { padding: 14px 4px 6px; }
+.bgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.bcard { position: relative; display: grid; gap: 6px; justify-items: center; padding: 6px 6px 8px; border-radius: 10px; cursor: grab; text-align: center; }
+.bcard:hover { background: var(--raised); }
+.bcard:active { cursor: grabbing; }
+.bcard b { font-weight: 500; font-size: 13px; line-height: 1.25; }
+.bthumb { width: 124px; height: 78px; position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); }
+.bcard.locked { cursor: default; }
+@media (min-width: 1181px) and (max-width: 1679.98px) {
+  .side.right .bthumb { width: 96px; height: 60px; }
+  .side.right .bcard b { font-size: 12px; }
+}
+/* --- hover and press: one rule set for everything that can be pressed (M-04, B-06) ---
+   Zero specificity (:where), so a component's own rule still wins; this only fills in what had nothing.
+   Hover: colour, background and border ease in over --t-fast. Press: the control sinks 1px at --t-instant. */
+:where(button, .bcard, .br-item, .pre, label.tool, label.drop, .tile-head[draggable="true"]):where(:not(:disabled)) {
+  transition: background-color var(--t-fast) var(--e-out), border-color var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out),
+    box-shadow var(--t-fast) var(--e-out), opacity var(--t-fast) var(--e-out), translate var(--t-fast) var(--e-out), filter var(--t-fast) var(--e-out);
+}
+/* panel cards: the snapshot rises 2px under the pointer and settles back on press */
+.bthumb { transition: translate var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.bcard:not(.locked):hover .bthumb { translate: 0 -2px; box-shadow: var(--shadow); }
+.bcard:not(.locked):active .bthumb { translate: 0 0; box-shadow: none; transition-duration: var(--t-instant); }
+.bcard.lift { opacity: .4; }
+.bcard { align-content: start; }
+.bcard b { text-wrap: balance; }
+.ctags { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-1); margin-top: calc(var(--s-1) * -1); }
+.ct { font: 500 var(--fs-11)/16px var(--mono); letter-spacing: .04em; font-style: normal; white-space: nowrap; padding: 0 5px; border-radius: var(--r-chip); }
+/* the tag inks are pulled a step towards the text colour so 11px reads at 4.5:1 on their tints, in both themes (C-30) */
+.ct.lab { color: color-mix(in srgb, var(--lab) 78%, var(--fg)); background: var(--lab-soft); text-transform: uppercase; letter-spacing: var(--caps-ls); }
+.ct.no { color: color-mix(in srgb, var(--amber) 80%, var(--fg)); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.ct.in { display: inline-flex; align-items: center; gap: 2px; color: color-mix(in srgb, var(--ok) 80%, var(--fg)); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.ct.park { color: var(--muted); background: color-mix(in srgb, var(--fg) 7%, transparent); }
+/* already placed or not used by this engine: the drawing dims but stays legible. A Lab module in a lower tier keeps
+   its drawing whole: its Lab tag says why it waits (C-44) */
+/* dimmed by colour on an opaque drawing, as in the picker, never by letting the page show through it (F-25) */
+.bcard.in .bthumb, .bcard.no .bthumb { opacity: 1; filter: grayscale(.6) brightness(.9); }
+/* in dark a drawing is already dark: a module on the desk or not used here loses its colour, not its light, so it can
+   still be made out; the tag says why (F-24) */
+:root[data-theme="dark"] :is(.bcard.in, .bcard.no) .bthumb { filter: grayscale(.7) contrast(.85); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :is(.bcard.in, .bcard.no) .bthumb { filter: grayscale(.7) contrast(.85); } }
+.bcard.in b { color: var(--muted); }
+/* a card that matches the filter only by its description is fainter (F-25) */
+.bcard.weak:not(:hover):not(:focus-visible) { opacity: .6; }
+.bcard.no b, .bcard.locked b { color: var(--muted); }
+.br-none { margin: 12px 4px; font-size: 13px; color: var(--muted); }
+#brList { display: grid; gap: 4px; align-content: start; }
+/* a finger has no F9 (S-31) */
+@media (pointer: coarse) { [data-openpicker] kbd { display: none; } }

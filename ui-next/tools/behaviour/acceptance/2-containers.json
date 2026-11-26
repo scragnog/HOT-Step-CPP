@@ -1,0 +1,22 @@
+{
+  "about": "The containers and read-outs: the planner's terminal and its lines, the repetition guard, the LCD rows, rack groups, decks, the plans and their Endings, the dice, the flow windows, the speed gauge, the schedule strip, the fader bank, the drop zones and the side units' objects (33-containers.mjs), with the older scenarios that exercise them.",
+  "scenarios": [
+    { "id": "33-containers/terminal-prints-flags-and-gathers-lab-lines", "why": "terminal, termLine, termBar: each control after its flag, a command line that hangs, the Lab lines under the rule (.tparams), a terminal chip that brings its token, a flag, Studio without the Lab lines." },
+    { "id": "33-containers/planner-off-stands-the-terminal-back", "why": "terminal: with its power switch off the lines stand back at 45% and stay editable, the switch does not; planText says the planner is off." },
+    { "id": "33-containers/plan-text-follows-what-it-reads", "why": "planText in its four looks: the planner's pick or yours (a key spelled as a musician does), the lyrics' sections, YuE2's score, MiniMax-Music3's prose, HeartMuLa's tags and length." },
+    { "id": "33-containers/guard-says-when-it-is-off", "why": "terminal and termLine standing back: a guard at 1.00 says so on its line, the planner off says so in its place (L-11), YuE2's line-and-strip pairs (.gline) each off on its own; a node's when on a token." },
+    { "id": "33-containers/tempo-lcd-rows", "why": "lcdRow: the top row lends the number its beat lamps (beatPulse: a lamp a beat, resting on auto, the beat's length) and its buttons; the key row's word; the trim settings held out of sight while Auto-trim is off." },
+    { "id": "33-containers/rack-groups-switch-and-stand-back", "why": "group, pair, adhereCurve: a power chip in the header, hatched while off, tokens in pairs with the range's arrow, the curve's band and legend; a group switched by a pill (.lat-g) and its compact choice." },
+    { "id": "33-containers/plans-deck-rows", "why": "deck and labelled in a deck: two columns, the recorders' lines indented, the changed mark after the row's label (E-36), a recorder standing back and the replay that is not used said (E-34); the planner's bar says the cache (E-15)." },
+    { "id": "33-containers/dice-flow-and-gauge-read-their-values", "why": "dice (a die per try, off with re-planning), flowWindows (the windows and the count follow the hop, the joins), speedGauge (the trade's speed)." },
+    { "id": "33-containers/side-unit-objects", "why": "lrcPreview (the first section of the lyrics), unitBadge, coverSwatch, unitStatus with its tip." },
+    { "id": "33-containers/drop-zones-take-audio-and-clear", "why": "dropZone: a chosen file on a pedal's slot is a step named for it, × clears it, a file that is no audio is refused and said, a dropped file on a sleeve loads, a drop outside every zone says where to drop, a file another module lends is shown as lent." },
+    { "id": "33-containers/fader-bank-scale-and-tapes", "why": "bank: its heading and tip, the 2-1-0 scale, a fader a group on its tape, a fader in the bank works." },
+    { "id": "17-undo-net/mastering-reference-is-its-own-step", "why": "dropZone: a file dropped on the Mastering pedal's slot is its own step, named for the file, and Ctrl+Z takes it out alone (L-01)." },
+    { "id": "22-engines-round5/composer-cfg-reads-auto-one-way", "why": "termLine: the composer's CFG token on its line reads auto one way, after a step and a reset (E-13)." },
+    { "id": "22-engines-round5/planner-seed-keeps-what-was-typed", "why": "termLine with a terminal text field (--seed): what was typed is kept and what is in force is said (E-33)." },
+    { "id": "11-engines/ruler-markers-follow-the-engine", "why": "lcdRow: Tempo's Beat I/O switch stands in its LCD row on Stable Audio 3 and draws its markers (B-04)." },
+    { "id": "15-other-engines/plans-follow-the-fader", "why": "bank and deck: the Plan fader of the master section below 1.00 brings Compact planner cache into the Last plan row at once, and focus stays on the fader (E-07)." },
+    { "id": "23-sa3-hm-round5/topk-scrub-scales-with-the-value", "why": "S-28: the top-K token on the planner's terminal line scrubs with the value (package 1's core, runnable once the terminal is drawn)." }
+  ]
+}

@@ -1,0 +1,15 @@
+<!-- Thumbnail post: the Pedalboard, drawn for this format from the thumbnail kit (the concept offers it in no panel). A board, two pedals in their hue, the cable between them and the leads to the edges. -->
+<rect class="board" x="0" y="0" width="176" height="112" rx="0"/>
+<path class="cable" d="M-2 40H22"/>
+<path class="cable" d="M76 40C84 46 92 46 100 40"/>
+<path class="cable" d="M154 40H178"/>
+<rect class="p-lip" x="24" y="24" width="50" height="70" rx="6"/>
+<rect class="p-face" x="24" y="22" width="50" height="70" rx="6"/>
+<rect class="p-lip" x="102" y="24" width="50" height="70" rx="6"/>
+<rect class="p-face" x="102" y="22" width="50" height="70" rx="6"/>
+<rect class="eng name" x="35" y="29" width="28" height="3" rx="1.5"/>
+<rect class="eng name" x="113" y="29" width="28" height="3" rx="1.5"/>
+<circle class="led-on" cx="49" cy="66" r="2.4"/>
+<circle class="led-on" cx="127" cy="66" r="2.4"/>
+<circle class="ft-c" cx="49" cy="80" r="5.8"/>
+<circle class="ft-c" cx="127" cy="80" r="5.8"/>

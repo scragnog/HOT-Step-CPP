@@ -1,0 +1,73 @@
+/* The prompt card: caption, tools row, suggestions, song info, caption lock, dataset tags, wildcards. */
+.prompt-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-tile); box-shadow: var(--shadow); padding: 16px 16px 12px; display: grid; gap: 10px; }
+.prompt-card:focus-within { border-color: color-mix(in srgb, var(--hot) 60%, var(--line)); }
+/* the page's focus ring, round the whole card, as the lyric sheet has it (S-19); the tint above stays for a press */
+.prompt-card:has(#prompt:focus-visible) { outline: 2px solid var(--hot); outline-offset: 2px; }
+#prompt:focus-visible { outline: none; }
+#prompt { width: 100%; border: 0; background: none; font-size: 18px; line-height: 1.45; min-height: 52px; outline: none; }
+#prompt::placeholder { color: var(--faint); }
+.suggest { display: flex; gap: 8px; flex-wrap: wrap; }
+.suggest:empty { display: none; }
+/* a suggestion is a button; a note beside them is plain text and does not look pressable (C-19) */
+.suggest .sg-note { align-self: center; font-size: 13px; color: var(--muted); }
+.suggest .sg-note b { font: 500 12.5px var(--mono); color: var(--fg); }
+#latChip:empty { display: none; }
+.suggest button { border: 1px solid color-mix(in srgb, var(--amber) 50%, var(--line)); background: color-mix(in srgb, var(--amber) 10%, transparent); border-radius: 8px; padding: 6px 10px; font-size: 13px; text-align: left; }
+.pc-foot { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; justify-content: flex-start; }
+@media (max-width: 760px) { #prompt { font-size: 16px; } }
+/* prompt box: capped, scroll marker on the right */
+.prompt-card { position: relative; }
+.prompt-card > .smark { right: 6px; background: color-mix(in srgb, var(--hot) 60%, transparent); width: 4px; }
+.prompt-card > .smark:hover, .prompt-card > .smark.drag { background: var(--hot); width: 6px; right: 5px; }
+/* The prompt card's tool row is one toolbar (G-D-08): every item 30px tall, radius 8, 8px apart, and of two kinds only.
+   An action is the grey .tool; a state is a .pchip, outlined, with a muted name and its value (and a × or ▾ inside).
+   Hardware skins (LCD selectors, label tape) stay on the desk; the prompt card is paper. */
+.pc-foot > .tool, .pc-foot > label.tool { height: 30px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: var(--r-ctl); }
+.pc-foot .wild-auto i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.pc-foot .wild-auto.on { background: var(--hot-soft); border-color: color-mix(in srgb, var(--hot) 40%, var(--line)); color: var(--fg); }
+.pc-foot .wild-auto.on i { background: var(--hot); }
+.pc-foot .trig input { width: auto; min-width: 7ch; field-sizing: content; border: 0; background: none; padding: 0; font: 500 13px var(--mono); color: var(--fg); outline: none; }
+.pc-foot .trig input::placeholder { color: var(--faint); font: 13px var(--body); } /* words in the label's face, not wide monospace (F-33) */
+.pc-foot .trig:has(input:focus-visible) { border-color: var(--hot); box-shadow: 0 0 0 1px var(--hot); }
+.songinfo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.songinfo label { display: grid; gap: 3px; }
+.songinfo label:nth-child(3), .songinfo label.si-art { grid-column: 1 / -1; }
+.songinfo span { font: 500 11px var(--mono); color: var(--faint); }
+.songinfo input { min-width: 0; width: 100%; border: 1px solid var(--line); background: var(--raised); color: var(--fg); border-radius: 8px; padding: 6px 9px; font: 14px var(--body); }
+/* Song info (C-18): filled, it carries the amber dot after its name; open, it takes the pressed fill the tier switch uses;
+   its fields open under the tool row, so the button stays where it was pressed */
+#songInfoBtn { gap: 6px; }
+/* "it holds something" is a dot inside the pill, after the label; a real element, because the button's ::before is its hit area (F-10) */
+/* the page's one "holds something" mark: the amber dot after the name, as on every changed control (F-33) */
+#songInfoBtn .si-dot { display: none; order: 1; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--chg, var(--amber)); }
+#songInfoBtn.on .si-dot { display: block; }
+#songInfoBtn[aria-expanded="true"] { background: var(--fg); color: var(--bg); }
+#songInfoBtn[aria-expanded="true"] .si-dot { background: var(--bg); }
+#songInfoBtn::after { content: none !important; }
+.pc-foot + .songinfo { padding-top: 2px; }
+/* one column on a phone: two fields side by side would be too narrow to read (S-24) */
+@media (max-width: 420px) { .songinfo { grid-template-columns: minmax(0, 1fr); } }
+/* the row's actions come first, then its state chips, 12px further on (E-38) */
+.pc-sep { flex: none; width: 0; margin-inline: calc((12px - 2 * var(--s-2)) / 2); }
+.capsrc { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+#prompt.locked { opacity: .78; cursor: default; background-image: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in srgb, var(--fg) 4%, transparent) 8px 9px); border-radius: 8px; }
+.dstags { display: grid; gap: 6px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 12px; }
+.dst-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.dst-head b { color: var(--fg); font-size: 13px; }
+.dst-chips { display: flex; flex-wrap: wrap; gap: 5px; max-height: 108px; overflow: auto; scrollbar-width: none; }
+.dst { border: 1px solid var(--line); background: var(--raised); color: var(--muted); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; }
+.dst.on { background: color-mix(in srgb, #f5a623 22%, var(--raised)); border-color: #f5a623; color: var(--fg); }
+#latBtn { cursor: pointer; }
+.drop input[type="file"], #latBtn .sr-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip-path: inset(50%); pointer-events: none; display: block; }
+#prompt.locked { color: var(--muted); }
+.cap-lock { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
+.cap-lock svg { flex: none; }
+.cap-lock .linkbtn { font-size: 12px; margin-left: 4px; }
+/* On a short window (800px or less) a desk tier's empty prompt card stands one line tall until it is focused: the words
+   and the tools share one row, so the desk's first hardware is in the first screen (L-07). It opens as soon as it is
+   focused, holds words, a suggestion or Song info. */
+@media (max-height: 800px) and (min-width: 761px) {
+  :is(.t-studio, .t-lab) .prompt-card:not(:focus-within):has(#prompt:placeholder-shown):has(#suggest:empty):has(#songInfo[hidden]):has(#capLock[hidden]):has(#dsTags[hidden]) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--s-4); padding-block: var(--s-3); }
+  :is(.t-studio, .t-lab) .prompt-card:not(:focus-within):has(#prompt:placeholder-shown):has(#suggest:empty):has(#songInfo[hidden]):has(#capLock[hidden]):has(#dsTags[hidden]) #prompt { min-height: 0; max-height: 30px; overflow: hidden; white-space: nowrap; resize: none; }
+  :is(.t-studio, .t-lab) .prompt-card:not(:focus-within):has(#prompt:placeholder-shown):has(#suggest:empty):has(#songInfo[hidden]):has(#capLock[hidden]):has(#dsTags[hidden]) #prompt::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}

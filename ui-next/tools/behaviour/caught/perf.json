@@ -1,0 +1,13 @@
+{
+ "about": "The scenarios that caught each switch of switches/perf.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "perf: a model is asked again only when what it read changed": ["39-perf/a-knob-drag-asks-again-only-the-models-that-read-it","39-perf/a-knob-key-asks-again-only-the-models-that-read-it","39-perf/undo-and-redo-are-one-notification-each"],
+  "perf: a tile's measurement is kept": ["39-perf/a-move-by-key-measures-nothing-and-solves-each-place-once","39-perf/a-removal-measures-only-what-changed","39-perf/a-tile-dragged-across-the-desk-measures-nothing"],
+  "perf: a preview is measured as the tile it copies": ["39-perf/a-tile-dragged-across-the-desk-measures-nothing"],
+  "perf: the layout's own moves are not a change of content": ["39-perf/a-move-by-key-measures-nothing-and-solves-each-place-once","39-perf/a-removal-measures-only-what-changed","39-perf/a-tile-dragged-across-the-desk-measures-nothing"],
+  "perf: a layout is solved once for the same tiles": ["39-perf/a-move-by-key-measures-nothing-and-solves-each-place-once"],
+  "perf: an Undo is one update of the store": ["39-perf/undo-and-redo-are-one-notification-each"],
+  "perf: a gesture is not state": ["39-perf/a-knob-drag-asks-again-only-the-models-that-read-it","39-perf/a-knob-key-asks-again-only-the-models-that-read-it"],
+  "perf: the focus request is a leaf of its own": ["39-perf/a-removal-measures-only-what-changed"]
+ }
+}

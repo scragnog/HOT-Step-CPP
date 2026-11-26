@@ -1,0 +1,231 @@
+/* Pedals on the board. */
+.pedal { --h: 330; width: 104px; flex: none; justify-items: center; align-content: start; gap: 6px; position: relative; text-align: center; }
+.pedal.off { filter: saturate(.25) brightness(.7); }
+.pedal .led { border-radius: 50%; position: absolute; }
+.pedal .px { position: absolute; width: 20px; height: 20px; border: 0; background: none; font-size: 14px; border-radius: 5px; }
+.pedal .bigval { font: 18px var(--lcdfont); border-radius: 5px; padding: 6px 8px; min-width: 60px; }
+.pedal small { font: 11px var(--mono); }
+.pknobs { display: flex; flex-wrap: wrap; justify-content: center; }
+.pedal .led-btn { padding: 4px 6px; font-size: 11px; max-width: 100%; }
+.pedal .lcdsel { text-align: left; }
+.pedal.xunit, .t-quick .pedal.xunit, .t-lab .pedal.xunit { --h: 255; min-width: 112px; }
+.pedal .lcdsel, .xunit .lcdsel { width: 100%; }
+.pedal .pk-lcdwrap { width: 100%; min-width: 0; }
+.pedal .pk-lcd { flex: 1 1 0; justify-content: center; }
+/* a pedal's extras column is never wider than the pedal: long plugin names ellipsize (the full name is in the picker and the label) */
+.pedal:not(.xunit) .pextra { grid-template-columns: minmax(0, 1fr); }
+.pedal .lcdsel { min-width: 0; }
+.pedal { background: linear-gradient(hsl(var(--h) var(--pd-s1) var(--pd-l1)), hsl(var(--h) var(--pd-s2) var(--pd-l2))); color: var(--pd-ink); box-shadow: 0 3px 0 hsl(var(--h) var(--pd-s3, 45%) var(--pd-l3)), 0 6px 12px var(--pb-sh); }
+.pedal.xunit, .t-quick .pedal.xunit, .t-lab .pedal.xunit { background: linear-gradient(var(--un1), var(--un2)); box-shadow: 0 3px 0 var(--un3), 0 6px 12px var(--pb-sh); }
+.pedal .knob { background: conic-gradient(from 225deg, var(--pd-ink) calc(clamp(0, var(--kp), 1) * 270deg), var(--kn-track) 0 270deg, transparent 0); }
+.pedal .kn output { color: var(--pd-ink); }
+.pedal .led { background: var(--led-off); }
+.pedal .px { color: color-mix(in srgb, var(--pd-ink) 60%, transparent); }
+.pedal .px:hover { background: color-mix(in srgb, var(--pd-ink) 15%, transparent); color: var(--pd-ink); }
+.pedal small { color: var(--pd-ink); }
+/* the neutral pedal's thickness is a darker shade of its own grey face, not a coloured edge (Q-10) */
+.pedal.neutral { --pd-s1: 9%; --pd-s2: 9%; --pd-s3: 9%; }
+.pedal .always { display: grid; place-items: center; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+/* pedal readouts */
+.pedal .pk-lcd small { color: inherit; }
+.pedal .chipsw > div { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; }
+.pedal .chipsw button { padding: 4px 2px; white-space: nowrap; }
+.pknobs { gap: 8px 12px; }
+.pknobs .kn { min-width: 60px; }
+.pknobs .kn output { white-space: nowrap; font-size: 11px; }
+/* one knob everywhere (D-32): a ridged cap, a 2px line pointer ending in a dot at the rim, the track always showing;
+   the pedal's knob is the same drawing in the pedal's own materials, and size is the only variant */
+.pedal .knob { --sk1: var(--kn-c1); --sk2: var(--kn-c2); --fc1: color-mix(in srgb, var(--kn-c1) 88%, var(--kn-c2)); --fc2: color-mix(in srgb, var(--kn-c2) 75%, var(--kn-c1)); }
+.pedal .knob::before { box-shadow: 0 3px 4px #0006, 0 0 0 1px #0000001a; }
+.pedal .knob i, .pedal .knob.sm i { background: var(--kn-ptr); }
+/* one turning read-out everywhere (Q-20): white on hot, on a pedal as on the desk */
+.pedal .kn.turning output { background: var(--hot); color: var(--hot-ink); }
+.pedal { border-radius: 9px; padding: 14px 10px 14px; z-index: 1; overflow: visible; display: flex; flex-direction: column; align-items: center; }
+.pedal > .pknobs, .pedal > .pextra, .pedal > .lcdsel, .pedal > .drop { align-self: stretch; }
+.pedal > .led { position: relative; order: 98; margin-top: auto; flex: none; }
+.pedal > .foot, .pedal > .always { order: 99; }
+.pedal::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle at 8px 8px, var(--screw) 0 1.6px, #00000080 1.6px 2.1px, color-mix(in srgb, var(--screw) 70%, #000) 2.1px 3.4px, transparent 3.8px),
+    radial-gradient(circle at calc(100% - 8px) 8px, var(--screw) 0 1.6px, #00000080 1.6px 2.1px, color-mix(in srgb, var(--screw) 70%, #000) 2.1px 3.4px, transparent 3.8px),
+    radial-gradient(circle at 8px calc(100% - 8px), var(--screw) 0 1.6px, #00000080 1.6px 2.1px, color-mix(in srgb, var(--screw) 70%, #000) 2.1px 3.4px, transparent 3.8px),
+    radial-gradient(circle at calc(100% - 8px) calc(100% - 8px), var(--screw) 0 1.6px, #00000080 1.6px 2.1px, color-mix(in srgb, var(--screw) 70%, #000) 2.1px 3.4px, transparent 3.8px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  box-shadow: inset 0 1px 0 #ffffff30, inset 0 -1px 0 #0000002e, inset 0 0 0 4px #00000008; }
+.pedal > * { position: relative; z-index: 1; }
+.pedal > .px { position: absolute; }
+/* the jacks: --jb above the pedal's foot on the board (L-17), so all the pedals in a row have them at one height */
+.board { --jb: 188px; }
+.t-studio .board { --jb: 180px; }
+.t-quick .board { --jb: 104px; }
+.pedal:not(.xunit)::after { content: ""; position: absolute; left: -6px; right: -6px; top: max(14px, calc(100% - var(--jb, calc(100% - 36px)) - 6px)); height: 12px; z-index: -1; pointer-events: none;
+  background: linear-gradient(var(--jack), var(--jack)) left / 7px 100% no-repeat, linear-gradient(var(--jack), var(--jack)) right / 7px 100% no-repeat; border-radius: 2px; }
+.pedal b { font: 700 11.5px/1.15 var(--display); letter-spacing: .09em; text-transform: uppercase; padding: 0 14px; }
+.pedal .px { top: 3px; right: 3px; left: auto; opacity: 0; transition: opacity var(--t-fast) var(--e-out); z-index: 2; }
+.pedal:hover .px, .pedal:focus-within .px { opacity: 1; }
+@media (hover: none) { .pedal .px { opacity: 1; } }
+.pedal .led { top: auto; right: auto; left: auto; bottom: auto; margin: auto 0 6px; transform: translateY(-2px); width: 10px; height: 10px; box-shadow: 0 0 0 2px #0000004d, 0 0 0 3px color-mix(in srgb, var(--screw) 60%, transparent), inset 0 -1px 2px #0006; }
+.pedal:not(.off) .led { background: radial-gradient(circle at 40% 35%, #ffd0d8, var(--led-on) 45%, #b3122f); box-shadow: 0 0 0 2px #0000004d, 0 0 0 3px color-mix(in srgb, var(--screw) 60%, transparent), 0 0 10px var(--led-on), 0 0 22px #ff3b5c66; }
+.pedal.flash:not(.off) .led { animation: bloom var(--t-slow) var(--e-out); }
+/* under reduced motion a pedal that arrives carries the page's static ring for 1.2s instead (S-27) */
+@media (prefers-reduced-motion: reduce) { .pedal.flash { outline: 2px solid var(--hot); outline-offset: 3px; } }
+@keyframes bloom { 0% { box-shadow: 0 0 0 2px #0000004d, 0 0 0 3px transparent, 0 0 30px 10px #ff3b5cee; } 100% { } }
+.pedal .always { margin-top: 0; height: 38px; }
+.pedal:not(.xunit) .always { padding-top: 6px; }
+/* chrome footswitch on a hex nut */
+.pedal .foot { width: 40px; height: 40px; border: 0; border-radius: 0; margin-top: 0; margin-bottom: -2px; flex: none; position: relative; cursor: pointer; box-shadow: none;
+  clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%);
+  background: conic-gradient(from 30deg, #9c9ba6, #e6e5ec, #7a7884, #c9c8d0, #6f6d78, #d8d7de, #9c9ba6); }
+.pedal .foot::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: radial-gradient(circle at 38% 30%, #ffffff, #d6d5dd 30%, #8d8b97 70%, #c3c2ca); box-shadow: 0 3px 0 #4d4b55, inset 0 -2px 3px #0005; }
+.pedal .foot:hover::after { filter: brightness(1.1); }
+.pedal .foot:active::after { box-shadow: 0 0 0 #4d4b55, inset 0 -1px 2px #0005; }
+.pedal .foot:active { transform: none; }
+.pedal .foot:focus-visible { outline: none; }
+.pedal .foot:focus-visible::after { box-shadow: 0 3px 0 #4d4b55, 0 0 0 2px var(--pd-face, transparent), 0 0 0 4px var(--ring); }
+/* pedal wells: readable on both skins */
+.pedal .led-btn { background: var(--pd-well); border-color: var(--pd-wline); color: color-mix(in srgb, var(--pd-ink) 78%, transparent); }
+.pedal .led-btn.on { color: var(--pd-ink); }
+.pedal .led-btn:hover { border-color: color-mix(in srgb, var(--pd-ink) 40%, transparent); }
+.pedal .chipsw > div { background: var(--pd-well); border-color: var(--pd-wline); }
+.pedal .chipsw button { color: color-mix(in srgb, var(--pd-ink) 72%, transparent); }
+.pedal .chipsw button[aria-pressed="true"] { background: var(--pd-ink); color: var(--pb1); }
+.pedal .bigval { background: var(--pd-well); }
+.pedal .pbtn { border: 1px solid var(--pd-wline); background: var(--pd-well); color: var(--pd-ink); border-radius: 7px; padding: 5px 10px; font: 600 12px var(--body); }
+.pedal .pbtn:hover { border-color: color-mix(in srgb, var(--pd-ink) 45%, transparent); }
+.pedal .pextra .tog { color: var(--pd-ink); }
+.pedal.xunit, .t-quick .pedal.xunit, .t-lab .pedal.xunit { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px 16px; width: auto; max-width: none; min-height: 54px; padding: 8px 40px; border-radius: 3px; text-align: left; }
+.pedal.neutral .led { display: none; }
+.pedal.xunit { background: linear-gradient(var(--un1), var(--un2)); }
+/* rack units: lip on the right with power and close */
+.pedal.xunit { padding-right: 46px; }
+.pedal.xunit::before { background:
+    radial-gradient(ellipse 4px 3px at 14px 12px, #0009 0 2.5px, transparent 3px), radial-gradient(ellipse 4px 3px at 14px calc(100% - 12px), #0009 0 2.5px, transparent 3px),
+    linear-gradient(90deg, #0000001f 0 28px, transparent 28px); box-shadow: inset 0 1px 0 #ffffff26, inset 0 -1px 0 #0003, inset 28px 0 0 -27px #0003; }
+/* pedals: the remove control is a tab that slides up out of the top edge */
+.pedal .px.tab { top: -17px; right: 16px; left: auto; width: 30px; height: 18px; border-radius: 7px 7px 0 0; z-index: -1; display: grid; place-items: center; padding: 0 0 2px;
+  font: 600 14px/1 var(--body); color: var(--pd-ink); background: hsl(var(--h) var(--pd-s1) var(--pd-l1)); box-shadow: inset 0 1px 0 #ffffff30; transition: transform var(--t-base) var(--e-spring), opacity var(--t-fast) var(--e-out); }
+.pedal .px.tab:hover { color: var(--hot); background: hsl(var(--h) var(--pd-s1) calc(var(--pd-l1) + 6%)); }
+.pedal .drop-x { top: 2px; right: 2px; width: 22px; height: 22px; }
+.pedal .pk-lcd b { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* pedal lettering: close to full ink, so it reads on the light and the dark end of each pedal's gradient */
+.pedal .kn .kl { color: var(--pd-ink); }
+.pedal .lcdsel .kl, .pedal .chipsw .kl { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+.pedal .always { opacity: .9; }
+.pedal small { opacity: 1; }
+.pedal.xunit .lcdsel { min-width: 0; max-width: 100%; }
+@container desk (max-width: 539.98px) {
+  .pedal.xunit, .t-quick .pedal.xunit, .t-lab .pedal.xunit { padding: 8px 34px 8px 30px; }
+  .pedal.xunit b { min-width: 0; }
+}
+/* Quality evaluator chips: room between Master and Both */
+.pedal .chipsw > div { gap: 2px; }
+.board > .pedals.pedal-exit > .pedal { margin: 0; }
+.board .pedals > .pedal { flex: none; width: min(var(--u), 100%); max-width: none; min-width: 0; }
+.t-lab .board .pedals > .pedal.u2 { width: min(calc(var(--u) * 2 + var(--ug)), 100%); }
+/* 216: a knob pedal's name, knob, label, value, LED and switch need 214 (196 cut the switch off) */
+.t-studio .board .pedals > .pedal { width: 132px; height: 216px; }
+.t-quick .board .pedals > .pedal { width: 112px; height: 140px; }
+/* the pedal face: name block, controls, then LED and foot switch at fixed places from the bottom */
+.board .pedals > .pedal { padding: 16px 14px; gap: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+.board .pedals > .pedal > b { display: grid; place-items: center; min-height: calc(2 * 1.15em); padding: 0 18px; margin: 0 0 12px; text-align: center; line-height: 1.15; font: 700 11.5px/1.15 var(--display); letter-spacing: .09em; text-wrap: balance; }
+.board .pedals > .pedal > .led { order: 98; margin: auto 0 12px; transform: none; flex: none; }
+/* a pedal in a row with a taller one keeps its controls in the middle of its face, between its name and its LED, so no
+   pedal carries a blank band under its controls (L-12); its switch still lines up with the row's */
+.board .pedals > .pedal > b + :not(.led) { margin-top: auto; }
+/* the last control keeps 14px clear of the LED (it was meant for the control before the LED; nth-last-child(3) is the LED) */
+.board .pedals > .pedal > :has(+ .led):not(b):not(.led) { margin-bottom: 14px; }
+.board .pedals > .pedal > .foot, .board .pedals > .pedal > .always { order: 99; margin: 0; }
+.board .pedals > .pedal > .always { height: 40px; width: 76px; display: grid; place-items: center; padding: 0; border-radius: 4px; font: 600 10px/1.15 var(--mono); letter-spacing: .1em; text-align: center; text-transform: uppercase; opacity: 1;
+  color: color-mix(in srgb, var(--pd-ink) 75%, transparent); background: color-mix(in srgb, var(--pd-ink) 8%, transparent); box-shadow: inset 0 1px 2px #0003, 0 1px 0 #ffffff40; }
+.board .pedals > .pedal.neutral > .led { display: block; visibility: hidden; }
+.pedal.neutral::before { --screw: color-mix(in srgb, var(--jack) 40%, #fff); }
+/* knobs: fixed 64 px cells, one-line labels, values on their own line (D-04) */
+/* a short last row is centred under the full one (L-39) */
+.board .pknobs { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 4px; align-self: center; width: calc(var(--cols, 2) * 64px + (var(--cols, 2) - 1) * 4px); max-width: 100%; }
+.board .pknobs > .kn-empty { align-self: start; height: 34px; }
+/* a kept knob cell is a recessed blanking plate, not an outlined ring (which read as a knob that failed to load); the first
+   plate says, in the pedal's label style, which setting fills it (L-13) */
+.board .pknobs > .kn-empty { position: relative; height: 72px; align-content: start; }
+.board .pknobs > .kn-empty::before { content: ""; width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, #000 6%, transparent); box-shadow: inset 0 1px 1px color-mix(in srgb, #000 14%, transparent), 0 1px 0 color-mix(in srgb, #fff 10%, transparent); }
+.board .pknobs > .kn-empty[data-blank]::after { content: attr(data-blank); position: absolute; top: 42px; left: 0; width: calc(var(--span, 1) * 64px + (var(--span, 1) - 1) * 4px); font: 500 10px/1.3 var(--mono); letter-spacing: .03em; text-align: center; text-wrap: balance; color: color-mix(in srgb, var(--pd-ink) 72%, transparent); pointer-events: none; }
+.board .pknobs .kn, .board .u-ctls .kn { width: 64px; min-width: 0; gap: 4px; }
+.board .pmid { display: grid; justify-items: center; gap: 4px; }
+.board .pmid .kn .kl:empty { display: none; }
+.t-studio .board .pmid .bigval { min-width: 64px; text-align: center; }
+/* what a Studio pedal is missing, two lines at most: the fact, then the way to it (Q-10) */
+.t-studio .board .pmid small { text-align: center; line-height: 1.4; }
+.board .pmid small .linkbtn { padding: 0; font: inherit; color: var(--pd-ink); text-decoration: underline; text-underline-offset: 2px; }
+/* selectors and text fields: control first, its label engraved underneath, centred (D-19) */
+.board .psels { display: grid; gap: 12px; align-self: stretch; margin-top: 14px; }
+.board .pedals > .pedal > .lcdsel, .board .psels .lcdsel { display: grid; gap: 5px; justify-items: stretch; width: 100%; text-align: center; }
+.board .pedals > .pedal > .lcdsel { margin-top: 14px; }
+/* toggles: LED push switches, two to a row on a 2U pedal, label beside (D-19) */
+.board .psw { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 16px; align-self: stretch; margin-top: 14px; }
+.board .pedals .psw .led-btn, .board .u-ctls .led-btn { background: none; border: 0; box-shadow: none; padding: 2px 0; gap: 8px; max-width: none; min-height: 0; color: var(--pd-ink); font: 500 11px/1.2 var(--mono); letter-spacing: .05em; text-align: left; }
+.board .psw .led-btn i, .board .u-ctls .led-btn i { width: 18px; height: 18px; flex: none; border-radius: 4px; position: relative; background: linear-gradient(color-mix(in srgb, var(--pd-ink) 10%, var(--kn-c1)), var(--kn-c2)); box-shadow: 0 2px 0 #0004, inset 0 1px 0 #ffffff80, 0 0 0 1px #0003; transition: transform var(--t-instant) var(--e-out), box-shadow var(--t-instant) var(--e-out); }
+.board .psw .led-btn i::after, .board .u-ctls .led-btn i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--led-off); box-shadow: inset 0 1px 1px #0006; transition: background var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.board .psw .led-btn.on i::after, .board .u-ctls .led-btn.on i::after { background: var(--led-on); box-shadow: 0 0 6px var(--led-on); }
+.board .psw .led-btn:active i, .board .u-ctls .led-btn:active i { transform: translateY(1px); box-shadow: 0 1px 0 #0004, inset 0 1px 0 #ffffff60, 0 0 0 1px #0003; }
+.board .psw .led-btn:hover, .board .u-ctls .led-btn:hover { border: 0; }
+/* VST3: a dark window and a hardware key, not a web button */
+.board .pwin { display: block; font: 13px/1 var(--lcdfont); letter-spacing: .08em; color: var(--lcd-fg); background: var(--lcd); border-radius: 6px; padding: 9px 8px; box-shadow: inset 0 1px 4px #000a, 0 1px 0 #ffffff40; text-align: center; }
+.board .pedals > .pedal > .pbtn { margin-top: 12px; padding: 5px 12px; border-radius: 5px; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--pd-ink); background: linear-gradient(color-mix(in srgb, var(--pd-ink) 6%, var(--kn-c1)), var(--kn-c2)); border: 0; box-shadow: 0 2px 0 #0004, inset 0 1px 0 #ffffff70, 0 0 0 1px #0003;
+  transition: transform var(--t-instant) var(--e-out), box-shadow var(--t-instant) var(--e-out); }
+.board .pedals > .pedal > .pbtn:active { transform: translateY(1px); box-shadow: 0 1px 0 #0004, inset 0 1px 0 #ffffff60, 0 0 0 1px #0003; }
+.board .drop.pslot { display: grid; gap: 3px; justify-items: center; width: 100%; margin-top: 12px; padding: 10px 8px 9px; border: 0; border-radius: 6px; cursor: pointer; position: relative; text-align: center;
+  background: color-mix(in srgb, #000 22%, transparent); box-shadow: inset 0 2px 4px #0006, 0 1px 0 #ffffff40; color: var(--pd-ink); }
+.board .drop.pslot::before { content: ""; position: absolute; left: 18px; right: 18px; top: 4px; height: 2px; border-radius: 1px; background: #0007; }
+.board .pslot .ps-eng { font: 600 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
+.board .pslot .ps-name { font: 11px var(--mono); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board .pslot.loaded { padding-right: 28px; }
+.board .pnote { display: block; margin-top: 8px; font: 11px/1.35 var(--mono); color: var(--pd-ink); text-align: center; }
+.board .pnote .linkbtn { color: inherit; font: inherit; }
+.board .pslot .drop-x { top: 50%; right: 4px; margin-top: -11px; }
+.board .pedals > .pedal > .psw:last-of-type { margin-bottom: 0; }
+.board .pedal.xunit { display: grid; grid-template-columns: minmax(72px, 112px) minmax(0, 1fr); align-items: center; column-gap: 16px; width: auto; max-width: none; min-width: 0; min-height: 64px; padding: 10px 40px 10px 34px; }
+.t-lab .board .pedal.xunit { min-height: 72px; }
+.board .pedal.xunit { align-content: center; justify-items: start; }
+.board .pedal.xunit > b { display: grid; gap: 2px; place-items: center start; min-height: 0; padding: 0; text-align: left; font: 700 11.5px/1.2 var(--display); letter-spacing: .09em; text-transform: uppercase; }
+@container desk (max-width: 699.98px) { .board .pedal.xunit { grid-template-columns: minmax(0, 1fr); row-gap: 8px; } }
+@container desk (max-width: 539.98px) { .board .pknobs { grid-template-columns: repeat(auto-fit, 64px); } }
+/* names and LCDs that have to fit a fixed pedal */
+.t-quick .board .pedals > .pedal > b { padding: 0 2px; }
+.t-studio .board .pedals > .pedal > b { padding: 0 8px; }
+/* pedals: the face brightens a touch under the pointer (no movement: the cables are measured from it) */
+.board .pedals > .pedal { transition: filter var(--t-fast) var(--e-out); }
+.board .pedals > .pedal:hover { filter: brightness(1.035); }
+.pedal .knob > .det { color: var(--pd-ink); }
+.pedal .kn:not(.changed) .knob > .det { --det: color-mix(in srgb, var(--pd-ink) 80%, transparent); }
+/* foot switch: the cap travels 2px down at once and comes back with a small spring; the LED blooms on the up-stroke */
+.pedal .foot::after { transition: transform var(--t-fast) var(--e-spring), box-shadow var(--t-fast) var(--e-out), filter var(--t-fast) var(--e-out); }
+.pedal .foot:active::after { transform: translateY(2px); transition-duration: var(--t-instant); }
+.pedal.here { animation: pedHere calc(var(--t-slow) * 2) var(--e-out); }
+@keyframes pedHere { from { outline: 3px solid color-mix(in srgb, var(--hot) 70%, transparent); outline-offset: 3px; } to { outline: 3px solid transparent; outline-offset: 10px; } }
+@media (prefers-reduced-motion: reduce) { .pedal.here { animation: none !important; outline: 2px solid var(--hot); outline-offset: 3px; } }
+/* ---- removing a pedal: at rest a full board is clean hardware, no tabs. With a pointer, the tab rises out of the
+   pedal's top edge on hover; with the keyboard, it rises when anything in the pedal has focus (it is the pedal's first
+   tab stop). On a touch screen, where there is no hover,
+   the tab stays up, small, as the only way in. The base tab rule is above; this replaces round 1's resting peek. ---- */
+.pedal .px.tab { opacity: 0; transform: translateY(14px); }
+.pedal:hover .px.tab, .pedal:focus-within .px.tab { opacity: 1; transform: none; }
+@media (hover: none) { .pedal .px.tab { opacity: .9; transform: translateY(6px); } }
+/* a long unit rides beside its number, smaller, so the read-out stays on one line and every pedal's LED and switch line up
+   (Q-09) */
+.pedal output[data-unit] { white-space: nowrap; padding-inline: 2px; }
+.pedal output[data-unit]::after { content: attr(data-unit); margin-left: 3px; font-size: 10px; line-height: 0; letter-spacing: 0; opacity: .75; }
+/* Under a bypassed chain a pedal keeps its own state (Q-18): an engaged one's LED glows at 40%, a bypassed one's stays dark,
+   and a press on its switch changes that LED at once. */
+.pedal.off.held .led { background: radial-gradient(circle at 40% 35%, color-mix(in srgb, #ffd0d8 40%, var(--led-off)), color-mix(in srgb, var(--led-on) 40%, var(--led-off)) 45%, var(--led-off)); }
+/* keyboard focus inside a dimmed pedal (Q-21): the dimming is a filter, which would dull the focus ring too, so the pedal
+   being worked on stands at full strength while focus is in it; the remove tab has its own 2px ring */
+/* Bypassed is one look in every state (L-02): under the pointer it stays bypassed (a touch brighter, as an engaged face does),
+   and with keyboard focus inside it the face and every control but the focused one keep the bypassed filter, drawn so that
+   the focused control and its ring are not dulled: the face is dimmed through its screw layer, the rest one by one. */
+.board .pedals > .pedal.off:hover { filter: saturate(.25) brightness(.74); }
+.pedal.off:has(:focus-visible) { filter: none; box-shadow: 0 3px 0 hsl(var(--h) 12% calc(var(--pd-l3) * .7)), 0 6px 12px var(--pb-sh); }
+.pedal.off:has(:focus-visible)::before { backdrop-filter: saturate(.25) brightness(.7); }
+.pedal.off:has(:focus-visible) > :not(.foot, .px, .pknobs, .psels, .psw, .u-ctls, .u-lip):not(:focus-visible, :has(:focus-visible)),
+.pedal.off:has(:focus-visible) :is(.pknobs, .psels, .psw, .u-ctls) > :not(:focus-visible, :has(:focus-visible)) { filter: saturate(.25) brightness(.7); }
+.pedal .px.tab:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+/* engaged but with nothing to run (Q-19): the LED is amber, not red */
+.pedal.idle:not(.off) .led { background: radial-gradient(circle at 40% 35%, #ffe9c2, var(--amber) 45%, color-mix(in srgb, var(--amber) 70%, #000)); box-shadow: 0 0 0 2px #0000004d, 0 0 8px color-mix(in srgb, var(--amber) 60%, transparent); }

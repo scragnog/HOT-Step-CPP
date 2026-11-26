@@ -1,0 +1,7 @@
+{
+ "about": "The scenarios that caught each switch of switches/fix-chrome.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "fix rc08 undo puts the tier back": ["37-fix-chrome/rc08-two-tabs-keep-their-own-desk"],
+  "fix rc11 the tile being read stays put": ["37-fix-chrome/rc11-the-tile-being-read-stays-put"]
+ }
+}

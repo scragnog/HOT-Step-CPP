@@ -1,0 +1,14 @@
+/* Re-planning. */
+.dicebox { display: flex; gap: 6px; flex-wrap: wrap; }
+.die { width: 28px; height: 28px; border-radius: 7px; border: 2px solid var(--fg); display: grid; place-items: center; font: 700 12px var(--mono); font-style: normal; transform: rotate(calc((var(--i, 0) - 1) * 3deg)); }
+.die.off { opacity: .3; }
+.die:nth-child(odd) { rotate: -4deg; }
+.die:nth-child(even) { rotate: 3deg; }
+.dice-cap { display: grid; gap: var(--s-1); justify-items: start; }
+.dice-cap > .kl, .venn-cap > .kl { font: var(--caps); letter-spacing: var(--caps-ls); text-transform: uppercase; color: var(--faint); }
+.die { transition: background-color var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.die.used { background: var(--fg); color: var(--surface); }
+/* ten dice always fit one row: they size from the row, never wrapping one or two onto a row of their own (B-14) */
+.dice-cap { min-width: 0; max-width: 100%; }
+.dicebox { flex-wrap: nowrap; max-width: 100%; gap: 4px; }
+.dicebox > .die { flex: 0 1 28px; min-width: 16px; width: auto; height: auto; aspect-ratio: 1; }

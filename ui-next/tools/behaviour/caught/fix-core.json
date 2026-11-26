@@ -1,0 +1,8 @@
+{
+ "about": "The scenarios that caught each switch of switches/fix-core.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "fc takes tile one figure": ["37-fix-core/takes-tile-and-go-bar-say-one-figure"],
+  "fc reuse its own step": ["37-fix-core/reuse-with-the-same-words-offers-no-undo-of-your-typing"],
+  "fc vst host runner": ["37-fix-core/vst-chain-add-says-the-host-is-elsewhere"]
+ }
+}

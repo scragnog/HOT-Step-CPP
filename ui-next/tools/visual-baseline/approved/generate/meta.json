@@ -1,0 +1,30 @@
+{
+ "set": "generate",
+ "at": "2026-11-24T20:05:43.264Z",
+ "commit": "3e66102542",
+ "states": [
+  "gen-rest",
+  "gen-rest-dark",
+  "gen-rest-quick",
+  "gen-rest-w1920",
+  "gen-rest-w1280",
+  "gen-running",
+  "gen-queue",
+  "gen-queue-dark",
+  "gen-queue-reduced",
+  "gen-fold",
+  "gen-done",
+  "gen-done-dark",
+  "gen-wontfit",
+  "gen-passes",
+  "gen-line-hidden-parked",
+  "gen-notice",
+  "gen-player",
+  "gen-player-dark",
+  "gen-player-w1280",
+  "gen-menu",
+  "gen-menu-mm3-dark",
+  "gen-toasts",
+  "gen-toasts-dark"
+ ]
+}

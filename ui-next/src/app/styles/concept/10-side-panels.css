@@ -1,0 +1,28 @@
+/* The two side panels as boxes: heads, bodies, the rails when collapsed, the drawers below 1180px. */
+.side { position: sticky; top: calc(62px + env(safe-area-inset-top, 0px)); max-height: calc(100vh - 78px); background: none; border: 0; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.side-head { display: flex; align-items: center; gap: 8px; padding: 6px 4px 8px 6px; }
+.side-head h2 { margin: 0; font: 700 16px var(--display); flex: 1; }
+.side-body { overflow-y: auto; overflow-x: hidden; padding: 8px; display: grid; gap: 4px; align-content: start; }
+.collapsed .side-head, .collapsed .side-body { display: none; }
+.rail-btn { display: none; border: 0; background: none; writing-mode: vertical-rl; padding: 14px 0; color: var(--muted); font-weight: 500; width: 100%; }
+.collapsed .rail-btn { display: block; }
+.rail-btn:hover { color: var(--fg); }
+@media (max-width: 1180px) {
+  .side { position: fixed; z-index: 42; top: 0; bottom: 0; max-height: none; border-radius: 0; width: min(320px, 88vw); box-shadow: var(--shadow); padding-top: env(safe-area-inset-top, 0px); }
+  .side.left { left: 0; }
+  .side.right { right: 0; }
+  .side:not(.open) { display: none; }
+  .side.collapsed .side-head, .side.collapsed .side-body { display: flex; }
+  .side.collapsed .side-body { display: grid; }
+  .rail-btn, .side.collapsed .rail-btn { display: none; }
+  .side { background: var(--surface); border-right: 1px solid var(--line); }
+}
+.drawer-scrim { position: fixed; inset: 0; z-index: 41; background: #0006; }
+@media (min-width: 1181px) { .drawer-scrim { display: none; } }
+/* side panels: one column that never grows past the panel, so a long name ellipsizes instead of pushing the actions out */
+.side-body { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1181px) and (max-width: 1419.98px) {
+  .app.r-over .side.right { position: fixed; z-index: 40; top: calc(62px + env(safe-area-inset-top, 0px)); right: 16px; width: 236px; max-height: calc(100vh - 62px - 84px); /* ends 12px above the go bar (72px), so Generate stays in sight (B-26, F-34) */
+      background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+}
+.app.r-over .side.right { animation: ovIn var(--t-base) var(--e-out); transform-origin: 100% 0; }

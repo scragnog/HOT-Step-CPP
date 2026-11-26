@@ -1,0 +1,31 @@
+<!-- Thumbnail flow: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="146" height="46" rx="8"/>
+<rect class="win2" x="20" y="22" width="28" height="9" rx="2.5"/>
+<rect class="win2" x="58" y="22" width="28" height="9" rx="2.5"/>
+<rect class="win2" x="96" y="22" width="28" height="9" rx="2.5"/>
+<rect class="win2" x="134" y="22" width="22" height="9" rx="2.5"/>
+<rect class="win" x="39" y="35" width="28" height="9" rx="2.5"/>
+<rect class="win" x="77" y="35" width="28" height="9" rx="2.5"/>
+<rect class="win" x="115" y="35" width="28" height="9" rx="2.5"/>
+<rect class="term-k" x="21" y="52" width="10" height="2.5" rx="1.25"/>
+<rect class="term-k" x="145" y="52" width="10" height="2.5" rx="1.25"/>
+<g class="k ">
+<path class="k-t" d="M23.6 88.4A9 9 0 1 1 36.4 88.4"/>
+<path class="k-a" d="M23.6 88.4A9 9 0 0 1 27.9 73.2"/>
+<circle class="k-c" cx="30" cy="82" r="6.4"/>
+<circle class="k-r" cx="30" cy="82" r="5.6"/>
+<path class="k-p" d="M30 82L28.6 76.4"/>
+</g>
+<g class="k ">
+<path class="k-t" d="M53.6 88.4A9 9 0 1 1 66.4 88.4"/>
+<path class="k-a" d="M53.6 88.4A9 9 0 0 1 52.7 76.7"/>
+<circle class="k-c" cx="60" cy="82" r="6.4"/>
+<circle class="k-r" cx="60" cy="82" r="5.6"/>
+<path class="k-p" d="M60 82L55.3 78.6"/>
+</g>
+<rect class="chip" x="82" y="69" width="79" height="12" rx="6"/>
+<circle class="led-on" cx="90" cy="75" r="2.4"/>
+<rect class="eng" x="97" y="73.5" width="57" height="3" rx="1.5"/>
+<rect class="chip" x="82" y="85" width="62" height="12" rx="6"/>
+<circle class="led-off" cx="90" cy="91" r="2.4"/>
+<rect class="eng" x="97" y="89.5" width="40" height="3" rx="1.5"/>

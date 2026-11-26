@@ -1,0 +1,10 @@
+{
+  "about": "The second fix round's fixes around the desk (the items the core round's re-reading left for this share), each switched off by one small change (vite.config.ts HS_SWITCH, test build only); each must make a scenario of acceptance/fix-chrome2.json fail.",
+  "switches": [
+    {"feature": "fix2 create keys do nothing on another page", "file": "src/app/register/keys.ts", "find": "if ((create || !k.create) && k.when(e))", "replace": "if (k.when(e))"},
+    {"feature": "fix2 a module is described on its engine", "file": "src/derive/steps.ts", "find": "l.engines.includes(desk.engine) && l.desc)", "replace": "l.engines.includes(desk.engine) && l.desc && false)"},
+    {"feature": "fix2 a symbol under a finger says a second tap uses it", "file": "src/app/parts/Dropdown.tsx", "find": "{preview ? say(ui('dd.tapAgain', { name: words(big) })) : ''}", "replace": "{''}"},
+    {"feature": "fix2 undo says what it left alone", "file": "src/app/store/desk.ts", "find": "return r.note ? { list: [said, r.note], join: 'sentences' } : said;", "replace": "return said;"},
+    {"feature": "fix2 a spent undo says so", "file": "src/app/store/desk.ts", "find": "    if (!r.moved) return {", "replace": "    if (false) return {"}
+  ]
+}

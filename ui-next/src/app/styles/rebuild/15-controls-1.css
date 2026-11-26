@@ -1,0 +1,102 @@
+/* The shared controls on every surface (package 1; styles/rebuild/, loaded after the concept's, whose files stay as
+   they are). The concept draws each of these controls inside one module's look: a token in a terminal, a lit word or
+   numbered chips on Tempo's LCD, a chip selector on a side unit's rack, the record button on the dark plans deck, the
+   look-back strip in a terminal. A definition can put them anywhere, so here each gets its look on the surfaces the
+   concept never drew it on, in the concept's tokens and materials: on paper (a tile's body, a row, a rack, a well, a
+   foot, a labelled pairing) the page's ink; on hardware (a pedal, a side unit) the hardware's ink; and the parts that
+   are an LCD's own (a lit word, numbered chips, the big number) bring a small LCD housing wherever no LCD holds them.
+   tools/visual-baseline/gallery.mjs draws every one on every surface, both themes, every tier. */
+
+/* ---- a small control keeps its own width in a tile's grid, as the concept's controls do in its rows */
+:is(.tile-body, .lcd) > :is(.pill-tog, .flag, .lcd-btns, .rec, .lock, .tok, .chipsw, .tchips, .lcd-bars, .lcd-numw, .stamp-wrap, .pchip) { justify-self: start; width: max-content; max-width: 100%; }
+.lcd > .lcd-btns { margin-left: 0; }
+.chipsw > div { width: max-content; max-width: 100%; }
+:is(.knobs, .tile-foot, .samp-strip, .rackrow) > :is(.pill-tog, .flag, .lcd-btns, .rec, .lock, .tok, .tchips, .lcd-bars, .lcd-numw, .pchip) { align-self: center; }
+/* in a well (a grid of 96px columns) a wide control takes the well's whole row */
+.samp-strip > :is(.chipsw, .tchips, .lcd-bars, .dur, .codes, .codes-cap, .pk-plugin, .pk-model, .pchip, .xy) { grid-column: 1 / -1; }
+.samp-strip > :is(.dur, .codes, .codes-cap) { justify-self: stretch; }
+
+/* ---- the parts that are an LCD's own (Tempo's lit words, its bar chips, its big number) bring a small LCD housing
+   wherever no LCD holds them */
+:is(.lcd-btns, .lcd-bars, .lcd-numw):not(.lcd :is(.lcd-btns, .lcd-bars, .lcd-numw)) {
+  background: var(--lcd); color: var(--lcd-fg); border-radius: 7px; padding: 4px 6px; box-shadow: inset 0 2px 6px #000a, var(--bezel); width: max-content; max-width: 100%; }
+.lcd-btns:not(.lcd .lcd-btns) { margin-left: 0; }
+.lcd-numw { display: inline-flex; align-items: baseline; gap: var(--s-2); }
+/* in an LCD's row its pieces stand in the row, as the concept's BPM does in its LCD's top row */
+:is(.lcd-row, .lcd-top) > .lcd-numw { display: contents; }
+.lcd > .lcd-numw { display: flex; width: auto; }
+.lcd-numw:not(.lcd .lcd-numw) .lcd-num.num { font-size: 32px; }
+.lcd-numw:not(.lcd .lcd-numw) .lcd-unit > small { font: 12px var(--lcdfont); color: color-mix(in srgb, var(--lcd-fg) 70%, transparent); }
+
+/* ---- a chip selector on paper: the page's segmented look, its label the page's caps label (the concept draws it only
+   on a side unit's dark rack) */
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip, .rackrow, .lcdsel) > .chipsw > .kl { color: var(--faint); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip, .rackrow) > .chipsw > div { background: var(--raised); border-color: var(--line); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip, .rackrow) > .chipsw button { color: var(--muted); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip, .rackrow) > .chipsw button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+:is(.tile-body, .knobs, .tile-foot, .foot-ctl, .samp-strip, .rackrow) > .chipsw { --chg: var(--amber); }
+/* on a pedal, in the pedal's ink */
+.pedal:not(.xunit) .chipsw > .kl { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+
+/* ---- terminal chips and flags outside a terminal: the page's (or the hardware's) ink, the pressed chip as in the
+   terminal */
+.tchips:not(.term .tchips) button { color: var(--muted); font: 500 12px var(--mono); }
+.tchips:not(.term .tchips) button[aria-pressed="true"] { color: var(--inst); background: var(--lcd-fg); }
+.tchips:not(.term .tchips) { --chg: var(--amber); }
+.flag:not(.term .flag) { color: var(--fg); font: 500 12px var(--mono); }
+.flag:not(.term .flag) .fbox::before { color: var(--muted); }
+.flag.on:not(.term .flag) .fbox::before { color: var(--hot); }
+.pedal:not(.xunit) :is(.flag, .tchips button):not(.term *) { color: var(--pd-ink); }
+.lcd :is(.flag, .tchips button):not(.term *) { color: var(--lcd-fg); }
+.lcd .tchips:not(.term .tchips), .lcd .flag:not(.term .flag) { --chg: #ffd27a; }
+
+/* ---- a token on hardware takes the hardware's ink (the concept: the page's ink on paper, green in a terminal or LCD) */
+.pedal:not(.xunit) .tok:not(.term .tok) { color: var(--pd-ink); }
+
+/* ---- the record button carries the page's mark after its words (on the plans deck the row's label carries it,
+   35-changed.css, and the deck hides the control's own) */
+.rec.changed::after { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 -9px 0 4px; vertical-align: middle; translate: 0 -1px; border-radius: 50%; background: var(--chg); }
+/* ---- the record button off its dark deck: the page's raised face, its words in the hot ink; armed it is the deck's red */
+.rec:not(.deck .rec):not(.on) { background: var(--raised); border-color: var(--line); color: var(--hot); }
+
+/* ---- a ruler and a look-back strip need room: in a row they take a share of it, on a pedal its whole width */
+:is(.knobs, .rackrow, .tile-foot, .u-ctls, .foot-ctl) > :is(.dur, .codes) { flex: 1 1 220px; min-width: 200px; }
+:is(.knobs, .rackrow, .tile-foot, .u-ctls, .foot-ctl) > .codes-cap { flex: 1 1 100%; }
+.pedal:not(.xunit) :is(.dur, .codes, .codes-cap) { width: 100%; align-self: stretch; }
+/* the scale's last label stands left of its tick (21-ruler.css matches the concept's style text "left:100%"; React
+   writes "left: 100%") */
+.ruler-labels > span:last-child:not(:first-child)[style*="left: 100%"] { translate: -100% 0; }
+/* its label is the page's caps label wherever it stands, as on Tempo's tile (32-songs.css .tile[data-m="tempo"] .dur .lbl) */
+.dur > .lbl, .dur > .ctl-head > .lbl { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.pedal:not(.xunit) .dur :is(.lbl, .ruler-labels) { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+.lcd .dur :is(.lbl, .ruler-labels) { color: color-mix(in srgb, var(--lcd-fg) 80%, transparent); }
+/* the look-back strip's scale off a terminal: the page's (or the hardware's) quiet ink */
+.codes-cap:not(.term .codes-cap) { color: var(--muted); }
+.pedal:not(.xunit) .codes-cap { color: color-mix(in srgb, var(--pd-ink) 80%, transparent); }
+.lcd .codes-cap { color: color-mix(in srgb, var(--lcd-fg) 80%, transparent); }
+/* off a terminal the strip carries the changed mark 4px after its box, at its top (in a terminal its token beside it
+   carries it, as the concept marks it) */
+.codes.changed:not(.term .codes) { position: relative; }
+.codes.changed:not(.term .codes)::after { content: ""; position: absolute; left: 100%; top: 0; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--chg); }
+
+/* ---- a fader off its bank: its read-out and tape label in the page's ink */
+.fdr:not(.faders .fdr) output { color: inherit; }
+.fdr:not(.faders .fdr) .fdr-l { color: var(--muted); }
+.pedal:not(.xunit) .fdr:not(.faders .fdr) { color: var(--pd-ink); }
+.pedal:not(.xunit) .fdr:not(.faders .fdr) .fdr-l { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+.lcd .fdr:not(.faders .fdr) { color: var(--lcd-fg); }
+
+/* ---- a number box on hardware: the label in the hardware's ink */
+.pedal:not(.xunit) .numbox .kl { color: color-mix(in srgb, var(--pd-ink) 88%, transparent); }
+.lcd .numbox .kl { color: color-mix(in srgb, var(--lcd-fg) 80%, transparent); }
+.numbox output { font: 11px var(--mono); color: var(--muted); }
+
+/* ---- a plugin or model picker in a row takes a share of it rather than its whole width */
+:is(.knobs, .rackrow, .tile-foot, .u-ctls) > :is(.pk-plugin, .pk-model) { flex: 1 1 200px; min-width: 180px; width: auto; }
+.pedal:not(.xunit) :is(.pk-plugin, .pk-model) { min-width: 0; }
+
+/* ---- the language stamp stands where the concept puts it on the lyric paper; anywhere else it stands in the flow */
+.stamp-wrap:not(.paper-wrap .stamp-wrap) { position: relative; top: auto; right: auto; display: inline-block; justify-self: start; }
+
+/* ---- a text field's check: its words on a line of their own under the field (25-module-latent.css .field-err) */
+.field-err:not(.term .field-err) { display: block; }

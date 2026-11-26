@@ -1,0 +1,24 @@
+<!-- Thumbnail ex-fa: inner drawing in the thumbnail kit's classes, on the side-unit canvas. Captured from the concept at vanilla-reference. -->
+<rect class="lcd" x="64" y="40" width="74" height="32" rx="4"/>
+<rect class="lcd-t" x="69" y="54" width="1.6" height="4" rx=".8"/>
+<rect class="lcd-t" x="72.1" y="48.7" width="1.6" height="14.5" rx=".8"/>
+<rect class="lcd-t" x="75.2" y="47.8" width="1.6" height="16.4" rx=".8"/>
+<rect class="lcd-t" x="78.3" y="51.7" width="1.6" height="8.7" rx=".8"/>
+<rect class="lcd-t" x="81.4" y="48.7" width="1.6" height="14.6" rx=".8"/>
+<rect class="lcd-t" x="84.5" y="53.2" width="1.6" height="5.5" rx=".8"/>
+<rect class="lcd-t" x="87.6" y="52.1" width="1.6" height="7.8" rx=".8"/>
+<rect class="lcd-t" x="90.7" y="50.8" width="1.6" height="10.3" rx=".8"/>
+<rect class="lcd-t" x="93.8" y="50.8" width="1.6" height="10.3" rx=".8"/>
+<rect class="lcd-t" x="96.9" y="48.6" width="1.6" height="14.8" rx=".8"/>
+<rect class="lcd-t" x="100" y="46.7" width="1.6" height="18.7" rx=".8"/>
+<rect class="lcd-t" x="103.1" y="49.2" width="1.6" height="13.6" rx=".8"/>
+<rect class="lcd-t" x="106.2" y="52.8" width="1.6" height="6.5" rx=".8"/>
+<rect class="lcd-t" x="109.30000000000001" y="52.6" width="1.6" height="6.8" rx=".8"/>
+<rect class="lcd-t" x="112.4" y="51.9" width="1.6" height="8.3" rx=".8"/>
+<rect class="lcd-t" x="115.5" y="48.8" width="1.6" height="14.4" rx=".8"/>
+<rect class="lcd-t" x="118.6" y="51.2" width="1.6" height="9.7" rx=".8"/>
+<rect class="lcd-t" x="121.7" y="53.7" width="1.6" height="4.6" rx=".8"/>
+<rect class="lcd-t" x="124.80000000000001" y="46.7" width="1.6" height="18.7" rx=".8"/>
+<rect class="lcd-t" x="127.9" y="51.3" width="1.6" height="9.3" rx=".8"/>
+<rect class="lcd-t" x="131" y="53.3" width="1.6" height="5.4" rx=".8"/>
+<path class="mark" d="M80 43V69M101 43V69M122 43V69"/>

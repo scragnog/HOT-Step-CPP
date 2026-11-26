@@ -1,0 +1,241 @@
+/* Adapters: cartridges and their art, the rig, the fader bank, section masks and phases, the adapter picker. */
+/* adapters */
+.carts { display: flex; }
+.cart { border: 1px solid var(--line); background: linear-gradient(var(--raised), var(--surface)); display: grid; justify-items: center; position: relative; }
+.cart .slot { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; justify-self: start; padding-right: 16px; }
+.cart .lab { width: 100%; border-radius: 4px; text-align: center; place-items: center; }
+.cart .lab em { font-style: normal; display: block; }
+.cart output { font: 12px var(--mono); }
+.cart .x { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; font-size: 15px; }
+.cart.empty { font-size: 13px; }
+.songref .art { width: 40px; height: 40px; border-radius: 6px; flex: none; }
+.song .art { aspect-ratio: 1; max-width: 100%; border-radius: 10px; position: relative; overflow: hidden; }
+/* a finished song resolves out of its placeholder: the last of the blur and the colour come in, no scale pop, one soft
+   ring; its duration arrives just after (M-12, G-M-06). The "from" state is where the pending art ends (below). */
+.song.new .art { animation: resolve var(--t-slow) var(--e-out), arrive var(--t-long) var(--e-out); }
+@keyframes resolve { from { filter: blur(2px) saturate(.85); opacity: .9; } }
+@keyframes arrive { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--hot) 45%, transparent); } to { box-shadow: 0 0 0 10px color-mix(in srgb, var(--hot) 0%, transparent); } }
+.pending .art { background: var(--raised); }
+/* a song being made is its own art, washed out and out of focus, coming into focus as its progress (--f) goes 0 to 1 */
+.pending .art::before { content: ""; position: absolute; inset: -16px; background: var(--pbg, none); filter: blur(calc((1 - var(--f, 0)) * 16px)) saturate(calc(.25 + var(--f, 0) * .6)); opacity: calc(.45 + var(--f, 0) * .45); }
+.player .art { width: 40px; height: 40px; border-radius: 8px; flex: none; }
+.carts { gap: 12px; align-items: stretch; }
+.cart { --acc: #ff7aa0; padding: 8px 8px 14px; gap: 7px; border-radius: 12px; }
+.cart.t-lora, .cartpick.t-lora { --acc: #ff7aa0; }
+.cart.t-lokr, .cartpick.t-lokr { --acc: #33d1bf; }
+.cart.t-dora, .cartpick.t-dora { --acc: #f5a623; }
+.cart.h-sound { background: linear-gradient(#2d2a35, #19171e); border: 1px solid #ffffff14; color: #ece8f2; box-shadow: 0 4px 0 #0e0c12, 0 10px 18px #0005; }
+/* the ridge: whole ticks only, with equal margins at both ends (G-D-11) */
+.cart.h-sound::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 5px; height: 5px; border-radius: 2px; background: linear-gradient(90deg, transparent 1.5px, #ffffff26 1.5px 3.5px, transparent 3.5px) 0 0 / 5px 100% space; }
+/* one material for every cartridge in both themes: the planner housing is the same dark hardware, told apart by its violet
+   rim and label only (L-28; it was a pale lavender card in the light theme beside three black cartridges) */
+.cart.h-plan { background: linear-gradient(#2a2140, #1f1830); border: 1px solid #8f7fd0; color: #e7e0fb; box-shadow: 0 4px 0 #120d1d, 0 10px 18px #0005; }
+.cart .slot { color: inherit; }
+.cart .x { color: inherit; opacity: .6; }
+.cart .x:hover { opacity: 1; background: #ffffff1a; }
+.cart .label-art { width: 100%; border-radius: 8px; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--acc) 15%, #121017); box-shadow: inset 0 1px 5px #000a, 0 0 0 1px color-mix(in srgb, var(--acc) 35%, transparent); }
+.cart.h-plan .label-art { background: color-mix(in srgb, var(--acc) 18%, #2a2250); }
+.label-art svg, .mini-art svg { width: 94%; height: 94%; }
+.cart .lab { background: none; color: inherit; padding: 0; font: 600 12px/1.2 var(--mono); word-break: break-word; display: block; }
+.cart .lab em { color: var(--acc); opacity: 1; font-weight: 500; margin-top: 3px; font-size: 11px; letter-spacing: .02em; }
+.cart .fdr-slot::after { background: var(--acc); }
+.cart.h-sound .fdr-slot::before { background: #0008; }
+.cart .fdr output { color: inherit; }
+/* the planner cart has no fader: its note sits centred in the zone where the fader would be (G-D-03) */
+.cart .pl-note { min-height: 144px; display: grid; place-items: center; padding: 0 var(--s-2); font: 12px/1.35 var(--body); opacity: .8; text-align: center; color: inherit; text-wrap: balance; }
+.cart.empty { background: none; border: 1.5px dashed var(--faint); box-shadow: none; color: var(--muted); min-height: 230px; place-content: center; }
+.cart.empty::after { display: none; }
+.cart.empty::before { content: ""; position: absolute; top: 12px; left: 22px; right: 22px; height: 7px; border-radius: 1px; background: linear-gradient(90deg, transparent 2px, var(--faint) 2px 5px, transparent 5px) 0 0 / 7px 100% space; opacity: .45; }
+.cart.empty.h-plan { color: var(--lab); border-color: color-mix(in srgb, var(--lab) 55%, var(--line)); }
+.cart.empty:hover { border-color: var(--fg); color: var(--fg); }
+.art .body { fill: #1d1a24; stroke: var(--acc); stroke-width: 1.2; }
+.art .win { fill: #0b0a0f; stroke: #ffffff26; }
+.art .hub { fill: var(--acc); }
+.art .spoke { stroke: #120f18; stroke-width: 2; stroke-linecap: round; fill: none; }
+.art .tapeline { fill: none; stroke: #7a5140; stroke-width: 2.2; }
+.art .slotb { fill: #ffffff14; stroke: #ffffff22; }
+.chip-art .pin { stroke: #9d9aae; stroke-width: 1.6; }
+.chip-art .chip-body { fill: #0e0d12; stroke: var(--acc); stroke-width: 1; }
+.chip-art .chip-cell { fill: var(--acc); transition: opacity var(--t-base) var(--e-out); }
+.vec-art .track { fill: none; stroke: #ffffff24; stroke-width: 5; stroke-linecap: round; }
+.vec-art .mag { fill: none; stroke: var(--acc); stroke-width: 5; stroke-linecap: round; stroke-dasharray: 1 1; stroke-dashoffset: calc(1 - var(--p, .5)); transition: stroke-dashoffset var(--t-base) var(--e-out); }
+.vec-art .arrow { stroke: #fff; stroke-width: 2; stroke-linecap: round; }
+.vec-art .head { fill: #fff; }
+.vec-art .pivot { fill: var(--acc); }
+.vec-art text { font: 600 6.5px var(--mono); fill: #ffffff80; letter-spacing: .05em; }
+/* Quick's flat cartridge: the same dark housing and label art, lying on its side (G-D-36) */
+.qcart { --acc: #ff7aa0; position: relative; display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: var(--s-3); padding: var(--s-2) 30px var(--s-2) var(--s-2); border-radius: var(--r-well); background: linear-gradient(#2d2a35, #19171e); border: 1px solid #ffffff14; color: #ece8f2; box-shadow: 0 3px 0 #0e0c12, 0 8px 16px #0004; }
+.qcart.t-lokr { --acc: #33d1bf; }
+.qcart.t-dora { --acc: #f5a623; }
+.qcart .label-art { width: 76px; height: 50px; border-radius: 8px; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--acc) 15%, #121017); box-shadow: inset 0 1px 5px #000a, 0 0 0 1px color-mix(in srgb, var(--acc) 35%, transparent); }
+.qcart .lab { min-width: 0; font: 600 12px/1.25 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qcart .lab em { display: block; margin-top: 2px; font: 500 11px var(--mono); font-style: normal; color: var(--acc); }
+.qcart .x { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; color: inherit; opacity: .7; }
+.qcart .x:hover { opacity: 1; background: #ffffff1a; }
+.cartlist { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cartpick { display: grid; gap: 4px; justify-items: center; border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 8px 6px; text-align: center; transition: transform var(--t-fast) var(--e-out), border-color var(--t-fast) var(--e-out); }
+.cartpick:hover, .cartpick:focus-visible { transform: translateY(-2px); border-color: var(--acc); outline: none; }
+.cartpick .mini-art { --p: .6; width: 100%; height: 46px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in srgb, var(--acc) 15%, #121017); }
+.cartpick b { font: 500 12px var(--mono); word-break: break-word; }
+.cartpick em { font: normal 11px var(--mono); }
+@media (max-width: 560px) { .cartlist { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* --- adapters: a cartridge is one object at one size (G-D-11); the row left-aligns and an empty slot takes the
+   rest. The master section spans the tile: the bank grows into the row and its Re-base controls sit beside it. --- */
+.rig-wrap { display: flex; flex-wrap: wrap; gap: var(--s-4); align-items: stretch; }
+.rig-left { flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; align-content: start; }
+.carts { flex-wrap: wrap; }
+.cart { flex: none; width: 144px; max-width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); align-content: start; }
+/* an empty slot beside a cartridge is a cartridge's footprint, never more (A-04); only on an empty rig is it a bar */
+.carts > .cart.empty { flex: none; width: 144px; }
+/* one cartridge: its info card takes the room beside the row, and the bank (Lab) goes under both */
+.rig-wrap:has(> .rig-right) > .rig-left { flex: 0 1 auto; }
+.unused { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
+.carts > .cart.empty:not(.bar)::before { left: 50%; right: auto; width: 112px; translate: -50% 0; }
+/* cartridges start at the tile's left edge at every tier, over the words and choices that follow them (E-27) */
+.rig-wrap:not(.has-bank) .carts { justify-content: flex-start; }
+.cart > * { min-width: 0; max-width: 100%; }
+.cart .label-art svg { max-width: 100%; max-height: 100%; }
+/* the file name is the cartridge's only identity: it wraps to two lines rather than truncate (G-D-03) */
+.cart .lab { min-height: calc(2.4em + 16px); text-wrap: balance; overflow-wrap: anywhere; }
+.cart .lab em { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cart .label-art { height: 70px; }
+.rig-master { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); align-items: flex-start; }
+.rig-master > .rig-mh { flex: 1 1 100%; }
+.rig-master > .faders { flex: 1 1 380px; min-width: 0; }
+.rig-master > .faders .fdr { flex: 1 1 62px; width: auto; min-width: 0; }
+.rig-mh { display: flex; align-items: baseline; gap: 8px; font: 600 11px var(--mono); color: var(--muted); }
+.rig-mh small { font: 11px var(--mono); letter-spacing: 0; text-transform: none; color: var(--faint); }
+.rig-master .lbl { max-width: 360px; }
+.fdr-scale { display: grid; align-content: space-between; height: 124px; font: 10px var(--mono); color: #ffffff70; text-align: right; }
+.secband { display: flex; gap: 2px; width: 100%; height: 18px; border-radius: 4px; padding: 2px; background: #0000004d; box-shadow: inset 0 1px 2px #0008; touch-action: none; }
+.secband button { min-width: 0; border: 0; border-radius: 2px; background: var(--c); color: #fff; font: 700 10px/1 var(--mono); padding: 0; opacity: 1; cursor: pointer; }
+.secband button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.cart.h-plan .secband { background: #2a225026; }
+.vec-art text { display: none; }
+.secband:empty { display: none; }
+/* one control row: mode, Σ and a one-line caption; a solid hairline, since dashed means an empty slot (G-D-13) */
+.stackbar { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-4); align-items: center; min-height: 40px; padding: var(--s-1) 0 var(--s-3); border-bottom: 1px solid var(--line); }
+.stackbar .lbl { flex: 0 1 auto; font-size: var(--fs-12); }
+.forced .seg { outline: 1px dashed var(--amber); outline-offset: 2px; border-radius: 9px; }
+.forced-note { font: 11.5px var(--mono); color: var(--amber); }
+.stack-hint { padding: 0 2px; }
+.cart .eff { font: 11px var(--mono); color: var(--acc); opacity: .9; }
+.fdr-pair { display: flex; gap: 4px; justify-content: center; }
+.fdr-pair .fdr-slot { width: 30px; }
+.fdr-pair .fdr-l { font-size: 10px; }
+/* active phase: handles live inside the track (inset by half a handle), the read-out is a caption above it in the
+   style of 'sends 0.25', never under a handle (G-D-12) */
+.phase { position: relative; width: 100%; height: 18px; margin-top: 16px; border-radius: 4px; background: #0000004d; box-shadow: inset 0 1px 2px #0008; touch-action: none; cursor: ew-resize; }
+.phase i { position: absolute; top: 3px; bottom: 3px; left: calc(3px + (100% - 6px) * var(--a) / 100); width: calc((100% - 6px) * (var(--b) - var(--a)) / 100); border-radius: 3px; background: color-mix(in srgb, var(--acc) 55%, transparent); }
+.phase b { position: absolute; top: 1px; bottom: 1px; width: 6px; left: calc((100% - 6px) * var(--v) / 100); border-radius: 2px; background: #fff; box-shadow: 0 0 4px var(--acc); outline: none; }
+.phase b:focus-visible { box-shadow: 0 0 0 2px var(--acc), 0 0 6px var(--acc); }
+.phase span { position: absolute; left: 0; bottom: calc(100% + 3px); font: 11px/1 var(--mono); color: var(--acc); pointer-events: none; white-space: nowrap; }
+.phase span em { font-style: normal; opacity: .7; margin-right: .5ch; }
+.secband button.half { opacity: .55; background-image: repeating-linear-gradient(135deg, #0004 0 3px, transparent 3px 6px); }
+.secband button.off { opacity: .16; filter: saturate(.3); }
+/* Re-base belongs to the bank: a column beside it, label over its control */
+/* Re-base is a row under the bank, so the bank spans the tile and nothing floats beside it (A-28) */
+.rebase { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); padding: var(--s-1) 0 0; }
+.rig-side { align-self: start; }
+.rebase .kl { font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.song.pending .art { position: relative; }
+/* section mask strip and phase handles: taller cells, a wider grip */
+.phase [data-ph] { touch-action: none; }
+.cart.h-plan .lab em, .cart.h-plan .slot { color: #cfc3f7; }
+.cart .slot { opacity: .86; }
+.cart.h-plan .x { opacity: .85; }
+.cartpick em { color: color-mix(in srgb, var(--acc) 45%, var(--fg)); }
+.rig-side { flex: 1 1 220px; min-width: 0; display: grid; gap: 8px; align-content: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.rig-side .kl { font: 500 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.rig-side p { margin: 0; font-size: 13px; color: var(--fg); }
+.rig-side p.lbl { color: var(--muted); }
+.rig-side .sbtn { justify-self: start; }
+.fdr-scale { align-self: start; margin-top: 12px; padding: 4px 4px 4px 2px; }
+/* an adapter slot with nothing in it is a load bar, not a cartridge-sized hole; it grows to a cartridge once one is loaded (D-11) */
+.carts > .cart.empty.bar { min-height: 0; height: 64px; max-width: none; flex: 1 1 180px; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 0 14px; }
+.carts > .cart.empty.bar br { display: none; }
+.carts > .cart.empty.bar::before { top: 8px; left: 14px; right: 14px; height: 5px; }
+/* song cards: the art lifts a little; its play button is already there to press */
+.song .art { transition: translate var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.song:hover .art { translate: 0 -2px; box-shadow: 0 10px 24px -10px #1b172259; }
+/* a song being made shows its progress on the art as a ring, as well as the bar along its foot (M-12) */
+.song.pending .art::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(var(--hot) calc(var(--f, 0) * 360deg), color-mix(in srgb, var(--fg) 12%, transparent) 0);
+  -webkit-mask: radial-gradient(circle closest-side, transparent 80%, #000 82%); mask: radial-gradient(circle closest-side, transparent 80%, #000 82%); }
+.song.waiting .art::after { background: color-mix(in srgb, var(--amber) 40%, transparent); }
+.song.playing .art::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--pp, 0) * 100%); background: var(--hot); box-shadow: 0 0 6px var(--hot); transition: width 1s linear; }
+@media (prefers-reduced-motion: reduce) { .pending .art::before { animation: rmPulse 1.6s linear infinite !important; background-position: 50% 0 !important; } }
+/* phase strips: handles widen and brighten */
+.phase b { transition: transform var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.phase:hover b { transform: scaleX(1.34); box-shadow: 0 0 7px var(--acc); }
+/* section masks: a chip lifts a pixel and brightens */
+.secband button { transition: opacity var(--t-fast) var(--e-out), filter var(--t-fast) var(--e-out), translate var(--t-fast) var(--e-out); }
+.secband button:hover { translate: 0 -1px; filter: brightness(1.12); }
+.secband button.off:hover { filter: saturate(.3) brightness(1.4); }
+/* in one column the foot's labelled switches stack their label over the switch, so none runs out of the tile */
+.tile[data-m="adapters"]:not(.w2):not(.widened) .tile-foot .foot-ctl { display: grid; gap: 4px; max-width: 100%; }
+.tile[data-m="adapters"]:not(.w2):not(.widened) .tile-foot .seg { max-width: 100%; }
+.tile[data-m="adapters"]:not(.w2):not(.widened) .tile-foot .seg > button { padding-inline: 8px; }
+/* a cartridge's name (Q-26): without its extension, at most two lines, breaking only at - _ . */
+.cart .lab-n, .qcart .lab-n { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: normal; word-break: normal; white-space: normal; }
+.qcart .lab { white-space: normal; }
+.qcart .label-art { flex-shrink: 1; min-width: 44px; }
+/* Quick in one column: the art gives way before the name does, and a name that still does not fit breaks anywhere
+   rather than being cut (Q-18); with more than one loaded, one line says so and leads to Studio */
+.bento > .tile:not(.w2, .widened) .qcart { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s-2); padding-right: 26px; }
+.bento > .tile:not(.w2, .widened) .qcart .label-art { width: 52px; height: 40px; }
+.qcart .lab-n { overflow-wrap: anywhere; }
+.q-more { margin: 0; font-size: var(--fs-12); line-height: 1.45; color: var(--muted); }
+.q-more .linkbtn { font-size: var(--fs-12); color: var(--fg); padding: 0; }
+/* --- the rig takes the room it needs, no more (L-05). The cartridges keep their width; the Group-scales bank stands beside
+   them when the tile has 400px to spare and goes under them when it does not. With one cartridge its info card and the
+   bank share the column beside it. An empty slot next to a cartridge is a short load bar, not a cartridge-sized hole. --- */
+.rig-wrap.has-bank > .rig-left { flex: 0 1 auto; }
+.rig-wrap > .rig-master { flex: 1 1 400px; }
+.rig-right { flex: 1 1 400px; min-width: 0; display: grid; gap: var(--s-3); align-content: start; }
+.rig-right > .rig-side { padding: var(--s-2) var(--s-3); }
+/* the cartridge's description is a caption, not a box that looks like a field (Q-19); its choices follow it */
+.rig-right > .rig-side { border: 0; padding: 0; border-radius: 0; }
+.rig-side > .tile-foot { border-top: 0; margin-top: var(--s-2); padding-top: 0; display: grid; gap: var(--s-3); justify-items: start; }
+.rig-side > .tile-foot .foot-ctl { display: grid; gap: 6px; }
+.rig-right > .cart.empty.bar { width: 100%; height: 48px; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 var(--s-3); }
+.rig-right > .cart.empty.bar::before { display: none; }
+.rig-mh { flex-wrap: wrap; align-items: center; row-gap: var(--s-2); }
+.rebase .kl.sym { text-transform: none; font: 500 13px/1 var(--body); }
+.rig-mh > .rebase { flex: none; margin-left: auto; padding: 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.phase:has(> .eff) > span:first-of-type em { display: none; }
+/* in Blend, what a cartridge sends rides on its phase caption's line, at the right */
+.phase > .eff { position: absolute; left: auto; right: 0; bottom: calc(100% + 3px); font: 11px/1 var(--mono); color: var(--acc); pointer-events: none; }
+.rig-right > .rig-master { flex: none; }
+.carts > .cart.empty:not(.bar) { align-self: flex-start; min-height: 0; height: 56px; padding: 0 var(--s-2); place-content: center; text-align: center; line-height: 1.25; }
+.carts > .cart.empty:not(.bar)::before { display: none; }
+.cart .label-art { height: 56px; }
+.cart .lab { min-height: calc(2.4em + 4px); }
+.cart .fdr-slot { height: 108px; }
+.cart .pl-note { min-height: 120px; }
+/* the Apply-as note sits directly under the control it explains (L-38) */
+.foot-ctl.forced { flex-wrap: wrap; }
+.foot-ctl.forced > .forced-note { flex-basis: 100%; }
+/* the planner cartridge in the dark theme: a deep violet housing with a lilac rim, as dark as the sound cartridges beside
+   it; the hue stays the cue for "plan" (L-24) */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cart.h-plan:not(.empty) { background: linear-gradient(#2a2140, #1f1830); border-color: #8f7fd0; color: #e7e0fb; box-shadow: 0 4px 0 #120d1d, 0 10px 18px #0005; } }
+:root[data-theme="dark"] .cart.h-plan:not(.empty) { background: linear-gradient(#2a2140, #1f1830); border-color: #8f7fd0; color: #e7e0fb; box-shadow: 0 4px 0 #120d1d, 0 10px 18px #0005; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cart.h-plan:not(.empty) :is(.slot, .lab em) { color: #cfc3f7; } }
+:root[data-theme="dark"] .cart.h-plan:not(.empty) :is(.slot, .lab em) { color: #cfc3f7; }
+/* section masks (L-25): every chip at least 16 x 18, wrapping to a second row when a song has many sections; the level is
+   how much of the chip is filled (full, the lower half, outline only), so it reads without colour */
+.secband { height: 22px; gap: 1px; }
+.secband button { flex: var(--n, 1) 1 14px; min-width: 14px; height: 18px; background: none; box-shadow: inset 0 0 0 1.5px var(--c); opacity: 1; filter: none; background-image: none; }
+.secband button.full { background: var(--c); }
+.secband button.half { background: linear-gradient(to top, var(--c) 50%, transparent 50%); opacity: 1; background-image: linear-gradient(to top, var(--c) 50%, transparent 50%); }
+.secband button.off { color: color-mix(in srgb, #fff 70%, var(--c)); opacity: 1; filter: none; }
+.secband button.off:hover { filter: brightness(1.3); }
+/* L-03: the strip never leaves its cartridge. Its chips are inset as the phase track's fill is, and are never narrower
+   than a three-letter tag ("V10"). Up to six sections share one row by length; a song with more sections sets them in
+   rows of six equal chips, so every section stays in the cartridge, legible and reachable, however many there are. */
+.secband { padding: 2px 3px; box-sizing: border-box; }
+.secband button { min-width: 19px; flex-basis: 19px; overflow: hidden; }
+.secband:has(> :nth-child(7)) { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: 18px; height: auto; gap: 2px; padding-block: 2px; }
+.secband:has(> :nth-child(7)) > button { min-width: 0; font-size: 9.5px; letter-spacing: -.02em; }
+/* a taller tile keeps its face in its middle (Q-23) */
+.bento > .tile.stretched[data-m="adapters"] > .tile-body { justify-content: center; }

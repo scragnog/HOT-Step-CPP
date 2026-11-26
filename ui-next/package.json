@@ -1,0 +1,60 @@
+{
+  "name": "ui-next",
+  "license": "MIT",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=22.18.0 <25.0.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.app.json && vite build",
+    "build:file": "tsc -p tsconfig.app.json && vite build --mode file",
+    "build:test": "tsc -p tsconfig.app.json && vite build --mode test",
+    "lint": "eslint src/app",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.app.json",
+    "validate": "node tools/validate-definitions.ts",
+    "request": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && node tools/validate-definitions.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts && node tools/test-core.ts && node tools/test-view.ts && node tools/test-controls.ts && node tools/test-containers.ts && node tools/test-instruments.ts && node tools/test-parts-contract.mjs && node tools/test-workflows.ts && node tools/test-overlays.ts && node tools/test-notes-logs.ts && node tools/test-cartridges.ts && node tools/test-generate.ts && node tools/test-instruments-3c.ts && node tools/test-fields.ts && node tools/test-code.ts && node tools/test-fold.ts && node tools/behaviour/switches.mjs --applies",
+    "docs": "node tools/validate-definitions.ts --docs",
+    "ship": "node tools/validate-definitions.ts --ship",
+    "record": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --record",
+    "request:live": "node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --live",
+    "fixtures": "node --no-warnings --import ./tools/real-app/load.mjs tools/make-fixtures.ts",
+    "test": "node tools/test-validator.ts && node --no-warnings --import ./tools/real-app/load.mjs tools/compare-request.ts --live",
+    "thumb": "node tools/thumb.ts",
+    "core": "node tools/test-core.ts",
+    "view": "node tools/test-view.ts",
+    "behaviour": "node tools/behaviour/run.mjs --page dist-test/index.html",
+    "baseline": "node tools/visual-baseline/vb.mjs",
+    "visual:all": "node tools/visual-baseline/visual-all.mjs",
+    "visual:approve": "node tools/visual-baseline/visual-all.mjs --approve",
+    "motion": "node tools/motion/frames.mjs",
+    "motion:approve": "node tools/motion/frames.mjs --approve",
+    "switches": "node tools/behaviour/switches.mjs",
+    "switches:apply": "node tools/behaviour/switches.mjs --applies",
+    "perf": "node tools/perf/run-all.mjs"
+  },
+  "dependencies": {
+    "i18next": "^26.0.10",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-i18next": "^17.0.7",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.0",
+    "vite": "^8.0.4"
+  }
+}

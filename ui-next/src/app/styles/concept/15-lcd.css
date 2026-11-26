@@ -1,0 +1,9 @@
+/* LCD screens and LCD selectors. */
+.lcd { background: var(--lcd); border-radius: var(--r-well); padding: var(--s-3); color: var(--lcd-fg); display: grid; gap: var(--s-2); }
+.lcd small { font: 12px var(--lcdfont); color: color-mix(in srgb, var(--lcd-fg) 70%, transparent); }
+.lcd input[type=range] { accent-color: var(--lcd-fg); }
+.lcd-input { background: var(--lcd); color: var(--lcd-fg); border: 1px solid #ffffff18; border-radius: 6px; font: 13px var(--lcdfont); padding: 5px 8px; box-shadow: var(--bezel), inset 0 2px 6px #000a; min-width: 150px; max-width: 100%; }
+.lcdsel.wide { flex-basis: 100%; }
+.lcdsel.wide .lcd-input { width: 100%; }
+/* text selected on an LCD reads in the LCD's own green, not the system blue (Q-35) */
+.lcd ::selection, .term ::selection, .tk-lcd ::selection, .lcd-num::selection, .lcd-input::selection, .seed-in::selection, .tok-in::selection { background: #a6f5bd; color: #0f1510; }

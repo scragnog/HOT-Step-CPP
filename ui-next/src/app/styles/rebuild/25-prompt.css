@@ -1,0 +1,9 @@
+/* Package 4: the prompt card and the lyric sheet. The concept's own rules (22-prompt.css, 25-module-lyrics.css) apply
+   to the same markup unchanged; this holds only what the rebuild's markup differs in.
+   - The vocal gender beside Instrumental is the generic labelled pairing (.foot-ctl), which carries no `gender`
+     class: its segments take the concept's compact padding (25-module-lyrics.css `.gender .seg button`) by where
+     they stand, the lyric sheet's foot. */
+.paper-wrap ~ .tile-foot > .foot-ctl .seg button { padding: 4px 9px; }
+/* - Instrumental in the sheet's foot stands as the concept's pill does there: the foot centres its row
+     (20-tile.css), so the pill takes no alignment of its own (15-controls-1.css gives one to a pill in any foot). */
+.paper-wrap ~ .tile-foot > .pill-tog { align-self: auto; }

@@ -1,0 +1,16 @@
+{
+  "about": "Each slice feature switched off by one small change to its source, applied to the test build only (vite.config.ts, HS_SWITCH). tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance; each must make at least one scenario fail. A change that no longer applies (the code moved) fails the run: put the switch where the feature now lives. A work package adds a file of its own beside this one for the features it builds.",
+  "switches": [
+    { "feature": "undo", "file": "src/app/store/desk.ts", "find": "    runUndo(entry) {", "replace": "    runUndo(entry) { return;" },
+    { "feature": "redo", "file": "src/app/store/desk.ts", "find": "    runRedo(entry) {", "replace": "    runRedo(entry) { return;" },
+    { "feature": "autosave", "file": "src/app/store/desk-tabs.ts", "find": "  if (text === written) return true;", "replace": "  if (text === written || text) return true;" },
+    { "feature": "restore", "file": "src/app/store/desk.ts", "find": "const text = bootDesk(DESK_KEY), r = deskOf(text);", "replace": "const text = null as string | null, r = deskOf(text);" },
+    { "feature": "knob keys", "file": "src/app/parts/Knob.tsx", "find": "    onValueKey(e, p, v.gesture);", "replace": "" },
+    { "feature": "keyboard moves", "file": "src/app/render/Tile.tsx", "find": "moveTile(def.id, dir);", "replace": "void moveTile;" },
+    { "feature": "add", "file": "src/app/store/desk.ts", "find": "    add(id, before) {", "replace": "    add(id, before) { return 'there';" },
+    { "feature": "remove", "file": "src/app/store/desk.ts", "find": "    remove(id, focusAfter?: string | string[] | null) {", "replace": "    remove(id, focusAfter?: string | string[] | null) { return;" },
+    { "feature": "tier switch", "file": "src/app/store/desk.ts", "find": "    setTier(t) {", "replace": "    setTier(t) { return;" },
+    { "feature": "engine switch", "file": "src/app/store/desk.ts", "find": "    switchEngine(to) {", "replace": "    switchEngine(to) { return;" },
+    { "feature": "theme", "file": "src/app/shell/Theme.tsx", "find": "const go = () => setT(n);", "replace": "const go = () => {};" }
+  ]
+}

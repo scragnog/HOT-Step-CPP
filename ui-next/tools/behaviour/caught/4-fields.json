@@ -1,0 +1,7 @@
+{
+ "about": "The scenarios that caught each switch of switches/4-fields.json, as tools/behaviour/switches.mjs last found them (each passes with the feature on and fails with it off); it tries these first. Written by its runs; commit it with the package's work.",
+ "caught": {
+  "tempo brings": ["06-prompt-generate/prompt-suggestions"],
+  "song info": ["06-prompt-generate/prompt-tools","33-fields/prompt-tools-without-the-popover"]
+ }
+}

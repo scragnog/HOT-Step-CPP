@@ -1,0 +1,31 @@
+{
+ "set": "instruments-3c",
+ "at": "2026-11-24T20:04:30.328Z",
+ "commit": "3e66102542",
+ "states": [
+  "i3c-build-empty-lab",
+  "i3c-build-untagged-strip",
+  "i3c-build-planned-studio-dark",
+  "i3c-build-takes-quick",
+  "i3c-build-kept-lab",
+  "i3c-build-stale-lab-dark",
+  "i3c-build-drift-studio",
+  "i3c-cont-lab",
+  "i3c-cont-build-dark",
+  "i3c-cont-empty",
+  "i3c-score-studio",
+  "i3c-score-lab-hard",
+  "i3c-score-soft-dark",
+  "i3c-score-abc",
+  "i3c-score-notabc",
+  "i3c-modal-healthy",
+  "i3c-modal-runaway-dark",
+  "i3c-modal-long",
+  "i3c-modal-pasted",
+  "i3c-flow-lab",
+  "i3c-plans-lab-dark",
+  "i3c-replan-lab",
+  "i3c-adhere-lab",
+  "i3c-yuebatch-lab-dark"
+ ]
+}

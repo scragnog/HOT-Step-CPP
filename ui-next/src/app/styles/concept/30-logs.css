@@ -1,0 +1,14 @@
+/* The engine log. */
+.logs { position: fixed; z-index: 44; left: 0; right: 0; bottom: 0; background: var(--inset); border-top: 1px solid var(--line); padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); max-height: 40vh; overflow: auto; box-shadow: var(--elev-overlay); }
+/* the header is one row at every width (S-23): the engine line takes what is left between "Engine" and Close, and wraps
+   inside its own cell, so Close never drops to a row of its own */
+.logs-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-4); align-items: center; }
+.logs-head #logEngine { overflow-wrap: anywhere; }
+/* on a phone the docked log takes at most a third of the screen, so the desk keeps most of it */
+@media (max-width: 560px) { .logs { max-height: 33vh; } .logs-head { gap: var(--s-3); align-items: start; } .logs-head > b, .logs-head > button { align-self: center; } }
+.logs pre { margin: 8px 0 0; font: 12px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap; }
+@keyframes ovSheet { from { opacity: 0; translate: 0 16px; } }
+.logs { animation: ovSheet var(--t-base) var(--e-out); }
+/* docked (F-15): the go bar stands on the log instead of under it, and the page gets the log's height of room at its foot */
+html.logs-open .gobar { bottom: var(--logs-h, 0px); }
+html.logs-open body { padding-bottom: var(--logs-h, 0px); }

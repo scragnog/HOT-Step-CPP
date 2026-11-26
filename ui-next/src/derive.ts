@@ -1,0 +1,36 @@
+// What is derived from the definitions, written once, as pure functions of the definitions and the desk. The page
+// is a view over these; the validator and the tools call them too. Nothing here has a branch for any one module.
+// docs/05-what-the-definition-drives.md says what each one does.
+//
+//   derive/core.ts      a parameter on an engine, conditions, values, how a number is written, words, faces
+//   derive/request.ts   the request: the desk in real names, and the Create intent
+
+export * from './derive/core.ts';
+export * from './derive/request.ts';
+export * from './derive/values.ts';
+export * from './derive/steps.ts';
+export * from './derive/engine.ts';
+export * from './derive/tiers.ts';
+export * from './derive/records.ts';
+export * from './derive/parts.ts';
+export * from './derive/strings.ts';
+export * from './derive/messages.ts';
+export * from './derive/view.ts';
+export * from './derive/desk.ts';
+export * from './derive/models.ts';
+export * from './derive/controls.ts';
+export * from './derive/containers.ts';
+export * from './derive/readouts.ts';
+export * from './derive/vram.ts';
+export * from './derive/instruments.ts';
+export * from './derive/workflows.ts';
+export * from './derive/picker.ts';
+export * from './derive/tips.ts';
+export * from './derive/fields.ts';
+export * from './derive/logs.ts';
+export * from './derive/cartridges.ts';
+export * from './derive/generate.ts';
+export * from './derive/build.ts';
+export * from './derive/recording.ts';
+export * from './derive/score.ts';
+export * from './derive/fold.ts';

@@ -1,0 +1,14 @@
+<!-- Thumbnail ex-art: inner drawing in the thumbnail kit's classes, on the side-unit canvas. Captured from the concept at vanilla-reference. -->
+<defs>
+<radialGradient id="thg18a" cx=".3" cy=".3" r=".7">
+<stop offset="0" class="art-1"/>
+<stop offset="1" class="art-0"/>
+</radialGradient>
+<radialGradient id="thg18b" cx=".75" cy=".7" r=".6">
+<stop offset="0" class="art-2"/>
+<stop offset="1" class="art-0"/>
+</radialGradient>
+</defs>
+<rect class="art-bg" x="84" y="39" width="34" height="34" rx="4"/>
+<rect x="84" y="39" width="34" height="34" rx="4" fill="url(#thg18a)"/>
+<rect x="84" y="39" width="34" height="34" rx="4" fill="url(#thg18b)"/>

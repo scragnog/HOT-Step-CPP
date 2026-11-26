@@ -1,0 +1,79 @@
+/* Interaction states shared by every control: the focus ring, hover and press feedback. After the components on purpose: these win over the resting style of a control. */
+/* keyboard focus: snaps in from further out, with a soft glow, instead of a static ring */
+/* One ring for keyboard focus (L-09): 2px, 2px off the control's own outline, in --hot, or in the LCD's green on an LCD or
+   terminal surface. Controls that draw a glow keep it as well as the ring, never instead of it. */
+:root { --ring: var(--hot); }
+:is(.lcd, .term, .tk-lcd, .u-lcd, .pk-lcdwrap, .dd-lcd, .lcd-input) { --ring: var(--lcd-fg); }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+:is(.knob, .xy, .ruler2, .venn, .codes, .tok, .phase b, .secband button, .strip > button):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* the ring settles in only when the keyboard moved focus (Tab, arrows); focus handed back by a closing overlay just appears (M-09) */
+html.kbnav :focus-visible { animation: focusIn var(--t-slow) var(--e-out); }
+@keyframes focusIn { from { outline-offset: 9px; outline-color: transparent; } }
+/* Order: a focused knob shows its value lit. Here, after the components, so it wins over .pedal .kn.turning output (27-pedals.css), which has the same specificity. */
+.kn:has(.knob:focus-visible) output { background: var(--hot); color: var(--hot-ink); }
+.drop:has(input:focus-visible), #latBtn:has(input:focus-visible) { outline: 2px solid var(--hot); outline-offset: 2px; }
+/* Order: a file dragged over a drop zone. Here, after the components, so it wins over .drop.sleeve (25-module-timbre.css). */
+.drop.over, #latBtn.over { border-color: var(--hot) !important; border-style: dashed; background: var(--hot-soft); }
+.small-btn:hover { background: var(--inset); }
+.icon-btn:active, .x:active, .tool:active, .small-btn:not(.primary):active, .pill-btn:active { background: var(--inset); }
+.linkbtn:hover { color: var(--fg); text-decoration-color: currentColor; }
+/* Order: .ping below comes after :focus-visible above: in reduced motion its amber outline wins on a focused control. */
+/* a changed control answers "changes" with two amber pulses of a ring around it */
+@keyframes ping { 0%, 50%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent); } 20%, 70% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 55%, transparent); } }
+.ping { animation: ping 1s var(--e-out); border-radius: var(--r-ctl); }
+@media (prefers-reduced-motion: reduce) { .ping { animation: none !important; outline: 2px solid var(--amber); outline-offset: 2px; } }
+/* Hit areas (A-12): every small control answers to at least 24 x 24 px, and the two that start a drag or a removal on
+   the desk (the tile grip, a pedal's remove tab) to 32 x 32. The pad is an invisible layer around the control, so nothing
+   it sits in moves. It is the control's ::before, so a control's ::after stays free for its "changed" dot. (:where keeps
+   these at zero specificity: a control's own positioning still wins.) */
+:where(.tile-head .grip, .tok, .tok-ro, .pill-tog, .cyc, .sm-del, .sm-star, .flag, .tchips > button, .tbtn, .tpow, .scope-btn, .instr-btn, .wild-x, .wild-auto, .x, .px, .pchev, .jump,
+  .lcd-btns > button, .lcd-bars > button, .chipsw button, .drop-x, .pend-x, .u-x, .toast-x, [data-mask], .phase [data-ph], .seg.sm > button, .rec, .led-btn, .dst, .sbtn, .small-btn,
+  .icon-btn, .pref, button.auto, .strip > button, .lcd-step button, .mood button, .itabs > button, .gender .seg > button, .lcd-ends .seg > button, .play, .more, .linkbtn, .tool, .qchoice button, .seg > button, .pk-plugin, .pk-lcd, .tk-reels .reel2, #ppause, #pstop, .scope-link) { position: relative; }
+:where(.tile-head .grip, .tok, .tok-ro, .pill-tog, .cyc, .sm-del, .sm-star, .flag, .tchips > button, .tbtn, .tpow, .scope-btn, .instr-btn, .wild-x, .wild-auto, .x, .px, .pchev, .jump,
+  .lcd-btns > button, .lcd-bars > button, .chipsw button, .drop-x, .pend-x, .u-x, .toast-x, [data-mask], .phase [data-ph], .seg.sm > button, .rec, .led-btn, .dst, .sbtn, .small-btn,
+  .icon-btn, .pref, button.auto, .strip > button, .lcd-step button, .mood button, .itabs > button, .gender .seg > button, .lcd-ends .seg > button, .play, .more, .linkbtn, .tool, .qchoice button, .seg > button, .pk-plugin, .pk-lcd, .tk-reels .reel2, #ppause, #pstop, .scope-link)::before {
+  content: ""; position: absolute; inset: min(0px, calc((100% - 24px) / 2)); }
+:where(.tile-head .grip, .px.tab)::before { inset: min(0px, calc((100% - 32px) / 2)); }
+/* under a finger every small control answers to 40 x 40 (B-35); where two pads meet, 19-hit-areas.js gives the click to
+   the nearer control */
+@media (pointer: coarse) {
+  :where(.tile-head .grip, .tok, .tok-ro, .pill-tog, .cyc, .sm-del, .sm-star, .flag, .tchips > button, .tbtn, .tpow, .scope-btn, .instr-btn, .wild-x, .wild-auto, .x, .px, .pchev, .jump,
+  .lcd-btns > button, .lcd-bars > button, .chipsw button, .drop-x, .pend-x, .u-x, .toast-x, [data-mask], .phase [data-ph], .seg.sm > button, .rec, .led-btn, .dst, .sbtn, .small-btn,
+  .icon-btn, .pref, button.auto, .strip > button, .lcd-step button, .mood button, .itabs > button, .gender .seg > button, .lcd-ends .seg > button, .play, .more, .linkbtn, .tool, .qchoice button, .seg > button, .pk-plugin, .pk-lcd, .tk-reels .reel2, #ppause, #pstop, .scope-link) { position: relative; }
+:where(.tile-head .grip, .tok, .tok-ro, .pill-tog, .cyc, .sm-del, .sm-star, .flag, .tchips > button, .tbtn, .tpow, .scope-btn, .instr-btn, .wild-x, .wild-auto, .x, .px, .pchev, .jump,
+  .lcd-btns > button, .lcd-bars > button, .chipsw button, .drop-x, .pend-x, .u-x, .toast-x, [data-mask], .phase [data-ph], .seg.sm > button, .rec, .led-btn, .dst, .sbtn, .small-btn,
+  .icon-btn, .pref, button.auto, .strip > button, .lcd-step button, .mood button, .itabs > button, .gender .seg > button, .lcd-ends .seg > button, .play, .more, .linkbtn, .tool, .qchoice button, .seg > button, .pk-plugin, .pk-lcd, .tk-reels .reel2, #ppause, #pstop, .scope-link)::before { inset: min(0px, calc((100% - 40px) / 2)); }
+}
+/* Off (L-37): one look and one behaviour wherever a setting elsewhere makes a control irrelevant (the planner off, no
+   reference to blend, Instrumental on, a group switched off). The control stands back at 45% and says why in words
+   beside it; it keeps its value and stays operable and in the Tab order, so it can be set before it is needed. */
+.is-off { opacity: .45; transition: opacity var(--t-fast) var(--e-out); }
+.off-why { font: 12px var(--body); color: var(--muted); letter-spacing: 0; text-transform: none; }
+/* "it is here": a control reached from a link elsewhere (an "Also set" line) is ringed for a moment, the same fading ring a
+   tile gets (Q-07); a static ring under reduced motion */
+.ring-here { animation: ctlHere calc(var(--t-slow) * 4) var(--e-out); }
+@keyframes ctlHere { from, 40% { box-shadow: 0 0 0 4px var(--hot-soft), 0 0 0 1.5px var(--hot); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .ring-here { animation: none; outline: 2px solid var(--hot); outline-offset: 3px; } }
+/* Touch on drag-operated controls (S-29): each lets the page pan up and down, and 19-touch-gesture.js decides whether a
+   finger is scrolling or working the control, so a scroll that starts on one never changes it. */
+:is(.knob, .fdr-slot, .num[data-num], .xy, .ruler2, .tok, .codes, .ivl-h, .venn, .secband, .phase, .phase [data-ph], .contwave, .wave canvas) { touch-action: pan-y pinch-zoom; }
+/* A pad cannot reach over a neighbour, so under a finger the smallest controls also grow in their own boxes (S-30): picks,
+   tabs, segments and small buttons are at least 40 px high, the bar buttons and side-unit buttons 40 px wide, the theme
+   switch 40 px across, and the key wheel 240 px so its inner ring is 40 px deep. A token is inline: its taller padding
+   widens what answers to the finger without moving the line. Last in the file, so it wins over each control's own size. */
+@media (pointer: coarse) {
+  .theme-seg button { width: 40px; height: 36px; }
+  .itabs > button, button.pk, .pbtn, .pref, .wild-x, .seg > button, .tchips > button, .lcd-btns > button { min-height: 40px; }
+  .lcd-bars > button { min-width: 36px; min-height: 36px; }
+  .u-pow, .u-x { min-width: 40px; }
+  .tile[data-m="tempo"] .wheel { width: 240px; height: 240px; } .tile[data-m="tempo"] .tempo > .wheel { justify-self: center; }
+  .tok, .tok-ro { padding-block: 12px; }
+  /* the rest of the page's own 40px rule (S-24): the top bar's pages, brand and Notes, the desk bar, the seed's number,
+     lock and search, the Chain switch, pedal knobs and LCD fields, the grip menu, plugin chips, and the picker's filter,
+     categories and close */
+  nav.main button, #notesBtn, .brand, .deskbar button, .move-menu > button, #pkBar > button, .fl-search, .seed-num, .sm-q, button.master, .pedal .lcd-input { min-height: 40px; }
+  .brand { display: inline-flex; align-items: center; }
+  .lock, #pkClose { min-width: 40px; min-height: 40px; }
+  #dd .opt-pt { min-width: 40px; min-height: 40px; }
+  .pedal .knob.sm { width: 40px; height: 40px; }
+}

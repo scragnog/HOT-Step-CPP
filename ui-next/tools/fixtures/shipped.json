@@ -1,0 +1,6 @@
+{
+ "note": "Every parameter key, state key and definition id a release has shipped, and where each value is kept (definition, owner, stored). Empty until the first release; written by npm run ship when a release goes out, and by nothing else. The validator checks the definitions against it (docs/07).",
+ "keys": {},
+ "states": {},
+ "ids": {}
+}

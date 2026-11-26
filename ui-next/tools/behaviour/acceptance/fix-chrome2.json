@@ -1,0 +1,11 @@
+{
+  "about": "The second fix round around the desk: each item has a scenario driven as a user reaches it (scenarios/37-fix-chrome2.mjs), with the older scenarios that pass since.",
+  "scenarios": [
+    {"id": "37-fix-chrome2/rc01-create-keys-do-nothing-on-another-page", "why": "RC-01's remainder: on Library, Studios, Training and Settings, F9, Alt+3 and Space do nothing; Ctrl+Z under the notes there says nothing; the top bar's Create is not covered and brings Create back, where F9 works."},
+    {"id": "37-fix-chrome2/e15-modules-describe-tempo-per-engine", "why": "E-15: the Modules panel's card, its filter and the picker's info line describe Tempo as its tile holds it on the engine in use (Beat I/O on MiniMax-Music3, a length on ACE-Step)."},
+    {"id": "37-fix-chrome2/s02-plugin-symbol-first-tap-shows-it", "why": "S-02: under a finger a plugin menu's first tap shows the symbol in the header with Use it, says a second tap uses it, and chooses nothing; the second tap chooses."},
+    {"id": "37-fix-chrome2/undo-says-what-it-left-alone", "why": "14-undo.js: an Undo or Redo that leaves a later edit alone says so; one with nothing of its step left says \"Nothing to put back for ...\" and why (F-24)."},
+    {"id": "15-other-engines/tempo-has-one-name", "why": "The Modules panel names Tempo on MiniMax-Music3 as its tile does, and describes what it holds there (E-15). (Re-read in the consolidation round, RA-06; it passes since this round.)"},
+    {"id": "09-undo-storage/undo-keeps-a-later-edit-of-the-same-thing", "why": "Undo puts back the lyrics, keeps the description edited since, and says so. (Re-read in the consolidation round, RA-06; it passes since this round.)"}
+  ]
+}

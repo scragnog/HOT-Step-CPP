@@ -1,0 +1,23 @@
+{
+  "about": "The Adapters' cartridges and the planner's XY pad (its top-p off rail, its fade with the planner off), with the Repetition guard, Mastering and the side units (36-cartridges.mjs and the older scenarios that exercise them).",
+  "scenarios": [
+    { "id": "36-cartridges/adapter-list-loads-and-stacks", "why": "cartridges and the adapter list (features/adapters.tsx): the column beside one cartridge (Q-19), the list under its button with the files of its kind but the one loaded, focus on its first file, the arrows through the grid and Escape back to the button (L-22), a second adapter stacking them in one step named for the file, focus on its fader (L-07), the slot's #n label and what each sends in Blend." },
+    { "id": "36-cartridges/unused-adapters-and-stack-them", "why": "cartridges while Stack is Single: one cartridge used and no empty slot, the other said loaded but not used with Stack them (A-14), which stacks them (the node's action)." },
+    { "id": "36-cartridges/section-masks-force-runtime", "why": "cartridges' section masks: a chip per section tagged by its initial (L-25), a press writes a directive into the lyrics as a step named for its section and adapter (L-09), Enter steps it again, a drag paints the rest in one step; a choice run at another value (ParamFace.forced): Apply as shows Runtime pressed, the others disabled, and what returns after (A-30)." },
+    { "id": "36-cartridges/phase-window-keys-drag-and-steps", "why": "cartridges' phase windows: a key moves a handle, a step named for its adapter (L-01), End to its own end, the handles' slider ranges, Runtime said while windows are set, a drag takes the nearer handle on the 5% grid." },
+    { "id": "36-cartridges/removing-renumbers-the-directives", "why": "cartridges' ×: the later adapter and its strength move up, the directives are renumbered and the toast says so, Undo in the toast puts all of it back." },
+    { "id": "36-cartridges/planner-adapter-from-its-own-list", "why": "cartridges at Lab: the bank beside one cartridge, the tile under 600px (L-05); the planner adapter from its own list, its cartridge with its note, focus on its × (L-07), and out again." },
+    { "id": "36-cartridges/quick-flat-cartridge-and-the-rest-said", "why": "cartridges at Quick: the first lying flat with its art, its strength a choice row, the rest said in one line with the way to Studio (Q-18)." },
+    { "id": "36-cartridges/yue-pair-and-hm-one-column", "why": "cartridges on YuE2 (the AR cartridge's Strength beside Plan and Compose, E-05; the NAR slot named, E-10) and HeartMuLa (one column, its limit said beside it: S-14, S-21; the tile's narrowWhen)." },
+    { "id": "36-cartridges/adapters-another-engine-keeps", "why": "The desk fact adaptersAway (features/adapters.tsx, from the engines' book): the empty tile and the rig say what another engine keeps for when you switch back (B-02)." },
+    { "id": "36-cartridges/xy-off-rail-and-planner-off", "why": "xyPad: MiniMax-Music3's top-p off rail along the top (E-28, E-32), down to the widest cut and up to off again; with the planner off the pad and Quick's How adventurous stand back, say why and stay operable (Q-17)." },
+    { "id": "10-desk-modules/adapter-phase-survives-reload-and-undo", "why": "A phase window stepped by keys (A-24), a full slider, kept through a reload (A-05) and through removing another adapter and undoing it; the foot says Runtime while phase windows are set." },
+    { "id": "17-undo-net/adapter-phase-and-mask-are-steps", "why": "A phase handle and a section mask chip are steps named for their adapter and section (L-01, L-09); two Ctrl+Z take them back and leave the adapter." },
+    { "id": "17-undo-net/lab-steps-are-named-too", "why": "A cartridge's fader is named for its adapter (L-09), and the planner's pad step names both values." },
+    { "id": "19-desk-round5/quick-adapters-say-it-once", "why": "Quick's flat cartridge: two adapters said once in the control's words with the way to Studio, no Also set line (Q-18), the name whole." },
+    { "id": "22-engines-round5/yue-adapters-say-what-yue-does", "why": "YuE2's column names the NAR slot (E-10); the bank says both adapters and the foot stands under it (E-27)." },
+    { "id": "22-engines-round5/mm3-topp-off-is-on-the-wide-edge", "why": "The XY pad's off rail along the top, the puck on it (E-32)." },
+    { "id": "23-sa3-hm-round5/heartmula-adapters-hug-one-cartridge", "why": "HeartMuLa's Adapters at Studio: one column, not widened (S-14)." },
+    { "id": "04-controls/ruler-fader-scrub", "why": "A cartridge's fader follows the pointer and Home, the art stills at 0 (package 1 excluded it for the cartridges)." }
+  ]
+}

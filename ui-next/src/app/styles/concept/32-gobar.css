@@ -1,0 +1,57 @@
+/* The go bar: the meter, drafts, cancel, Generate. */
+/* gobar */
+.gobar { display: flex; align-items: center; gap: 12px; position: sticky; bottom: 0; z-index: 6; container: gobar / inline-size; }
+/* the status line takes what the bar has left (at least 160px) and, when that is little, keeps only its warning and
+   the tier (C-05) */
+.meter { flex: 1 1 0; min-width: 160px; color: var(--muted); font-size: 13px; container-type: inline-size; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 340px) { .meter .m-long { display: none; } }
+@container (max-width: 300px) { .meter .m-rest { display: none; } }
+@container (max-width: 200px) { .meter .m-warn ~ b, .meter .m-warn ~ .m-sep, .meter .m-warn + .m-sep { display: none; } }
+.meter .c { color: var(--amber); }
+.meter .l { color: var(--lab); }
+.go { border: 0; background: var(--hot); color: var(--hot-ink); font-weight: 600; font-size: 15px; padding: 12px 22px; border-radius: 12px; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; box-shadow: 0 6px 20px color-mix(in srgb, var(--hot) 35%, transparent); }
+.t-quick .bento, .t-quick .gobar, .t-quick .latest, .t-quick .hidden-note { width: 100%; max-width: 900px; margin-left: auto; margin-right: auto; }
+/* dock: player and Generate share one bar; toast sits bottom-left */
+.gobar { background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line); margin: 0 -10px; padding: 12px 10px calc(12px + env(safe-area-inset-bottom, 0px)); border-radius: 14px 14px 0 0; }
+@media (max-width: 1100px) { .gobar:has(.player:not([hidden])) .meter { display: none; } }
+.cancel-go { border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 12px; padding: 11px 16px; font-weight: 600; white-space: nowrap; }
+.cancel-go:hover { border-color: var(--hot); color: var(--hot); }
+#qCount { font: 12px var(--mono); color: var(--muted); }
+.drafts-btn { margin-left: auto; }
+/* every draft row is one height whatever its engine; another engine's draft says so on its second line (C-06) */
+.drafts { display: grid; gap: 4px; max-height: 260px; overflow: auto; margin-top: 8px; }
+.draft { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 4px; border-radius: 8px; }
+.draft:hover { background: var(--raised); }
+.dr-t { flex: 1; min-width: 0; display: grid; }
+.dr-t b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-t small { font: 12px var(--body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.draft .ico-btn { border: 0; background: none; color: var(--muted); width: 28px; height: 28px; border-radius: var(--r-ctl); display: grid; place-items: center; flex: none; }
+.draft .ico-btn:hover { background: var(--surface); color: var(--fg); }
+.pop-row .small-btn.primary:disabled { opacity: .45; cursor: default; filter: none; }
+/* Generate: a fixed width (the longest label fits), lifts on hover, sinks on press; the queue is a badge (M-12, B-11) */
+.go { position: relative; min-width: 172px; justify-content: center; }
+.go:hover { filter: none; translate: 0 -1px; box-shadow: 0 10px 28px color-mix(in srgb, var(--hot) 42%, transparent); }
+.go:active { translate: 0 1px; box-shadow: 0 2px 8px color-mix(in srgb, var(--hot) 35%, transparent); transition-duration: var(--t-instant); }
+.go-q { position: absolute; top: -7px; right: -7px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; display: grid; place-items: center;
+  font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--hot); background: var(--surface); box-shadow: 0 0 0 2px var(--hot), var(--shadow); }
+.go-q:not([hidden]) { animation: ledIn var(--t-base) var(--e-spring); }
+@keyframes ledIn { from { scale: .4; opacity: 0; } }
+/* while a run is live its progress sweeps across the button itself, under the label; the button keeps its size and
+   place, and a second press still queues (G-M-06) */
+.go { isolation: isolate; }
+.go-fill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: #ffffff2e; clip-path: inset(0 calc((1 - var(--gf, 0)) * 100%) 0 0 round 12px); opacity: 0; transition: opacity var(--t-base) var(--e-out); pointer-events: none; }
+body.running .go-fill { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .go:hover, .go:active, .song:hover .art, .bcard:hover .bthumb, .bento > .tile:has(> .tile-head:active) { translate: none !important; scale: none !important; } }
+.meter .warn { color: var(--hot); font-weight: 600; }
+.meter .linkbtn { font: inherit; padding: 0; }
+.meter .linkbtn.c { color: var(--amber); text-decoration-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+.go.wontfit { box-shadow: 0 6px 20px color-mix(in srgb, var(--hot) 20%, transparent); filter: saturate(.75); }
+/* on a phone the bar is two rows at most: the status on one line that keeps its tier and warning, then Drafts and a
+   full-width Generate (B-22) */
+@media (max-width: 560px) {
+  .gobar { flex-wrap: wrap; row-gap: 8px; padding-top: 8px; }
+  .gobar > .meter { flex: 1 1 100%; min-width: 0; }
+  .gobar > .go { flex: 1 1 auto; min-width: 0; }
+}
+/* the drafts popover says why Save waits, in words under the field (F-18) */
+.pop-note { margin: var(--s-2) 0 0; font-size: var(--fs-12); color: var(--muted); }

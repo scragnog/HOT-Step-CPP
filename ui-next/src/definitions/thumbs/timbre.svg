@@ -1,0 +1,13 @@
+<!-- Thumbnail timbre: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="well" x="15" y="15" width="146" height="40" rx="8"/>
+<circle class="vinyl" cx="37" cy="35" r="15"/>
+<circle class="groove" cx="37" cy="35" r="11.5"/>
+<circle class="groove" cx="37" cy="35" r="8.5"/>
+<circle class="vinyl-l" cx="37" cy="35" r="5"/>
+<rect class="ink" x="62" y="27" width="60" height="3.5" rx="1.75"/>
+<rect class="ink2" x="62" y="37" width="44" height="3" rx="1.5"/>
+<rect class="well" x="15" y="61" width="146" height="36" rx="8"/>
+<path class="blend-tk" d="M60 84v4M70 84v4M80 84v4M90 84v4M100 84v4"/>
+<circle class="blend-ref" cx="104" cy="74" r="10.5"/>
+<circle class="dot-ref" cx="26" cy="89" r="2.5"/>
+<circle class="dot-you" cx="150" cy="89" r="2.5"/>

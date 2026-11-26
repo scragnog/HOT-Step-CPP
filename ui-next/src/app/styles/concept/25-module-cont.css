@@ -1,0 +1,24 @@
+/* Continue from recording. */
+.contwave { position: relative; height: 52px; border-radius: 10px; background: var(--inst); box-shadow: inset 0 2px 8px #000a; overflow: hidden; touch-action: none; }
+.cw-bars { position: absolute; inset: 6px 10px; display: flex; gap: 1px; align-items: center; }
+.cw-bars i { flex: 1; min-width: 0; background: #ffffff; opacity: .35; border-radius: 1px; }
+.cw-bars.hi { clip-path: inset(0 calc(100% - var(--z) * 1%) 0 calc(var(--a) * 1%)); }
+.cw-bars.hi i { background: #f5a623; opacity: 1; }
+.cw-sel { position: absolute; top: 0; bottom: 0; left: calc(10px + (100% - 20px) * var(--a) / 100); width: calc((100% - 20px) * (var(--z) - var(--a)) / 100); background: color-mix(in srgb, #f5a623 14%, transparent); pointer-events: none; }
+.cw-sel::before, .cw-sel::after { content: ""; position: absolute; top: 50%; width: 6px; height: 24px; margin: -12px 0 0 -3px; border-radius: 3px; background: #f5a623; box-shadow: 0 0 0 1.5px var(--inst), 0 1px 3px #0008; }
+.cw-sel::before { left: 0; }
+.cw-sel::after { left: 100%; }
+.cw-ruler { position: relative; height: 16px; margin: -6px 10px 0; font: 11px/16px var(--mono); color: var(--faint); }
+.cw-ruler > span { position: absolute; top: 0; translate: -50% 0; font-variant-numeric: tabular-nums; }
+.cw-ruler > span:first-child { translate: 0 0; }
+.cw-ruler > span:last-child { translate: -100% 0; }
+.tile[data-m="cont"] .cap { display: flex; justify-content: space-between; gap: 10px; font: 12px var(--mono); color: var(--muted); }
+/* Continue from recording: the cursor says what a press does: move an edge, move the selection, or draw a new one (G-B-01) */
+.contwave { cursor: crosshair; }
+.contwave[data-hit="a"], .contwave[data-hit="z"], .contwave.g-a, .contwave.g-z { cursor: ew-resize; }
+.contwave[data-hit="move"] { cursor: grab; }
+.contwave.g-move { cursor: grabbing; }
+.cw-sel::before, .cw-sel::after { transition: transform var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out); }
+.contwave[data-hit="a"]:hover .cw-sel::before, .contwave.g-a .cw-sel::before,
+.contwave[data-hit="z"]:hover .cw-sel::after, .contwave.g-z .cw-sel::after { transform: scaleX(1.34); box-shadow: 0 0 0 1.5px var(--inst), 0 0 8px #f5a623; }
+.contwave:focus-visible { outline: 2px solid #f5a623; outline-offset: 2px; }

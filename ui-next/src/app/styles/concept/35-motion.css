@@ -1,0 +1,43 @@
+/* Shared motion: the press, overlay exit ghosts, off-screen pausing, pings, shared keyframes. After the components on purpose: the press timing wins over their transitions. */
+@keyframes reelspin { to { transform: rotate(360deg); } }
+/* selection: a light that travels once round the edge and goes out (S-09). What stays is the element's own even ring
+   (its border or outline); the light never rests, because at rest its lit half would be a stripe down one side. Under
+   reduced motion it is not drawn at all. */
+@property --sa { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes sweep { 0% { opacity: 0; } 8% { opacity: 1; } 78% { opacity: 1; } to { --sa: 360deg; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ep-card[aria-checked="true"]::after, .fl-it .box::after, .opt-el::after { display: none; } }
+/* motion: decorative loops rest off screen and when nothing has happened for a while; they pick up on any input */
+.offscreen *, .offscreen *::before, .offscreen *::after { animation-play-state: paused !important; }
+/* --- overlays enter on the vocabulary; they leave through ovOut() in 36-round2-motion.js (M-03) ---
+   Popovers, menus, dropdowns, the engine panel: fade and settle 4px from the trigger edge, --t-base --e-out, no overshoot.
+   The notes drawer slides 24px in from the right; scrims fade; the engine log rises from the bottom edge. The keyframes
+   use the individual translate/scale properties, so an overlay's own transform (if it has one) is left alone. */
+@keyframes ovIn { from { opacity: 0; translate: 0 -4px; scale: .98; } }
+@keyframes ovFade { from { opacity: 0; } }
+.ov-ghost { animation: none !important; pointer-events: none !important; }
+.ov-ghost * { animation: none !important; }
+:where(button, label.tool):where(:not(:disabled)):active { translate: 0 1px; transition-duration: var(--t-instant); }
+/* things that already move as a whole, or that the pointer drags, do not also sink */
+:where(.foot, .u-pow, .secband button, .opt-pt, .reel2, .wheel *, .xy, .ep-card, .fl-it, .grip):active { translate: none; }
+/* Order: Generate's transition, after the press rule above, which would otherwise set its duration. */
+.go { transition: translate var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out), filter var(--t-fast) var(--e-out); }
+/* knobs: the pointer and arc follow the hand 1:1 while turning, settle with a small spring on a step, and turn back
+   over --t-base on a double-click reset. A detent tick on the ring marks the default and lights while the knob sits on it. */
+@property --kp { syntax: '<number>'; inherits: true; initial-value: 0; }
+/* --- reduced motion is a designed alternative, not a kill switch (M-08) ---
+   Nothing moves; colour, opacity and focus still change visibly, over a short fade. Progress keeps showing as a slow
+   opacity pulse. The "it is here" ring becomes a static outline (M-07, see flash()). */
+@keyframes rmPulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  /* Order: after .ov-ghost above, so the ghost of a closing overlay still fades in reduced motion. */
+  .menu, .pop, .dd, .eng-panel, .sc-card, .drawer, .notes-scrim, .drawer-scrim, .score-modal, .logs, .toast, .fl, .fl .fl-cols { animation: ovFade 120ms linear !important; }
+}
+/* Order: the picker's More button keeps its centring translate when pressed (after the press rule above). */
+.fl-more { translate: -50% 0; }
+/* A tier change (Q-04, Q-13): the choreography is the concept's html.tier-morph View Transition, drawn by hand on the
+   page's own elements (shell/morph.ts, which holds its timings): every box moves and resizes from its old place to its
+   new one over --t-move with --e-out, what is inside a box is never scaled, and html.tier-morph is set while it runs.
+   - a frame or a band (a tile, the prompt card, the lyric sheet, the bars) shows its surface, line, radius and shadow
+     on its ::before for the moment, at the size of the moment, under its content; its own are taken off */
+[data-morph] { background: transparent !important; border-color: transparent !important; box-shadow: none !important; isolation: isolate; }
+[data-morph]::before { content: ""; position: absolute; z-index: -1; pointer-events: none; }

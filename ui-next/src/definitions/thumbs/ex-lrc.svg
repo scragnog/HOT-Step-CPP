@@ -1,0 +1,6 @@
+<!-- Thumbnail ex-lrc: inner drawing in the thumbnail kit's classes, on the side-unit canvas. Captured from the concept at vanilla-reference. -->
+<rect class="lcd" x="64" y="40" width="74" height="32" rx="4"/>
+<rect class="lcd-d" x="70" y="48" width="22" height="3" rx="1.5"/>
+<rect class="lcd-t" x="96" y="48" width="26" height="3" rx="1.5"/>
+<rect class="lcd-d" x="70" y="60" width="22" height="3" rx="1.5"/>
+<rect class="lcd-t" x="96" y="60" width="34" height="3" rx="1.5"/>

@@ -1,0 +1,12 @@
+<!-- Thumbnail tempo.sa3: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="34" width="146" height="26" rx="6"/>
+<rect class="hot" x="23" y="44" width="90.52" height="6" rx="3"/>
+<rect class="inst-t" x="51.5" y="38" width="1.5" height="18" rx="9"/>
+<rect class="inst-t" x="88" y="38" width="1.5" height="18" rx="9"/>
+<rect class="inst-t" x="124.5" y="38" width="1.5" height="18" rx="9"/>
+<rect class="lcd-d" x="15" y="68" width="14" height="3" rx="1.5"/>
+<rect class="lcd-d" x="51.5" y="68" width="14" height="3" rx="1.5"/>
+<rect class="lcd-d" x="88" y="68" width="14" height="3" rx="1.5"/>
+<rect class="lcd-d" x="124.5" y="68" width="14" height="3" rx="1.5"/>
+<rect class="lcd-d" x="147" y="68" width="14" height="3" rx="1.5"/>
+<rect class="inst" x="15" y="80" width="146" height="14" rx="4"/>

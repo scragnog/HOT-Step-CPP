@@ -1,0 +1,52 @@
+/* Side units on the board. A side unit is a .pedal.xunit: this builds on 27-pedals.css and loads after it. */
+.units { flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed #ffffff22; align-items: flex-start; }
+.units:empty { display: none; }
+.units-label { width: 100%; font: 500 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+.units { border-top-color: var(--cable); }
+/* rack units: 1U strips with ears */
+.units { display: grid; gap: 6px; }
+.units-label { grid-column: 1 / -1; }
+.u-lcd { display: grid; font: 11px/1.35 var(--lcdfont); color: var(--lcd-fg); background: var(--lcd); border-radius: 5px; padding: 3px 8px; box-shadow: inset 0 1px 4px #000a; white-space: nowrap; }
+.u-art { width: 38px; height: 38px; border-radius: 4px; background: radial-gradient(circle at 30% 30%, hsl(var(--h) 90% 65%), transparent 60%), radial-gradient(circle at 75% 70%, hsl(calc(var(--h) + 60) 90% 55%), transparent 55%), #15121a; box-shadow: inset 0 0 0 1px #ffffff22, 0 2px 4px #0006; }
+.pedal.off .u-lcd, .pedal.off .u-art { opacity: .5; }
+.u-lip { position: absolute; top: 0; right: 0; bottom: 0; width: 26px; z-index: 2; display: grid; grid-template-rows: 1fr 1fr; border-radius: 0 3px 3px 0; overflow: hidden;
+  background: linear-gradient(90deg, #00000038, #0000 3px), linear-gradient(#6d6876, #55515d); box-shadow: inset 1px 0 0 #ffffff33; transition: background var(--t-base) var(--e-out); }
+.u-lip button { border: 0; background: none; display: grid; place-items: center; padding: 0; cursor: pointer; transition: color var(--t-fast) var(--e-out), background var(--t-fast) var(--e-out); }
+.u-lip button + button { border-top: 1px solid #0003; }
+.u-lip button:hover { background: #ffffff1f; color: #fff; }
+.u-pow[aria-pressed="true"] { color: #ffd27a; filter: drop-shadow(0 0 4px #ffb84d); }
+.u-x { font: 600 15px/1 var(--body); }
+.u-wait { display: block; font: 500 10px var(--mono); letter-spacing: .04em; text-transform: none; opacity: .75; margin-top: 2px; }
+.units-label { color: color-mix(in srgb, var(--pd-ink) 80%, transparent); }
+.u-lip button { color: #fff; }
+/* side units fill the board's width (A-17): strips of at least 280px share each row equally (two on Quick's board, three
+   at 1280-1600, four at 1920), every strip in a row one height; a unit with more controls (Whisper in Lab) asks for two
+   strips' room so its controls stay on one line */
+.board .units { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 24px 36px 0; padding-top: 14px; border-top: 1px dashed var(--cable); align-items: stretch; }
+.board .units > .units-label { flex: 1 0 100%; }
+/* two strips to a row, so every seam between strips falls at the middle of the board, and a strip has room for its
+   read-out (Q-25, L-30); a unit with more controls (Whisper in Lab) takes the row */
+.board .units > .pedal.xunit { flex: 1 1 calc(50% - 7px); }
+.t-lab .board .units > .pedal.xunit.u-wide { flex: 1 1 100%; }
+/* two strips share a row only when each has room for its name, its read-out and its lip: on a board narrower than that
+   (a two-column Pedalboard beside the lyric sheet) each strip takes the row (E-02) */
+.board .units { container: units / inline-size; }
+@container units (max-width: 699.98px) { .board .units > .pedal.xunit { flex-basis: 100%; } }
+.board .u-ctls .led-btn { white-space: nowrap; }
+.u-badge { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--lcd); color: var(--lcd-fg); box-shadow: inset 0 1px 4px #000a, 0 0 0 2px color-mix(in srgb, var(--lcd-fg) 30%, transparent); font: 13px/1 var(--lcdfont); }
+.pedal.off .u-badge { opacity: .5; }
+.board .units:empty { display: none; }
+.board .units-label { grid-column: 1 / -1; color: color-mix(in srgb, var(--pd-ink) 78%, var(--pb2)); }
+.board .u-ctls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; }
+.board .u-ctls .lcdsel, .board .u-ctls .chipsw { width: auto; min-width: 120px; max-width: 220px; }
+.board .u-ctls .led-btn { max-width: 160px; }
+/* on the board every control's label is engraved under it, on pedals and side units alike (L-30) */
+.board .u-ctls :is(.lcdsel, .chipsw) { text-align: center; justify-items: center; }
+.board .u-ctls :is(.lcdsel, .chipsw) > .kl { order: 2; }
+@container desk (max-width: 539.98px) { .board .units { margin: 20px 16px 0; } }
+.board .u-status { font: 12px/1.35 var(--body); color: color-mix(in srgb, var(--pd-ink) 72%, transparent); }
+/* a unit narrower than its name, its object and its lip: the object gives way inside the unit, never under the lip
+   (Q-05); an LCD keeps its lines and cuts them with an ellipsis */
+.board .u-ctls { flex: 1 1 0; max-width: 100%; overflow: hidden; }
+.board .u-ctls .u-lcd { min-width: 0; max-width: 100%; overflow: hidden; }
+.board .u-ctls .u-lcd > * { overflow: hidden; text-overflow: ellipsis; }

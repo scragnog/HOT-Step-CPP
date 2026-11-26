@@ -1,0 +1,70 @@
+/* The Pedalboard tile: the board, its head and master switch, the cables, the board meter. */
+/* pedalboard */
+.board-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.board-head .tog { color: var(--fg); font-weight: 500; }
+.board-head span { margin-left: auto; font-family: var(--mono); font-size: 12px; }
+.board { border-radius: 12px; }
+.pedals { display: flex; gap: 10px; align-items: stretch; min-width: max-content; }
+.master { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 5px 12px 5px 7px; font: 600 13px var(--body); }
+.master i { width: 24px; height: 24px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #e2e2e8, #7c7c86); box-shadow: 0 2px 0 #0006; position: relative; }
+.master i::after { content: ""; position: absolute; top: -4px; right: -5px; width: 8px; height: 8px; border-radius: 50%; background: #3a0d14; }
+.master.on i::after { background: var(--led-on); box-shadow: 0 0 8px var(--led-on); }
+.master:active i { transform: translateY(1px); box-shadow: 0 1px 0 #0006; }
+.master b { font: 500 11px var(--mono); letter-spacing: .1em; color: var(--faint); }
+.master b::after { content: "BYPASSED"; }
+.master.on b::after { color: var(--hot); }
+/* pedalboard skins: dark hardware in dark mode, a light skin for light mode */
+.board { background: linear-gradient(var(--pb1), var(--pb2)); box-shadow: inset 0 2px 10px var(--pb-sh); }
+.master.on b::after { content: "ON"; }
+.master:not(.on) b::after { content: "BYPASSED"; }
+.cables { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 0; }
+.cables path { fill: none; stroke-linecap: round; }
+.cables .cb-sig { stroke: #ff5b8a; stroke-width: 2.5; stroke-dasharray: 6 94; opacity: 0; }
+.board.live .cables .cb-sig { opacity: 1; animation: sig 1.1s linear infinite; }
+@keyframes sig { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.board > .pedals.pedal-exit { position: absolute; inset: 0; display: block; padding: 0; pointer-events: none; z-index: 1; }
+/* --- the pedalboard: a unit grid (D-03, B-02) ---
+   1U = 164, gap 40 (room for a patch cable and its two plugs), so 2U = 368 and every pedal edge sits on a 204 px
+   pitch. Rows keep the height of their tallest pedal; LED and foot switch are pinned to the bottom so the
+   switches line up across a row. The row gap holds the return cable (D-02). */
+.board { --u: 164px; --ug: 40px; position: relative; overflow: visible; padding: 20px 0; }
+/* the chain stands centred on the board at every count, one row or several (Q-40) */
+/* Studio and Quick pedals are one size; LED and footswitch on one line at the foot, jacks and cables level (S-23) */
+.board .pedals { display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: 44px var(--ug); min-width: 0; padding: 0 36px; position: relative; z-index: 1; }
+/* in Lab a pedal is as tall as its own controls (rounded to the 32px step) and the pedals of a row stand on one line, as
+   on a real board: foot switches and jacks level, tops ragged, no blank face (L-12) */
+.t-lab .board .pedals { align-items: flex-end; }
+.board-empty { color: color-mix(in srgb, var(--pd-ink) 70%, transparent); font-size: 13px; padding: 16px 0; }
+/* clipped to its cell, with room past it for its changed dot (L-08) */
+.board .kn .kl { max-width: 64px; white-space: nowrap; overflow: clip; overflow-clip-margin: 10px; text-overflow: ellipsis; letter-spacing: .03em; line-height: 14px; }
+.board .kn output { font-size: 11px; line-height: 16px; white-space: nowrap; }
+.board .pedals .lcdsel .kl { text-align: center; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.board .lcdsel .lcd-input { width: 100%; text-align: center; }
+.board .vu { display: block; width: 132px; height: 60px; flex: none; position: relative; overflow: hidden; border-radius: 6px; margin-top: 2px;
+  background: radial-gradient(ellipse 90% 130% at 50% 100%, var(--vu1), var(--vu2)); box-shadow: inset 0 1px 3px #0008, inset 0 0 0 1px #0004, 0 1px 0 #ffffff40; }
+.board .vu::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(165deg, #ffffff38 0 30%, transparent 30.5%); }
+.board .vu svg { position: absolute; inset: 0; display: block; }
+.board .vu path { fill: none; stroke: var(--vu-ink); stroke-width: 1; }
+.board .vu path.r { stroke: var(--vu-red); }
+.board .vu .vu-red { stroke: var(--vu-red); stroke-width: 3; }
+.board .vu text { font: 500 8.5px var(--mono); fill: var(--vu-ink); text-anchor: middle; }
+.board .vu text.r { fill: var(--vu-red); }
+.board .vu .vu-cap { font: 600 9px var(--mono); letter-spacing: .14em; text-anchor: start; }
+.board .vu i { position: absolute; left: 50%; bottom: -18px; width: 1.5px; height: 66px; margin-left: -.75px; background: var(--vu-ndl); transform-origin: 50% 100%; transform: rotate(-28deg); animation: none; border-radius: 1px; }
+/* while a run is live the needle follows it (B-14): it climbs with the run's progress (--lvl, set by the generate tick)
+   towards 0 dB, with a small wobble on top; at rest it lies on its stop */
+.board .vu i { transition: transform var(--t-slow) var(--e-out); }
+.board.live .pedal:not(.off) .vu i { transform: rotate(calc(-28deg + var(--lvl, 0) * 34deg)); animation: needleJit .7s ease-in-out infinite alternate; }
+@keyframes needleJit { from { rotate: -3deg; } to { rotate: 3deg; } }
+.board .cables { z-index: 2; transition: opacity var(--t-base) var(--e-out); }
+.cables .cb { stroke: var(--cb); stroke-width: 6; }
+.cables .cb-hi { stroke: #ffffff30; stroke-width: 1.5; transform: translateY(-1.2px); }
+.cables .plug { fill: var(--plug); stroke: #0005; stroke-width: .6; }
+.cables .cb-lbl { font: 600 10px var(--mono); letter-spacing: .14em; fill: color-mix(in srgb, var(--pd-ink) 60%, transparent); }
+.cables .cb-byp { fill: none; stroke: var(--cb); stroke-width: 1.5; stroke-dasharray: 3 4; stroke-linecap: butt; opacity: .6; }
+/* a bypassed chain: the cables dim and carry no signal (B-03) */
+.board.bypassed .cables { opacity: .4; }
+.board.empty .cables { display: none; }
+@container desk (max-width: 539.98px) { .board .pedals { padding: 0 24px; column-gap: 32px; } }
+.board .pedals .pk-lcdwrap .cyc { width: 16px; }
+.board .pedals .pk-lcd { padding: 2px 2px; letter-spacing: .02em; }

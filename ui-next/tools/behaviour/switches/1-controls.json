@@ -1,0 +1,30 @@
+{
+  "about": "Package 1's features, each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+  "switches": [
+    { "feature": "number box", "file": "src/app/parts/NumberBox.tsx", "find": "  const commit = (text: string) => { if (text !== box?.text) p?.typed(text); setDraft(null); };", "replace": "  const commit = (text: string) => { void text; setDraft(null); };" },
+    { "feature": "ruler", "file": "src/app/parts/Ruler.tsx", "find": "p.along((e.clientX - b.left) / b.width, r.span, b.width);", "replace": "void b;" },
+    { "feature": "ruler auto", "file": "src/app/parts/Ruler.tsx", "find": "onClick={() => p.setAuto(!r.auto)}", "replace": "onClick={() => {}}" },
+    { "feature": "ruler markers", "file": "src/derive/controls.ts", "find": "markers: opts.markers && desk.tier !== 'quick' ?", "replace": "markers: false ?" },
+    { "feature": "auto estimate", "file": "src/derive/parts.ts", "find": "const e = on || k in at.vals ? null : autoEstimate(ix, k, at);", "replace": "const e = null as number | null;" },
+    { "feature": "plugin list", "file": "src/app/parts/Dropdown.tsx", "find": "  const curves = variant === 'plugin' && !!faces?.some(f => f.curve), table = variant === 'plugin' && !curves && opts.length > 6;", "replace": "  const curves = false, table = false;" },
+    { "feature": "list filter", "file": "src/app/parts/Dropdown.tsx", "find": "if (filter) { e.preventDefault(); filter.focus(); filter.value += e.key; setQuery(filter.value); }", "replace": "void filter;" },
+    { "feature": "list Tab", "file": "src/app/parts/Dropdown.tsx", "find": "if (b?.isConnected) tabFrom(b, e.shiftKey ? -1 : 1); return; }", "replace": "return; }" },
+    { "feature": "row marker", "file": "src/app/parts/ChoiceRow.tsx", "find": "<i ref={mark} className=\"q-mark\" aria-hidden=\"true\" hidden={!between} />", "replace": "<i ref={mark} className=\"q-mark\" aria-hidden=\"true\" hidden />" },
+    { "feature": "row from value", "file": "src/app/parts/ChoiceRow.tsx", "find": "const from = between && checked === null && Number.isFinite(d) ?", "replace": "const from = false ?" },
+    { "feature": "token drag", "file": "src/app/parts/Token.tsx", "find": "    if (e.clientX !== d.x) p.scrub(d.from, e.clientX - d.x, e.shiftKey);", "replace": "" },
+    { "feature": "token type", "file": "src/app/parts/Token.tsx", "find": "e.stopPropagation(); setTyping(true); return; }", "replace": "return; }" },
+    { "feature": "pill", "file": "src/app/parts/Toggles.tsx", "find": "data-ledtog={p.key} data-ctl={p.key} aria-pressed={on(p)} title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on(p))}>\n      <i />", "replace": "data-ledtog={p.key} data-ctl={p.key} aria-pressed={on(p)} title={v.title ? say(v.title) : undefined}>\n      <i />" },
+    { "feature": "text keeps", "file": "src/app/parts/TextField.tsx", "find": "else if (p.kept) setLeft(true);", "replace": "else if (p.kept) setDraft(null);" },
+    { "feature": "text refuses", "file": "src/derive/parts.ts", "find": "if (bad) { const v = valueOf(ix, k, at);", "replace": "if (bad && k === '') { const v = valueOf(ix, k, at);" },
+    { "feature": "unit chips", "file": "src/app/parts/Chips.tsx", "find": "title={say(o.label)} onClick={() => p.set(o.value)}>{say(o.short ?? o.label)}", "replace": "title={say(o.label)}>{say(o.short ?? o.label)}" },
+    { "feature": "delete resets", "file": "src/app/kit/value.ts", "find": "  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); g.end('key'); p.reset(); return true; }", "replace": "" },
+    { "feature": "fader", "file": "src/app/parts/Fader.tsx", "find": "    p.toFraction(y * f.span);", "replace": "    void y;" },
+    { "feature": "box arrows", "file": "src/app/parts/NumberBox.tsx", "find": "      if (p && /^(ArrowUp|ArrowDown|PageUp|PageDown)$/.test(e.key)) {", "replace": "      if (p && /^$/.test(e.key)) {" },
+    { "feature": "module switches", "file": "src/app/parts/Toggles.tsx", "find": "title={v.title ? say(v.title) : undefined} onClick={() => p.set(!on(p))}>\n        {say(v.label, { upper: true })}", "replace": "title={v.title ? say(v.title) : undefined}>\n        {say(v.label, { upper: true })}" },
+    { "feature": "power chip", "file": "src/app/parts/Toggles.tsx", "find": "onClick={() => p.set(pw.to)}", "replace": "onClick={() => {}}" },
+    { "feature": "lookback", "file": "src/app/parts/Lookback.tsx", "find": "    p.press(SWAP[e.key] ?? e.key, e.shiftKey);", "replace": "    p.press(e.key, e.shiftKey);" },
+    { "feature": "pick variants", "file": "src/app/parts/Pick.tsx", "find": "  if (variant === 'stamp') return", "replace": "  if (variant === ('none' as string)) return" },
+    { "feature": "stamp recent", "file": "src/app/parts/Dropdown.tsx", "find": "const choose = (o: Opt) => { if (variant === 'stamp') remember(String(o.value));", "replace": "const choose = (o: Opt) => { void remember;" },
+    { "feature": "length snap", "file": "src/derive/controls.ts", "find": "  if (face.unit !== 's' || !face.range) return null;", "replace": "  if (face.unit || !face.range) return null;" }
+  ]
+}

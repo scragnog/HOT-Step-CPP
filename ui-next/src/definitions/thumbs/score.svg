@@ -1,0 +1,36 @@
+<!-- Thumbnail score: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="paper" x="15" y="15" width="146" height="82" rx="6"/>
+<path class="rule" d="M24 44H152M24 60H152M24 76H152M24 92H152"/>
+<rect class="p-ink" x="26" y="24" width="16" height="3" rx="1.5"/>
+<rect class="p-ink" x="26" y="32" width="24" height="3" rx="1.5"/>
+<path class="staff" d="M114 21H152M114 24H152M114 27H152M114 30H152M114 33H152"/>
+<ellipse class="note-h" cx="124" cy="30" rx="2.4" ry="1.8" transform="rotate(-20 124 30)"/>
+<ellipse class="note-h" cx="133" cy="27.5" rx="2.4" ry="1.8" transform="rotate(-20 133 27.5)"/>
+<ellipse class="note-h" cx="142" cy="25" rx="2.4" ry="1.8" transform="rotate(-20 142 25)"/>
+<rect class="p-ink" x="26" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="37" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="48" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="59" y="52" width="10" height="3" rx="1.5"/>
+<path class="stem" d="M74 48V57"/>
+<rect class="p-ink" x="80" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="91" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="102" y="52" width="7" height="3" rx="1.5"/>
+<path class="stem" d="M114 48V57"/>
+<rect class="p-ink" x="120" y="52" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="131" y="52" width="10" height="3" rx="1.5"/>
+<rect class="p-ink" x="26" y="68" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="37" y="68" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="48" y="68" width="10" height="3" rx="1.5"/>
+<path class="stem" d="M63 64V73"/>
+<rect class="p-ink" x="69" y="68" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="80" y="68" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="91" y="68" width="7" height="3" rx="1.5"/>
+<path class="stem" d="M103 64V73"/>
+<rect class="p-ink" x="109" y="68" width="14" height="3" rx="1.5"/>
+<path class="stem" d="M128 64V73"/>
+<rect class="p-ink" x="26" y="84" width="10" height="3" rx="1.5"/>
+<rect class="p-ink" x="40" y="84" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="51" y="84" width="7" height="3" rx="1.5"/>
+<path class="stem" d="M63 80V89"/>
+<rect class="p-ink" x="69" y="84" width="7" height="3" rx="1.5"/>
+<rect class="p-ink" x="80" y="84" width="7" height="3" rx="1.5"/>

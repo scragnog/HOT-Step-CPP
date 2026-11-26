@@ -1,0 +1,29 @@
+{
+  "about": "The shared controls (knobs, LED buttons, segmented choices, pickers and dropdowns, Quick's choice rows, number boxes, rulers, faders, tokens, the look-back strip), each where a module draws it (31-controls.mjs) or in the test build's parts gallery (32-controls-gallery.mjs), with the older scenarios that exercise them.",
+  "scenarios": [
+    { "id": "31-controls/number-box-types-steps-and-scrubs", "why": "numberBox: typing, Enter, the arrows, Page, Shift, a word refused and said, out of range clamped and said, Escape, scrubbing, the seconds under it (21-numbox.js)." },
+    { "id": "31-controls/ruler-drags-keys-and-leaves-auto", "why": "ruler: the estimate on auto, the auto button, a press and a drag, the value contract's keys, the cap at the end, a double-click back to auto." },
+    { "id": "31-controls/ruler-says-what-auto-means-on-each-engine", "why": "ruler: 'up to 4:00' where the model ends the song and auto off starting there (S-17), an exact length without an estimate." },
+    { "id": "31-controls/ruler-draws-beat-io-and-trim", "why": "ruler markers: Beat I/O at both ends, the line when it is longer than the song, the trim tag." },
+    { "id": "31-controls/plugin-picker-table-grid-and-filter", "why": "pick, plugin variant, and its dropdown: the periodic table, its header, typing into the filter, Enter takes the first match, ArrowDown opens, Escape, the grid of curves, no match said, Home, End, Tab carries on, a click chooses." },
+    { "id": "31-controls/quick-row-between-its-choices", "why": "choiceRow's marker: a value between its choices checks none, marks its place and says it, the Tab stop is the nearest, an arrow goes on from the value (Q-08)." },
+    { "id": "31-controls/scrub-tokens-step-drag-and-type", "why": "token: the arrows, a sideways drag, Enter to type, Escape, a double-click reset." },
+    { "id": "31-controls/pill-and-how-adventurous", "why": "pill; choiceRow's mood look with its radio keys." },
+    { "id": "31-controls/checked-text-keeps-or-refuses", "why": "textField: a check marks while typing, a keeping field keeps and says nothing is applied, a valid list set on Enter, a field that does not keep refuses, puts back and says what it kept." },
+    { "id": "31-controls/side-unit-chip-selector", "why": "chips on a side unit: its caps label, its short words, a press chooses and marks it changed." },
+    { "id": "31-controls/delete-resets-tokens-and-rulers", "why": "S-18: Delete and Backspace reset a ruler and a token." },
+    { "id": "32-controls-gallery/fader-keys-drag-and-reset", "why": "fader: a slider with its value and unity line, the keys, a press and a drag, a double-click and Delete reset." },
+    { "id": "32-controls-gallery/lcd-number-types-and-steps", "why": "lcdNumber: typing, an arrow, clamped and said, scrubbing." },
+    { "id": "32-controls-gallery/switches-in-a-modules-look", "why": "lcdButton, flag, recButton, lockButton: each switches on and off, says it is pressed, is marked, is one named step." },
+    { "id": "32-controls-gallery/power-chip-switches-a-group-by-its-number", "why": "powerChip: on while its number is not the off value, a press sets the off value and the chip says so." },
+    { "id": "32-controls-gallery/chips-choose-on-paper-and-lcd", "why": "termChips, lcdChips, chips: a press chooses." },
+    { "id": "32-controls-gallery/look-back-strip-grows-into-the-past", "why": "lookback: the lit bars, Left reaches further back, Right less, End, a hand along it." },
+    { "id": "32-controls-gallery/chip-model-and-stamp-pickers", "why": "pick's chip, model and stamp variants and their lists: open on the chosen one, the arrows and Enter, Escape, the stamps' filter and the language used last first, Tab carries on." },
+    { "id": "32-controls-gallery/lcd-picker-cycles-and-lists", "why": "pick's LCD variant: the arrows beside it cycle and wrap, its LCD list, Home and Enter." },
+    { "id": "11-engines/number-box-tab-changes-nothing", "why": "numberBox: passing through it with Tab stores and marks nothing (B-27)." },
+    { "id": "17-undo-net/undo-after-leaving-a-field-stays-out-of-it", "why": "numberBox: an arrow in the box, then Undo after leaving it leaves focus out of it (L-05)." },
+    { "id": "18-tips-touch/short-plugin-menu-is-named-cards", "why": "pick, plugin variant: a short list is cards with their names (S-02)." },
+    { "id": "23-sa3-hm-round5/delete-resets-a-value-control", "why": "S-18: Delete on a focused knob resets it (the value contract, kit/value.ts, which this package extended)." },
+    { "id": "23-sa3-hm-round5/length-drag-snaps-to-round-values", "why": "S-31: dragging a length ruler snaps to round values." }
+  ]
+}

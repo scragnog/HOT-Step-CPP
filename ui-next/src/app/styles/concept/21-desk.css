@@ -1,0 +1,81 @@
+/* The desk: the grid that packs the tiles, the empty desk, the parked tray, drag and drop, more tiles. Loads after 20-tile.css: the grid places tiles. */
+/* desk grid */
+.bento { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 12px; }
+/* columns follow the width the desk really has (container queries further down), not the window, so a narrow tile never drops under ~260px */
+.deskwrap { container: desk / inline-size; min-width: 0; }
+.deskwrap:has(> .bento:empty) { display: none; }
+@container desk (max-width: 1235.98px) {
+  /* columns follow the desk's width so a column never drops far under 300px: 4 from 1236px, 3 from 900px, then 2, then 1.
+     At 3 columns a wide tile takes two and a narrow one sits beside it, so ordinary laptop windows keep a three-column desk (D-10). */
+  .bento { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container desk (max-width: 899.98px) { .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container desk (max-width: 539.98px) { .bento { grid-template-columns: minmax(0, 1fr); } }
+@container desk (max-width: 1235.98px) {
+  /* Quick: one centred column, 900px wide and 4 x 216 while it fits, otherwise 2 x 216 centred; tiles never stretch */
+  .t-quick .bento { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container desk (max-width: 899.98px) { .t-quick .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container desk (max-width: 459.98px) { .t-quick .bento { grid-template-columns: minmax(0, 1fr); } }
+.bento:empty { display: none; }
+.moretiles { grid-column: 1 / -1; border: 1px dashed var(--line); background: none; border-radius: 12px; padding: 10px; color: var(--muted); font-weight: 500; }
+.moretiles:hover { color: var(--fg); border-color: var(--faint); }
+.parked { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 12px; }
+.parked .lbl { flex-basis: 100%; color: var(--muted); }
+/* on a phone a parked chip that holds a long name and its engine tag wraps inside the tray, never past its edge */
+.parked .pchip { max-width: 100%; min-width: 0; flex-wrap: wrap; white-space: normal; height: auto; row-gap: 2px; }
+.bento { grid-auto-rows: 2px; row-gap: 0; align-items: stretch; }
+/* a tile is exactly as tall as its content, never stretched to its packed area, so when its content shrinks the tile
+   shrinks with it and the packer hears about it (G-B-03) */
+.bento > * { margin-bottom: 12px; align-self: start; }
+/* a tile the packer grew to close a gap under it (A-01) fills its area; its body keeps its own height, so the surface
+   extends below the content and the packer still hears the content change size */
+.bento > .stretched { align-self: stretch; }
+.bento > .tile.stretched > .tile-body { flex-grow: 0; }
+/* a tile whose face is drawn to take more room (data-stretch, Q-23): its controls keep to the top and its foot goes to
+   the bottom, so a row of tiles ends on one line with no blank band under any of them */
+.bento > .tile.stretched[data-stretch] > .tile-body { flex-grow: 1; justify-content: space-between; }
+/* a module whose drawing can grow (data-fill: the sticky note) takes the room itself */
+.bento > .tile.stretched[data-fill] > .tile-body { flex-grow: 1; }
+.bento.measuring > * { align-self: start; grid-row-end: auto !important; }
+/* empty and sparse desks */
+.desk-empty { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px 18px; align-items: center; align-content: center; padding: 22px 24px; border: 1.5px dashed var(--line); border-radius: 16px; color: var(--muted); background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--fg) 2.5%, transparent) 10px 11px); }
+.desk-empty .de-art { width: 64px; height: 48px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); gap: 4px; }
+.desk-empty .de-art i { border-radius: 4px; background: var(--raised); border: 1px solid var(--line); }
+.desk-empty .de-art i:nth-child(1) { grid-column: span 2; }
+.desk-empty .de-art i:nth-child(4) { grid-column: span 2; background: var(--hot-soft); border-color: color-mix(in srgb, var(--hot) 40%, var(--line)); }
+.desk-empty h3 { margin: 0 0 2px; font: 600 15px var(--body); color: var(--fg); }
+.desk-empty p { margin: 0; font-size: 13px; }
+.desk-empty .de-acts { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.desk-empty .de-acts .sbtn b { font-weight: 600; color: var(--fg); }
+@container desk (max-width: 539px) {
+  .desk-empty { grid-template-columns: minmax(0, 1fr); }
+  .desk-empty .de-art { display: none; }
+}
+/* beside the lyric sheet: the two columns left on a four-column desk, the one left on a three-column desk (Q-08); with no sheet (an
+   engine without lyrics) it is the whole row (Q-23); the
+   layout grows it to the sheet's height, and its content stands in its middle */
+@container desk (min-width: 900px) { :is(.t-studio, .t-lab) .bento:has(> [data-m="lyrics"]) > .desk-empty { grid-column: span 1; grid-template-columns: minmax(0, 1fr); justify-items: start; } }
+@container desk (min-width: 1236px) { :is(.t-studio, .t-lab) .bento:has(> [data-m="lyrics"]) > .desk-empty { grid-column: span 2; grid-template-columns: auto minmax(0, 1fr); } }
+/* the desk is one layer under the bars: a tile that moves, lands or lifts never paints over the top bar, the bar with
+   the tier switch or the go bar (Q-15) */
+.deskwrap { position: relative; z-index: 0; }
+.bento.exit-layer { position: absolute; inset: 0; display: block; max-width: none; margin: 0; pointer-events: none; z-index: 3; }
+.bento.exit-layer > .tile { margin: 0; }
+.bento > .deskrow { grid-column: 1 / -1; }
+/* the drag image: the snapshot itself, 5% larger, tilted 2 degrees, on the overlay shadow (built off screen by dragImage()) */
+.drag-img { position: fixed; left: -4000px; top: 0; padding: 18px; zoom: 1.05; pointer-events: none; }
+.drag-img > * { position: relative !important; inset: auto !important; rotate: -2deg; border-radius: var(--r-ctl); overflow: hidden; background: var(--surface); box-shadow: var(--elev-overlay); }
+/* the grip's move menu (B-23): four plain choices, sized for a finger */
+.pop:has(.move-menu) { width: auto; min-width: 200px; }
+.move-menu { display: grid; gap: 4px; }
+.move-menu button { text-align: left; min-height: 36px; padding: 0 12px; }
+.move-menu button:disabled { opacity: .45; }
+/* a parked pedal or side unit says which it is (B-12) */
+.parked .pchip small { font: 11px var(--mono); color: var(--faint); }
+/* the engines a parked chip returns on, in the Modules panel's tag colours (S-13) */
+.parked .pchip .pc-eng { color: color-mix(in srgb, var(--amber) 80%, var(--fg)); background: color-mix(in srgb, var(--amber) 14%, transparent); border-radius: var(--r-chip); padding: 0 5px; }
+/* the empty Quick desk (Q-42): one quiet line under the sheet, with the starters */
+.q-empty { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 4px 2px; font-size: var(--fs-13); color: var(--muted); }
+.q-empty .de-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.q-empty .sbtn b { font-weight: 600; color: var(--fg); }

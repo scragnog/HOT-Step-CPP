@@ -1,0 +1,57 @@
+/* Element defaults and resets, the skip link, sr-only, mono, scroll fades, the Auto toggle. */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+/* the body grows with the page, so the sticky top bar stays in view however far the page scrolls; with a fixed
+   height it was carried off with the body once the page had scrolled one window down */
+html { height: 100%; } body { min-height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--body); margin: 0; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.lbl { color: var(--faint); font-size: 13px; }
+kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--surface); color: var(--muted); }
+/* header */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--bg); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+/* Order: the Auto toggle. A ruler in auto mode is also .auto and 15-ruler.css restyles it, so this sits in base, before the controls. */
+.auto { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 0 6px; font: 11px var(--mono); color: var(--faint); }
+.auto.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+input[type=range] { width: 100%; accent-color: var(--hot); margin: 0; }
+input[type=range]:disabled { opacity: .35; }
+/* Scrolling without scrollbars: content grows, the pedalboard wraps, panels fade at the edge that has more */
+html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 22%, transparent) transparent; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--fg) 16%, transparent) transparent; }
+/* a region that scrolls says how long it is and where you are: a thin, quiet scrollbar beside the edge fades (C-43) */
+.noscroll { overscroll-behavior: contain; }
+.fade-t { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32px); mask-image: linear-gradient(to bottom, transparent, #000 32px); }
+.fade-b { -webkit-mask-image: linear-gradient(to top, transparent, #000 32px); mask-image: linear-gradient(to top, transparent, #000 32px); }
+.fade-t.fade-b { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 32px, #000 calc(100% - 32px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 32px, #000 calc(100% - 32px), transparent); }
+/* a surface that scrolls itself (a drawer, a dropdown) must stay opaque to its border (S-25): its edge fades are a band of
+   its own background laid over the content, not a mask, which would let the page show through */
+.fade-own.fade-t, .fade-own.fade-b { -webkit-mask-image: none; mask-image: none; }
+.fade-own::before, .fade-own::after { content: ""; position: sticky; z-index: 3; display: block; height: 32px; pointer-events: none; background: inherit; opacity: 0; transition: opacity var(--t-fast) var(--e-out); }
+.fade-own::before { top: 0; margin: 0 0 -32px; -webkit-mask-image: linear-gradient(#000, transparent); mask-image: linear-gradient(#000, transparent); }
+.fade-own::after { bottom: 0; margin: -32px 0 0; -webkit-mask-image: linear-gradient(transparent, #000); mask-image: linear-gradient(transparent, #000); }
+.fade-own.fade-t::before, .fade-own.fade-b::after { opacity: 1; }
+body.scrubbing, body.scrubbing * { cursor: ns-resize !important; user-select: none; }
+textarea.capped { overflow-y: auto !important; scrollbar-width: none; overscroll-behavior: contain; }
+textarea.capped::-webkit-scrollbar { display: none; }
+textarea.capped.more-down { -webkit-mask: linear-gradient(#000 calc(100% - 36px), transparent); mask: linear-gradient(#000 calc(100% - 36px), transparent); }
+textarea.capped.more-up { -webkit-mask: linear-gradient(transparent, #000 30px); mask: linear-gradient(transparent, #000 30px); }
+textarea.capped.more-up.more-down { -webkit-mask: linear-gradient(transparent, #000 30px, #000 calc(100% - 36px), transparent); mask: linear-gradient(transparent, #000 30px, #000 calc(100% - 36px), transparent); }
+.smark { position: absolute; z-index: 3; width: 6px; border-radius: 3px; cursor: ns-resize; touch-action: none; transition: width var(--t-fast) var(--e-out), background var(--t-fast) var(--e-out); }
+.lbl.warn { color: var(--amber); }
+html { scroll-padding-top: calc(72px + env(safe-area-inset-top, 0px)); scroll-padding-bottom: 96px; }
+/* typed numbers that don't fit */
+/* invalid is the field's own border in the warning red, never an outer ring: the ring means focus (L-19) */
+input.bad { border-color: #e0225a !important; box-shadow: inset 0 0 0 1px #e0225a; text-decoration: wavy underline #e0225a; }
+/* skip link, the page heading in Studio and Lab, the theme switch */
+.skip { position: absolute; left: 12px; top: -60px; z-index: 100; background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; }
+.skip:focus { top: 10px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: -1px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; scroll-behavior: auto !important;
+      transition-property: color, background-color, border-color, outline-color, opacity, box-shadow, fill, stroke, filter !important;
+      transition-duration: 120ms !important; transition-timing-function: linear !important; transition-delay: 0s !important; }
+}

@@ -1,0 +1,239 @@
+{
+ "about": "Package 2's features, each switched off by one small change to its source (vite.config.ts HS_SWITCH, test build only); tools/behaviour/switches.mjs builds the page once per feature and runs the acceptance, and each must make at least one scenario fail.",
+ "switches": [
+  {
+   "feature": "term lab lines",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "    if (k.extra && k.part === 'termLine') {",
+   "replace": "    if (k.extra && k.part === 'none') {"
+  },
+  {
+   "feature": "term flags",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "flag !== null ? <><span className=\"k\">{say(flag)}</span> {items[i]}</> : items[i]",
+   "replace": "items[i]"
+  },
+  {
+   "feature": "term off",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "const cls = `term${v.dim ? (bar ? ' pw-off' : ' plan-off') : ''}",
+   "replace": "const cls = `term${v.dim ? '' : ''}"
+  },
+  {
+   "feature": "guard off",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "${line?.dim ? ' guard-off' : ''}",
+   "replace": ""
+  },
+  {
+   "feature": "guard lines",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "    if (strips > 1 && k.part === 'termLine'",
+   "replace": "    if (strips > 9 && k.part === 'termLine'"
+  },
+  {
+   "feature": "plan-off words",
+   "file": "src/app/parts/Terminal.tsx",
+   "find": "{lent ? <span className=\"term-plan-off\">{lent}</span> : null}",
+   "replace": "{null}"
+  },
+  {
+   "feature": "plan text",
+   "file": "src/derive/readouts.ts",
+   "find": "  const yoursBpm = !!kb && has(ix, kb, desk.engine) && !isAuto(ix, kb, desk),",
+   "replace": "  const yoursBpm = false as boolean,"
+  },
+  {
+   "feature": "plan looks",
+   "file": "src/derive/readouts.ts",
+   "find": "  if (look === 'compose') {",
+   "replace": "  if (look === 'none') {"
+  },
+  {
+   "feature": "beat lamps lent",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "const unit = lend('beatPulse')",
+   "replace": "const unit = lend('none')"
+  },
+  {
+   "feature": "trim held",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "const held = run.every(x => x.dim);",
+   "replace": "const held = false as boolean;"
+  },
+  {
+   "feature": "beat lamps",
+   "file": "src/derive/readouts.ts",
+   "find": "  return { beats: top, beat: bpm ?",
+   "replace": "  return { beats: 4 + 0 * top, beat: bpm ?"
+  },
+  {
+   "feature": "group dim",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "`ad-g${foot ? ' ad-ps' : ''}${v.dim ? ' dim' : ''}`",
+   "replace": "`ad-g${foot ? ' ad-ps' : ''}`"
+  },
+  {
+   "feature": "group head",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "head = kids[first]?.part === 'pill' || kids[first]?.part === 'powerChip' ? first : -1;",
+   "replace": "head = -1 + 0 * first;"
+  },
+  {
+   "feature": "token pairs",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "    if (isPair(k)) {",
+   "replace": "    if (isPair(k) && k.part === 'none') {"
+  },
+  {
+   "feature": "pair arrow",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "{items[0]}<span className=\"tk-arrow\" aria-hidden=\"true\">→</span>{items[1]}",
+   "replace": "{items[0]}{items[1]}"
+  },
+  {
+   "feature": "group row",
+   "file": "src/app/parts/containers.tsx",
+   "find": "  if (kids.length && kids.every(k => k.part === 'group'))",
+   "replace": "  if (kids.length && kids.every(k => k.part === 'none'))"
+  },
+  {
+   "feature": "deck sub rows",
+   "file": "src/app/parts/containers.tsx",
+   "find": "const sub = what === 'pick' || what === 'textField',",
+   "replace": "const sub = false as boolean,"
+  },
+  {
+   "feature": "deck why",
+   "file": "src/app/parts/containers.tsx",
+   "find": "off = what === 'pick' && kids[0]?.dim ? kids[0].dim : null;",
+   "replace": "off = null as string | null;"
+  },
+  {
+   "feature": "deck row",
+   "file": "src/app/parts/containers.tsx",
+   "find": "  const cls = (v.kids ?? []).length > 1 ? ' deck-row'",
+   "replace": "  const cls = (v.kids ?? []).length > 9 ? ' deck-row'"
+  },
+  {
+   "feature": "dice",
+   "file": "src/derive/readouts.ts",
+   "find": "  return { n: Math.min(50, Math.max(0, Math.round(num(ix, desk, node.reads?.[0])))),",
+   "replace": "  return { n: 3,"
+  },
+  {
+   "feature": "dice off",
+   "file": "src/derive/readouts.ts",
+   "find": "off: !!off && read(ix, desk, off) === false, used:",
+   "replace": "off: false, used:"
+  },
+  {
+   "feature": "flow windows",
+   "file": "src/derive/readouts.ts",
+   "find": "frames = num(ix, desk, key, 100), hs",
+   "replace": "frames = 150, hs"
+  },
+  {
+   "feature": "speed gauge",
+   "file": "src/derive/readouts.ts",
+   "find": "  return { text: sp < 1 ? '0%' : `+${Math.round(sp)}%` };",
+   "replace": "  return { text: sp < 1000 ? '0%' : '' };"
+  },
+  {
+   "feature": "adhere curve",
+   "file": "src/derive/readouts.ts",
+   "find": "    band: pc > 1 ?",
+   "replace": "    band: pc > 100 ?"
+  },
+  {
+   "feature": "curve legend",
+   "file": "src/derive/readouts.ts",
+   "find": "  if (pc > 1) legend.push(",
+   "replace": "  if (pc > 100) legend.push("
+  },
+  {
+   "feature": "lrc preview",
+   "file": "src/derive/readouts.ts",
+   "find": "  const first = sectionNames(String(read(ix, desk, node.reads?.[0]) ?? ''))[0] ?? 'verse';",
+   "replace": "  const first = 'verse';"
+  },
+  {
+   "feature": "unit objects",
+   "file": "src/app/parts/UnitObjects.tsx",
+   "find": "<span className=\"u-badge\" aria-hidden=\"true\" title={v.words.tip ? say(v.words.tip) : undefined}>{v.words.text ? say(v.words.text) : null}</span>",
+   "replace": "<span className=\"u-badge\" aria-hidden=\"true\" />"
+  },
+  {
+   "feature": "unit status",
+   "file": "src/app/parts/UnitObjects.tsx",
+   "find": "<span className=\"u-status\" title={v.words.tip ? say(v.words.tip) : undefined}>",
+   "replace": "<span className=\"u-status\">"
+  },
+  {
+   "feature": "file choose",
+   "file": "src/app/parts/DropZone.tsx",
+   "find": "e.currentTarget.value = ''; if (f) st.load(f.name, f.type); }} />",
+   "replace": "e.currentTarget.value = ''; void f; }} />"
+  },
+  {
+   "feature": "file drop",
+   "file": "src/app/parts/DropZone.tsx",
+   "find": "const f = e.dataTransfer.files[0]; if (f) st.load(f.name, f.type); },",
+   "replace": "void e.dataTransfer; },"
+  },
+  {
+   "feature": "file clear",
+   "file": "src/app/parts/DropZone.tsx",
+   "find": "onClick={e => { e.preventDefault(); st.apply('clear', ''); }}",
+   "replace": "onClick={e => { e.preventDefault(); }}"
+  },
+  {
+   "feature": "file refused",
+   "file": "src/derive/containers.ts",
+   "find": "(type || '').startsWith('audio/') || AUDIO_EXT.test(name) ? null :",
+   "replace": "true ? null :"
+  },
+  {
+   "feature": "drop outside",
+   "file": "src/app/features/file-drop.ts",
+   "find": "useDesk.getState().showToast({ text: dropOutside() });",
+   "replace": "void dropOutside;"
+  },
+  {
+   "feature": "file lent",
+   "file": "src/derive/models.ts",
+   "find": "lent: hit.d.id !== d.id || !!opts.from,",
+   "replace": "lent: false,"
+  },
+  {
+   "feature": "file steps",
+   "file": "src/derive/steps.ts",
+   "find": "    const file = fileStep(ix, n, before, after);\n    if (file) return file;",
+   "replace": "    const file = null as StepWords | null;\n    if (file) return file;"
+  },
+  {
+   "feature": "fader bank",
+   "file": "src/app/parts/Racks.tsx",
+   "find": "<div className=\"fdr-scale\" aria-hidden=\"true\"><span>2</span><span>1</span><span>0</span></div>",
+   "replace": ""
+  },
+  {
+   "feature": "applies hides",
+   "file": "src/derive/desk.ts",
+   "find": "!binds.some(k => applies(ix, k, desk))) return false;",
+   "replace": "false) return false;"
+  },
+  {
+   "feature": "short segments",
+   "file": "src/app/parts/Segmented.tsx",
+   "find": "{say(sm ? o.short ?? o.label : o.label)}",
+   "replace": "{say(o.label)}"
+  },
+  {
+   "feature": "container kids",
+   "file": "src/derive/models.ts",
+   "find": "  if ((spec?.kind === 'container' || (spec?.kind === 'bespoke' && node0.children?.length)) && key) m.kids = kidsOf(ix, node0, desk, key);",
+   "replace": ""
+  }
+ ]
+}

@@ -1,0 +1,3 @@
+/* Tooltips. */
+.tip { position: fixed; z-index: 70; max-width: 300px; padding: 6px 10px; border-radius: var(--r-ctl); background: var(--fg); color: var(--bg); font: 12px/1.4 var(--body); box-shadow: var(--elev-overlay); pointer-events: none; animation: ovFade var(--t-fast) var(--e-out); }
+.tip[hidden] { display: none; }

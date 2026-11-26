@@ -1,0 +1,26 @@
+<!-- Thumbnail adapters: inner drawing in the thumbnail kit's classes, on the 176 x 112 module canvas. Captured from the concept at vanilla-reference. -->
+<rect class="inst" x="15" y="15" width="64" height="82" rx="8"/>
+<rect class="cart-w" x="22" y="23" width="50" height="26" rx="5"/>
+<rect class="cass" x="28" y="29" width="38" height="14" rx="7"/>
+<circle class="hot" cx="38.5" cy="36" r="3.6"/>
+<circle class="hot" cx="55.5" cy="36" r="3.6"/>
+<rect class="inst-t" x="31" y="55" width="32" height="3" rx="1.5"/>
+<path class="fdr-s" d="M47 64V91"/>
+<rect class="fdr-c" x="40" y="71" width="14" height="6" rx="2"/>
+<rect class="inst" x="85" y="15" width="76" height="82" rx="8"/>
+<path class="fdr-s" d="M94 24V88"/>
+<path class="fdr-v" d="M94 55V88"/>
+<rect class="fdr-c" x="89.5" y="49" width="9" height="6" rx="1.5"/>
+<path class="fdr-s" d="M105.6 24V88"/>
+<path class="fdr-v" d="M105.6 55V88"/>
+<rect class="fdr-c" x="101.1" y="49" width="9" height="6" rx="1.5"/>
+<path class="fdr-s" d="M117.2 24V88"/>
+<path class="fdr-v" d="M117.2 55V88"/>
+<rect class="fdr-c" x="112.7" y="49" width="9" height="6" rx="1.5"/>
+<path class="fdr-s" d="M128.8 24V88"/>
+<path class="fdr-v" d="M128.8 55V88"/>
+<rect class="fdr-c" x="124.3" y="49" width="9" height="6" rx="1.5"/>
+<path class="fdr-s" d="M140.4 24V88"/>
+<rect class="fdr-c" x="135.9" y="81" width="9" height="6" rx="1.5"/>
+<path class="fdr-s" d="M152 24V88"/>
+<rect class="fdr-c" x="147.5" y="81" width="9" height="6" rx="1.5"/>

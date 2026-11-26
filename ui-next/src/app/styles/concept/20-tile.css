@@ -1,0 +1,75 @@
+/* The tile shell: head, grip, body, foot, strips, widths, Lab modules on lower tiers. */
+.tile { grid-column: span 1; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-tile); display: flex; flex-direction: column; min-width: 0; position: relative; align-self: stretch; }
+.tile.w2 { grid-column: span 2; }
+.tile.w4 { grid-column: 1 / -1; }
+.tile.tall { grid-row: span 2; }
+.t-quick .tile.w4 { grid-column: 1 / -1; }
+.tile.source { border-color: color-mix(in srgb, var(--hot) 55%, var(--line)); }
+.tile.flash { animation: flash calc(var(--t-slow) * 2) var(--e-out); }
+@keyframes flash { from { box-shadow: 0 0 0 5px var(--hot-soft); } to { box-shadow: 0 0 0 0 transparent; } }
+.tile-head { display: flex; align-items: center; gap: 8px; padding: 8px 8px 0 12px; min-height: 40px; }
+.tile-head[draggable="true"] { cursor: grab; }
+.grip { user-select: none; }
+.grp { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.tile-head h3 { margin: 0; font: 600 14px var(--body); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.unsup .tile-body { opacity: .28; pointer-events: none; filter: grayscale(1); }
+.unsup-note { position: absolute; inset: 44px 14px auto 14px; background: var(--surface); border: 1px dashed var(--faint); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--muted); z-index: 2; }
+.unsup-note b { color: var(--fg); }
+.strip { display: flex; height: 24px; gap: 2px; border-radius: 7px; }
+.strip span { flex: var(--n); display: grid; place-items: center; font: 500 11px var(--mono); color: #fff; white-space: nowrap; overflow: hidden; min-width: 0; }
+.strip .empty { flex: 1; background: var(--raised); color: var(--faint); }
+.tile-foot { display: flex; gap: 10px 16px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+@container desk (max-width: 539.98px) { .bento .tile.w2, .bento .tile.w4 { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .tile.tall { grid-row: span 1; } }
+.tile.ghost { opacity: .5; pointer-events: none; outline: 2px dashed var(--hot); outline-offset: 3px; animation: ghostIn var(--t-base) var(--e-out); }
+@keyframes ghostIn { from { opacity: 0; transform: scale(.97); } to { opacity: .5; transform: none; } }
+.tile.glow { box-shadow: 0 0 0 3px var(--hot-soft); border-color: var(--hot); }
+/* the grip: the drawn six dots (C-38), with the same hover the remove button has (A-28) */
+.grip { border: 0; background: none; padding: 2px 3px; cursor: grab; color: var(--faint); font: 12px var(--mono); letter-spacing: -2px; border-radius: 4px; }
+.tile-head .grip { padding: 0; width: 20px; height: 28px; margin-left: -6px; display: inline-grid; place-items: center; cursor: grab; color: var(--faint); border-radius: 6px; flex: none; transition: background var(--t-fast) var(--e-out), color var(--t-fast) var(--e-out); }
+.grip:hover { color: var(--fg); }
+.tile-head .grip:hover { background: var(--raised); }
+.bento .tile:not(.w2):not(.w4) .tile-head .grp { display: none; }
+/* tiles: no category labels; Lab marked with a corner tag, not a border */
+.tile-head .grp { display: none; }
+.tile.labmod { border-color: var(--line); }
+.tile.labmod .tile-head h3::after { content: "LAB"; margin-left: 8px; font: 700 10px var(--mono); letter-spacing: .1em; color: var(--lab); background: color-mix(in srgb, var(--lab) 14%, transparent); border-radius: 4px; padding: 2px 5px; vertical-align: 1px; }
+.bento > .tile.tall { grid-row: auto; }
+.tile-body { flex: 1 0 auto; }
+.cap[data-flowcap] { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font: 12px var(--mono); color: var(--muted); }
+.cap[data-flowcap] b { color: var(--fg); }
+.tile textarea, .tile input, [data-term], .tile pre { -webkit-user-select: text; user-select: text; }
+/* lyrics strip: segments are buttons that take you to the section */
+.strip > button { flex: var(--n) 1 32px; min-width: 28px; display: grid; place-items: center; border: 0; padding: 0 3px; margin: 0; color: #fff; font: 500 11px var(--mono); white-space: nowrap; overflow: hidden; min-width: 0; cursor: pointer; }
+.strip > button:hover { filter: brightness(1.12); }
+.strip > button:focus-visible { outline: 2px solid var(--fg); outline-offset: -3px; }
+.strip { overflow: visible; }
+.strip > :first-child { border-radius: 7px 0 0 7px; }
+.strip > :last-child { border-radius: 0 7px 7px 0; }
+.strip > :only-child { border-radius: 7px; }
+/* R-44: one-line read-outs never set the width of the page; they ellipsize instead */
+.strip { contain: inline-size; }
+.strip .empty { text-overflow: ellipsis; padding: 0 8px; }
+/* a narrow sheet lets the hint take two lines rather than cut it (S-27) */
+@media (max-width: 480px) { .strip .empty { white-space: normal; line-height: 1.3; padding-block: 3px; } }
+/* "BPM and key in caption" is a pill, not a full-width bar */
+.tile-body > .pill-tog { align-self: flex-start; }
+@container desk (min-width: 900px) and (max-width: 1235.98px) { .bento > .tile.w2.fold3 { grid-column: span 1; } }
+.tile.is-strip .tile-body { padding-top: 2px; padding-bottom: 12px; }
+.mod-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-height: 32px; }
+.mod-strip .ms-why { flex: 1 1 160px; font-size: 13px; line-height: 1.35; color: var(--muted); }
+.mod-strip .ms-act { display: flex; flex-wrap: wrap; gap: 6px; }
+/* a tile's header is its handle: on hover the grip comes to full ink and a hairline marks the handle; pressing lifts the tile */
+.tile-head[draggable="true"] { border-radius: calc(var(--r-tile) - 1px) calc(var(--r-tile) - 1px) 0 0; }
+.tile-head[draggable="true"]:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
+.tile-head[draggable="true"]:hover .grip { color: var(--fg); }
+.bento > .tile { transition: scale var(--t-fast) var(--e-out), box-shadow var(--t-fast) var(--e-out), opacity var(--t-base) var(--e-out); }
+.bento > .tile:has(> .tile-head[draggable="true"]:active) { scale: 1.01; box-shadow: var(--elev-overlay); z-index: 4; }
+/* dragging a tile: it leaves the desk (out of the flow, hidden where it stood) and the others close up, so its preview
+   shows exactly where it will land; the drag image is what the hand carries (M-13, G-M-04) */
+.bento > .tile.moving { position: absolute; left: var(--mx); top: var(--my); width: var(--mw); margin: 0; visibility: hidden; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .tile.flash { animation: none !important; outline: 2px solid var(--hot); outline-offset: 3px; } }
+/* Quick's "Also set" line (Q-07): one quiet line at the tile's foot, the link right after the words */
+.tile > .q-also { margin: -4px 14px 12px; font-size: var(--fs-12); line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.tile > .q-also .linkbtn { margin-left: 2px; font-size: var(--fs-12); color: var(--fg); padding: 0; }
