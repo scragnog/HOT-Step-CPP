@@ -1,0 +1,71 @@
+/* Ivory: cream panels and vermilion keys, a light-mode first skin for classic. Overlay rules:
+   docs/dev/skins.md#classic-overlay-skins. The palette is stock zinc (to warm grey), pink (to
+   vermilion) and rose (to orange) at each step's stock luminance, so contrast stays classic's. Light
+   mode adds raised cards and keycaps; dark mode is the same palette as a walnut-brown room. */
+
+:root[data-skin="ivory"] {
+  --zinc-50: 255 249 242;  --zinc-100: 249 243 236; --zinc-200: 235 227 217; --zinc-300: 221 211 198;
+  --zinc-400: 171 160 147; --zinc-500: 124 112 96;  --zinc-600: 92 81 66;    --zinc-700: 72 62 49;
+  --zinc-800: 46 38 27;    --zinc-900: 30 23 15;    --zinc-950: 14 8 3;
+  --pink-50: 255 242 239;  --pink-100: 255 231 225; --pink-200: 255 209 198; --pink-300: 255 171 150;
+  --pink-400: 255 117 84;  --pink-500: 245 76 31;   --pink-600: 218 56 0;    --pink-700: 185 46 0;
+  --pink-800: 155 37 0;    --pink-900: 132 30 0;    --pink-950: 79 14 0;
+  --rose-50: 253 242 235;  --rose-100: 250 231 215; --rose-200: 247 210 182; --rose-300: 241 174 119;
+  --rose-400: 234 132 0;   --rose-500: 199 111 0;   --rose-600: 173 96 0;    --rose-700: 146 79 0;
+  --rose-800: 122 66 0;    --rose-900: 106 56 0;    --rose-950: 57 28 0;
+  --purple-50: 255 245 239; --purple-100: 255 231 219; --purple-200: 255 212 190; --purple-300: 254 177 133; --purple-400: 248 124 37; --purple-500: 206 96 0;
+  --purple-600: 173 79 0; --purple-700: 146 66 0; --purple-800: 124 55 0; --purple-900: 102 44 0; --purple-950: 67 27 0;
+  --violet-50: 254 242 236; --violet-100: 253 231 220; --violet-200: 251 210 188; --violet-300: 247 174 134; --violet-400: 237 127 55; --violet-500: 199 92 0;
+  --violet-600: 167 76 0; --violet-700: 144 65 0; --violet-800: 121 53 0; --violet-900: 101 44 0; --violet-950: 65 26 0;
+  --white: 255 250 238;
+  --black: 16 10 5;
+  --suno-panel: 22 15 9;
+}
+
+html.dark[data-skin="ivory"] { --white: 248 241 227; }
+
+html[data-skin="ivory"] ::selection { background: rgb(var(--pink-500) / 0.25); }
+
+/* ---- light mode: the faceplate --------------------------------------------- */
+
+html[data-skin="ivory"]:not(.dark) :is(.rounded-lg, .rounded-xl, .rounded-2xl):is(.bg-white, .bg-zinc-50).border {
+  border-color: rgb(var(--zinc-300));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.7), 0 1px 2px rgb(var(--zinc-800) / 0.08), 0 2px 6px -2px rgb(var(--zinc-800) / 0.12);
+}
+
+/* Wells: inputs are cut into the plate. */
+html[data-skin="ivory"]:not(.dark) :is(input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"]), textarea) {
+  box-shadow: inset 0 1px 3px rgb(var(--zinc-800) / 0.14);
+}
+
+/* Keycaps: secondary buttons. */
+html[data-skin="ivory"]:not(.dark) button:is(.bg-zinc-100, .bg-zinc-200) {
+  background-image: linear-gradient(180deg, rgb(var(--white)), rgb(var(--zinc-200)));
+  border: 1px solid rgb(var(--zinc-300));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 1px 0 rgb(var(--zinc-400) / 0.6);
+}
+
+/* Lit keys: the main action. */
+html[data-skin="ivory"]:not(.dark) button:is(.bg-pink-500, .bg-pink-600, [class*="from-pink-"]):not(:disabled) {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), inset 0 -2px 0 rgb(var(--pink-800) / 0.35), 0 1px 2px rgb(var(--pink-900) / 0.3);
+}
+
+/* Pressable keys sink. */
+html[data-skin="ivory"]:not(.dark) button:is(.bg-zinc-100, .bg-zinc-200, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]):active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 3px rgb(var(--zinc-800) / 0.25);
+}
+
+/* Engraved labels. */
+html[data-skin="ivory"]:not(.dark) :is(.uppercase.tracking-wider, .uppercase.tracking-wide) {
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.8);
+}
+
+html[data-skin="ivory"] :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 2px solid rgb(var(--pink-500));
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="ivory"] button { transform: none !important; }
+}

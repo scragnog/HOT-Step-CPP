@@ -39,7 +39,7 @@ these folders beside the original. Use your ID as the new folder name.
 | Kind | Copy | Edit |
 | --- | --- | --- |
 | Theme | `ui/src/themes/ice/` | Change the ID in `manifest.json` and both skin selectors in `theme.css`. |
-| Classic overlay | `ui/src/themes/skeuo/` | Use the manifest and selectors as a reference. Replace the stylesheet with your own scoped rules and write an `IMPORT.md` if you are adapting an outside design. |
+| Classic overlay | `ui/src/themes/phosphor/` | Change the ID and the palette variables ([colour variables](docs/dev/skins.md#classic-overlay-skins)), then add scoped rules for anything a palette cannot do. `ui/src/themes/skeuo/` restyles class by class. Write an `IMPORT.md` if you are adapting an outside design. |
 | Shell | `ui/src/shells/starter/` | Change the ID in the manifest and `data-shell` selectors in the CSS. Edit `index.tsx`, which default-exports the React component. |
 
 Fill in `id`, `name` for the picker, `author` for credits, `version` in

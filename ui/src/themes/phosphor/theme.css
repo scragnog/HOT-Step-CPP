@@ -1,0 +1,73 @@
+/* Phosphor: a green CRT terminal for classic. Overlay rules: docs/dev/skins.md#classic-overlay-skins.
+   The palette is stock zinc, pink and rose moved to a green hue at each step's stock luminance, so
+   every text and surface pair keeps classic's contrast. Dark mode lifts the accent so it glows, and
+   text on a lit fill turns dark to stay readable. Square corners, mono type, faint scanlines. */
+
+:root[data-skin="phosphor"] {
+  --zinc-50: 244 252 246; --zinc-100: 238 246 240; --zinc-200: 220 231 222; --zinc-300: 202 216 204;
+  --zinc-400: 146 167 149; --zinc-500: 94 120 99;   --zinc-600: 63 88 68;    --zinc-700: 47 68 51;
+  --zinc-800: 25 43 29;    --zinc-900: 12 27 16;    --zinc-950: 2 11 4;
+  --pink-50: 239 247 239;  --pink-100: 225 241 224; --pink-200: 194 228 194; --pink-300: 143 207 145;
+  --pink-400: 67 180 78;   --pink-500: 0 158 42;    --pink-600: 0 136 35;    --pink-700: 0 115 28;
+  --pink-800: 0 95 21;     --pink-900: 0 80 16;     --pink-950: 0 46 6;
+  --rose-50: 241 245 235;  --rose-100: 229 237 216; --rose-200: 207 222 183; --rose-300: 171 198 122;
+  --rose-400: 131 171 17;  --rose-500: 110 145 0;   --rose-600: 94 126 0;    --rose-700: 78 104 0;
+  --rose-800: 65 87 0;     --rose-900: 56 75 0;     --rose-950: 28 39 0;
+  --purple-50: 237 249 245; --purple-100: 215 242 232; --purple-200: 179 232 212; --purple-300: 111 213 180; --purple-400: 0 180 141; --purple-500: 0 145 113;
+  --purple-600: 0 121 94; --purple-700: 0 101 78; --purple-800: 0 86 65; --purple-900: 0 70 53; --purple-950: 0 45 33;
+  --violet-50: 234 247 242; --violet-100: 217 241 231; --violet-200: 181 229 211; --violet-300: 114 208 177; --violet-400: 0 177 139; --violet-500: 0 139 108;
+  --violet-600: 0 116 90; --violet-700: 0 100 77; --violet-800: 0 83 64; --violet-900: 0 69 53; --violet-950: 0 43 32;
+  --white: 246 254 248;
+  --black: 1 5 2;
+  --suno-panel: 7 19 10;
+}
+
+html.dark[data-skin="phosphor"] {
+  --white: 198 251 207;
+  --pink-300: 181 247 182; --pink-400: 109 220 116; --pink-500: 46 200 70; --pink-600: 0 179 48; --pink-700: 0 157 41;
+  --rose-300: 209 238 159; --rose-400: 168 210 74;  --rose-500: 141 186 0; --rose-600: 125 165 0; --rose-700: 108 143 0;
+  --purple-300: 151 253 219; --purple-400: 0 224 176; --purple-500: 0 187 147; --purple-600: 0 162 127; --purple-700: 0 141 110;
+  --violet-300: 154 248 216; --violet-400: 0 221 173; --violet-500: 0 181 142; --violet-600: 0 157 122; --violet-700: 0 140 109;
+}
+
+html[data-skin="phosphor"] :is(body, .font-sans, .font-mono) {
+  font-family: ui-monospace, 'Cascadia Mono', 'Cascadia Code', Consolas, 'DejaVu Sans Mono', Menlo, monospace;
+}
+html[data-skin="phosphor"] :is(.rounded, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl) { border-radius: 2px; }
+html[data-skin="phosphor"] ::selection { background: rgb(var(--pink-500) / 0.35); }
+
+/* ---- dark mode: the lit tube ---------------------------------------------- */
+
+/* Text bleeds a little light, as phosphor does. */
+html.dark[data-skin="phosphor"] body { text-shadow: 0 0 4px rgb(var(--pink-500) / 0.3); }
+
+/* Scanlines on the big surfaces: a background under the content, never an overlay. */
+html.dark[data-skin="phosphor"] :is(.dark\:bg-suno, .dark\:bg-black, .dark\:bg-suno-sidebar, .dark\:bg-zinc-950) {
+  background-image: repeating-linear-gradient(0deg, rgb(0 0 0 / 0.22) 0 1px, transparent 1px 3px);
+}
+
+/* Lit fills: the accent is bright, so the text on it goes dark. */
+html.dark[data-skin="phosphor"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, .bg-rose-500, .bg-rose-600, [class*="from-pink-"], .hover\:bg-pink-400:hover, .hover\:bg-pink-500:hover, .hover\:bg-pink-600:hover),
+html.dark[data-skin="phosphor"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]) :is(.text-white, .dark\:text-white) {
+  color: rgb(var(--zinc-950));
+  text-shadow: none;
+}
+html.dark[data-skin="phosphor"] button:is(.bg-pink-500, .bg-pink-600, [class*="from-pink-"]):not(:disabled) {
+  box-shadow: 0 0 14px -2px rgb(var(--pink-500) / 0.6);
+}
+
+/* Inputs: a cursor-green ring on focus. */
+html.dark[data-skin="phosphor"] :is(input, textarea, select):focus {
+  outline: none;
+  border-color: rgb(var(--pink-500) / 0.7);
+  box-shadow: 0 0 0 1px rgb(var(--pink-500) / 0.5), 0 0 12px -2px rgb(var(--pink-500) / 0.5);
+}
+html.dark[data-skin="phosphor"] :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 2px solid rgb(var(--pink-400));
+  outline-offset: 2px;
+}
+
+/* Status dots glow. */
+html.dark[data-skin="phosphor"] .rounded-full:is(.w-1, .w-1\.5, .w-2, .w-2\.5):is(.bg-pink-500, .bg-emerald-500, .bg-emerald-400, .bg-green-500, .bg-green-400) {
+  box-shadow: 0 0 6px 1px rgb(var(--pink-400) / 0.8);
+}

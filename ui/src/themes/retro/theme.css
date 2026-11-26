@@ -1,0 +1,162 @@
+/* Retro: two eras of old-school computing for classic, one per mode. Overlay rules:
+   docs/dev/skins.md#classic-overlay-skins.
+   - Light: a 90s desktop GUI. Silver faces with bevelled edges, sunken white wells, navy keys,
+     dithered scrollbars, square corners, no gradients and no animation on hover.
+   - Dark: an 80s text-mode screen. Navy panels, yellow and cyan highlights, double-line borders,
+     hard block shadows and a mono face.
+   Both palettes are set per mode (the eras share nothing), and every text pair meets classic's
+   own contrast or better. */
+
+:root[data-skin="retro"] {
+  --zinc-50: 206 203 196;  --zinc-100: 198 195 188; --zinc-200: 180 178 172; --zinc-300: 150 148 144;
+  --zinc-400: 108 108 108; --zinc-500: 72 72 72;    --zinc-600: 56 56 56;    --zinc-700: 40 40 40;
+  --zinc-800: 24 24 24;    --zinc-900: 0 0 0;       --zinc-950: 0 0 0;
+  --pink-50: 230 232 248;  --pink-100: 208 212 240; --pink-200: 168 176 228; --pink-300: 104 120 208;
+  --pink-400: 0 0 168;     --pink-500: 0 0 128;     --pink-600: 0 0 112;     --pink-700: 0 0 96;
+  --pink-800: 0 0 80;      --pink-900: 0 0 64;      --pink-950: 0 0 40;
+  --rose-50: 248 228 228;  --rose-100: 240 208 208; --rose-200: 228 168 168; --rose-300: 208 104 104;
+  --rose-400: 168 0 0;     --rose-500: 128 0 0;     --rose-600: 112 0 0;     --rose-700: 96 0 0;
+  --rose-800: 80 0 0;      --rose-900: 64 0 0;      --rose-950: 40 0 0;
+  --purple-50: 224 244 244; --purple-100: 200 236 236; --purple-200: 160 220 220; --purple-300: 96 192 192;
+  --purple-400: 0 128 128;  --purple-500: 0 112 112;   --purple-600: 0 96 96;     --purple-700: 0 80 80;
+  --purple-800: 0 64 64;    --purple-900: 0 52 52;     --purple-950: 0 36 36;
+  --violet-50: 224 244 244; --violet-100: 200 236 236; --violet-200: 160 220 220; --violet-300: 96 192 192;
+  --violet-400: 0 128 128;  --violet-500: 0 112 112;   --violet-600: 0 96 96;     --violet-700: 0 80 80;
+  --violet-800: 0 64 64;    --violet-900: 0 52 52;     --violet-950: 0 36 36;
+  --white: 214 211 204;
+  --black: 0 0 0;
+  --suno-panel: 0 0 0;
+}
+
+html.dark[data-skin="retro"] {
+  --zinc-50: 250 250 250;  --zinc-100: 240 240 240; --zinc-200: 225 225 225; --zinc-300: 210 210 210;
+  --zinc-400: 170 170 170; --zinc-500: 140 140 150; --zinc-600: 100 100 170; --zinc-700: 40 40 200;
+  --zinc-800: 0 0 200;     --zinc-900: 0 0 160;     --zinc-950: 0 0 136;
+  --pink-50: 255 255 230;  --pink-100: 255 255 200; --pink-200: 255 255 160; --pink-300: 255 255 120;
+  --pink-400: 255 255 85;  --pink-500: 255 255 85;  --pink-600: 230 230 40;  --pink-700: 170 170 0;
+  --pink-800: 128 128 0;   --pink-900: 96 96 0;     --pink-950: 64 64 0;
+  --rose-50: 255 235 235;  --rose-100: 255 215 215; --rose-200: 255 180 180; --rose-300: 255 140 140;
+  --rose-400: 255 85 85;   --rose-500: 255 85 85;   --rose-600: 220 50 50;   --rose-700: 170 0 0;
+  --rose-800: 128 0 0;     --rose-900: 96 0 0;      --rose-950: 64 0 0;
+  --purple-50: 230 255 255; --purple-100: 200 255 255; --purple-200: 160 255 255; --purple-300: 120 255 255;
+  --purple-400: 85 255 255; --purple-500: 0 230 230;   --purple-600: 0 200 200;   --purple-700: 0 170 170;
+  --purple-800: 0 128 128;  --purple-900: 0 96 96;     --purple-950: 0 64 64;
+  --violet-50: 230 255 255; --violet-100: 200 255 255; --violet-200: 160 255 255; --violet-300: 120 255 255;
+  --violet-400: 85 255 255; --violet-500: 0 230 230;   --violet-600: 0 200 200;   --violet-700: 0 170 170;
+  --violet-800: 0 128 128;  --violet-900: 0 96 96;     --violet-950: 0 64 64;
+  --white: 238 238 238;
+  --black: 0 0 112;
+  --suno-panel: 0 0 128;
+}
+
+/* ---- both eras ------------------------------------------------------------- */
+
+/* Square corners everywhere except true circles (dots, avatars, switch knobs). */
+html[data-skin="retro"] :is(.rounded, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl, .rounded-l, .rounded-r, .rounded-t, .rounded-b, .rounded-l-lg, .rounded-r-lg, .rounded-t-lg, .rounded-b-lg, .rounded-t-xl, .rounded-b-xl) { border-radius: 0; }
+html[data-skin="retro"] :is(button, span).rounded-full.border { border-radius: 0; }
+
+/* Nothing glides: state changes snap, as they did. A near-zero duration, not `none`, so
+   transitionend still fires (the song details slide-over unmounts on it). Spinners keep their animation. */
+html[data-skin="retro"] * { transition-duration: 0.01ms !important; transition-delay: 0s !important; }
+
+/* Flat colour, no gradients: the main action is a solid key. */
+html[data-skin="retro"] :is(button, a, [role="button"])[class*="from-pink-"] {
+  background-image: none;
+  background-color: rgb(var(--pink-500));
+}
+html[data-skin="retro"] [class*="shadow-pink-"], html[data-skin="retro"] [class*="shadow-purple-"] { --tw-shadow-color: transparent; }
+
+/* ---- light: 90s desktop ---------------------------------------------------- */
+
+html[data-skin="retro"]:not(.dark) :is(body, .font-sans) {
+  font-family: Tahoma, 'Microsoft Sans Serif', 'MS Sans Serif', Geneva, Verdana, sans-serif;
+}
+html[data-skin="retro"]:not(.dark) .font-mono { font-family: 'Courier New', Courier, monospace; }
+html[data-skin="retro"]:not(.dark) ::selection { background: rgb(0 0 128); color: rgb(255 255 255); }
+
+/* Raised: keys with a border or a face colour, and the main action. */
+html[data-skin="retro"]:not(.dark) button:is(.border, .bg-zinc-100, .bg-zinc-200, .bg-white, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]) {
+  border-color: transparent;
+  box-shadow: inset -1px -1px rgb(10 10 10), inset 1px 1px rgb(255 255 255), inset -2px -2px rgb(128 128 128), inset 2px 2px rgb(232 230 226);
+}
+html[data-skin="retro"]:not(.dark) button:is(.border, .bg-zinc-100, .bg-zinc-200, .bg-white, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]):active:not(:disabled) {
+  box-shadow: inset 1px 1px rgb(10 10 10), inset -1px -1px rgb(255 255 255), inset 2px 2px rgb(128 128 128), inset -2px -2px rgb(232 230 226);
+  padding-top: 1px;
+}
+
+/* Panels and cards: a thin raised edge. */
+html[data-skin="retro"]:not(.dark) :is(div, section, aside):is(.rounded-lg, .rounded-xl, .rounded-2xl).border {
+  border-color: rgb(128 128 128);
+  box-shadow: inset 1px 1px rgb(255 255 255);
+}
+
+/* Wells: white, sunken. */
+html[data-skin="retro"]:not(.dark) :is(input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"], [type="color"]), textarea, select) {
+  background-color: rgb(255 255 255);
+  border-color: transparent;
+  box-shadow: inset 1px 1px rgb(128 128 128), inset -1px -1px rgb(255 255 255), inset 2px 2px rgb(10 10 10), inset -2px -2px rgb(232 230 226);
+}
+
+/* Menus and dialogs: a hard shadow, no blur. */
+html[data-skin="retro"]:not(.dark) :is(.shadow-lg, .shadow-xl, .shadow-2xl) {
+  box-shadow: inset -1px -1px rgb(10 10 10), inset 1px 1px rgb(255 255 255), 3px 3px 0 rgb(0 0 0 / 0.45);
+}
+
+html[data-skin="retro"]:not(.dark) :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 1px dotted rgb(0 0 0);
+  outline-offset: -4px;
+}
+
+/* Chunky dithered scrollbars. */
+html[data-skin="retro"]:not(.dark) ::-webkit-scrollbar { width: 16px; height: 16px; }
+html[data-skin="retro"]:not(.dark) ::-webkit-scrollbar-track {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='%23c6c3bc'/%3E%3Crect width='1' height='1' fill='%23ffffff'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%23ffffff'/%3E%3C/svg%3E");
+}
+html[data-skin="retro"]:not(.dark) ::-webkit-scrollbar-thumb,
+html[data-skin="retro"]:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  border-radius: 0;
+  background: rgb(214 211 204);
+  box-shadow: inset -1px -1px rgb(10 10 10), inset 1px 1px rgb(255 255 255), inset -2px -2px rgb(128 128 128), inset 2px 2px rgb(232 230 226);
+}
+
+/* ---- dark: 80s text mode --------------------------------------------------- */
+
+html.dark[data-skin="retro"] :is(body, .font-sans, .font-mono) {
+  font-family: 'Lucida Console', 'Courier New', 'DejaVu Sans Mono', monospace;
+}
+html.dark[data-skin="retro"] ::selection { background: rgb(0 170 170); color: rgb(0 0 0); }
+
+/* Lit keys: bright fill, black text, a block shadow; pressing drops it into the shadow. */
+html.dark[data-skin="retro"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, .bg-purple-500, .bg-purple-600, .bg-violet-500, .bg-violet-600, [class*="from-pink-"], .hover\:bg-pink-400:hover, .hover\:bg-pink-500:hover, .hover\:bg-pink-600:hover),
+html.dark[data-skin="retro"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]) :is(.text-white, .dark\:text-white) {
+  color: rgb(0 0 0);
+}
+html.dark[data-skin="retro"] button:is(.bg-pink-500, .bg-pink-600, [class*="from-pink-"]):not(:disabled) { box-shadow: 4px 4px 0 rgb(0 0 0); }
+html.dark[data-skin="retro"] button:is(.bg-pink-500, .bg-pink-600, [class*="from-pink-"]):active:not(:disabled) { box-shadow: none; transform: translate(4px, 4px); }
+
+/* Windows: a double-line frame drawn inside the border, so nothing moves. */
+html.dark[data-skin="retro"] :is(div, section, aside):is(.rounded-xl, .rounded-2xl).border {
+  border-color: rgb(var(--zinc-300));
+  box-shadow: inset 0 0 0 2px rgb(var(--zinc-950)), inset 0 0 0 3px rgb(var(--zinc-300));
+}
+
+/* Menus and dialogs: the block shadow. */
+html.dark[data-skin="retro"] :is(.shadow-lg, .shadow-xl, .shadow-2xl) { box-shadow: 8px 8px 0 rgb(0 0 0 / 0.85); }
+
+html.dark[data-skin="retro"] :is(input, textarea, select):focus {
+  outline: none;
+  border-color: rgb(var(--purple-400));
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-400));
+}
+html.dark[data-skin="retro"] :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 2px solid rgb(var(--purple-400));
+  outline-offset: 2px;
+}
+
+/* Shade-block scrollbars. */
+html.dark[data-skin="retro"] ::-webkit-scrollbar { width: 14px; height: 14px; }
+html.dark[data-skin="retro"] ::-webkit-scrollbar-track {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='2' height='2'%3E%3Crect width='2' height='2' fill='%23000088'/%3E%3Crect width='1' height='1' fill='%235555ff'/%3E%3Crect x='1' y='1' width='1' height='1' fill='%235555ff'/%3E%3C/svg%3E");
+}
+html.dark[data-skin="retro"] ::-webkit-scrollbar-thumb,
+html.dark[data-skin="retro"] ::-webkit-scrollbar-thumb:hover { border-radius: 0; background: rgb(170 170 170); }

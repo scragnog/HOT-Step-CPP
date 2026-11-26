@@ -1,0 +1,11 @@
+{
+  "id": "ivory",
+  "name": "Ivory",
+  "author": "HOT-Step",
+  "license": "MIT",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "targets": ["classic"],
+  "preview": ["#fffaee", "#ebe3d9", "#f54c1f", "#1e170f"]
+}

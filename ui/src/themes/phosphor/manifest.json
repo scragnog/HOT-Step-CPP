@@ -1,0 +1,11 @@
+{
+  "id": "phosphor",
+  "name": "Phosphor",
+  "author": "HOT-Step",
+  "license": "MIT",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "targets": ["classic"],
+  "preview": ["#020b04", "#0c1b10", "#2ec846", "#c6fbcf"]
+}

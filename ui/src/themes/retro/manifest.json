@@ -1,0 +1,11 @@
+{
+  "id": "retro",
+  "name": "Retro",
+  "author": "HOT-Step",
+  "license": "MIT",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "targets": ["classic"],
+  "preview": ["#d6d3cc", "#000080", "#000088", "#ffff55"]
+}

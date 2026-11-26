@@ -1,0 +1,75 @@
+/* Neon: cyan and magenta on deep indigo, for classic. Overlay rules: docs/dev/skins.md#classic-overlay-skins.
+   The palette is stock zinc (to indigo), pink (to cyan) and rose (to magenta) at each step's stock
+   luminance, so contrast stays classic's; the pink-to-rose gradients become cyan-to-magenta. Dark mode
+   lifts the accent, puts dark text on lit fills and adds glow; light mode is the palette alone. */
+
+:root[data-skin="neon"] {
+  --zinc-50: 250 249 255;  --zinc-100: 244 243 253; --zinc-200: 228 227 240; --zinc-300: 212 210 226;
+  --zinc-400: 162 157 199; --zinc-500: 114 108 156; --zinc-600: 84 76 123;   --zinc-700: 65 58 98;
+  --zinc-800: 40 34 68;    --zinc-900: 25 20 48;    --zinc-950: 10 6 27;
+  --pink-50: 234 247 249;  --pink-100: 215 241 244; --pink-200: 172 229 236; --pink-300: 86 209 222;
+  --pink-400: 0 175 190;   --pink-500: 0 150 163;   --pink-600: 0 129 140;   --pink-700: 0 109 119;
+  --pink-800: 0 90 98;     --pink-900: 0 76 83;     --pink-950: 0 43 48;
+  --rose-50: 252 241 249;  --rose-100: 249 228 244; --rose-200: 244 206 235; --rose-300: 236 166 220;
+  --rose-400: 227 119 206; --rose-500: 216 76 192;  --rose-600: 197 51 175;  --rose-700: 166 39 148;
+  --rose-800: 139 34 123;  --rose-900: 120 30 106;  --rose-950: 66 11 58;
+  --purple-50: 251 244 254; --purple-100: 246 231 253; --purple-200: 238 211 251; --purple-300: 225 177 247; --purple-400: 206 127 241; --purple-500: 187 76 230;
+  --purple-600: 168 36 214; --purple-700: 146 14 187; --purple-800: 121 23 154; --purple-900: 98 22 125; --purple-950: 68 0 90;
+  --violet-50: 249 242 252; --violet-100: 244 231 250; --violet-200: 235 210 246; --violet-300: 219 174 240; --violet-400: 199 129 230; --violet-500: 178 76 219;
+  --violet-600: 163 33 207; --violet-700: 145 3 188; --violet-800: 122 5 157; --violet-900: 100 12 130; --violet-950: 65 3 86;
+  --white: 250 249 255;
+  --black: 4 1 17;
+  --suno-panel: 17 13 37;
+}
+
+html.dark[data-skin="neon"] {
+  --white: 241 240 255;
+  --pink-300: 115 236 249; --pink-400: 0 203 220;   --pink-500: 0 178 192;  --pink-600: 0 156 169;  --pink-700: 0 135 146;
+  --rose-300: 255 197 241; --rose-400: 255 145 233; --rose-500: 244 103 219; --rose-600: 225 80 201; --rose-700: 194 68 173;
+  --purple-300: 241 212 255; --purple-400: 226 161 255; --purple-500: 212 107 255; --purple-600: 195 70 241; --purple-700: 171 55 214;
+  --violet-300: 239 206 255; --violet-400: 225 156 255; --violet-500: 205 103 246; --violet-600: 188 68 234; --violet-700: 171 51 215;
+}
+
+html[data-skin="neon"] ::selection { background: rgb(var(--rose-500) / 0.35); }
+
+/* ---- dark mode: everything lit is a tube ------------------------------------- */
+
+/* Lit fills: dark text, and a glow that picks up both ends of the gradient. */
+html.dark[data-skin="neon"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, .bg-rose-500, .bg-rose-600, [class*="from-pink-"], .hover\:bg-pink-400:hover, .hover\:bg-pink-500:hover, .hover\:bg-pink-600:hover),
+html.dark[data-skin="neon"] :is(.bg-pink-400, .bg-pink-500, .bg-pink-600, [class*="from-pink-"]) :is(.text-white, .dark\:text-white) {
+  color: rgb(var(--zinc-950));
+}
+html.dark[data-skin="neon"] button:is(.bg-pink-500, .bg-pink-600, [class*="from-pink-"]):not(:disabled) {
+  box-shadow: -6px 0 18px -6px rgb(var(--pink-400) / 0.8), 6px 0 18px -6px rgb(var(--rose-500) / 0.8);
+}
+
+/* Selected chips and tabs: a lit outline. */
+html.dark[data-skin="neon"] :is(button, [role="tab"]):is(.bg-pink-500\/10, .bg-pink-500\/15, .bg-pink-500\/20) {
+  border-color: rgb(var(--pink-400) / 0.7);
+  box-shadow: 0 0 10px -2px rgb(var(--pink-400) / 0.6), inset 0 0 8px -2px rgb(var(--pink-400) / 0.35);
+}
+
+/* Accent text glows faintly. */
+html.dark[data-skin="neon"] :is(.text-pink-300, .text-pink-400, .text-pink-500) { text-shadow: 0 0 8px rgb(var(--pink-400) / 0.45); }
+html.dark[data-skin="neon"] :is(.text-rose-400, .text-rose-500) { text-shadow: 0 0 8px rgb(var(--rose-500) / 0.45); }
+
+/* The sidebar's active entry marker becomes a tube. */
+html.dark[data-skin="neon"] .bg-pink-500.rounded-r-full { box-shadow: 0 0 8px 1px rgb(var(--pink-400) / 0.9); }
+
+html.dark[data-skin="neon"] :is(input, textarea, select):focus {
+  outline: none;
+  border-color: rgb(var(--pink-400) / 0.8);
+  box-shadow: 0 0 0 1px rgb(var(--pink-400) / 0.4), 0 0 14px -2px rgb(var(--rose-500) / 0.5);
+}
+html.dark[data-skin="neon"] :is(button, [role="switch"], [role="tab"], a):focus-visible {
+  outline: 2px solid rgb(var(--pink-400));
+  outline-offset: 2px;
+}
+html.dark[data-skin="neon"] [role="switch"][aria-checked="true"] { box-shadow: 0 0 10px -1px rgb(var(--pink-400) / 0.7); }
+
+html.dark[data-skin="neon"] .rounded-full:is(.w-1, .w-1\.5, .w-2, .w-2\.5):is(.bg-emerald-500, .bg-emerald-400, .bg-green-500, .bg-green-400) {
+  box-shadow: 0 0 6px 1px rgb(74 222 128 / 0.8);
+}
+html.dark[data-skin="neon"] .rounded-full:is(.w-1, .w-1\.5, .w-2, .w-2\.5):is(.bg-red-500, .bg-red-400) {
+  box-shadow: 0 0 6px 1px rgb(248 113 113 / 0.8);
+}

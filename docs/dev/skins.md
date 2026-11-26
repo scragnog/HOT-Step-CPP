@@ -137,10 +137,28 @@ semantic colour layer, so an overlay is **tied to classic's markup**. That works
 because classic is meant to stay put; if you change a classic class combination or
 a hook (`sk-fader*` on `EditableSlider`), check the overlays.
 
-To recolour the brand accent, set `--pink-50` to `--pink-950` and `--rose-50` to
-`--rose-950` (RGB channels, `R G B`). Every `pink-*` and `rose-*` utility reads
-them (`tailwind.config.js`); the defaults in `index.css` equal Tailwind's stock
-values, so with no skin classic is unchanged.
+Classic's colours are CSS variables (RGB channels, `R G B`), so most of a reskin is a
+palette. Every utility of these families reads them (`tailwind.config.js`); the
+defaults in `index.css` equal Tailwind's stock values, so with no skin classic is
+unchanged.
+
+| Variables | What they colour |
+|---|---|
+| `--zinc-50` to `--zinc-950` | Every surface, border and text grey. Classic uses no other grey family. |
+| `--white`, `--black` | `white` and `black` utilities: light-mode panels, dark-mode text, overlays such as `bg-white/5`. |
+| `--pink-*`, `--rose-*` | The brand accent and the near end of its gradients. |
+| `--purple-*`, `--violet-*` | The second accent: the far end of the gradients (the Generate button). |
+| `--suno-panel` | `bg-suno-panel`. The other `suno` colours read `--zinc-*` and `--black`. |
+
+Status colours (`red`, `amber`, `emerald`) stay stock. To keep classic's contrast,
+give each step the same luminance as the stock step it replaces: a darker `zinc-500`
+on a lighter `white` is fine, a lighter one is not. Set a variable on
+`:root[data-skin="<id>"]` for both modes, or on `html.dark[data-skin="<id>"]` for dark
+only. A palette needs no class names, so it survives classic's markup changes;
+keep class-level rules for the flourishes.
+
+The overlays in the repo show both ends: `skeuo` restyles class by class, and
+`phosphor`, `neon`, `ivory` and `retro` are a palette plus a few class rules.
 
 The picker is **Settings > Skin** in classic. It sets `html[data-skin]` at once and
 saves `hs-skin`; the default is no skin.

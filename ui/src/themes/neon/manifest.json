@@ -1,0 +1,11 @@
+{
+  "id": "neon",
+  "name": "Neon",
+  "author": "HOT-Step",
+  "license": "MIT",
+  "version": "1.0.0",
+  "api": 0,
+  "kind": "theme",
+  "targets": ["classic"],
+  "preview": ["#0a061b", "#191430", "#00b2c0", "#f467db"]
+}
