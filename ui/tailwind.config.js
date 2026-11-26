@@ -10,12 +10,12 @@ export default {
       colors: {
         /* Suno theme colors — matching hot-step-9000 */
         suno: {
-          DEFAULT: '#09090b',
-          sidebar: '#000000',
-          panel: '#121214',
-          card: '#18181b',
-          hover: '#27272a',
-          border: '#27272a',
+          DEFAULT: 'rgb(var(--zinc-950) / <alpha-value>)',
+          sidebar: 'rgb(var(--black) / <alpha-value>)',
+          panel: 'rgb(var(--suno-panel) / <alpha-value>)',
+          card: 'rgb(var(--zinc-900) / <alpha-value>)',
+          hover: 'rgb(var(--zinc-800) / <alpha-value>)',
+          border: 'rgb(var(--zinc-800) / <alpha-value>)',
         },
 
 
@@ -38,7 +38,14 @@ export default {
         ink: { DEFAULT: 'rgb(var(--k-ink) / <alpha-value>)', muted: 'rgb(var(--k-muted) / <alpha-value>)', onTint: 'rgb(var(--k-on-tint) / <alpha-value>)' },
         status: { ok: 'rgb(var(--k-ok) / <alpha-value>)', warn: 'rgb(var(--k-warn) / <alpha-value>)', error: 'rgb(var(--k-error) / <alpha-value>)' },
 
-        /* pink / rose read CSS variables (defaults in index.css, equal to Tailwind stock). */
+        /* zinc, white, black, pink, rose, purple and violet read CSS variables (defaults in index.css, equal to
+           Tailwind stock), so a classic skin can recolour every surface and text utility. */
+        white: 'rgb(var(--white) / <alpha-value>)',
+        black: 'rgb(var(--black) / <alpha-value>)',
+        zinc: {50: 'rgb(var(--zinc-50) / <alpha-value>)', 100: 'rgb(var(--zinc-100) / <alpha-value>)', 200: 'rgb(var(--zinc-200) / <alpha-value>)', 300: 'rgb(var(--zinc-300) / <alpha-value>)', 400: 'rgb(var(--zinc-400) / <alpha-value>)', 500: 'rgb(var(--zinc-500) / <alpha-value>)', 600: 'rgb(var(--zinc-600) / <alpha-value>)', 700: 'rgb(var(--zinc-700) / <alpha-value>)', 800: 'rgb(var(--zinc-800) / <alpha-value>)', 900: 'rgb(var(--zinc-900) / <alpha-value>)', 950: 'rgb(var(--zinc-950) / <alpha-value>)'},
+
+        purple: {50: 'rgb(var(--purple-50) / <alpha-value>)', 100: 'rgb(var(--purple-100) / <alpha-value>)', 200: 'rgb(var(--purple-200) / <alpha-value>)', 300: 'rgb(var(--purple-300) / <alpha-value>)', 400: 'rgb(var(--purple-400) / <alpha-value>)', 500: 'rgb(var(--purple-500) / <alpha-value>)', 600: 'rgb(var(--purple-600) / <alpha-value>)', 700: 'rgb(var(--purple-700) / <alpha-value>)', 800: 'rgb(var(--purple-800) / <alpha-value>)', 900: 'rgb(var(--purple-900) / <alpha-value>)', 950: 'rgb(var(--purple-950) / <alpha-value>)'},
+        violet: {50: 'rgb(var(--violet-50) / <alpha-value>)', 100: 'rgb(var(--violet-100) / <alpha-value>)', 200: 'rgb(var(--violet-200) / <alpha-value>)', 300: 'rgb(var(--violet-300) / <alpha-value>)', 400: 'rgb(var(--violet-400) / <alpha-value>)', 500: 'rgb(var(--violet-500) / <alpha-value>)', 600: 'rgb(var(--violet-600) / <alpha-value>)', 700: 'rgb(var(--violet-700) / <alpha-value>)', 800: 'rgb(var(--violet-800) / <alpha-value>)', 900: 'rgb(var(--violet-900) / <alpha-value>)', 950: 'rgb(var(--violet-950) / <alpha-value>)'},
         pink: {50: 'rgb(var(--pink-50) / <alpha-value>)', 100: 'rgb(var(--pink-100) / <alpha-value>)', 200: 'rgb(var(--pink-200) / <alpha-value>)', 300: 'rgb(var(--pink-300) / <alpha-value>)', 400: 'rgb(var(--pink-400) / <alpha-value>)', 500: 'rgb(var(--pink-500) / <alpha-value>)', 600: 'rgb(var(--pink-600) / <alpha-value>)', 700: 'rgb(var(--pink-700) / <alpha-value>)', 800: 'rgb(var(--pink-800) / <alpha-value>)', 900: 'rgb(var(--pink-900) / <alpha-value>)', 950: 'rgb(var(--pink-950) / <alpha-value>)'},
         rose: {50: 'rgb(var(--rose-50) / <alpha-value>)', 100: 'rgb(var(--rose-100) / <alpha-value>)', 200: 'rgb(var(--rose-200) / <alpha-value>)', 300: 'rgb(var(--rose-300) / <alpha-value>)', 400: 'rgb(var(--rose-400) / <alpha-value>)', 500: 'rgb(var(--rose-500) / <alpha-value>)', 600: 'rgb(var(--rose-600) / <alpha-value>)', 700: 'rgb(var(--rose-700) / <alpha-value>)', 800: 'rgb(var(--rose-800) / <alpha-value>)', 900: 'rgb(var(--rose-900) / <alpha-value>)', 950: 'rgb(var(--rose-950) / <alpha-value>)'},
 

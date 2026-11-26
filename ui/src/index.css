@@ -45,6 +45,44 @@
   --rose-800: 159 18 57;
   --rose-900: 136 19 55;
   --rose-950: 76 5 25;
+  /* Stock zinc, white and black the same way: every classic surface, border and text colour.
+     purple and violet are classic's second accent, the far end of its gradients. */
+  --zinc-50: 250 250 250;
+  --zinc-100: 244 244 245;
+  --zinc-200: 228 228 231;
+  --zinc-300: 212 212 216;
+  --zinc-400: 161 161 170;
+  --zinc-500: 113 113 122;
+  --zinc-600: 82 82 91;
+  --zinc-700: 63 63 70;
+  --zinc-800: 39 39 42;
+  --zinc-900: 24 24 27;
+  --zinc-950: 9 9 11;
+  --purple-50: 250 245 255;
+  --purple-100: 243 232 255;
+  --purple-200: 233 213 255;
+  --purple-300: 216 180 254;
+  --purple-400: 192 132 252;
+  --purple-500: 168 85 247;
+  --purple-600: 147 51 234;
+  --purple-700: 126 34 206;
+  --purple-800: 107 33 168;
+  --purple-900: 88 28 135;
+  --purple-950: 59 7 100;
+  --violet-50: 245 243 255;
+  --violet-100: 237 233 254;
+  --violet-200: 221 214 254;
+  --violet-300: 196 181 253;
+  --violet-400: 167 139 250;
+  --violet-500: 139 92 246;
+  --violet-600: 124 58 237;
+  --violet-700: 109 40 217;
+  --violet-800: 91 33 182;
+  --violet-900: 76 29 149;
+  --violet-950: 46 16 101;
+  --white: 255 255 255;
+  --black: 0 0 0;
+  --suno-panel: 18 18 20;
 
   /* Backgrounds — dark mode */
   --bg-primary-dark: #09090b;
@@ -267,21 +305,21 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: rgb(var(--zinc-700));
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: rgb(var(--zinc-600));
 }
 
 /* Light-mode scrollbar */
 :root:not(.dark) ::-webkit-scrollbar-thumb {
-  background: #d4d4d8;
+  background: rgb(var(--zinc-300));
 }
 
 :root:not(.dark) ::-webkit-scrollbar-thumb:hover {
-  background: #a1a1aa;
+  background: rgb(var(--zinc-400));
 }
 
 /* ========================================
@@ -309,7 +347,7 @@ select:disabled {
 }
 
 select:hover:not(:disabled) {
-  border-color: #ec4899;
+  border-color: rgb(var(--pink-500));
 }
 
 /* ========================================
@@ -467,7 +505,7 @@ input[type="range"] {
   -webkit-appearance: none;
   width: 100%;
   height: 4px;
-  background: #27272a;
+  background: rgb(var(--zinc-800));
   border-radius: 2px;
   outline: none;
 }
@@ -477,24 +515,24 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ec4899;
+  background: rgb(var(--pink-500));
   cursor: pointer;
-  border: 2px solid #09090b;
-  box-shadow: 0 0 8px rgba(236, 72, 153, 0.3);
+  border: 2px solid rgb(var(--zinc-950));
+  box-shadow: 0 0 8px rgb(var(--pink-500) / 0.3);
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: #db2777;
-  box-shadow: 0 0 16px rgba(236, 72, 153, 0.4);
+  background: rgb(var(--pink-600));
+  box-shadow: 0 0 16px rgb(var(--pink-500) / 0.4);
 }
 
 /* Light-mode range slider */
 :root:not(.dark) input[type="range"] {
-  background: #e4e4e7;
+  background: rgb(var(--zinc-200));
 }
 
 :root:not(.dark) input[type="range"]::-webkit-slider-thumb {
-  border-color: #ffffff;
+  border-color: rgb(var(--white));
 }
 
 /* ========================================
@@ -758,10 +796,10 @@ input[type="range"].kit-range:disabled::-webkit-slider-thumb {
    injected at runtime after this file.
    ======================================== */
 html.dark {
-  --toastify-color-light: #18181b;
-  --toastify-text-color-light: #e4e4e7;
-  --toastify-spinner-color: #a1a1aa;
-  --toastify-spinner-color-empty-area: #3f3f46;
+  --toastify-color-light: rgb(var(--zinc-900));
+  --toastify-text-color-light: rgb(var(--zinc-200));
+  --toastify-spinner-color: rgb(var(--zinc-400));
+  --toastify-spinner-color-empty-area: rgb(var(--zinc-700));
   --toastify-toast-shadow: 0px 4px 16px rgba(0, 0, 0, 0.5);
 }
 html.dark .Toastify__toast-theme--light {
@@ -868,8 +906,8 @@ html.dark .Toastify__close-button--light {
   color: rgba(255, 255, 255, 0.9);
 }
 .lyrics-word--active {
-  color: #ec4899;
-  text-shadow: 0 0 20px rgba(236, 72, 153, 0.6), 0 0 40px rgba(236, 72, 153, 0.3);
+  color: rgb(var(--pink-500));
+  text-shadow: 0 0 20px rgb(var(--pink-500) / 0.6), 0 0 40px rgb(var(--pink-500) / 0.3);
   font-weight: 800;
 }
 .lyrics-word--future {
