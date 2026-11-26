@@ -87,7 +87,9 @@ test('post-process chain: re-run on a song (gain offset stage)', { timeout: 15 *
   const start = await apiRaw('POST', `/api/songs/${id}/postprocess`, { gainOffsetDb: -1 }, { auth: true });
   if (start.status === 409) return t.skip(`song not eligible: ${start.body?.error}`);
   assert.equal(start.status, 200, JSON.stringify(start.body).slice(0, 300));
-  await poll(`/api/songs/${id}/postprocess`, 'postprocess',
+  const jobId = start.body?.jobId;
+  assert.ok(typeof jobId === 'string' && jobId, 'missing post-processing job id');
+  await poll(`/api/songs/${id}/postprocess?jobId=${encodeURIComponent(jobId)}`, 'postprocess',
     (r) => r.status === 'succeeded' || r.status === 'done',
     (r) => r.status === 'failed' || r.status === 'cancelled', 15 * MIN);
 });
